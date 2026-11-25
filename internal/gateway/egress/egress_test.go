@@ -573,6 +573,9 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			Expect(upstreamCalls()[0].Header.Get("Authorization")).To(Equal("Bearer " + value))
+			Expect(scrubbed).To(ContainElements(value, "Bearer "+value))
+			Expect(kinds).NotTo(BeEmpty())
+			Expect(kinds).To(HaveEach(credkind.EgressBearer))
 		})
 
 		It("never serves the credential to another agent of the org", func() {

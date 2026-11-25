@@ -3,38 +3,46 @@
 // Package credkind is the one list of the credential kinds that koinon-gateway sends upstream, and of how the
 // gateway's credential scrub covers each kind (#1221, ADR 0097 decision 12).
 //
-// Every code path that opens a credential names its kind with a [Kind] constant of this package and gives the
-// value to the scrub with that kind. The scrub reads the rule of the kind from [Rules]. A kind that is not in the
-// list is scrubbed by value, as [ByValue]: a new kind is covered by default. A spec of this package parses the
-// source tree and fails when a [Kind] constant has no rule, so a new kind is a decision, not an accident.
+// Every code path that opens a credential names its kind with a [Kind] of this package and gives the value to the
+// scrub with that kind. The scrub reads the rule of the kind from [Rules]. A kind that is not in the list is
+// scrubbed by value, as [ByValue]: a new kind is covered by default. Only this package can make a [Kind], and a
+// spec of this package parses it and fails when a kind has no rule, so a new kind is a decision, not an accident.
 //
 // The list holds outbound credentials: values the gateway attaches to a request it sends. Inbound credentials (a
 // gateway key, an actor token) are not in it. The caller already holds them, and the trace scrubber matches
 // their shapes (internal/tracing/scrub).
 package credkind
 
-// Kind names a credential kind. Its value is a fixed name: the audit row and the span attribute carry it, never a
-// token. Declare each kind as a constant in this package and give it a rule in [Rules].
-type Kind string
+// Kind names a credential kind. Its name is fixed: the audit row and the span attribute carry it, never a token.
+//
+// Kind is a struct with an unexported field, so only this package can make a kind: code in another package cannot
+// convert a string to a Kind, and an untyped string constant does not assign to one. Each kind is a variable of
+// this package with a rule in [Rules]; a spec parses this package and fails when a kind has no rule. The zero Kind
+// is not a kind of the list; the scrub covers it by value.
+type Kind struct{ name string }
 
-// The credential kinds. A kind that ships later is listed now with its rule, so that its opener only names it.
-const (
+// String returns the fixed name of the kind.
+func (k Kind) String() string { return k.name }
+
+// The credential kinds. A kind that ships later is listed now with its rule, so that its opener only names it. Do
+// not assign to these variables.
+var (
 	// None is a call that sends no credential.
-	None Kind = "none"
+	None = Kind{"none"}
 	// Error is a call whose credential could not be read. Nothing is sent.
-	Error Kind = "error"
+	Error = Kind{"error"}
 	// MCPStatic is the static header value of an org's MCP server (ADR 0097). An org owns it.
-	MCPStatic Kind = "static"
+	MCPStatic = Kind{"static"}
 	// MCPSignIn is the OAuth access token of an MCP sign-in (ADR 0096). An org owns it.
-	MCPSignIn Kind = "signin"
+	MCPSignIn = Kind{"signin"}
 	// Passport is the agent passport, a signed JWT for one run, audience and scope (ADR 0073). An agent owns it.
-	Passport Kind = "passport"
+	Passport = Kind{"passport"}
 	// EgressBearer is a bearer credential of an egress route (ADR 0120). An agent owns it.
-	EgressBearer Kind = "egress_bearer"
+	EgressBearer = Kind{"egress_bearer"}
 	// EgressBasic is a Basic credential of an egress route (ADR 0120). An agent owns it.
-	EgressBasic Kind = "egress_basic"
+	EgressBasic = Kind{"egress_basic"}
 	// ProviderKey is the API key of a model provider on the model path (ADR 0097). An org owns it.
-	ProviderKey Kind = "provider_key"
+	ProviderKey = Kind{"provider_key"}
 )
 
 // Scrub is how the credential scrub covers a kind.
@@ -80,7 +88,9 @@ var rules = []Rule{
 	{Kind: MCPStatic, Scrub: ByValue},
 	{Kind: MCPSignIn, Scrub: ByValue},
 	{Kind: Passport, Scrub: ByShape, Why: "one value per run, audience and scope with a life of minutes would " +
-		"push org values out of the capped value set; the fixed JWT typ " + PassportType + " is matched instead"},
+		"push org values out of the capped value set; the fixed JWT typ " + PassportType + " is matched instead. " +
+		"Once one passport was opened, every JWT of that typ is removed from every org's texts, also a passport that " +
+		"a tool returns on purpose"},
 	{Kind: EgressBearer, Scrub: ByValue},
 	{Kind: EgressBasic, Scrub: ByValue},
 	{Kind: ProviderKey, Scrub: ByValue},
@@ -89,8 +99,8 @@ var rules = []Rule{
 // Rules returns a copy of the list.
 func Rules() []Rule { return append([]Rule(nil), rules...) }
 
-// Lookup returns the rule of k. ok is false when k is not in the list; the rule is then [ByValue], so an unlisted
-// kind is scrubbed by value.
+// Lookup returns the rule of k. ok is false when k is not in the list (the zero Kind); the rule is then [ByValue],
+// so an unlisted kind is scrubbed by value.
 func Lookup(k Kind) (r Rule, ok bool) {
 	for _, r := range rules {
 		if r.Kind == k {

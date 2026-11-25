@@ -69,7 +69,7 @@ var _ = Describe("the credential scrub by kind (#1221)", func() {
 				continue
 			}
 			It(fmt.Sprintf("removes a value of kind %q from the results, the logs and the errors of its org", r.Kind), func(ctx SpecContext) {
-				token := "koinon_test_not-a-real-token-" + string(r.Kind)
+				token := "koinon_test_not-a-real-token-" + r.Kind.String()
 				sc.Record(r.Kind, "acme", "Bearer "+token)
 				Expect(resultText(sc.Result("acme", echoResult("you sent Bearer "+token)))).
 					To(Equal("you sent [redacted:secret]"))
@@ -148,8 +148,8 @@ var _ = Describe("the credential scrub by kind (#1221)", func() {
 	})
 
 	Context("a kind that is not in the list", func() {
-		for _, k := range []credkind.Kind{"koinon_test_future_kind", ""} {
-			It(fmt.Sprintf("scrubs a value of kind %q by value", k), func(ctx SpecContext) {
+		for _, k := range []credkind.Kind{{}} {
+			It("scrubs a value of the zero kind by value", func(ctx SpecContext) {
 				const token = "koinon_test_not-a-real-future-token"
 				src := sc.Source(kindSource{kind: k, value: "Bearer " + token})
 				_, err := src.Credential(ctx, target, acme)

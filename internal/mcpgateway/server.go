@@ -274,7 +274,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 
 	s := g.snapOf(ctx)
 	// The row and the span carry names only after the grant check: a caller's text is never recorded.
-	row.Target, row.Tool, row.CredKind = "unknown", "unknown", string(CredentialNone)
+	row.Target, row.Tool, row.CredKind = "unknown", "unknown", CredentialNone.String()
 	target, tool, ok := splitToolName(p.Name)
 	if !ok {
 		finish(OutcomeRefusedGrant)
@@ -309,9 +309,9 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		return refusedResult(reason)
 	}
 	if c, err := g.creds.Credential(ctx, t, agent); err == nil {
-		row.CredKind, row.RecipientKeyID = string(c.Kind), c.RecipientKeyID
+		row.CredKind, row.RecipientKeyID = c.Kind.String(), c.RecipientKeyID
 	} else {
-		row.CredKind = string(CredentialError)
+		row.CredKind = CredentialError.String()
 		var oe *OpenError
 		if errors.As(err, &oe) {
 			row.RecipientKeyID = oe.KeyID

@@ -117,7 +117,7 @@ var _ = Describe("a sealed MCP credential", func() {
 			Expect(up.header("X-Api-Key")).To(BeEmpty(), "no credential and no request reaches the target")
 			Expect(up.header("Mcp-Method")).NotTo(ContainElement("tools/call"))
 			Expect(failed(reason)).To(BeNumerically(">=", 1))
-			Expect(audit.rows[len(audit.rows)-1].CredKind).To(Equal(string(mcpgateway.CredentialError)))
+			Expect(audit.rows[len(audit.rows)-1].CredKind).To(Equal(mcpgateway.CredentialError.String()))
 			Expect(text(res)).NotTo(ContainSubstring(fakeToken))
 		},
 		Entry("an unknown key ID", gatewaykeys.ReasonUnknownKey, func() (*secretstore.RecipientKeyring, secretstore.EnvelopeV2) {

@@ -294,7 +294,8 @@ func run(ctx context.Context, cfg config) error {
 			URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) }, Logger: log,
 		})
 		mg = modelgateway.New(modelgateway.Options{
-			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: otel.Tracer("koinon-gateway"), Logger: log,
+			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: credScrub.Tracer(otel.Tracer("koinon-gateway")),
+			Logger: log,
 			// Each provider key the model path reads goes into the scrub of every log line and span (#1221).
 			Scrub: credScrub.Record,
 		})

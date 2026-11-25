@@ -22,7 +22,7 @@ import (
 
 // Credential kinds, as the span and the audit row name them. They are fixed values, never a token. The one list
 // of kinds, and how the scrub covers each one, is [credkind] (#1221).
-const (
+var (
 	CredentialNone   = credkind.None
 	CredentialStatic = credkind.MCPStatic
 	// CredentialError is the kind of a call whose credential could not be read.
