@@ -209,6 +209,10 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	STORIES=1 test/e2e/run.sh
 
+.PHONY: test-fence-kind
+test-fence-kind: ## Prove the Substrate fence on its own throwaway kind cluster (API server ports rule; needs Docker, kind, helm 4; KEEP_CLUSTER=1 keeps it)
+	test/e2e/kind/apiserver-egress.sh
+
 .PHONY: test-e2e-web
 test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install on kind koinon-e1 (KEEP=1 keeps the cluster)
 	SUITE=web test/e2e/run.sh

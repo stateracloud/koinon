@@ -631,7 +631,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   actor traffic (its `--mode=ingress` is the `routerAddress` of the driver), and atelet: a TLS registry on
   port 443 is reachable at L3, and only the image rewrite and the `SandboxConfig` source limit atelet to the one image
   source. Worker pods get no such rule.
-  `test/e2e/kind/apiserver-egress.sh` proves the rule on kind (manual, not in CI).
+  `test/e2e/kind/apiserver-egress.sh` (`make test-fence-kind`) proves the rule on kind (manual, not in CI).
 - atelet needs no purpose-made internet egress (it still has the TCP 443 API server rule above) when the gVisor tarball comes from the cluster object store. The installer
   stages it (see [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store),
   issue #1157). The control-plane NetworkPolicy allows traffic inside `ate-system`, so atelet reaches rustfs.
