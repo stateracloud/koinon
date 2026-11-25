@@ -364,9 +364,9 @@ func wrap(kind int, sep, text string) string {
 
 // fuzzSeedLimit bounds the seed string of FuzzAlwaysShapesNeverSurvive in bytes. The test builds
 // the planted secret from the whole seed, and the fuzzer grows a string without a limit. The
-// scrubber is linear in its input, but Go's regexp machine costs about 1 us per byte on each rule
-// that matches, and a run does that for Text and for Content. A seed of some 100 KB made one
-// execution take seconds, and the fuzz run showed 0 execs/sec for 30 s (issue 1337 C). A secret
+// scrubber is linear in its input (measured: 18 ms for a 4 KiB seed, 0.25 s for 100 KiB, per
+// run of one shape), but the fuzzer grows a seed to 100s of KB, and each execution then takes a
+// second or more. The fuzz run showed 0 execs/sec for 30 s (issue 1337 C). A secret
 // needs at most about 40 characters of the seed, so a longer seed adds only time.
 const fuzzSeedLimit = 256
 

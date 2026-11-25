@@ -219,7 +219,9 @@ type glAllow struct {
 
 // gitleaksStopContains lists the rules whose own stopwords keep gitleaks' "contains" test: the
 // generic rule has no fixed shape, so a word inside its candidate shows a name or a placeholder,
-// not a key. Every other rule, and the global allowlist, drops a candidate only on a whole match.
+// not a key. Every other rule drops a candidate only on a whole match. The global allowlist does
+// too, and it also applies to the generic rule: a generic candidate that holds the alphabet run is
+// now redacted (more redaction, never less).
 var gitleaksStopContains = map[string]struct{}{"generic-api-key": {}}
 
 // glSet is the compiled rule set.

@@ -467,6 +467,13 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 		if sep[idx] == ',' && proseLike(in[vs:min(ve, vs+256)]) {
 			return 0, 0, false // ["Authorization", "is a header"]
 		}
+	case kind != KindCredential && q == 0 && strings.ContainsAny(sep[:idx], "\"'") && openQuote(in, nameS) != 0:
+		// A quoted JSON key with a bare value ({"apiKey": null, "n": 1}): the quote before the name
+		// opens the key, not a string that holds the value. The value is one token, and it ends at
+		// a delimiter. The span used to run on to the next quote and took the comma with it, so
+		// the scrubbed text was not valid JSON (issue 1337).
+		for ve = vs; ve < len(in) && strings.IndexByte(",;}] \t\r\n", in[ve]) < 0 && !lineBreakAt(in, ve); ve++ {
+		}
 	case kind != KindCredential && openQuote(in, nameS) != 0:
 		// "Name: value" inside a string (JSON, curl -H "..."): the value runs to the string's end
 		ve = scanQuoted(in, vs, openQuote(in, nameS), quoteEscapes(in, nameS))
@@ -490,7 +497,8 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 		if sep[idx] == '=' && sepHasSpace(sep, idx) && (!lineStartExact(in, nameS) || strings.ContainsAny(prefix, "(){}")) {
 			return 0, 0, false // password = getPassword(): code, not an ini line
 		}
-		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve); ve++ {
+		jsonKey := strings.ContainsAny(sep[:idx], "\"'") // {"token": false, "n": 1}: a delimiter ends a bare value
+		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve) && !(jsonKey && strings.IndexByte(",;}]", in[ve]) >= 0); ve++ {
 		}
 		if strings.IndexByte(in[vs:ve], '(') >= 0 {
 			return 0, 0, false // password=getPassword(): a call
@@ -757,15 +765,6 @@ func skipHeaderValue(kind Kind, value string) bool {
 	}
 	fields := strings.Fields(v)
 	rest := fields
-	// A JSON literal that a delimiter ends ("null," in {"apiKey": null, "enabled": false}) is a
-	// whole value and holds no credential. Without this the span ran on to the next quote and
-	// removed the comma, so the scrubbed trace was not valid JSON (issue 1337).
-	if w := fields[0]; len(w) > 1 && strings.IndexByte(",;}]", w[len(w)-1]) >= 0 {
-		switch strings.ToLower(strings.TrimRight(w, ",;}]")) {
-		case "null", "nil", "true", "false":
-			return true
-		}
-	}
 	switch strings.ToLower(fields[0]) {
 	case "bearer", "basic", "digest", "token", "negotiate", "required", "require", "none", "null", "nil", "true", "false":
 		rest = fields[1:]

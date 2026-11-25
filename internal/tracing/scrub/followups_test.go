@@ -95,6 +95,8 @@ func TestAuthHeaderRuleKeepsJSONValid(t *testing.T) {
 		`{"outer": {"apiKey": null, "enabled": false}}`,
 		`{"apiKey": null}`,
 		`{"enabled": false, "apiKey": null, "n": 3}`,
+		`{"apiKey": null }`,
+		`{"apiKey" : null , "n": 1}`,
 	} {
 		if !json.Valid([]byte(in)) {
 			t.Fatalf("bad test input: %q", in)
@@ -148,6 +150,51 @@ func TestLongInputIsScrubbedWhole(t *testing.T) {
 		}
 		if out, _ := s.Content(in, 0); strings.Contains(out, key) {
 			t.Errorf("%s: survived in Content", name)
+		}
+	}
+}
+
+// TestAuthHeaderRuleKeepsStructureForOtherValues: a bare number after a credential-like key is
+// redacted, and the delimiter and the rest of the document stay (review of PR 1338: the span
+// ended at the next quote, whatever the value was). The marker is not a JSON token, so Text
+// output is not valid JSON here; Content, the JSON-aware path, is.
+func TestAuthHeaderRuleKeepsStructureForOtherValues(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	for _, tc := range []struct{ in, tail string }{
+		{`{"apiKey": 0, "n": 1}`, `, "n": 1}`},
+		{`{"apiKey": 12, "n": 1}`, `, "n": 1}`},
+		{`{"apiKey" : 12 , "n": 1}`, ` , "n": 1}`},
+		{`{"apiKey": 12}`, `}`},
+		{`[{"token": 7}, {"n": 1}]`, `}, {"n": 1}]`},
+	} {
+		if out := s.Text(tc.in); !strings.HasSuffix(out, tc.tail) || strings.Contains(out, "12") {
+			t.Errorf("Text(%q) = %q, want the tail %q kept and the number redacted", tc.in, out, tc.tail)
+		}
+		if out, _ := s.Content(tc.in, 0); !json.Valid([]byte(out)) {
+			t.Errorf("Content(%q) = %q, want valid JSON", tc.in, out)
+		}
+	}
+}
+
+// TestLiteralThenCredentialStillRedacted: a literal at the start of a value does not hide what
+// follows it (review of PR 1338). The value is not a JSON literal here, it is a header line.
+func TestLiteralThenCredentialStillRedacted(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	const secret = "Zq8vNotRealOpaqueValue7731"
+	for _, in := range []string{
+		"Cookie: null; session=" + secret,
+		"x-api-key: null, " + secret,
+		"X-Api-Key: false; " + secret,
+		"authorization: null, " + secret,
+		"api_key: null, " + secret,
+		"Proxy-Authorization: nil, Basic " + secret,
+		`{"authorization": "null, ` + secret + `"}`,
+	} {
+		if out := s.Text(in); strings.Contains(out, secret) {
+			t.Errorf("survived in Text(%q): %q", in, out)
+		}
+		if out, _ := s.Content(in, 0); strings.Contains(out, secret) {
+			t.Errorf("survived in Content(%q): %q", in, out)
 		}
 	}
 }
