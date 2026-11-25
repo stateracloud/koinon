@@ -193,7 +193,7 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 		if rig.tier != harness.TierVM {
 			Skip(notApplicable + "tier " + string(rig.tier) + ": its sandbox is a user-space-kernel or container sandbox, not a microVM (ADR 0075 decision 9); the vm tier is qualified in #1349")
 		}
-		testenv.Require(testenv.Var("microvm", "KOINON_ESCAPE_HOST_KERNEL"))
+		testenv.Require(testenv.Var("host-kernel", "KOINON_ESCAPE_HOST_KERNEL"))
 		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
 		k := res["kernel"].(map[string]any)
 		Expect(k["release"]).NotTo(Equal(os.Getenv("KOINON_ESCAPE_HOST_KERNEL")))
@@ -235,7 +235,7 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 	// (ADR 0120 section 1), not even a placeholder, and the one value the execution layer injects, the
 	// actor identity token, is minted and injected outside the guest. Its shape (a JWT) must be found
 	// nowhere the agent user can read: files, environment, command lines of every process.
-	It("holds no credential, no actor identity token and no JWT that it could read", func(ctx SpecContext) {
+	It("holds no credential and no JWT-shaped value that it could read", func(ctx SpecContext) {
 		res := probe(ctx,
 			check{"id": "scan", "op": "scan", "roots": scanRootsGuest(), "pattern": jwtShape},
 			check{"id": "env", "op": "env"},
@@ -250,6 +250,15 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			Expect(name).NotTo(Equal(guestauth.VerifyKeysEnv), "the guest front removes its key variable before it starts a process")
 		}
 	}, NodeTimeout(4*time.Minute))
+
+	// ADR 0120 section 1.2: the execution layer injects a short-lived actor identity token outside the
+	// guest. No code mints or injects one into an actor yet (actortoken has no caller outside tests), so
+	// the guest cannot hold one and a scan would pass with nothing to find. The result is "not applicable"
+	// until the injection exists; the contract specs above pin the minted token. The JWT scan above
+	// already finds a token of that shape the day one is injected somewhere the agent can read.
+	It("holds no actor identity token that it could read", func(ctx SpecContext) {
+		Skip(notApplicable + "tier " + string(rig.tier) + ": the execution layer injects no actor identity token into a guest yet; needs main: an issue for the injection, and then a spec with a real token and a control that the gateway accepts it")
+	})
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
 		expectNoPrivileges(ctx, probe)
@@ -304,7 +313,24 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			addr, err := netip.ParseAddr(strings.TrimSpace(out))
 			Expect(err).NotTo(HaveOccurred(), "the address of org B's actor: %q", out)
 			Expect(addr.IsLoopback()).To(BeFalse(), "an address that org A could route to, not loopback")
-			denied(ctx, []target{{addr.String(), 8099}})
+
+			By("controls: the address is org B's own, and its listener answers on that address")
+			own, ownErr, code := rig.exec(ctx, rig.workspace, probeSandbox, "", "python3", "-c", "import socket;print(socket.gethostbyname(socket.gethostname()))")
+			Expect(code).To(Equal(0), ownErr)
+			Expect(strings.TrimSpace(own)).NotTo(Equal(addr.String()), "both actors share one address: a refused connect would prove nothing")
+			Expect(rig.probeIn(ctx, rig.otherWorkspace, other, check{"id": "self", "op": "tcp", "host": addr.String(), "port": 8099})["self"]).To(Equal("open"),
+				"org B cannot reach its own listener on the address that org A is tested against")
+			obsA, err := rig.driver.Observe(ctx, rig.workspace, probeSandbox)
+			Expect(err).NotTo(HaveOccurred())
+			obsB, err := rig.driver.Observe(ctx, rig.otherWorkspace, other)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(obsA.Worker).NotTo(BeEmpty())
+			Expect(obsB.Worker).To(Equal(obsA.Worker), "the two actors must share a worker node (use a worker pool of one node); a denial across nodes is not the claim")
+
+			By("org A gets no answer: a refusal would mean no listener, so it counts as a failure here")
+			peer := tcp2(target{addr.String(), 8099})
+			res := probe(ctx, peer)
+			Expect(res[peer["id"].(string)]).To(BeElementOf("EACCES", "EPERM", "ENETUNREACH", "EHOSTUNREACH", "timeout"))
 		}, NodeTimeout(10*time.Minute))
 
 		It("is invisible to this org's driver calls: no get, no exec, no delete by name", func(ctx SpecContext) {
@@ -359,6 +385,11 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 				_, err := rig.driver.DeleteSandbox(ctx, rig.workspace, restored.Name)
 				return err
 			})
+			Eventually(func(g Gomega) {
+				sb, err := rig.driver.GetSandbox(ctx, rig.workspace, restored.Name)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(sb.Phase).To(Equal(execution.PhaseReady), "%s: %s", sb.Reason, sb.Message)
+			}).WithContext(ctx).WithTimeout(racescale.D(5 * time.Minute)).WithPolling(2 * time.Second).Should(Succeed())
 		}, NodeTimeout(15*time.Minute))
 	})
 })

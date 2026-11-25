@@ -274,7 +274,7 @@ test-escape: ## Run the escape suite's OpenShell cases against a gateway you poi
 
 .PHONY: test-escape-substrate
 test-escape-substrate: ## Qualify one Substrate isolation tier (default hardened = gVisor) on a cluster you point it at (KOINON_ESCAPE_SUBSTRATE_*; runbook: docs/dev/escape-substrate.md)
-	KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:-escape-cluster-ips,host-kernel} \
+	KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:+$$KOINON_REQUIRE,}escape-cluster-ips,host-kernel,substrate-targets,substrate-snapshots \
 		$(GO) test -count=1 -v -timeout 45m ./test/escape/ -ginkgo.label-filter=substrate -ginkgo.timeout=40m
 
 .PHONY: test-escape-kind

@@ -5,6 +5,8 @@ package escape_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +14,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -36,8 +40,9 @@ import (
 //	KOINON_ESCAPE_SUBSTRATE_CA             CA file of ateapi's certificate (default: system roots)
 //	KOINON_ESCAPE_SUBSTRATE_SERVER_NAME    name checked against ateapi's certificate
 //	KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE     ServiceAccount token (ateapi audience) sent as bearer token
-//	KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE hex seed of the Ed25519 guest-API key the actor template trusts
-//	                                       (required; the same key as --substrate-guest-key-file)
+//	KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE optional. Without it the run makes a key of its own: the driver
+//	                                       writes the public half into the templates it creates, so the
+//	                                       qualification never needs the production signing seed
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE          actor image with sh and python3 on its PATH, built on the
 //	                                       sandbox-substrate overlay (guest front and launcher) (required)
 //	KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS  the Substrate runtime class of the tier under test, for
@@ -58,7 +63,7 @@ import (
 // substrateEnvNames are the variables the qualifying run must set; the harness fails, never skips, when
 // a driver run lacks one, because a skipped qualification reads as a pass.
 var substrateEnvNames = []string{
-	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER", "KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE",
+	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER",
 	"KOINON_ESCAPE_SUBSTRATE_IMAGE", "KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS",
 }
 
@@ -107,6 +112,24 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 		tier = harness.TierHardened
 	}
 	class := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS"))
+	keyFile := get("KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE")
+	if keyFile == "" {
+		// A key made for this run only: it signs the calls of the run and lives in a 0600 file that is
+		// removed once the config has read it.
+		dir, err := os.MkdirTemp("", "koinon-escape-guestkey-")
+		if err != nil {
+			return nil, nil, err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		seed := make([]byte, ed25519.SeedSize)
+		if _, err := rand.Read(seed); err != nil {
+			return nil, nil, err
+		}
+		keyFile = filepath.Join(dir, "seed")
+		if err := os.WriteFile(keyFile, []byte(hex.EncodeToString(seed)+"\n"), 0o600); err != nil {
+			return nil, nil, err
+		}
+	}
 	s := cli.Substrate{
 		ControlAddress:    get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
 		RouterAddress:     get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
@@ -116,7 +139,7 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 		RuntimeClassTiers: []string{class + "=" + string(tier)},
 		ImageMirrors:      splitList(get("KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS")),
 		ImageRegistry:     get("KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY"),
-		GuestKeyFile:      get("KOINON_ESCAPE_SUBSTRATE_GUEST_KEY_FILE"),
+		GuestKeyFile:      keyFile,
 		SnapshotStore: cli.SnapshotStore{
 			Endpoint:      get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT"),
 			Region:        get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_REGION"),
@@ -216,7 +239,7 @@ func (r *substrateRig) sandbox(ctx context.Context, workspace, name string) stri
 // and returns its output and exit code.
 func (r *substrateRig) exec(ctx context.Context, workspace, name, stdin string, command ...string) (string, string, int) {
 	GinkgoHelper()
-	var stderr bytes.Buffer
+	var stderr syncBuffer
 	p, err := r.driver.Exec(ctx, workspace, name, execution.ExecRequest{Command: command, Stderr: &stderr})
 	Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = p.Close() }()
@@ -231,6 +254,24 @@ func (r *substrateRig) exec(ctx context.Context, workspace, name, stdin string, 
 	code, err := p.Wait()
 	Expect(err).NotTo(HaveOccurred(), stderr.String())
 	return string(out), stderr.String(), code
+}
+
+// syncBuffer is a buffer that the driver's stderr pump may write while a spec reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // probeIn runs checks in the named sandbox of workspace and returns each check's result by id.
@@ -253,8 +294,8 @@ func (r *substrateRig) probe(ctx context.Context, checks ...check) map[string]an
 	return r.probeIn(ctx, r.workspace, probeSandbox, checks...)
 }
 
-// requireSnapshots skips a spec that needs the snapshot bucket, and fails it under
-// KOINON_REQUIRE=substrate-snapshots.
+// requireSnapshots skips a spec that needs the snapshot bucket. It fails under
+// KOINON_REQUIRE=substrate-snapshots, which make test-escape-substrate sets.
 func requireSnapshots() {
 	GinkgoHelper()
 	if rig.snapshots {
