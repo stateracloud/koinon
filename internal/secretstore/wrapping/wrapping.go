@@ -83,7 +83,9 @@ func (c *Config) Flags(fs *pflag.FlagSet) {
 	backendFlags(fs, "", &c.OpenBao, &c.AWSKMS)
 	fs.StringVar(&c.ReadOnly.Backend, readOnlyPrefix+"kek-backend", "",
 		"a second wrapping key that only unwraps, the one of before a move to a new key: openbao or awskms; empty is none. "+
-			"Its settings are the --"+readOnlyPrefix+"openbao-* or --"+readOnlyPrefix+"awskms-* flags")
+			"Its settings are the --"+readOnlyPrefix+"openbao-* or --"+readOnlyPrefix+"awskms-* flags. "+
+			"It must have another key ID than the primary (a stored KEK names its key by backend and key ID only): "+
+			"another transit mount or key name, or another AWS key ARN")
 	backendFlags(fs, readOnlyPrefix, &c.ReadOnly.OpenBao, &c.ReadOnly.AWSKMS)
 }
 

@@ -119,6 +119,14 @@ var _ = Describe("the read-only wrapping key (issue 688)", func() {
 				ring, err := load(ctx, ws, s)
 				Expect(err).NotTo(HaveOccurred(), name)
 				Expect(ring.Active()).To(Equal(id))
+				// The old KEK is routed to the old key's adapter, and that one is read-only.
+				w, err := ws.For(s)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(w.Backend()).To(Equal(wrapping.BackendOpenBao))
+				Expect(w.KeyID()).To(Equal("transit/koinon-kek-old"))
+				Expect(ws.Primary().KeyID()).NotTo(Equal(w.KeyID()))
+				_, err = w.Wrap(ctx, kek, nil)
+				Expect(err).To(MatchError(wrapping.ErrReadOnlyKey))
 				got, err := ws.Unwrap(ctx, id, s)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(got).To(Equal(kek))
@@ -211,6 +219,9 @@ var _ = Describe("the read-only wrapping key (issue 688)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = w.Wrap(ctx, kek, nil)
 		Expect(err).To(HaveOccurred())
+		// The error with the most context: the KEK of another install.
+		_, installErr := ws.WithInstallID(secretstore.StaticInstallID("00000000-0000-4000-8000-000000000999")).Unwrap(ctx, id, s)
+		Expect(installErr).To(MatchError(secretstore.ErrOpen))
 		kms["openbao:koinon-kek-old"].Down.Store(true)
 		_, loadErr := load(ctx, ws, s)
 		Expect(loadErr).To(HaveOccurred())
@@ -226,6 +237,7 @@ var _ = Describe("the read-only wrapping key (issue 688)", func() {
 			base64.StdEncoding.EncodeToString(s.Wrapped), "not-a-real-key"} {
 			Expect(logs.String()).NotTo(ContainSubstring(leak))
 			Expect(loadErr.Error()).NotTo(ContainSubstring(leak))
+			Expect(installErr.Error()).NotTo(ContainSubstring(leak))
 		}
 	})
 
