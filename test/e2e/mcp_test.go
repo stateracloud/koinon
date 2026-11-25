@@ -561,24 +561,40 @@ func setToolSinkE2E(ctx context.Context, admin func(context.Context, string, str
 }
 
 // guardDecisions reads koinon_api_mcp_guard_decisions_total for one decision, reason and sink class from
-// koinon-api, where the leak guard runs behind the default gateway driver (agentgateway) with one
-// replica. The counter has fixed labels (ADR 0023), so the e2e compares it before and after a task.
+// the processes that run the leak guard on the agent's MCP path. The counter has fixed labels (ADR 0023),
+// so the e2e compares it before and after a task.
 func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass string) float64 {
 	GinkgoHelper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, "deploy/koinon-api", "9090")+"/metrics", nil)
-	Expect(err).NotTo(HaveOccurred())
-	res, err := http.DefaultClient.Do(req)
-	Expect(err).NotTo(HaveOccurred())
-	defer func() { _ = res.Body.Close() }()
-	b, err := io.ReadAll(res.Body)
-	Expect(err).NotTo(HaveOccurred())
+	// The guard counts its decisions in the process that runs it: koinon-api behind agentgateway, and
+	// each koinon-mcp-gateway pod with driver koinon (#1239). A call goes to one pod, so the sum counts it once.
+	targets := []string{"deploy/koinon-api"}
+	port := "9090"
+	if agentMCPPath(ctx, kubectl).koinon {
+		out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "pods", "-l", "app.kubernetes.io/component=mcp-gateway",
+			"--field-selector=status.phase=Running", "-o", "name").CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), "kubectl get pods koinon-mcp-gateway: %s", out)
+		targets = strings.Fields(string(out))
+		Expect(targets).NotTo(BeEmpty(), "a running koinon-mcp-gateway pod")
+		port = "15020"
+	}
 	re := regexp.MustCompile(`(?m)^koinon_api_mcp_guard_decisions_total\{decision="` + regexp.QuoteMeta(decision) +
 		`",reason="` + regexp.QuoteMeta(reason) + `",sink_class="` + regexp.QuoteMeta(sinkClass) + `"\} (\S+)$`)
-	m := re.FindSubmatch(b)
-	Expect(m).NotTo(BeNil(), "koinon-api exports the guard's decisions for %s/%s/%s", decision, reason, sinkClass)
-	n, err := strconv.ParseFloat(string(m[1]), 64)
-	Expect(err).NotTo(HaveOccurred())
-	return n
+	var sum float64
+	for _, t := range targets {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, t, port)+"/metrics", nil)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		b, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		Expect(err).NotTo(HaveOccurred())
+		m := re.FindSubmatch(b)
+		Expect(m).NotTo(BeNil(), "%s exports the guard's decisions for %s/%s/%s", t, decision, reason, sinkClass)
+		n, err := strconv.ParseFloat(string(m[1]), 64)
+		Expect(err).NotTo(HaveOccurred())
+		sum += n
+	}
+	return sum
 }
 
 // setToolTierE2E sets a tool's tier as the console does (e2eclient.SetToolTier): an unreviewed tool stays
