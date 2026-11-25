@@ -126,9 +126,10 @@ func (h rpcHandler) RequestApproval(ctx context.Context, req *gwv1.RequestApprov
 	if agentID.Scan(req.GetAgentId()) != nil || serverID.Scan(req.GetServerId()) != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "agent_id and server_id must be UUIDs")
 	}
-	args := json.RawMessage(req.GetArguments())
-	if len(args) == 0 {
-		args = json.RawMessage(`{}`)
+	// Empty arguments stay empty: mcpask hashes them as {}, the same as the in-process path.
+	var args json.RawMessage
+	if a := req.GetArguments(); len(a) > 0 {
+		args = json.RawMessage(a)
 	}
 	risk, err := decodeRisk(req.GetRisk())
 	if err != nil {
@@ -143,9 +144,17 @@ func (h rpcHandler) RequestApproval(ctx context.Context, req *gwv1.RequestApprov
 	if err != nil {
 		return nil, s.lookupErr(err, "agent")
 	}
+	if agent.Status != store.AgentStatusActive {
+		return nil, errNotMatched
+	}
 	srv, err := s.q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org.ID, ID: serverID})
 	if err != nil {
 		return nil, s.lookupErr(err, "server")
+	}
+	// The same filter as GetServedMCPServerForGuard: the gateway serves only a server that is not
+	// disabled, removed or without its credential.
+	if srv.DisabledReason.Valid || srv.AdminDisabledAt.Valid || srv.RemovedAt.Valid || srv.CredentialLostAt.Valid {
+		return nil, errNotMatched
 	}
 	allowed, err := s.q.GetAgentMCPServer(ctx, store.GetAgentMCPServerParams{OrgID: org.ID, AgentID: agent.ID, ServerID: srv.ID})
 	if err != nil {
@@ -157,6 +166,9 @@ func (h rpcHandler) RequestApproval(ctx context.Context, req *gwv1.RequestApprov
 	t, err := s.q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org.ID, ServerID: srv.ID, Name: tool})
 	if err != nil {
 		return nil, s.lookupErr(err, "tool")
+	}
+	if !t.Present || t.Tier == store.McpTierNever {
+		return nil, errNotMatched
 	}
 
 	text, err := s.approve(ctx, org, agent, srv, t, args, risk)
@@ -232,6 +244,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		c := *cfg.HTTP
 		hc = &c
 	}
+	// The token goes to koinon-api only: never follow a redirect to another host.
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	base := hc.Transport
 	if base == nil {
 		base = http.DefaultTransport
@@ -248,6 +262,10 @@ var _ mcpguard.ApproveFunc = (*Client)(nil).Approve
 // Approve implements mcpguard.ApproveFunc: it asks koinon-api to record the approval of exactly this call
 // and returns the text the agent reads. An error fails the call closed.
 func (c *Client) Approve(ctx context.Context, org store.Org, agent store.Agent, srv store.McpServer, tool store.McpTool, args json.RawMessage, risk map[string]any) (string, error) {
+	if len(args) > mcpask.MaxArgsBytes {
+		// The same answer as mcpask.Server.RequestApproval on the agentgateway path.
+		return fmt.Sprintf("refused: the arguments are larger than %d bytes", mcpask.MaxArgsBytes), nil
+	}
 	var riskJSON []byte
 	if risk != nil {
 		b, err := json.Marshal(risk)

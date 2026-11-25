@@ -451,13 +451,59 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		Expect(reason(r)).To(Equal(v.Reason))
 		Expect(approvals(ctx)).To(Equal(1))
 
-		By("a refused or expired approval fails the call closed")
-		_, err = pool.Exec(ctx, `UPDATE approval_requests SET status = 'expired' WHERE org_id = $1`, org)
+		By("an approved call is not sent by the gateway: Koinon's executor sends it, and the agent reads that")
+		_, err = pool.Exec(ctx, `UPDATE approval_requests SET status = 'approved', decision = 'allow' WHERE org_id = $1`, org)
+		Expect(err).NotTo(HaveOccurred())
+		v = callWith(gg, held)
+		Expect(v.Refuse).To(BeTrue())
+		Expect(v.Reason).To(HavePrefix("accepted: id="))
+		Expect(v.Reason).To(ContainSubstring("status=approved"))
+		Expect(reason(call(ctx, "tracker", "post_message", held))).To(Equal(v.Reason))
+		Expect(approvals(ctx)).To(Equal(1))
+
+		By("a denied or expired approval fails the call closed")
+		var reviewer pgtype.UUID
+		Expect(pool.QueryRow(ctx, `SELECT id FROM users WHERE personal_org_id = $1`, org).Scan(&reviewer)).To(Succeed())
+		_, err = pool.Exec(ctx, `UPDATE approval_requests SET status = 'denied', decision = 'ask', decided_by = $2 WHERE org_id = $1`, org, reviewer)
+		Expect(err).NotTo(HaveOccurred())
+		v = callWith(gg, held)
+		Expect(v.Refuse).To(BeTrue())
+		Expect(v.Reason).To(ContainSubstring("status=denied"))
+		Expect(reason(call(ctx, "tracker", "post_message", held))).To(Equal(v.Reason))
+		_, err = pool.Exec(ctx, `UPDATE approval_requests SET status = 'expired', decided_by = NULL WHERE org_id = $1`, org)
 		Expect(err).NotTo(HaveOccurred())
 		v = callWith(gg, held)
 		Expect(v.Refuse).To(BeTrue())
 		Expect(v.Reason).To(ContainSubstring("status=expired"))
 		Expect(approvals(ctx)).To(Equal(1))
+
+		By("koinon-api reads the agent, the server and the tool itself: a call the gateway must not serve records nothing")
+		direct, err := approvalroute.NewClient(approvalroute.ClientConfig{URL: api.URL, Token: func() (string, error) { return token, nil }})
+		Expect(err).NotTo(HaveOccurred())
+		orgRow, err := q.GetOrgBySlug(ctx, slug)
+		Expect(err).NotTo(HaveOccurred())
+		srvRow, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: uuidOf(tracker.ID)})
+		Expect(err).NotTo(HaveOccurred())
+		toolRow, err := q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org, ServerID: srvRow.ID, Name: "post_message"})
+		Expect(err).NotTo(HaveOccurred())
+		approveDirect := func() error {
+			GinkgoHelper()
+			_, err := direct.Approve(ctx, orgRow, agent, srvRow, toolRow, json.RawMessage(`{"text":"direct"}`), nil)
+			return err
+		}
+		for _, c := range []struct{ change, undo string }{
+			{`UPDATE agents SET status = 'archived', archived_at = now() WHERE org_id = $1`, `UPDATE agents SET status = 'active', archived_at = NULL WHERE org_id = $1`},
+			{`UPDATE mcp_servers SET admin_disabled_at = now() WHERE org_id = $1`, `UPDATE mcp_servers SET admin_disabled_at = NULL WHERE org_id = $1`},
+			{`UPDATE mcp_tools SET tier = 'never' WHERE org_id = $1 AND name = 'post_message'`, "UPDATE mcp_tools SET tier = '" + string(toolRow.Tier) + "' WHERE org_id = $1 AND name = 'post_message'"},
+			{`UPDATE mcp_tools SET present = false WHERE org_id = $1 AND name = 'post_message'`, `UPDATE mcp_tools SET present = true WHERE org_id = $1 AND name = 'post_message'`},
+		} {
+			_, err = pool.Exec(ctx, c.change, org)
+			Expect(err).NotTo(HaveOccurred(), c.change)
+			Expect(approveDirect()).To(MatchError(ContainSubstring("does not match")), c.change)
+			_, err = pool.Exec(ctx, c.undo, org)
+			Expect(err).NotTo(HaveOccurred(), c.undo)
+			Expect(approvals(ctx)).To(Equal(1), c.change)
+		}
 
 		By("a gateway without the token records nothing, and the call is refused")
 		other := map[string]any{"text": "again: " + secretPage[40:300]}

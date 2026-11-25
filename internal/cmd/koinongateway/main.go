@@ -577,8 +577,8 @@ func (a logAudit) Record(ctx context.Context, r mcpgateway.AuditRow) error {
 }
 
 // openGuard opens the gateway's database login and builds the leak guard on it, with the Postgres audit
-// writer. approve records the approval of a call that needs a person (koinon-api's approval route). The guard's route stays closed (every message and call is refused) until the database has
-// answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
+// writer. approve records the approval of a call that needs a person (koinon-api's approval route).
+// The guard's route stays closed (every message and call is refused) until the database has answered once; a later outage refuses on its own, because a decision that cannot be recorded is a
 // refusal (ADR 0120 section 2).
 func openGuard(ctx context.Context, urlFile string, approve mcpguard.ApproveFunc, log *slog.Logger, reg prometheus.Registerer) (*mcpguard.GatewayGuard, mcpgateway.Audit, *pgxpool.Pool, error) {
 	dsn, err := readSecretFile(urlFile, "the database URL")
