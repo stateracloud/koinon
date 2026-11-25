@@ -21,12 +21,14 @@ for f in "${value_files[@]}"; do
 		'kind: ClusterRole' '- preflight'; do
 		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
 	done
-	if [[ $name == substrate-values ]]; then
+	# Substrate is the default (#1093): every ci values file runs the Substrate checks. Only values.yaml,
+	# rendered with execution.driver=openshell by insecure_for, keeps the OpenShell hook under test.
+	if grep -qF -- '--driver=substrate' <<<"$rendered"; then
 		# execution.driver=substrate (#1089): the hook runs the Substrate checks (Kubernetes 1.37, the CRDs, the
 		# pinned api server, the router), not the OpenShell ones, and starts no Substrate probe pod: those
 		# need a privileged namespace of their own that only koinon-api substrate install makes.
 		for want in '- --driver=substrate' '- --substrate-namespace=ate-system' '- --substrate-worker-namespace=ate-workers' \
-			'- --substrate-probes=false' '- --seccomp-probe=false' 'resourceNames: [ate-api-server, atenet-router]'; do
+			'- --substrate-probes=false' '- --seccomp-probe=false' 'resourceNames: [ate-api-server, atenet-router'; do
 			grep -qF -- "$want" <<<"$rendered" || { echo "$name: Substrate preflight hook lacks '$want'" >&2; exit 1; }
 		done
 		# The CRDs and Deployments the hook may read are the ones internal/preflight/substrate.go checks.
@@ -42,12 +44,15 @@ for f in "${value_files[@]}"; do
 		for absent in '--openshell-address' '--runtime-class=' '--agent-sandbox-' 'sandboxes.agents.x-k8s.io' 'runtimeclasses' 'configmaps' 'openshell-tls'; do
 			if grep -qF -- "$absent" <<<"$rendered"; then echo "$name: Substrate preflight hook has OpenShell '$absent'" >&2; exit 1; fi
 		done
-		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment.
-		kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --show-only templates/preflight.yaml)
-		grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
-			{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
-	elif grep -qF -- '--driver=substrate' <<<"$rendered"; then
-		echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2
+		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment. Only a values
+		# file that allows kubernetes mode (the MCP gateway values need standalone) can show it.
+		if [[ $name == substrate-values ]]; then
+			kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --show-only templates/preflight.yaml)
+			grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
+				{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
+		fi
+	elif [[ $name != values ]]; then
+		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
 	fi
 	# The ClusterRole is get-only, except that in cnpg mode the CNPG operator check lists

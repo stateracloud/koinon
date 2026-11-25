@@ -1170,7 +1170,7 @@ func renderAdmission(ctx context.Context, release, namespace, template string, s
 	var out, stderr bytes.Buffer
 	args := append([]string{
 		"template", release, "../../charts/koinon", "--namespace", namespace,
-		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", template,
+		"--set", "execution.driver=openshell", "--set", "sandboxObserver.enabled=true", "--set", "sandboxNetworkPolicy.enabled=true", "--set", "sandboxLimitRange.enabled=true", "--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", template,
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
