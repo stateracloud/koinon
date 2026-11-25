@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/mcpservers/mcpserverstest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
 func uuidOf(s string) pgtype.UUID {
@@ -1014,7 +1015,7 @@ var _ = Describe("Service", func() {
 				Expect(sync.Rollback(ctx)).To(Succeed())
 				for range 2 {
 					var got error
-					Eventually(done, "10s").Should(Receive(&got))
+					Eventually(done).WithTimeout(racescale.D(10 * time.Second)).Should(Receive(&got))
 					Expect(got).NotTo(HaveOccurred())
 				}
 			})
