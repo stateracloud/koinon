@@ -42,9 +42,9 @@ function Pill({ tone, label, testId }: { tone: Tone; label: string; testId?: str
   )
 }
 
-/** StatusBadge shows one task state: its name as text, a dot and the colour of ADR 0126 section 3. */
+/** StatusBadge shows one task state (the ADR name "Blocked on you" for input required; the board column keeps its title): its name as text, a dot and the colour of ADR 0126 section 3. */
 export function StatusBadge({ state }: { state: TaskState }) {
-  return <Pill tone={taskTones[state] ?? 'neutral'} label={stateLabel(state)} testId="status-badge" />
+  return <Pill tone={taskTones[state] ?? 'neutral'} label={state === TaskState.INPUT_REQUIRED ? 'Blocked on you' : stateLabel(state)} testId="status-badge" />
 }
 
 /** AgentStatusBadge shows an agent's status for the cards: Active (green), Draft (hollow) or Unhealthy (red). */

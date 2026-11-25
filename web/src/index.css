@@ -102,7 +102,7 @@
   --info: #90b7f8;
   --idion: #8cd6cb;
   --logo-gold: #f7c68c;
-  /* Task-state badge fills (ADR 0126 section 3). The text is info, primary, success or danger; Blocked on you
+  /* Task-state badge fills (ADR 0126 section 3). The text is info, link, success or danger; Blocked on you
      uses attention; Canceled is hollow. */
   --state-submitted-bg: #2b3850;
   --state-working-bg: #3e3745;

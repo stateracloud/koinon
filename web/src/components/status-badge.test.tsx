@@ -10,7 +10,7 @@ import { AgentStatusBadge, StatusBadge } from './status-badge'
 const cases: [TaskState, string, string][] = [
   [TaskState.SUBMITTED, 'Submitted', 'submitted'],
   [TaskState.WORKING, 'Working', 'working'],
-  [TaskState.INPUT_REQUIRED, 'Input required', 'attention'],
+  [TaskState.INPUT_REQUIRED, 'Blocked on you', 'attention'],
   [TaskState.COMPLETED, 'Completed', 'completed'],
   [TaskState.FAILED, 'Failed', 'failed'],
   [TaskState.CANCELED, 'Canceled', 'neutral'],

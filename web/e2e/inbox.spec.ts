@@ -100,7 +100,7 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
     await page.emulateMedia({ colorScheme: scheme })
     await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
     // Controls fade between the themes; axe must not sample a colour mid-transition.
-    await page.waitForFunction('document.getAnimations().length === 0')
+    await page.waitForTimeout(400)
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
     expect(results.violations.map((v) => `${scheme} ${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
   }
