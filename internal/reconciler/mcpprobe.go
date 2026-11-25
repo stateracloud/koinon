@@ -217,6 +217,29 @@ func (r *Reconciler) gatewayAckedNow(ctx context.Context, rev int64) (bool, erro
 	return staterev.AllAcked(ctx, r.pool, rev, gwv1.Half_HALF_MCP, live)
 }
 
+// gatewayServes reports whether koinon-gateway serves State revision rev now: every live copy that
+// serves MCP acked it, or no such copy is live (agentgateway serves MCP, or koinon-gateway is down and
+// its own readiness shows that). When the revision could not be stored (rev 0), a live copy cannot
+// serve this pass's keys, so it reports false. wait bounds how long it waits for the acks.
+func (r *Reconciler) gatewayServes(ctx context.Context, rev int64, wait bool) bool {
+	if rev <= 0 {
+		live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
+		if err != nil {
+			r.log.Warn("reading the live gateway copies failed; sandbox work that needs a new key waits", "err", err)
+			return false
+		}
+		return len(live) == 0
+	}
+	if wait {
+		return r.awaitGatewayAcked(ctx, rev)
+	}
+	ok, err := r.gatewayAckedNow(ctx, rev)
+	if err != nil {
+		r.log.Warn("reading the gateway acks failed; sandbox work waits for the acks", "err", err)
+	}
+	return err == nil && ok
+}
+
 const (
 	// DefaultMCPAckWait is how long the first probe of a server waits for the gateway copies to ack.
 	DefaultMCPAckWait = time.Minute
@@ -242,7 +265,7 @@ func (r *Reconciler) awaitGatewayAcked(ctx context.Context, rev int64) bool {
 	defer deadline.Stop()
 	for {
 		if ok, err := r.gatewayAckedNow(ctx, rev); err != nil {
-			r.log.Warn("reading the gateway acks failed; the MCP probe waits", "err", err)
+			r.log.Warn("reading the gateway acks failed; the work that needs them waits", "err", err)
 		} else if ok {
 			return true
 		}
@@ -250,7 +273,7 @@ func (r *Reconciler) awaitGatewayAcked(ctx context.Context, rev int64) bool {
 		case <-ctx.Done():
 			return false
 		case <-deadline.C:
-			r.log.Warn("not every gateway copy acked the MCP state; the MCP probe is held back until the next interval", "revision", rev)
+			r.log.Warn("not every gateway copy acked the MCP state; the work that needs it is held back until the next pass or interval", "revision", rev)
 			return false
 		case <-time.After(poll):
 		}

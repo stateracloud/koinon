@@ -39,6 +39,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
+	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/harness"
@@ -1637,6 +1639,52 @@ var _ = Describe("Reconciler", func() {
 		Eventually(func() string {
 			return osg.Sandbox(wsName, namesA.Sandbox).GetSpec().GetTemplate().GetImage()
 		}).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(image + "-2"))
+	})
+
+	Describe("when koinon-gateway serves MCP from the State stream (#1239)", func() {
+		const copyID = "koinon-gateway-test/boot-1239"
+		BeforeEach(func(ctx SpecContext) {
+			cfg.MCPAckWait = racescale.D(300 * time.Millisecond)
+			cfg.MCPAckPoll = 20 * time.Millisecond
+			Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+			DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
+		})
+
+		It("holds a new agent's sandbox until every live copy acked the revision, then starts it", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(BeZero(), "the live copy has not acked the revision with the key")
+			Expect(sandboxRow(ctx, a.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MODEL)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(BeZero(), "an ack of the model half does not count")
+
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("stores the revision when agentgateway cannot apply the state, so koinon-gateway still gets key changes", func(ctx SpecContext) {
+			before, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			mg.fail = errors.New("gateway unreachable")
+			newAgent(ctx, org, user)
+			r := newReconciler()
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			after, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after).NotTo(BeNil())
+			if before != nil {
+				Expect(after.Revision).To(BeNumerically(">", before.Revision))
+			}
+			Expect(after.Keys).NotTo(BeEmpty(), "the new agent's key is in the stream")
+			Expect(osg.Calls("CreateSandbox")).To(BeZero())
+		})
 	})
 
 	Describe("the leader lock (#573)", func() {

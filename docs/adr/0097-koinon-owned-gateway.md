@@ -437,6 +437,14 @@ long a deleted org's data stays. An ack of a revision covers every earlier one f
 copy never reuses it after a restart. S3 note: LISTEN does not work behind transaction-mode
 PgBouncer, so the stream client also polls the table as a fallback.
 
+Record (2026-11-25, #1239; the choices below are decided): with koinon-gateway as the default MCP driver,
+the stored revision is the State that koinon-gateway serves, not a record of the agentgateway Apply. The
+reconciler stores it on its own path, before the Apply and whatever the Apply does, so an agentgateway
+outage or a refused config does not freeze key revokes and grants on koinon-gateway. A failed store is
+retried in the pass and is then a pass error. Sandbox work that needs an agent's key waits until every
+live koinon-gateway copy acked the revision (the bounded wait of #1260); after the wait the agent is held
+with a message, and the next pass looks again. With no live copy (the agentgateway driver) nothing waits.
+
 Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
 with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener
 that already carries the gateway's bearer token (`internal/otlpauth`, the token the OTLP receiver

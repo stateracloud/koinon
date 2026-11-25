@@ -90,7 +90,16 @@ GWKEY=koinon-gateway-recipient-key
 # shellcheck disable=SC2016 # a go-template: $k and $v are template variables, not shell ones
 gwdata='{{range $k, $v := .data}}{{$k}}={{$v}};{{end}}'
 gwdigest() { "${K[@]}" -n "$NS" get secret "$GWKEY" -o go-template="$gwdata" | sha256sum; }
+# The chart renders the key-admin ServiceAccount exactly when it expects the Secret (gateway.mcp.driver=koinon, the
+# default, with recipientKey.enabled). Then the Secret is required: a missing one fails here, it is not skipped.
+gwwant=0
+if "${K[@]}" -n "$NS" get serviceaccount koinon-gateway-key-admin >/dev/null 2>&1; then
+  gwwant=1
+fi
 gwon=0
+if (( gwwant )) && ! "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
+  fail "the install uses the koinon MCP driver and has no gateway key Secret $GWKEY"
+fi
 if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   gwon=1
   gwfile=$work/koinon-gateway-key-backup.yaml
