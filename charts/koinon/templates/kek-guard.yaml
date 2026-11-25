@@ -154,7 +154,7 @@ spec:
         resourceNames: [{{ $gwSecret | quote }}]
   variables:
     - name: writer
-      expression: {{ $gwAdmin | quote }}
+      expression: {{ $gwAdmin | toJson | quote }}
     - name: terminating
       expression: "has(namespaceObject.status) && has(namespaceObject.status.phase) && namespaceObject.status.phase == 'Terminating'"
   validations:
