@@ -462,6 +462,20 @@ var _ = Describe("MCP servers", func() {
 			names = append(names, t.Name)
 		}
 		Expect(names).To(ContainElements("acme-wiki", "acme-wiki-ask", "acme-sick"))
+		// #1315: the ask target is Koinon's mcpask proxy. It keeps the org (org scoping, tool pins) and
+		// is marked Ask, so koinon-gateway sends it the agent header. The org's own server is not.
+		for _, t := range pl.State.MCP {
+			switch t.Name {
+			case "acme-wiki-ask":
+				Expect(t.Org).To(Equal("acme"))
+				Expect(t.Ask).To(BeTrue())
+				Expect(t.CredentialHeader).To(BeEmpty())
+				Expect(t.TrustsAgentHeader()).To(BeTrue())
+			default:
+				Expect(t.Ask).To(BeFalse(), t.Name)
+				Expect(t.TrustsAgentHeader()).To(BeFalse(), "an org's own server never gets the agent header: "+t.Name)
+			}
+		}
 		exec := gateway.AgentRef{Org: "acme", Name: gateway.MCPExecAgentName}
 		// The executor opens every tool a person can approve a call of, healthy server or not (as
 		// before old issue 455): the ask tier (ADR 0042) and the auto tier, whose external calls the leak

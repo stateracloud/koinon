@@ -67,7 +67,7 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 		s.MCP = append(s.MCP, gateway.MCPTarget{
 			Name: t.GetName(), URL: t.GetUrl(), SSE: t.GetSse(), Org: t.GetOrg(),
 			CredentialHeader: t.GetCredentialHeader(), CredentialPrefix: t.GetCredentialPrefix(), CredentialFile: t.GetCredentialFile(), CAFile: t.GetCaFile(), InsecureSkipVerify: t.GetInsecureSkipVerify(),
-			Builtin: t.GetBuiltin(), HandleKeyFile: t.GetHandleKeyFile(), RemoteAgents: remoteAgentsFromProto(t.GetRemoteAgents()),
+			Builtin: t.GetBuiltin(), HandleKeyFile: t.GetHandleKeyFile(), RemoteAgents: remoteAgentsFromProto(t.GetRemoteAgents()), Ask: t.GetAsk(),
 		})
 	}
 	for _, at := range u.GetMcp().GetTools() {
@@ -263,7 +263,7 @@ func mcpToProto(m gateway.MCPState) *gwv1.MCPState {
 			// The path of the target's public CA bundle.
 			CaFile: t.CAFile, InsecureSkipVerify: t.InsecureSkipVerify,
 			// The built-in target: the paths of its key and credentials, and the pin of each card.
-			Builtin: t.Builtin, HandleKeyFile: t.HandleKeyFile, RemoteAgents: remoteAgentsToProto(t.RemoteAgents),
+			Builtin: t.Builtin, HandleKeyFile: t.HandleKeyFile, RemoteAgents: remoteAgentsToProto(t.RemoteAgents), Ask: t.Ask,
 		})
 	}
 	slices.SortFunc(out.Targets, func(a, b *gwv1.MCPTarget) int {

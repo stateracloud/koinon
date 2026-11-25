@@ -68,6 +68,7 @@ func richState() gateway.State {
 	s.MCP = []gateway.MCPTarget{
 		{Name: "wiki", URL: "http://wiki/mcp", Org: "acme", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/creds/wiki", CAFile: "/creds/wiki-ca", InsecureSkipVerify: true},
 		{Name: "docs", URL: "http://docs/sse", SSE: true},
+		{Name: "wiki-ask", URL: "http://koinon-api/mcp-ask/wiki", Org: "acme", Ask: true},
 	}
 	s.GrantTools(agentA, gateway.ToolGrant{Target: "wiki", Tools: []string{"search", "read"}}, gateway.ToolGrant{Target: "docs", All: true})
 	s.EgressRoutes = []route.Route{
@@ -205,6 +206,8 @@ var _ = Describe("secret material", func() {
 		"Keys[].Agent.Name", "Keys[].Agent.Org", "Keys[].Hash", "Keys[].ID",
 		"Limits{}.Amount", "Limits{}.Generation", "Limits{}.Unit", "Limits{}.Window", "Limits{}~Name", "Limits{}~Org",
 		"MCP[].Builtin", "MCP[].HandleKeyFile",
+		// The ask target flag (#1315), reviewed 2026-11-25: it says the target is Koinon's mcpask proxy.
+		"MCP[].Ask",
 		"MCP[].RemoteAgents[].Agents[]", "MCP[].RemoteAgents[].CAFile", "MCP[].RemoteAgents[].CardHash", "MCP[].RemoteAgents[].CardURL",
 		"MCP[].RemoteAgents[].CredentialFile", "MCP[].RemoteAgents[].CredentialHeader", "MCP[].RemoteAgents[].CredentialPrefix",
 		"MCP[].RemoteAgents[].ID", "MCP[].RemoteAgents[].InsecureSkipVerify", "MCP[].RemoteAgents[].Name",
