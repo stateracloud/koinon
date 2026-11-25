@@ -737,10 +737,16 @@ jobs:
   # Rendered startup smoke test (old issue 284): the chart's Jobs and Deployments run as containers, with
   # the rendered args, env and mounts, against Postgres and envtest. See test/chartsmoke. Required:
   # a run skipped because no chart file changed reports success.
-  chart-smoke:
+  # The install modes run as three parallel shards (#1303): each has its own 15 minute budget. The required check
+  # `chart smoke` is the `chart-smoke` job below, which reads the shards' results.
+  chart-smoke-shard:
     needs: changes
     if: needs.changes.outputs.chartsmoke == 'true'
-    name: chart smoke
+    name: chart smoke shard (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, external, kms]
     runs-on: ubuntu-latest
     # Above the test's own timeouts (go test 20m, ginkgo 15m), so a hang fails the test and cleans up.
     timeout-minutes: 35
@@ -760,7 +766,30 @@ jobs:
         with:
           path: ~/.local/share/kubebuilder-envtest
           key: envtest-1.37.0
-      - run: make test-chart-smoke
+      - run: make test-chart-smoke CHART_SMOKE_SHARD=${{ matrix.shard }}
+
+  # The required check, with the name it had before the shards: green when every shard is green, or when the
+  # shards were skipped because no chart file changed.
+  chart-smoke:
+    name: chart smoke
+    needs: [changes, chart-smoke-shard]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          SHARDS: ${{ needs.chart-smoke-shard.result }}
+          WANT: ${{ needs.changes.outputs.chartsmoke }}
+        run: |
+          set -euo pipefail
+          if [[ $CHANGES != success ]]; then echo "changes: $CHANGES"; exit 1; fi
+          if [[ $WANT != true ]]; then
+            [[ $SHARDS == skipped ]] || { echo "shards: $SHARDS (expected skipped)"; exit 1; }
+            echo "chart smoke not needed for this change"
+            exit 0
+          fi
+          [[ $SHARDS == success ]] || { echo "shards: $SHARDS"; exit 1; }
 
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
   # envtest's API server. The OpenShell cases need a gateway and run on kind (make test-escape-kind, and in the kind e2e).
@@ -1272,7 +1301,7 @@ jobs:
   # a push to main, so it can never be a required check.
   ci-red:
     name: ci-red
-    needs: [changes, go-tidy, go-vuln, fuzz, go-lint, go-test, go-race-serial, go-race-parallel, go, quick-checks, web-lint, web-test, web-e2e, web, generate, chart, chart-smoke, escape-admission, lint-shell, scripts, warm-caches, warm-caches-web, warm-caches-opencode-plugins, opencode-plugin, harnesses, harness-publish]
+    needs: [changes, go-tidy, go-vuln, fuzz, go-lint, go-test, go-race-serial, go-race-parallel, go, quick-checks, web-lint, web-test, web-e2e, web, generate, chart, chart-smoke-shard, chart-smoke, escape-admission, lint-shell, scripts, warm-caches, warm-caches-web, warm-caches-opencode-plugins, opencode-plugin, harnesses, harness-publish]
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
