@@ -785,6 +785,10 @@ var _ = Describe("Service", func() {
 				got := tiers(ctx, s)["search"]
 				Expect(got.ContentHash).NotTo(Equal(before))
 				Expect(got.ReviewReason).NotTo(BeEmpty())
+				// A tool that already waits for review is not flagged again (#1216): review it, so the next
+				// case is a change of a reviewed tool.
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", mcpserverstest.PinOf(ctx, svc, org, s.ID, "search"))
+				Expect(err).NotTo(HaveOccurred())
 			}
 			By("the first change demoted the auto tool")
 			Expect(tiers(ctx, s)["search"].Tier).To(Equal("ask"))
@@ -953,6 +957,96 @@ var _ = Describe("Service", func() {
 				Expect(unreviewedRows(ctx, s)).To(Equal(mcpservers.MaxUnreviewedTools))
 				Expect(cappedAt(ctx, s).Valid).To(BeTrue())
 				Expect(events(ctx, "mcp_server.unreviewed_tools_capped")).To(HaveLen(2))
+			})
+
+			It("does not count an absent row from before the pin that an admin gave a tier (#1216 point e)", func(ctx SpecContext) {
+				s := create(ctx, "junk", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{tool("legacy", "Legacy", false)})
+				Expect(err).NotTo(HaveOccurred())
+				// A row from before the pin (#1132): an admin set its tier, and no text was approved.
+				_, err = pool.Exec(ctx, `UPDATE mcp_tools SET tier = 'auto', tier_set_by = 'user:admin', tier_set_at = now(), approved_hash = NULL, approved_json = NULL
+					WHERE org_id = $1 AND server_id = $2 AND name = 'legacy'`, org, sid)
+				Expect(err).NotTo(HaveOccurred())
+				for i := range 3 {
+					_, err = svc.SyncTools(ctx, org, sid, round(i))
+					Expect(err).NotTo(HaveOccurred())
+				}
+				var present bool
+				Expect(pool.QueryRow(ctx, `SELECT present FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND name = 'legacy'`, org, sid).Scan(&present)).To(Succeed())
+				Expect(present).To(BeFalse())
+				var never int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND server_id = $2 AND approved_hash IS NULL AND tier_set_by IS NULL`,
+					org, sid).Scan(&never)).To(Succeed())
+				Expect(never).To(Equal(mcpservers.MaxUnreviewedTools), "the legacy row takes no place of a new tool")
+			})
+		})
+
+		Describe("a tool whose text changes while it waits for review (#1216)", func() {
+			// changing lists the tool with new text on each call, as a server that changes it on each probe.
+			changing := func(name string, i int) []mcpservers.ListedTool {
+				return []mcpservers.ListedTool{tool(name, fmt.Sprintf("Search, version %d", i), true)}
+			}
+			observed := func(ctx SpecContext, s mcpservers.Server, name string) string {
+				GinkgoHelper()
+				return mcpserverstest.PinOf(ctx, svc, org, s.ID, name)
+			}
+
+			It("writes no sync event for each change of a tool that no admin reviewed, and keeps its text current (point b)", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, changing("search", 0))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(events(ctx, "mcp_tool.sync")).To(HaveLen(1), "the new tool")
+				for i := 1; i <= 10; i++ {
+					before := observed(ctx, s, "search")
+					res, err := svc.SyncTools(ctx, org, sid, changing("search", i))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(res).To(Equal(mcpservers.SyncResult{}))
+					Expect(observed(ctx, s, "search")).NotTo(Equal(before), "the admin reviews the text the server publishes now")
+				}
+				Expect(events(ctx, "mcp_tool.sync")).To(HaveLen(1), "no event for each change")
+				got := tiers(ctx, s)["search"]
+				Expect(got.Description).To(Equal("Search, version 10"))
+				Expect(got.ReviewReason).To(BeEmpty(), "a tool no admin reviewed has no change to review")
+
+				By("an admin approves the text the sync recorded last")
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", observed(ctx, s, "search"))
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("writes one sync event for a change of a reviewed tool, not one for each later change before the review (point d)", func(ctx SpecContext) {
+				s := create(ctx, "wiki", "")
+				sid := uuidOf(s.ID)
+				_, err := svc.SyncTools(ctx, org, sid, changing("search", 0))
+				Expect(err).NotTo(HaveOccurred())
+				_, err = svc.SetTier(ctx, org, actor, s.ID, "search", "auto", observed(ctx, s, "search"))
+				Expect(err).NotTo(HaveOccurred())
+
+				res, err := svc.SyncTools(ctx, org, sid, changing("search", 1))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				Expect(res.Demoted).To(Equal([]string{"search"}))
+				Expect(events(ctx, "mcp_tool.sync")).To(HaveLen(2))
+
+				for i := 2; i <= 10; i++ {
+					res, err := svc.SyncTools(ctx, org, sid, changing("search", i))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(res).To(Equal(mcpservers.SyncResult{}))
+				}
+				Expect(events(ctx, "mcp_tool.sync")).To(HaveLen(2), "no event for each later change")
+				got := tiers(ctx, s)["search"]
+				Expect(got.Description).To(Equal("Search, version 10"))
+				Expect(got.ReviewReason).To(Equal(mcpservers.ReviewChangedDemoted), "the tool still waits for review")
+				Expect(got.Tier).To(Equal("ask"))
+
+				By("after the review, the next change is a change again")
+				_, err = svc.AcknowledgeReview(ctx, org, actor, s.ID, "search", observed(ctx, s, "search"))
+				Expect(err).NotTo(HaveOccurred())
+				res, err = svc.SyncTools(ctx, org, sid, changing("search", 11))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.Changed).To(Equal([]string{"search"}))
+				Expect(events(ctx, "mcp_tool.sync")).To(HaveLen(3))
 			})
 		})
 

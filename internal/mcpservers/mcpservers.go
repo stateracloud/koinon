@@ -142,6 +142,29 @@ func Unreviewed(t store.McpTool) bool {
 	return !t.ApprovedHash.Valid
 }
 
+// neverReviewed reports whether no admin ever made a decision on the tool: no approved text, and no
+// tier an admin set. Only such a row counts toward MaxUnreviewedTools. A row from before the pin
+// (#1132) has a tier that an admin set and no approved hash; it is Unreviewed until the sync adopts its
+// pin, but an admin decided on it, so the server cannot add more such rows (#1216 point e).
+func neverReviewed(t store.McpTool) bool {
+	return Unreviewed(t) && !t.TierSetBy.Valid
+}
+
+// waitingForReview reports whether a tool already waits for an admin: no admin ever reviewed it, or
+// the sync flagged a change since the last review. A further change of its text updates the stored
+// text, which is what the admin approves, but it is not a new change: the sync writes no audit event
+// for it. A server that changes the text on each probe thus writes no event for each sync (#1216
+// points b and d).
+func waitingForReview(t store.McpTool) bool {
+	return neverReviewed(t) || t.ReviewReason.Valid
+}
+
+// PendingChange reports whether an admin approved the tool's text and the sync recorded other text
+// since. The gateway leaves such a tool out (#1132); the ask proxy does too (#1216 point a).
+func PendingChange(t store.McpTool) bool {
+	return t.ApprovedHash.Valid && t.ToolHash.String != t.ApprovedHash.String
+}
+
 // Reasons a server is disabled.
 const (
 	ReasonShadowed = "shadowed by an MCP server of the same name declared in a Kubernetes Secret"
@@ -1315,12 +1338,12 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			return err
 		}
 		have := map[string]store.McpTool{}
-		// Every unreviewed row counts, present or absent: a server that lists other names each time
-		// must not make room by dropping the names it listed before.
+		// Every row that no admin ever reviewed counts, present or absent: a server that lists other
+		// names each time must not make room by dropping the names it listed before.
 		unreviewed := 0
 		for _, t := range known {
 			have[t.Name] = t
-			if Unreviewed(t) {
+			if neverReviewed(t) {
 				unreviewed++
 			}
 		}
@@ -1380,6 +1403,22 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					return err
 				}
 				res.New = append(res.New, lt.Name)
+			case cur.ContentHash != hash && waitingForReview(cur):
+				// The tool already waits for an admin: keep its text current for the review, keep its
+				// review state, and write no event. The declaration still goes back to the default; that
+				// reset is audited only when it changes something, so at most once for each admin action.
+				out, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
+					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
+					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: cur.ReviewReason,
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+					ToolJson: toolJSON, ToolHash: pgtype.Text{String: toolHash, Valid: true},
+				})
+				if err != nil {
+					return err
+				}
+				if err := recordToolDeclarationReset(ctx, q, b, org, audit.System("koinon-reconciler:mcp-sync"), srv.Name, cur, out, ReasonContentChanged); err != nil {
+					return err
+				}
 			case cur.ContentHash != hash || pinMoved || legacyExtra:
 				reason := ReviewChanged
 				if cur.Tier == store.McpTierAuto {

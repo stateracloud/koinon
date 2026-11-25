@@ -57,14 +57,25 @@ The maintainer decided on 2026-11-24 to hide a tool until an admin reviews it.
    console switch come in part 2 of #1216.
 5. **A limit on unreviewed rows.** The sync stores at most 256 tool rows with no approved hash for one
    server (`mcpservers.MaxUnreviewedTools`). Absent rows count too, so a server cannot make room by
-   dropping names. At the limit the sync stores no new row. It sets
+   dropping names. A row from before the pin (#1132) with a tier that an admin set does not count: an
+   admin decided on it, so a server cannot add such rows. At the limit the sync stores no new row. It sets
    `mcp_servers.unreviewed_tools_capped_at` and writes one audit event,
    `mcp_server.unreviewed_tools_capped`. The event has the server name and the limit, and no tool name.
    Later syncs at the limit write no event. When the server is below the limit again, the sync clears
    the mark without an event. A later cap writes a new event.
 6. **The sync locks the server row** (`SELECT ... FOR NO KEY UPDATE`). Two syncs of one server thus
    cannot both count below the limit and both add rows.
-7. **Metrics.** `koinon_gateway_mcp_tools_left_out_total` gets the reason `unreviewed`. The labels stay
+7. **One event for each change that waits for review.** A tool that no admin reviewed, or that the sync
+   flagged as changed and no admin reviewed since, already waits for an admin. When its text changes
+   again, the sync stores the new text (the admin approves the text the sync recorded last) and keeps
+   the review state. It writes no `mcp_tool.sync` event for that change. Thus a server that changes the
+   text of a tool on each probe writes at most one event for each admin review.
+8. **The ask proxy applies the pin.** `mcpask` leaves out an ask-tier tool whose recorded text is not
+   the approved text, as the gateway does. A call to it is refused with the gateway's fixed text.
+9. **The executor checks the review.** An approved request for a tool that is hidden now (no admin
+   reviewed it, and the server does not show new tools) does not run. This covers requests that agents
+   recorded before tools were hidden, and requests recorded while "show new tools before review" was on.
+10. **Metrics.** `koinon_gateway_mcp_tools_left_out_total` gets the reason `unreviewed`. The labels stay
    a fixed set (ADR 0023). The gateway writes no log line for each hidden tool, because a server can list
    many names and a name is the server's own text.
 
@@ -83,20 +94,17 @@ The maintainer decided on 2026-11-24 to hide a tool until an admin reviews it.
 
 - Positive: a new tool's text reaches the model only after a person reads it, or after an admin chose to
   trust the server.
-- Positive: a hostile server cannot fill the database or the audit log with new names. This limit
-  covers new names only. A server that changes the text of a stored tool on each probe still writes one
-  `mcp_tool.sync` event per sync (a follow-up).
+- Positive: a hostile server cannot fill the database or the audit log with new names, or with text
+  changes of a stored tool (decision 7).
 - Negative: an admin must review each new tool before an agent can use it. Part 2 of #1216 adds an
   approve-all action and a "tools waiting" notice to make this light.
 - Negative: rows of tools that a server no longer lists can fill the limit. There is no admin action to
-  delete them yet (a follow-up). A row from before the pin (#1132) that has a tier but no approved hash
-  counts as unreviewed until the sync adopts its pin; an absent row of that kind keeps its place.
-- Negative: an approval request that an agent recorded for an unreviewed tool before this change, or
-  while "show new tools before review" was on, still runs when a person approves it. A person decided
-  that call, so the risk is low.
-- Follow-ups: part 2 of #1216 (the API, declarative and console switch, approve-all and the notice). The
-  ask proxy serves the current text of an approved ask-tier tool that has a pending change; it does not
-  apply the pin (a follow-up). When PR 1228 has merged, main changes "Relates to" 0097 to "Amends" and adds
+  delete them yet (a follow-up).
+- Negative: an approved request for a tool that is hidden now fails when a person approves it, also
+  when it was recorded while "show new tools before review" was on (decision 9). The agent asks again
+  after an admin reviews the tool.
+- Follow-ups: part 2 of #1216 (the API, declarative and console switch, approve-all and the notice).
+  When PR 1228 has merged, main changes "Relates to" 0097 to "Amends" and adds
   0125 to the "Amended by" line of ADR 0097. This PR does not edit ADR 0097, because PR 1228 edits it.
 
 ## Links
