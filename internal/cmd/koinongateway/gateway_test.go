@@ -81,6 +81,17 @@ var _ = Describe("koinon-gateway's startup", func() {
 		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--shutdown-delay", "-1s"}, nil)).NotTo(Succeed())
 	})
 
+	It("refuses a drain shorter than the MCP call timeout, and accepts it on a model-only pod", func() {
+		base := []string{"--state-url", stateURL, "--state-token-file", tokenFile}
+		err := cli.Check(NewRootCommand(), append(base, "--drain-timeout", "30s"), nil)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("MCP call timeout"))
+		Expect(cli.Check(NewRootCommand(), append(base, "--drain-timeout", "2m"), nil)).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), base, nil)).To(Succeed(), "the default drain covers a call")
+		model := append(base, "--mcp-path=false", "--model-path", "--drain-timeout", "30s")
+		Expect(cli.Check(NewRootCommand(), model, nil)).To(Succeed())
+	})
+
 	It("takes the guard's database login from --database-url-file, and refuses an empty or missing file before it serves anything", func() {
 		dsn := filepath.Join(GinkgoT().TempDir(), "dsn")
 		Expect(os.WriteFile(dsn, []byte("postgres://koinon_gateway@db.example/koinon\n"), 0o600)).To(Succeed())

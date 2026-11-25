@@ -27,6 +27,10 @@ key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 {{- $m := .Values.gateway.mcp.koinon }}
 {{- $drain := int $m.drainTimeoutSeconds }}
 {{- $delay := int $m.shutdownDelaySeconds }}
+{{- /* A tool call is never retried and runs for up to the gateway's call timeout (120 s, mcpgateway.DefaultCallTimeout). A shorter drain cuts each call that is in flight at a rollout. */ -}}
+{{- if lt $drain 120 }}
+{{- fail "gateway.mcp.koinon.drainTimeoutSeconds must be at least 120, the call timeout of koinon-gateway: a shorter drain cuts a tool call in flight at each rollout" }}
+{{- end }}
 {{- $dbDir := include "koinon.mcpGatewayDBURLDir" . }}
 {{- $mcpKeysDir := include "koinon.gatewayMCPKeysDir" . }}
 {{- $gwKey := include "koinon.gwKey" . }}

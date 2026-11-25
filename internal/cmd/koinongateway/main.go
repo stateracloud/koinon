@@ -137,9 +137,12 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"internal hosts (names, IPs or CIDRs, optionally with a port) that the egress routes may reach although they are internal")
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
-	fs.DurationVar(&c.drain, "drain-timeout", 30*time.Second,
-		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long")
+	fs.DurationVar(&c.drain, "drain-timeout", defaultDrain,
+		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long; with the MCP path it must be at least the call timeout ("+mcpgateway.DefaultCallTimeout.String()+")")
 }
+
+// defaultDrain is the default --drain-timeout: the MCP call timeout and a margin.
+const defaultDrain = mcpgateway.DefaultCallTimeout + 30*time.Second
 
 // validate holds the rules between flags, which cobra's required-flag check does not know.
 func (c *config) validate() error {
@@ -175,6 +178,11 @@ func (c *config) validate() error {
 	}
 	if c.drain <= 0 {
 		return errors.New("--drain-timeout must be positive")
+	}
+	// A tool call is never retried and runs for up to the call timeout. A shorter drain cuts every call that
+	// is still running when a rollout starts (issue 1347).
+	if c.mcpPath && c.drain < mcpgateway.DefaultCallTimeout {
+		return fmt.Errorf("--drain-timeout (%s) must be at least the MCP call timeout (%s): a call in flight at SIGTERM would be cut", c.drain, mcpgateway.DefaultCallTimeout)
 	}
 	return nil
 }
@@ -256,6 +264,8 @@ func run(ctx context.Context, cfg config) error {
 	}
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
 	var keys *gatewaykeys.Loader
+	// guardLoad is the guard's database check; nil when the pod runs no guard. /readyz asks it.
+	var guardLoad loadChecker
 	if cfg.mcpPath && cfg.databaseURLFile != "" {
 		// A call the guard holds for a person is parked through koinon-api (#1301): koinon-api records the
 		// approval, and the gateway's database login has no right on approvals.
@@ -270,6 +280,7 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		defer pool.Close()
+		guardLoad = guard
 		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
 		// The pod reports the formats it reads, so koinon-api seals a credential to the gateway key only when
 		// every gateway pod opens it (ADR 0097 decision 12.5 step 1). A pod without a key reads none.
@@ -347,13 +358,12 @@ func run(ctx context.Context, cfg config) error {
 	// leaves the Service first.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
+	var keyReady keyReadier
+	if keys != nil {
+		keyReady = keys
+	}
 	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
-		if keys != nil {
-			if ok, _ := keys.Ready(); !ok {
-				return false
-			}
-		}
-		return (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != "")
+		return podReady(guardLoad, keyReady, (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
 	}, log); err != nil {
 		return err
 	}
@@ -523,6 +533,30 @@ func serveEgress(ctx context.Context, cfg config, eg *egress.Gateway, log *slog.
 	safego.Go(ctx, log, "egress-listener", func(context.Context) { served <- srv.Serve(ln) })
 	log.Info("egress listener started", "listen", ln.Addr().String())
 	return srv, nil
+}
+
+// loadChecker is the guard's view of its database login (mcpguard.GatewayGuard.Loaded).
+type loadChecker interface{ Loaded() error }
+
+// keyReadier is the key loader's readiness (gatewaykeys.Loader.Ready).
+type keyReadier interface{ Ready() (bool, error) }
+
+// podReady is the /readyz answer of the pod. A pod is ready when it applied a config (configured), its key
+// loader holds the keys it needs, and the leak guard reached its database. The guard opens a lazy pool
+// and retries every 2 s: a broken login would leave every org target closed behind a ready pod, and a
+// rollout would not stop. A nil guard or loader means the pod runs without one. Each later outage is not
+// checked here: the guard refuses on its own then (fail closed), and a database blip must not
+// remove every endpoint.
+func podReady(guard loadChecker, keys keyReadier, configured bool) bool {
+	if guard != nil && guard.Loaded() != nil {
+		return false
+	}
+	if keys != nil {
+		if ok, _ := keys.Ready(); !ok {
+			return false
+		}
+	}
+	return configured
 }
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is

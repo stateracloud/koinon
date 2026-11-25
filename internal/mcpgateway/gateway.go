@@ -29,6 +29,11 @@ import (
 const RootURI = "file:///workspace"
 
 // Options configures a [Gateway]. The zero value of every field but Guard is usable.
+// DefaultCallTimeout is the longest an upstream call runs when Options.CallTimeout is zero. A call is never
+// retried, so the drain timeout of the process must be at least this long: a call in flight at SIGTERM then
+// finishes instead of being cut by a rollout (issue 1347).
+const DefaultCallTimeout = 2 * time.Minute
+
 type Options struct {
 	// Guard sees every message of every upstream connection. Nil means [AllowGuard]; a deployment
 	// that serves org targets sets a real one (ADR 0097: the guard fails closed).
@@ -48,8 +53,11 @@ type Options struct {
 	Logger *slog.Logger
 	// IdleTTL is how long an unused upstream session lives. Zero means 5 minutes.
 	IdleTTL time.Duration
-	// CallTimeout bounds one upstream call. Zero means 2 minutes.
+	// CallTimeout bounds one upstream call. Zero means [DefaultCallTimeout].
 	CallTimeout time.Duration
+	// MaxResponseBytes bounds one upstream reply (a JSON reply as a whole, one event of a stream). Zero means
+	// [DefaultMaxResponseBytes]; negative means no bound (for tests).
+	MaxResponseBytes int64
 	// ListTimeout bounds one target's part of a tools/list. Zero means 10 seconds.
 	ListTimeout time.Duration
 	// Builtins are the kinds of built-in target this process can run, by [gateway.MCPTarget.Builtin].
@@ -93,7 +101,10 @@ func New(o Options) *Gateway {
 		o.IdleTTL = 5 * time.Minute
 	}
 	if o.CallTimeout == 0 {
-		o.CallTimeout = 2 * time.Minute
+		o.CallTimeout = DefaultCallTimeout
+	}
+	if o.MaxResponseBytes == 0 {
+		o.MaxResponseBytes = DefaultMaxResponseBytes
 	}
 	if o.ListTimeout == 0 {
 		o.ListTimeout = 10 * time.Second
