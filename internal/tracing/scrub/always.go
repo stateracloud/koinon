@@ -757,6 +757,15 @@ func skipHeaderValue(kind Kind, value string) bool {
 	}
 	fields := strings.Fields(v)
 	rest := fields
+	// A JSON literal that a delimiter ends ("null," in {"apiKey": null, "enabled": false}) is a
+	// whole value and holds no credential. Without this the span ran on to the next quote and
+	// removed the comma, so the scrubbed trace was not valid JSON (issue 1337).
+	if w := fields[0]; len(w) > 1 && strings.IndexByte(",;}]", w[len(w)-1]) >= 0 {
+		switch strings.ToLower(strings.TrimRight(w, ",;}]")) {
+		case "null", "nil", "true", "false":
+			return true
+		}
+	}
 	switch strings.ToLower(fields[0]) {
 	case "bearer", "basic", "digest", "token", "negotiate", "required", "require", "none", "null", "nil", "true", "false":
 		rest = fields[1:]
