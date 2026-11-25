@@ -39,12 +39,13 @@ type Substrate struct {
 	RuntimeClassTiers []string
 	// DefaultTier is the tier of a sandbox that names no runtime class.
 	DefaultTier string
-	// AllowUnhardened acknowledges that the guest image does not yet carry the launcher and the guest
-	// server, so the harness may not run behind the launcher (issue #1088 slice f; the driver already
-	// puts the launcher prefix on every Exec, slice b). A read-only root is not a reason: the gVisor
+	// AllowUnhardened acknowledges that the substrate overlay of the harness image (sandbox-substrate:
+	// the guest server and the launcher, built by the release, issue #1087) has not yet run in a real
+	// Substrate actor with its probe results recorded, so the harness may not run behind the launcher
+	// (the driver already puts the launcher prefix on every Exec). A read-only root is not a reason: the gVisor
 	// tiers keep a writable root by decision (issue #1150, ADR 0120 section 4). Validate refuses the
 	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
-	// slice f has merged; then the flag and chart value are removed.
+	// the overlay's microVM and gVisor probe results are recorded on issue #1087; then the flag and chart value are removed.
 	AllowUnhardened bool
 	// ImageMirrors are "host=target" entries: the registry host of an actor image and the image source
 	// of the node agent that replaces it (issue #1170). The path, tag and digest are kept.
@@ -178,7 +179,7 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.CAFile, "substrate-ca-file", "", "CA file that signed ateapi's certificate; empty uses the system roots")
 	fs.StringVar(&e.Substrate.ServerName, "substrate-server-name", "", "name checked against ateapi's certificate")
-	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path may run the harness without the guest launcher until the guest image of issue #1088 slice f lands (the gVisor tiers keep a writable root, issue #1150); required with --execution-driver=substrate")
+	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path may run the harness without the guest launcher until the overlay image of issue #1087 has run in a real actor (the gVisor tiers keep a writable root, issue #1150); required with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.SnapshotStore.Endpoint, "substrate-snapshot-endpoint", "", "S3 endpoint (host:port or URL) of Substrate's snapshot bucket; with --substrate-snapshot-bucket and the two key files it turns on snapshots (without it they fail closed)")
 	fs.StringVar(&e.Substrate.SnapshotStore.Region, "substrate-snapshot-region", "", "region of the snapshot bucket")
 	fs.StringVar(&e.Substrate.SnapshotStore.Bucket, "substrate-snapshot-bucket", "", "snapshot bucket; a snapshot address in another bucket is refused")
@@ -208,7 +209,7 @@ func (e *Execution) Validate(openshellAddress string) error {
 			return err
 		}
 		if !e.Substrate.AllowUnhardened {
-			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the guest image does not yet carry the guest launcher (issue #1088 slice f)")
+			return errors.New("--execution-driver=substrate refuses to start without --substrate-allow-unhardened: the substrate overlay image (guest server and launcher, issue #1087) has no recorded run in a real actor yet")
 		}
 		if cfg.DefaultTier == "" && len(cfg.RuntimeClassTiers) == 0 {
 			return errors.New("--substrate-default-tier or --substrate-runtime-class-tiers is required with --execution-driver=substrate: without a tier no guest process can start")

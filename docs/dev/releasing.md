@@ -14,6 +14,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 | `api` (with the web UI), `reconciler`, `agentd`, `gateway` | `ghcr.io/stateracloud/koinon/<name>:<version>`, linux/amd64 and linux/arm64, ko SPDX SBOMs. `latest` moves only for final releases |
 | `harnesses/opencode`, the OpenCode harness (ADR 0059) | `ghcr.io/stateracloud/koinon/sandbox:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. `latest` moves only for final releases |
 | `ate-env-guest`, the Substrate guest server (ADR 0119), built from `github.com/agent-substrate/env` at `ATE_ENV_VERSION` in `hack/versions.env` | `ghcr.io/stateracloud/koinon/ate-env-guest:<version>`, linux/amd64, ko SPDX SBOM. Upstream publishes no image. The chart value is `execution.substrate.guestImage` |
+| `sandbox-substrate`, the harness image plus the guest server and the guest launcher (ADR 0119, ADR 0016), built on the released `sandbox` digest | `ghcr.io/stateracloud/koinon/sandbox-substrate:<version>`, linux/amd64 and linux/arm64, BuildKit SBOM and provenance attestations. The chart uses it for the default harness with `execution.driver=substrate` |
 | Helm chart | `oci://ghcr.io/stateracloud/koinon/charts/koinon`, tag `<version>` |
 | Release notes | A draft GitHub release, from the Conventional Commits since the previous tag: features, fixes, others. `docs`, `ci`, `test`, `chore` and `style` commits are left out |
 

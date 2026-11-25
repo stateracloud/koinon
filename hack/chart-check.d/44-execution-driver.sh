@@ -36,7 +36,7 @@ done
 if render --set execution.driver=substrate >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
 grep -q 'controlAddress' "$out/sub.err" || fail "the missing-address error must name execution.substrate.controlAddress"
 if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown driver must not render"; fi
-# Substrate is refused until the guest image carries the guest launcher (#1088 slice f).
+# Substrate is refused until the overlay image has a recorded run in a real actor (#1087).
 if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null 2>"$out/sub.err"; then fail "substrate without allowUnhardened must not render"; fi
 grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
 env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
@@ -72,5 +72,7 @@ done
 has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: substrate-x' "${sub[@]}" --set execution.substrate.namespace=substrate-x --set execution.substrate.gatewayClientNamespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=substrate-x --show-only templates/networkpolicy.yaml
 # Substrate needs every harness image pinned by digest (#1192): the reconciler refuses to start
 # without one, so the substrate CI values carry a digest and the config renders it.
-has "the substrate CI values pin the harness image by digest" 'image: .*/sandbox:[^@ ]+@sha256:[0-9a-f]{64}' -f "$CHART/ci/substrate-values.yaml" --show-only templates/config.yaml
+# With substrate the default repository is the overlay with the guest server and launcher (#1087).
+has "the substrate CI values pin the harness image by digest, and it is the substrate overlay" 'image: .*/sandbox-substrate:[^@ ]+@sha256:[0-9a-f]{64}' -f "$CHART/ci/substrate-values.yaml" --show-only templates/config.yaml
+has "a repository set for the harness is used as it is with substrate" 'image: .*/my-sandbox:' "${sub[@]}" --set harnesses.opencode.image.repository=my-sandbox --set harnesses.opencode.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 --show-only templates/config.yaml
 lacks "the default harness image has no digest (OpenShell does not need one)" 'image: .*/sandbox:[^@ ]+@sha256:' --show-only templates/config.yaml

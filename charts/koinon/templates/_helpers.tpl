@@ -108,6 +108,22 @@ rewritten by koinon.imageRef.
 {{- include "koinon.imageRef" (list $ctx $ref) }}
 {{- end }}
 
+{{/*
+Harness image reference: koinon.harnessImage (list $ $f.image). Like koinon.image, but with execution.driver=substrate
+the default repository "sandbox" becomes "sandbox-substrate", the harness image with the guest server and the
+guest launcher (release job harness-substrate, issue #1087). The substrate driver runs the guest server as the
+actor's process, so the plain harness image cannot serve it. Any other repository is used as set. The digest of
+the entry must be the digest of the image it names.
+*/}}
+{{- define "koinon.harnessImage" -}}
+{{- $ctx := index . 0 -}}
+{{- $img := index . 1 -}}
+{{- if and (eq (include "koinon.substrate" $ctx) "true") (eq $img.repository "sandbox") }}
+{{- $img = set (deepCopy $img) "repository" "sandbox-substrate" }}
+{{- end }}
+{{- include "koinon.image" (list $ctx $img) }}
+{{- end }}
+
 {{- define "koinon.podSecurityContext" -}}
 runAsNonRoot: true
 runAsUser: 65532
@@ -1261,7 +1277,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the guest image does not yet carry the guest launcher (issue #1088 slice f). The gVisor tiers keep a writable root (issue #1150)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
 {{- end }}
 {{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
 {{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
