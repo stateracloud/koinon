@@ -266,9 +266,11 @@ var _ = Describe("home checkpoint resync", func() {
 
 		By("audited by the system actor, in the agent's org; the gauge and the change counter follow")
 		Expect(audited(ctx, agentd.ResyncedAction)).To(ConsistOf(And(HavePrefix("system "+agent.String()), ContainSubstring(`"added": 1`), ContainSubstring(`"missing": 1`))))
-		Eventually(gauge("pending")).Should(BeZero())
-		Expect(changes("added")).To(BeEquivalentTo(1))
-		Expect(changes("missing")).To(BeEquivalentTo(1))
+		// The pass commits the audit row and the finished mark first, then adds to the change counters
+		// and sets the gauges. The spec sees the commit before it sees the counters, so it waits for them.
+		Eventually(gauge("pending")).WithTimeout(racescale.D(20 * time.Second)).Should(BeZero())
+		Eventually(func() float64 { return changes("added") }).WithTimeout(racescale.D(20 * time.Second)).Should(BeEquivalentTo(1))
+		Eventually(func() float64 { return changes("missing") }).WithTimeout(racescale.D(20 * time.Second)).Should(BeEquivalentTo(1))
 
 		By("a second request finds nothing to change")
 		before := count(ctx)
