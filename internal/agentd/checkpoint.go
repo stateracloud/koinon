@@ -568,9 +568,13 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {
+				if cp.ContentDigest.String == "" {
+					r.log.Warn("restored a home checkpoint that has no content digest (made before digests, or resynced): the home is not verified", "checkpoint", cp.ID.String())
+				}
 				if recErr := r.own.Record(ctx, "run.home_restored", map[string]any{
 					"checkpoint": cp.ID.String(), "snapshot": cp.SnapshotID.String, "newer_failed": i,
 					"taken_at": cp.FinishedAt.Time.UTC().Format(time.RFC3339),
+					"verified": cp.ContentDigest.String != "",
 				}); recErr != nil {
 					r.log.Warn("recording the home restore failed", "err", recErr)
 				}
@@ -586,6 +590,10 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			}
 			r.log.Warn("restoring the home failed", "checkpoint", cp.ID.String(), "try", try, "err", err)
 			errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
+			if errors.Is(err, checkpoint.ErrDigestMismatch) {
+				// Another try reads the same snapshot: go to the next older checkpoint.
+				break
+			}
 			if try < c.RestoreTries && !sleep(ctx, time.Second<<try) {
 				return ctx.Err()
 			}

@@ -210,6 +210,11 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		if err != nil {
 			return err
 		}
+		// The digest covers every staged file, so kopia may skip none: a `.kopiaignore` file or a
+		// cache directory marker (CACHEDIR.TAG, which cargo writes in target/) in the agent's home
+		// would leave the snapshot smaller than the digest, and no restore would pass. An old
+		// repository keeps the policy it was made with, so this is set at upload time.
+		pt = keepEverything(pt)
 		u := upload.NewUploader(wr)
 		u.ParallelUploads = 2
 		man, err := u.Upload(ctx, src, pt, source, prev...)
@@ -391,6 +396,16 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 		return nil, fmt.Errorf("connecting to the repository: %w", err)
 	}
 	return repo.Open(ctx, cfg, password, nil)
+}
+
+// keepEverything returns a policy tree whose files policy skips nothing that Stage kept.
+func keepEverything(pt *policy.Tree) *policy.Tree {
+	eff := *pt.EffectivePolicy()
+	eff.FilesPolicy.DotIgnoreFiles = nil
+	eff.FilesPolicy.IgnoreRules = nil
+	no := policy.OptionalBool(false)
+	eff.FilesPolicy.IgnoreCacheDirectories = &no
+	return policy.BuildTree(nil, &eff)
 }
 
 // setPolicy sets the global policy of a new repository: zstd compression and retention.

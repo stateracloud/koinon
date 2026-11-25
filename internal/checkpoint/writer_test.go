@@ -121,6 +121,32 @@ var _ = Describe("Writer", func() {
 		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
 	})
 
+	It("keeps a home that holds a .kopiaignore file or a cache directory marker, and restores it with its digest (issue #1090)", func() {
+		pw := "koinon_test_not-a-real-token"
+		sig := "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag.\n"
+		h := home(
+			entry{name: "./.kopiaignore", body: "*.log\n"},
+			entry{name: "./a.log", body: "log"},
+			entry{name: "./proj/target/CACHEDIR.TAG", body: sig},
+			entry{name: "./proj/target/v", body: "built"},
+		)
+		r, err := w.Backup(ctx, prefix, pw, h, checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
+		names := map[string]bool{}
+		tr := tar.NewReader(&out)
+		for {
+			hd, err := tr.Next()
+			if err != nil {
+				break
+			}
+			names[hd.Name] = true
+		}
+		Expect(names).To(HaveKey("a.log"))
+		Expect(names).To(HaveKey("proj/target/v"))
+	})
+
 	It("writes nothing to the bucket in restore-only mode (#940)", func() {
 		bucket := GinkgoT().TempDir()
 		src := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir()}
