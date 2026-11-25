@@ -53,7 +53,8 @@ env_is KOINON_READ_ONLY_OPENBAO_KEY '"koinon-kek-old"' "${bao_primary[@]}" "${ro
 env_is KOINON_READ_ONLY_OPENBAO_ROLE '"koinon-api"' "${bao_primary[@]}" "${ro_bao[@]}"
 env_is KOINON_OPENBAO_KEY '"koinon-kek"' "${bao_primary[@]}" "${ro_bao[@]}"
 bao_all=$(render "${bao_primary[@]}" "${ro_bao[@]}")
-grep -F -A1 'name: KOINON_READ_ONLY_OPENBAO_ROLE' <<<"$bao_all" | grep -qF 'value: "koinon-key-admin"' || fail "the key-admin Job signs in to the old key as the key-admin role"
+ro_roles=$(grep -F -A1 'name: KOINON_READ_ONLY_OPENBAO_ROLE' <<<"$bao_all")
+hit -F 'value: "koinon-key-admin"' <<<"$ro_roles" || fail "the key-admin Job signs in to the old key as the key-admin role"
 [[ $(grep -c 'name: KOINON_READ_ONLY_OPENBAO_KEY' <<<"$bao_all") == 3 ]] || fail "koinon-api, the reconciler and the key-admin Job get the read-only OpenBao key"
 # A move back to local: the primary is local, the old KMS key is read-only.
 env_is KOINON_READ_ONLY_KEK_BACKEND openbao "${ro_bao[@]}"
