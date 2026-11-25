@@ -269,6 +269,15 @@ spec:
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
+    {{- if include "koinon.egressListener" . }}
+    # The egress listener (#1086 part C2): sandboxes send git here, as they reach agentgateway's llm port.
+    # The actor token and the routes gate each request; the reconciler's L7 rule limits the paths.
+    - ports:
+        - port: egress
+      from:
+        - namespaceSelector:
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+    {{- end }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats

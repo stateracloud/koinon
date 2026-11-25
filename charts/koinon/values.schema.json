@@ -399,6 +399,24 @@
                 "nodeSelector": {"$ref": "#/definitions/map"},
                 "tolerations": {"type": "array"},
                 "affinity": {"$ref": "#/definitions/map"},
+                "egress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
+                    "caBundle": {"type": "string"},
+                    "actorToken": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "issuer": {"$ref": "#/definitions/nonEmpty"},
+                        "keyId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                        "existingSecret": {"type": "string"}
+                      }
+                    }
+                  }
+                },
                 "recipientKey": {
                   "type": "object",
                   "additionalProperties": false,

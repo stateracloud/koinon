@@ -159,6 +159,12 @@ spec:
             {{- if eq $component "agentd" }}
             {{- include "koinon.otlpTracesTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
+            {{- if include "koinon.egressListener" $ }}
+            # The actor token seed only (#1086 part C2): koinon-agentd signs, the gateway verifies.
+            - name: actor-token-key
+              mountPath: /secrets/actor-token
+              readOnly: true
+            {{- end }}
             {{- if $.Values.checkpoints.enabled }}
             - name: checkpoints
               mountPath: /var/lib/koinon/checkpoints
@@ -192,6 +198,15 @@ spec:
         {{- if eq $component "agentd" }}
         {{- include "koinon.otlpTracesTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
+        {{- if include "koinon.egressListener" $ }}
+        - name: actor-token-key
+          secret:
+            secretName: {{ include "koinon.actorTokenKeyName" $ }}
+            defaultMode: 0440
+            items:
+              - key: seed
+                path: seed
+        {{- end }}
         {{- if $.Values.checkpoints.enabled }}
         - name: checkpoints
           emptyDir:

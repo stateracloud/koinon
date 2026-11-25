@@ -36,6 +36,10 @@ data:
       {{- if include "koinon.mcpKoinon" . }}
       # koinon-gateway opens sealed MCP credentials; with agentgateway the reconciler refuses them.
       mcpSealed: true
+      {{- if include "koinon.egressListener" . }}
+      # koinon-gateway's egress listener: the reconciler adds an enforced L7 sandbox rule for it (#1086 part C2).
+      egressUrl: {{ include "koinon.egressURL" . }}
+      {{- end }}
       {{- end }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.

@@ -30,6 +30,13 @@ key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 {{- $dbDir := include "koinon.mcpGatewayDBURLDir" . }}
 {{- $mcpKeysDir := include "koinon.gatewayMCPKeysDir" . }}
 {{- $gwKey := include "koinon.gwKey" . }}
+{{- $egress := include "koinon.egressListener" . }}
+{{- $eg := $m.egress }}
+{{- if $egress }}
+{{- if eq (int $eg.port) (int $m.port) }}
+{{- fail "gateway.mcp.koinon.egress.port must differ from gateway.mcp.koinon.port" }}
+{{- end }}
+{{- end }}
 {{- if eq .Values.postgres.mode "cnpg" }}
 ---
 # The URL of the guard's database login, without a password (the pod sets PGPASSWORD). It holds no secret.
@@ -41,6 +48,18 @@ metadata:
     {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
 data:
   url: {{ printf "postgres://%s@%s-rw.%s.svc:5432/%s?sslmode=verify-full&sslrootcert=/etc/koinon/db-ca/ca.crt" (include "koinon.pgRole" "mcpgateway") (include "koinon.pgCluster" .) .Release.Namespace .Values.postgres.cnpg.database | quote }}
+{{- end }}
+{{- if and $egress $eg.caBundle }}
+---
+# The extra CA roots of the egress upstreams (gateway.mcp.koinon.egress.caBundle). Public certificates only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-egress-ca
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+data:
+  ca.crt: {{ $eg.caBundle | quote }}
 {{- end }}
 ---
 apiVersion: v1
@@ -119,6 +138,18 @@ spec:
             {{- if $gwKey }}
             - --recipient-key-dir={{ include "koinon.gwKeyDir" . }}
             {{- end }}
+            {{- if $egress }}
+            # The egress listener (#1086 part C2): the forge routes of the State stream, behind the actor token.
+            - --egress-addr=:{{ int $eg.port }}
+            - --actor-token-issuer={{ $eg.actorToken.issuer }}
+            - --actor-token-keys-dir=/etc/koinon/actor-token-keys
+            {{- with concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
+            - --egress-allowed-hosts={{ join "," . }}
+            {{- end }}
+            {{- if $eg.caBundle }}
+            - --egress-ca-file=/etc/koinon/egress-ca/ca.crt
+            {{- end }}
+            {{- end }}
           env:
             {{- if eq .Values.postgres.mode "cnpg" }}
             - name: PGPASSWORD
@@ -131,6 +162,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- if $egress }}
+            # The egress dialer refuses every Service in Koinon's namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
             - name: KOINON_MEMORY_LIMIT_BYTES
               valueFrom:
                 resourceFieldRef:
@@ -142,6 +180,10 @@ spec:
           ports:
             - name: mcp
               containerPort: {{ int $m.port }}
+            {{- if $egress }}
+            - name: egress
+              containerPort: {{ int $eg.port }}
+            {{- end }}
             - name: stats
               containerPort: 15020
             - name: health
@@ -170,6 +212,17 @@ spec:
               readOnly: true
             {{- include "koinon.dbVolumeMount" . | nindent 12 }}
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
+            {{- if $egress }}
+            # The public actor token key only, as <key id>.pub: the gateway verifies, it cannot sign.
+            - name: actor-token-keys
+              mountPath: /etc/koinon/actor-token-keys
+              readOnly: true
+            {{- if $eg.caBundle }}
+            - name: egress-ca
+              mountPath: /etc/koinon/egress-ca
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- if $gwKey }}
             # The wrapped private keys (ADR 0097 12.3): only this Deployment mounts them. The Secret may not
             # exist yet (the key-admin Job makes it), and the pod is ready without a key.
@@ -206,6 +259,20 @@ spec:
         {{- end }}
         {{- include "koinon.dbVolume" . | nindent 8 }}
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
+        {{- if $egress }}
+        - name: actor-token-keys
+          secret:
+            secretName: {{ include "koinon.actorTokenKeyName" . }}
+            defaultMode: 0444
+            items:
+              - key: public.pem
+                path: {{ $eg.actorToken.keyId }}.pub
+        {{- if $eg.caBundle }}
+        - name: egress-ca
+          configMap:
+            name: {{ $name }}-egress-ca
+        {{- end }}
+        {{- end }}
         {{- if $gwKey }}
         - name: gateway-key
           secret:
@@ -252,6 +319,11 @@ spec:
     - name: mcp
       port: {{ int $m.port }}
       targetPort: mcp
+    {{- if $egress }}
+    - name: egress
+      port: {{ int $eg.port }}
+      targetPort: egress
+    {{- end }}
     - name: stats
       port: 15020
       targetPort: stats
