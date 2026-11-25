@@ -504,8 +504,13 @@ var _ = Describe("Org MCP servers", func() {
 				Expect(second.ReconcileAll(ctx)).To(Succeed())
 				Consistently(g.seen.Load).WithTimeout(racescale.D(1500 * time.Millisecond)).Should(BeZero())
 
+				// The second pass may have stored a newer revision (the state can differ): the probe waits for
+				// the newest one, so the copy acks that.
+				newest, err := staterev.Latest(ctx, pool)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(newest.Revision).To(BeNumerically(">=", latest.Revision))
 				g.keyed.Store(true)
-				Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				Expect(staterev.Ack(ctx, pool, copyID, newest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
 				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
 				Expect(g.refused.Load()).To(BeZero())
 			})
