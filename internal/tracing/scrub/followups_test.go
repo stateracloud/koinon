@@ -189,6 +189,13 @@ func TestLiteralThenCredentialStillRedacted(t *testing.T) {
 		"api_key: null, " + secret,
 		"Proxy-Authorization: nil, Basic " + secret,
 		`{"authorization": "null, ` + secret + `"}`,
+		// Cursor security review of PR 1338: a quoted key with an unquoted scheme and token.
+		`{"Authorization": Bearer ` + secret + ` rest}`,
+		`{"Authorization": Basic ` + secret + `}`,
+		`{"Cookie": sid=` + secret + `; theme=dark}`,
+		`x "authorization": Digest realm=a, response=` + secret,
+		`{"authorization": null; ` + secret + `}`,
+		`{"api_key": 12, ` + secret + `}`,
 	} {
 		if out := s.Text(in); strings.Contains(out, secret) {
 			t.Errorf("survived in Text(%q): %q", in, out)

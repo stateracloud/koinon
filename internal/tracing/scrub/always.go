@@ -458,6 +458,16 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 	if kind == KindCookie && !strings.Contains(in[vs:min(len(in), vs+256)], "=") {
 		return 0, 0, false // not cookie-shaped
 	}
+	// A quoted JSON key with a bare scalar value ({"apiKey": null, "n": 1}): the quote before the
+	// name opens the key, not a string that holds the value, so the span used to run on to the
+	// next quote and took the comma with it. The scrubbed text was not valid JSON (issue 1337).
+	// Only a whole scalar followed by JSON structure ends early; any other bare value (a scheme
+	// and a token, a cookie) keeps the scan below, which reads it to its real end.
+	var scalarEnd int
+	var scalar bool
+	if q == 0 && strings.ContainsAny(sep[:idx], "\"'") {
+		scalarEnd, scalar = jsonScalarEnd(in, vs)
+	}
 	switch {
 	case q != 0:
 		ve = scanQuoted(in, vs, q, k)
@@ -467,13 +477,8 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 		if sep[idx] == ',' && proseLike(in[vs:min(ve, vs+256)]) {
 			return 0, 0, false // ["Authorization", "is a header"]
 		}
-	case kind != KindCredential && q == 0 && strings.ContainsAny(sep[:idx], "\"'") && openQuote(in, nameS) != 0:
-		// A quoted JSON key with a bare value ({"apiKey": null, "n": 1}): the quote before the name
-		// opens the key, not a string that holds the value. The value is one token, and it ends at
-		// a delimiter. The span used to run on to the next quote and took the comma with it, so
-		// the scrubbed text was not valid JSON (issue 1337).
-		for ve = vs; ve < len(in) && strings.IndexByte(",;}] \t\r\n", in[ve]) < 0 && !lineBreakAt(in, ve); ve++ {
-		}
+	case scalar:
+		ve = scalarEnd
 	case kind != KindCredential && openQuote(in, nameS) != 0:
 		// "Name: value" inside a string (JSON, curl -H "..."): the value runs to the string's end
 		ve = scanQuoted(in, vs, openQuote(in, nameS), quoteEscapes(in, nameS))
@@ -497,17 +502,45 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 		if sep[idx] == '=' && sepHasSpace(sep, idx) && (!lineStartExact(in, nameS) || strings.ContainsAny(prefix, "(){}")) {
 			return 0, 0, false // password = getPassword(): code, not an ini line
 		}
-		jsonKey := strings.ContainsAny(sep[:idx], "\"'") // {"token": false, "n": 1}: a delimiter ends a bare value
 		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve); ve++ {
-			if jsonKey && strings.IndexByte(",;}]", in[ve]) >= 0 {
-				break
-			}
 		}
 		if strings.IndexByte(in[vs:ve], '(') >= 0 {
 			return 0, 0, false // password=getPassword(): a call
 		}
 	}
 	return vs, ve, ve > vs && !skipHeaderValue(kind, in[vs:min(ve, vs+256)])
+}
+
+// jsonScalarEnd reports whether a JSON scalar that is not a string (null, true, false, a number)
+// stands at vs and is followed by JSON structure: a comma and the next key, a closing brace or
+// bracket, or the end of the text. It returns the end of the scalar.
+func jsonScalarEnd(in string, vs int) (int, bool) {
+	e := vs
+	for e < len(in) && strings.IndexByte(",;}] \t\r\n\\\"'", in[e]) < 0 {
+		e++
+	}
+	if e == vs {
+		return 0, false
+	}
+	tok := in[vs:e]
+	switch strings.ToLower(tok) {
+	case "null", "nil", "true", "false":
+	default:
+		for i := 0; i < len(tok); i++ {
+			if !isDigit(tok[i]) && strings.IndexByte(".-+eE", tok[i]) < 0 {
+				return 0, false
+			}
+		}
+	}
+	n := skipSet(in, e, " \t", 1<<30)
+	switch {
+	case n >= len(in), in[n] == '}', in[n] == ']':
+		return e, true
+	case in[n] == ',':
+		n = skipSet(in, n+1, " \t\r\n", 1<<30)
+		return e, n < len(in) && (in[n] == '"' || in[n] == '\'' || in[n] == '\\')
+	}
+	return 0, false
 }
 
 // foldAt reports whether the line break at i (CR LF or LF) is followed by a continuation line: one
