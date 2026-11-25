@@ -37,6 +37,8 @@ export function useMcpActions(orgId: string) {
       setToolSink: (serverId: string, tool: string, contentHash: string, sink: ReturnType<typeof buildSink>) => done(client.setToolSink({ orgId, serverId, tool, contentHash, sink })),
       setToolTwoApprovers: (serverId: string, tool: string, required: boolean) => done(client.setToolTwoApprovers({ orgId, serverId, tool, required })),
       acknowledgeReview: (serverId: string, tool: string, toolHash: string) => done(client.acknowledgeToolReview({ orgId, serverId, tool, toolHash })),
+      // tools are the waiting tools the admin saw, each with the hash of the text shown (#1216).
+      reviewAllTools: (serverId: string, tools: { tool: string; toolHash: string }[]) => done(client.reviewAllTools({ orgId, serverId, tools })),
       setAgentServers: (agentId: string, servers: { serverId: string; tools: string[] }[]) => done(client.setAgentServers({ orgId, agentId, servers })),
     }
   }, [transport, queryClient, orgId])

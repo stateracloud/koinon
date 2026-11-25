@@ -207,6 +207,41 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 	return i, err
 }
 
+const deleteAbsentUnreviewedMCPTools = `-- name: DeleteAbsentUnreviewedMCPTools :many
+DELETE FROM mcp_tools
+WHERE org_id = $1 AND server_id = $2 AND NOT present
+  AND approved_hash IS NULL AND tier_set_by IS NULL
+RETURNING name
+`
+
+type DeleteAbsentUnreviewedMCPToolsParams struct {
+	OrgID    pgtype.UUID
+	ServerID pgtype.UUID
+}
+
+// An admin reviews a server's tools (#1216 point c): the rows of tools that no admin ever decided on (no
+// approved text, no tier an admin set) and that the server no longer lists go. They are not served,
+// and they count toward the limit of unreviewed tools (mcpservers.MaxUnreviewedTools).
+func (q *Queries) DeleteAbsentUnreviewedMCPTools(ctx context.Context, arg DeleteAbsentUnreviewedMCPToolsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteAbsentUnreviewedMCPTools, arg.OrgID, arg.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteAgentMCPServers = `-- name: DeleteAgentMCPServers :exec
 DELETE FROM agent_mcp_servers
 WHERE org_id = $1 AND agent_id = $2

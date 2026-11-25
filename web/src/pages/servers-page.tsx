@@ -19,7 +19,7 @@ import { useMcpActions, type McpActions } from '@/hooks/use-mcp-actions'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
 import { availabilityMinutes, formatTime } from '@/lib/providers'
-import { healthLabel, serverDeletable, serverEditable, sourceLabel, suggestsAuto, summarizeTools, summaryText, tierExplanation, tiers, toolsOf, transportLabel } from '@/lib/mcp-servers'
+import { absentUnreviewed, healthLabel, serverDeletable, serverEditable, sourceLabel, suggestsAuto, summarizeTools, summaryText, tierExplanation, tiers, toolsOf, transportLabel, waitsForReview } from '@/lib/mcp-servers'
 
 /** ServersPage is where org admins and owners manage the org's remote MCP servers and their tools' tiers (ADR 0057). */
 export function ServersPage() {
@@ -237,6 +237,7 @@ function ServerCard({
       <div className="grid gap-2 border-t pt-3">
         <h3 className="text-sm font-semibold">Tools</h3>
         <p className="text-muted-foreground text-xs">{summaryText(summary)}</p>
+        <ToolsWaiting server={s} tools={tools} actions={actions} onNotice={onNotice} onRefused={onRefused} />
         {tools.length === 0 ? (
           <p className="text-muted-foreground text-sm">No tools yet. They appear after Koinon first reaches the server.</p>
         ) : (
@@ -250,6 +251,63 @@ function ServerCard({
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * ToolsWaiting is the notice of the tools that wait for an admin, with the action that reviews them all
+ * (#1216, ADR 0125). The action approves the text shown here, at the hashes shown: a tool whose text
+ * changed since makes the server refuse the whole action, and the list refreshes. It also deletes the
+ * rows of tools that the server no longer lists and that no admin reviewed.
+ */
+function ToolsWaiting({
+  server: s,
+  tools,
+  actions,
+  onNotice,
+  onRefused,
+}: {
+  server: Server
+  tools: Tool[]
+  actions: McpActions
+  onNotice: (m: string) => void
+  onRefused: (m: string) => void
+}) {
+  const waiting = tools.filter(waitsForReview)
+  const absent = tools.filter(absentUnreviewed)
+  if (waiting.length === 0 && absent.length === 0 && !s.unreviewedToolsCappedAt) return null
+  const parts: string[] = []
+  if (waiting.length) parts.push(`approves the current text of ${waiting.length} ${waiting.length === 1 ? 'tool' : 'tools'} (${waiting.map((t) => t.name).join(', ')}) without changing a tier`)
+  if (absent.length) parts.push(`deletes ${absent.length} ${absent.length === 1 ? 'tool' : 'tools'} that the server no longer lists and that no admin reviewed`)
+  return (
+    <Alert role="note" aria-label={`Tools waiting for review: ${s.name}`}>
+      <AlertDescription className="grid gap-2">
+        {waiting.length > 0 && (
+          <p>
+            {waiting.length} {waiting.length === 1 ? 'tool waits' : 'tools wait'} for review. Agents do not get the text of a tool that waits for review until an admin approves it.
+          </p>
+        )}
+        {s.unreviewedToolsCappedAt && <p>This server is at the limit of tools that no admin reviewed. Koinon stores no new tool of it until you review its tools.</p>}
+        {parts.length > 0 && (
+          <div>
+            <ConfirmAction
+              label="Review all"
+              subject={`tools of ${s.name}`}
+              consequence={`This ${parts.join(', and ')}.`}
+              confirmLabel="Review all"
+              onConfirm={async () => {
+                const res = await actions.reviewAllTools(
+                  s.id,
+                  waiting.map((t) => ({ tool: t.name, toolHash: t.toolHash })),
+                )
+                onNotice(`Reviewed ${res.tools.length} ${res.tools.length === 1 ? 'tool' : 'tools'} of ${s.name}. Deleted ${res.removed}.`)
+              }}
+              onError={onRefused}
+            />
+          </div>
+        )}
+      </AlertDescription>
+    </Alert>
   )
 }
 
