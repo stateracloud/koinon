@@ -165,8 +165,8 @@ Tracked on #1087 until the maintainer files separate issues:
    (`cmd/koinon-guest-launcher/Dockerfile`). The guest front embeds the upstream guest server of the
    commit in `go.mod`; a test keeps `ATE_ENV_VERSION` (`hack/build-env-guest.sh`) on the same commit. The release builds the overlay on the
    released harness image (`harness-substrate` job, `hack/release-harness-substrate.sh`, repository `sandbox-substrate`) and with
-   `execution.driver=substrate` the chart's default harness repository is `sandbox-substrate`. The separate `ate-env-guest`
-   image of the release stays for the rootfs-image mode of upstream (the guest mounted into an unmodified image); the driver does not use it yet.
+   `execution.driver=substrate` the chart's default harness repository is `sandbox-substrate`. A release publishes no separate `ate-env-guest`
+   image. The rootfs-image mode of upstream (the guest mounted into an unmodified image) would need that image again; `make env-guest` and `hack/build-env-guest.sh` still build the binary for it. The driver does not use that mode.
    The overlay runs as root (the guest front listens on port 80 and starts the payload), the launcher hardens the payload.
    The driver applies the exec prefix to every Exec (`internal/execution/substrate`, `Config.RuntimeClassTiers`).
 2. Probe results in the Substrate microVM and in gVisor classes are a lab run, not yet recorded.

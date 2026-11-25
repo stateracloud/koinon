@@ -506,15 +506,7 @@ while IFS=$'\t' read -r file line; do
 		tool=${BASH_REMATCH[1]}
 		ver=${BASH_REMATCH[2]}
 		repo=$(tool_repo "$tool")
-		if [[ $tool == ATE_ENV_BASE ]]; then
-			# A base image, not a release: the tag and the digest of the index (ATE_ENV_BASE_SHA256_AMD64) date it.
-			dg=$(sed -nE 's/^ATE_ENV_BASE_SHA256_AMD64=([0-9a-f]{64})$/\1/p' hack/versions.env)
-			if [[ -n $dg ]]; then
-				once "image bash:$ver@sha256:$dg" && check_image "bash:$ver@sha256:$dg"
-			else
-				report "$tool $ver (no ATE_ENV_BASE_SHA256_AMD64 in hack/versions.env)" unknown "$file"
-			fi
-		elif [[ -n $repo ]]; then
+		if [[ -n $repo ]]; then
 			prefix=v
 			[[ $ver == v* || $ver =~ ^[0-9a-f]{40}$ ]] && prefix=
 			[[ $tool == GVISOR ]] && prefix=release-
