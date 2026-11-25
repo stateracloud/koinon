@@ -818,7 +818,8 @@ execution:
     defaultTier: ""
     # Required true with substrate until the substrate overlay of the harness image (sandbox-substrate,
     # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
-    # the gVisor tiers keep a writable root by decision (issue #1150).
+    # the gVisor tiers keep a writable root by decision (issue #1150). Also open: the guest API listens
+    # on TCP :80 with no authentication, so agent code can start an unconfined process (issue #1309).
     allowUnhardened: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
     # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the
