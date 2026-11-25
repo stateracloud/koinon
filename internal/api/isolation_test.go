@@ -1023,6 +1023,11 @@ var isolationExempt = map[string]string{
 	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure: "records a gateway copy's confirmation of an " +
 		"install-wide revision (ADR 0097); served by internal/gateway/stateserver behind the gateway's bearer token, " +
 		"not on this API; the request names the copy, not an org",
+	gatewayv1alpha1connect.GatewayApprovalServiceRequestApprovalProcedure: "the gateway's approval route (ADR 0097, " +
+		"#1301); served by internal/gateway/approvalroute on the internal listener, not on this API: only a holder of " +
+		"the gateway's bearer token reaches it (approvalroute_test.go refuses a wrong token before any row is read). " +
+		"The request names an org, but koinon-api reads the agent, server, allowance and tool inside that org itself " +
+		"and refuses a call that does not match them",
 }
 
 var _ = Describe("org isolation", func() {
