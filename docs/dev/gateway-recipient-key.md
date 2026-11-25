@@ -105,7 +105,9 @@ The guide's blocks are in `test/e2e/commands/backup-restore.e1`:
 4. `restore-gateway-key`, after `restore-db`, makes the Secret equal to the backup. The new install's own
    first key goes away, because no restored row names it. The guard lets only the key-admin service
    account write the Secret, so the block writes it as that account (`kubectl --as`). The person who
-   restores needs the right to impersonate that service account. The guard stays on.
+   restores needs the right to impersonate that service account. That right also lets a person write
+   the Secret at any time, so grant it only for the restore and remove it after. The guard stays on.
+   `GWADMIN` names the service account when the chart's names differ (for example a `fullnameOverride`).
 5. `verify-gateway-key` waits until koinon-mcp-gateway is ready. It is ready only when it holds the private
    key of each key that is not retired and each key matches its public row.
 
@@ -118,7 +120,8 @@ What fails without it:
 - Do not run `rotate` or `retire` between the backup of the Secret and the dump. If `check-gateway-key`
   fails, take both again.
 
-Let the key-admin Job of a new install finish before the restore.
+`stop` waits for the key-admin Jobs of a new install to finish: a Job that adds a key during the restore
+would leave a key that no restored row names, and the gateway would not become ready.
 
 ## OpenBao policy
 

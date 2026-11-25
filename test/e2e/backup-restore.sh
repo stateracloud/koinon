@@ -31,6 +31,9 @@ NS=koinon
 COMMANDS=$root/test/e2e/commands/backup-restore.e1
 work="$OUT/backup-restore"
 mkdir -p "$work"
+# The key backups hold key material (test keys, but still keys): run.sh uploads $OUT as a CI artifact, so they
+# do not stay after this script. The dump and the notes stay for diagnostics.
+trap 'rm -f "$work/koinon-kek-backup.yaml" "$work/koinon-gateway-key-backup.yaml"' EXIT
 K=("$OUT/bin/kubectl")
 [[ -x ${K[0]} ]] || { echo "$OUT/bin/kubectl is missing: run test/e2e/run.sh first" >&2; exit 2; }
 

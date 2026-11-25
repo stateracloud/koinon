@@ -11,14 +11,15 @@
 # Variables of the two pipe blocks (pipe-db, pipe-keys): SRC_NS and SRC_REL (and SRC_GWKEY) are the live source install, NS and REL
 # the target (both are required: a source that is the target would be wiped before it is read). Their commands stream the source into the target, so they
 # need both installs at once: test/drill runs them, in the order stop, hold, pipe-db, pipe-keys, start, compare-keys,
-# verify-keys, release (backup-restore.sh restores in place from files and cannot).
+# verify-keys, release (backup-restore.sh restores in place from files and cannot). With a gateway recipient key, run
+# verify-gateway-key after start too.
 # Not here and not checked by any test: a CloudNativePG backup restore. The chart configures no CNPG backup yet
 # (ADR 0076 decision 9), so there is nothing to restore from. Tracked in https://github.com/stateracloud/koinon/issues/910.
 # The gateway recipient key (docs/dev/gateway-recipient-key.md): with gateway.mcp.driver=koinon the stored MCP
 # credentials are sealed to it, and only its Secret (GWKEY, default <release>-gateway-recipient-key) holds the private
 # half. Its blocks do nothing on an install without that Secret. The Secret is guarded: only the key-admin service
 # account may write it, so restore-gateway-key writes it as that account (kubectl --as; the person needs the right to
-# impersonate it). A KMS-wrapped key opens only with the same wrapping key: the target uses the source's KMS key.
+# impersonate it; GWADMIN overrides its name, default <release>-gateway-key-admin). A KMS-wrapped key opens only with the same wrapping key: the target uses the source's KMS key.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/backup-restore.e1
 # e1=backup-keys
 NS=${NS:-koinon}
@@ -70,6 +71,11 @@ done
 # e1=stop
 NS=${NS:-koinon}
 REL=${REL:-koinon}
+# A new install's key-admin Jobs (the KEK's and the gateway key's) finish first: a Job that writes a key during the
+# restore would add a key that no restored row names.
+if test -n "$(kubectl -n "$NS" get job -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=key-admin -o name)"; then
+  kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=key-admin --timeout=15m
+fi
 kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=0
 kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=agentd --timeout=10m
 kubectl -n "$NS" scale deployment/"$REL"-reconciler deployment/"$REL"-api --replicas=0
@@ -114,7 +120,7 @@ GWKEY=${GWKEY:-$REL-gateway-recipient-key}
 # own first key has no row after restore-db. Without a backup file (no gateway key) there is nothing to do.
 if test -f koinon-gateway-key-backup.yaml; then
   grep -qx "  name: $GWKEY" koinon-gateway-key-backup.yaml || { echo "koinon-gateway-key-backup.yaml is not the Secret $GWKEY" >&2; false; }
-  AS=system:serviceaccount:$NS:$REL-gateway-key-admin
+  AS=system:serviceaccount:$NS:${GWADMIN:-$REL-gateway-key-admin}
   if kubectl -n "$NS" get secret/"$GWKEY" > /dev/null 2>&1; then
     kubectl -n "$NS" replace --as="$AS" -f koinon-gateway-key-backup.yaml
   else
@@ -155,7 +161,7 @@ fi
 GWKEY=${GWKEY:-$REL-gateway-recipient-key}
 SRC_GWKEY=${SRC_GWKEY:-$SRC_REL-gateway-recipient-key}
 if kubectl -n "$SRC_NS" get secret/"$SRC_GWKEY" > /dev/null 2>&1; then
-  AS=system:serviceaccount:$NS:$REL-gateway-key-admin
+  AS=system:serviceaccount:$NS:${GWADMIN:-$REL-gateway-key-admin}
   verb=create
   if kubectl -n "$NS" get secret/"$GWKEY" > /dev/null 2>&1; then verb=replace; fi
   kubectl -n "$SRC_NS" get secret/"$SRC_GWKEY" -o go-template='apiVersion: v1{{"\n"}}kind: Secret{{"\n"}}metadata:{{"\n"}}  name: '"$GWKEY"'{{"\n"}}  labels:{{"\n"}}{{range $k, $v := .metadata.labels}}    {{$k}}: {{printf "%q" $v}}{{"\n"}}{{end}}type: Opaque{{"\n"}}data:{{"\n"}}{{range $k, $v := .data}}  {{$k}}: {{$v}}{{"\n"}}{{end}}' | kubectl -n "$NS" "$verb" --as="$AS" -f -
