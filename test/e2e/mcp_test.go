@@ -208,7 +208,14 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 		g.Expect(s.Health).To(Equal("healthy"), s.HealthReason)
 		g.Expect(s.ToolsSyncedAt).NotTo(BeNil())
 	}).WithContext(ctx).WithTimeout(8 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-	Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
+	if probe := probeMCPPath(ctx, kubectl); probe.koinon {
+		// koinon-gateway sends no agent header (#1235). The healthy server with synced tools shows the
+		// probe's handshake passed; the fake also saw new credentialed /mcp requests from the gateway.
+		Expect(len(credentialedMCP(fakeMCPRequests(ctx, fake)))).To(BeNumerically(">", len(credentialedMCP(recs))),
+			"the scratch probe's requests through koinon-gateway")
+	} else {
+		Expect(fakeMCPRequests(ctx, fake)).To(ContainElement(HaveField("Agent", "default/mcp-probe-scratch")))
+	}
 
 	By("an admin confirms read_item as auto and write_item as ask, and allows the agent")
 	setToolTierE2E(ctx, admin, srv.ID, "read_item", "auto")
@@ -583,4 +590,15 @@ func setToolTierE2E(ctx context.Context, admin func(context.Context, string, str
 		return code, b, nil
 	}, serverID, tool, tier)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// credentialedMCP returns the /mcp requests that carried the credential and are not the add-time check.
+func credentialedMCP(recs []fakeMCPRecord) []fakeMCPRecord {
+	var out []fakeMCPRecord
+	for _, r := range recs {
+		if r.Path == "/mcp" && r.Authorized && r.UserAgent != mcpservers.PreflightUserAgent {
+			out = append(out, r)
+		}
+	}
+	return out
 }
