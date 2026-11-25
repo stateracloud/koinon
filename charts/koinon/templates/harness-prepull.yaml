@@ -47,7 +47,7 @@ spec:
       initContainers:
         {{- range $harness, $f := .Values.harnesses }}
         - name: pull-{{ $harness }}
-          image: {{ include "koinon.image" (list $ $f.image) | quote }}
+          image: {{ include "koinon.harnessImage" (list $ $f.image) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c", "exit 0"]
           securityContext:

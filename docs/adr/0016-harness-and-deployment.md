@@ -52,10 +52,10 @@ driver the harness image gains the guest launcher (`make harness-substrate-<harn
 exec prefix, not the ENTRYPOINT: the driver runs the harness over the in-guest ProcessService, so every
 substrate-driver Exec of a harness (the ACP launch in particular) is
 `koinon-guest-launcher --policy /etc/koinon/guest-launcher/<policy of the tier> -- <EntryScript> ...`, carried
-as `harness.Descriptor.LauncherPrefix(tier)`. The image ENTRYPOINT is a default only and does not harden a
+as `harness.Descriptor.LauncherPrefix(tier)`. The image ENTRYPOINT is the guest server (below) and does not harden a
 ProcessService exec; OpenShell paths ignore the prefix. On the vm tier Landlock is required (fail closed); on the gVisor tiers it stays best effort and the driver must mount the root filesystem read-only, with only /sandbox and /tmp writable (#1088). This lifts "flavor images carry no Koinon binary" of the amendment above for the substrate
-driver only; the OpenShell image has no Koinon binary. The Substrate guest server joins the same
-overlay when the driver takes it (#1088).
+driver only; the OpenShell image has no Koinon binary. The Substrate guest server is in the same
+overlay (#1087): it is the image ENTRYPOINT, built from the pinned upstream commit, and the release publishes the overlay as `sandbox-substrate`.
 
 ```mermaid
 flowchart LR

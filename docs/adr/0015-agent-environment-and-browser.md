@@ -99,7 +99,7 @@ user, never a credential. Substrate has no exec in its control API; the driver r
 in-guest ProcessService, so the process is a child of the guest server and the image ENTRYPOINT does
 not wrap it. The contract is therefore an exec prefix: every substrate-driver Exec of a harness
 (the ACP launch in particular) is `koinon-guest-launcher --policy /etc/koinon/guest-launcher/<policy of the tier> -- <EntryScript> ...`
-(`harness.Descriptor.LauncherPrefix(tier)`). The image ENTRYPOINT stays only as a default; on its own it does
+(`harness.Descriptor.LauncherPrefix(tier)`). The image ENTRYPOINT is the guest server, the actor's process; it does
 not harden a ProcessService exec. The controls follow ADR 0120 section 4. On the vm tier Landlock is required (fail closed); on the gVisor tiers it stays best effort and the substrate driver must mount the root filesystem read-only, with only /sandbox and /tmp writable (#1088). Tools that an agent installs (ADR 0113) still land in its home inside the
 guest. The OpenShell driver, the default, keeps the plain image and its exec path unchanged.
 
