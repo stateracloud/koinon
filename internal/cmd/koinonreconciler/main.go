@@ -85,6 +85,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	egressEndpoint, err := cfg.egressEndpoint()
+	if err != nil {
+		return err
+	}
 
 	pool, err := pgxpool.New(ctx, cfg.databaseURL)
 	if err != nil {
@@ -254,6 +258,7 @@ func serve(ctx context.Context, cfg config) error {
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:             endpoint,
+			Egress:              egressEndpoint,
 			Prices:              priceResolver,
 			Keys:                keyring,
 			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},

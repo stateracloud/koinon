@@ -111,6 +111,10 @@ type Config struct {
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
+	// Egress is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it, the
+	// sandbox of an agent with a code-host grant gets a rule for the forge routes there (EgressRule).
+	// Nil: no such rule, and git reaches the forge only through the driver's own rule.
+	Egress *Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
 	Keys catalog.Opener
 	// ProviderKeys receives the opened keys for the gateway. Required when any served
@@ -1375,6 +1379,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		providers = append(providers, names.GitHubProvider)
 		network[githubRule] = GitHubRule(read, r.githubBinaries(harness))
+		if r.cfg.Egress != nil {
+			network[egressRule] = EgressRule(*r.cfg.Egress, read, r.githubBinaries(harness))
+		}
 	}
 	if rule, ok := PluginInstallRule(w.cfg, w.agent.Harness, harness); ok {
 		network[npmRule] = rule

@@ -5,11 +5,16 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
+
+	"github.com/stateracloud/koinon/connectors"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	harnessdesc "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
@@ -179,4 +184,34 @@ func (r *Reconciler) agentEgress(ctx context.Context, w *work) ([]route.Route, *
 		return routes, nil, nil
 	}
 	return routes, cred, file
+}
+
+// egressRule names the sandbox policy entry of the gateway's egress listener.
+const egressRule = "koinon_egress"
+
+// EgressRule is the sandbox policy entry that lets git reach the agent's forge routes at the gateway's
+// egress listener gw (#1086 part C2). koinon-agentd rewrites the code host to
+// <gw>/egress/<authority>/, so each rule of the code-host grant is the same rule under that prefix:
+// the same methods, paths and queries, enforced at L7, for the same binaries. Nothing else on the
+// listener is reachable. The gateway enforces the same rules again (EgressRoutes) and checks the
+// actor token; the sandbox holds no credential for it.
+func EgressRule(gw Endpoint, read GitHubRead, binaries []string) execution.NetworkRule {
+	var allow, deny []execution.L7Rule
+	for _, ep := range read.Endpoints {
+		port := int(ep.Port)
+		if port == 0 {
+			port = 443
+		}
+		prefix := egress.PathPrefix + connectors.HostPort{Host: ep.Host, Port: port}.Authority()
+		for _, r := range ep.Allow {
+			allow = append(allow, execution.L7Rule{Method: r.Method, Path: prefix + r.Path, Query: maps.Clone(r.Query)})
+		}
+		for _, r := range ep.Deny {
+			deny = append(deny, execution.L7Rule{Method: r.Method, Path: prefix + r.Path, Query: maps.Clone(r.Query)})
+		}
+	}
+	return execution.NetworkRule{
+		Endpoints: []execution.Endpoint{{Host: gw.Host, Port: gw.Port, Protocol: "rest", Allow: allow, Deny: deny}},
+		Binaries:  slices.Clone(binaries),
+	}
 }

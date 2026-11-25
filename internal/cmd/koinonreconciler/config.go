@@ -65,6 +65,9 @@ type config struct {
 	mcpKeysDir    string
 	// mcpSealed: koinon-gateway serves every MCP path, so the reconciler may serve sealed credentials.
 	mcpSealed bool
+	// egressURL is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it the
+	// sandbox of an agent with a code-host grant may reach the forge routes there; empty: no such rule.
+	egressURL string
 	kekDir    string
 	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
 	kekWrapping     wrapping.Config
@@ -111,9 +114,25 @@ type config struct {
 // gatewayEndpoint parses the agentgateway URL into the host and port the provider profile
 // binds the key to.
 func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
-	u, err := url.Parse(c.gatewayURL)
+	return parseEndpoint("--gateway-url", c.gatewayURL)
+}
+
+// egressEndpoint is the gateway's egress listener, nil without --gateway-egress-url.
+func (c *config) egressEndpoint() (*reconciler.Endpoint, error) {
+	if c.egressURL == "" {
+		return nil, nil
+	}
+	e, err := parseEndpoint("--gateway-egress-url", c.egressURL)
 	if err != nil {
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url: %w", err)
+		return nil, err
+	}
+	return &e, nil
+}
+
+func parseEndpoint(flag, raw string) (reconciler.Endpoint, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return reconciler.Endpoint{}, fmt.Errorf("%s: %w", flag, err)
 	}
 	port := u.Port()
 	switch {
@@ -123,11 +142,11 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 	case u.Scheme == "http":
 		port = "80"
 	default:
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url %q: want http(s)://host[:port]", c.gatewayURL)
+		return reconciler.Endpoint{}, fmt.Errorf("%s %q: want http(s)://host[:port]", flag, raw)
 	}
 	p, err := strconv.ParseUint(port, 10, 16)
 	if err != nil || u.Hostname() == "" {
-		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url %q: want http(s)://host[:port]", c.gatewayURL)
+		return reconciler.Endpoint{}, fmt.Errorf("%s %q: want http(s)://host[:port]", flag, raw)
 	}
 	return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}, nil
 }
