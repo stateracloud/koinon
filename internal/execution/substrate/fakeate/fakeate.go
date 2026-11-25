@@ -41,6 +41,9 @@ type Cluster struct {
 	Latency time.Duration
 	// AsyncDelete keeps a deleted actor in state DELETING for Latency before it disappears.
 	AsyncDelete bool
+	// Unguarded plays an image without the guest front (from before issue #1309): no token check
+	// and no Bind method. Set it before Start.
+	Unguarded bool
 
 	mu        sync.Mutex
 	uid       int
@@ -82,12 +85,18 @@ func New() *Cluster {
 func (c *Cluster) Start() (control, router *grpc.ClientConn, err error) {
 	c.ctlLis, c.routerLn = bufconn.Listen(1<<20), bufconn.Listen(1<<20)
 	c.ctl = grpc.NewServer()
-	c.rtr = grpc.NewServer(grpc.UnaryInterceptor(c.checkUnary), grpc.StreamInterceptor(c.checkStream))
+	if c.Unguarded {
+		c.rtr = grpc.NewServer()
+	} else {
+		c.rtr = grpc.NewServer(grpc.UnaryInterceptor(c.checkUnary), grpc.StreamInterceptor(c.checkStream))
+	}
 	ateapiv1.RegisterControlServer(c.ctl, &controlServer{c: c})
 	g := &guestServer{c: c}
 	ateenvv1alpha.RegisterProcessServiceServer(c.rtr, g)
 	ateenvv1alpha.RegisterFileSystemServiceServer(c.rtr, g)
-	c.rtr.RegisterService(&frontService, g)
+	if !c.Unguarded {
+		c.rtr.RegisterService(&frontService, g)
+	}
 	go func() { _ = c.ctl.Serve(c.ctlLis) }()
 	go func() { _ = c.rtr.Serve(c.routerLn) }()
 	dial := func(l *bufconn.Listener) (*grpc.ClientConn, error) {

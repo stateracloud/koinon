@@ -805,7 +805,8 @@ execution:
     # enters a sandbox. Empty: the ensure-secrets hook Job creates <release>-substrate-guest-key once
     # (key "key", 64 hex characters: the key's seed) and never changes it. A new key changes every
     # actor template, so the next start re-creates every sandbox; a key rotation without that is not
-    # supported yet.
+    # supported yet (#1326). Keep the Secret: with a new key, running sandboxes and memory snapshots
+    # made with the old key refuse every call.
     guestKey:
       existingSecret: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as

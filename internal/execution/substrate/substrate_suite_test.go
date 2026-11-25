@@ -32,9 +32,13 @@ var noTier bool
 // noSigner makes newDriver leave Config.GuestSigner nil.
 var noSigner bool
 
+// unguarded makes newDriver start a fake Substrate whose guest has no guest front.
+var unguarded bool
+
 // newDriver starts a fake Substrate and returns a driver on it, with the workspace made.
 func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	cl := fakeate.New()
+	cl.Unguarded = unguarded
 	control, router, err := cl.Start()
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(cl.Stop)

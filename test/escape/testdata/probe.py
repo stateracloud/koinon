@@ -319,6 +319,48 @@ def grpc_h2c(c):
         s.close()
 
 
+def grpc_http1(c):
+    """The same call over HTTP/1.1. The guest front answers a refused gRPC call with the header
+    grpc-status: 16 (Unauthenticated) in plain text; a gRPC server without the front refuses HTTP/1
+    with no grpc-status (gRPC needs HTTP/2). The result is "<http status> <grpc-status or ->", or
+    the errno name."""
+    msg = b"".join(bytes([0x0A]) + _varint(len(a.encode())) + a.encode() for a in c["command"])
+    body = b"\x00" + len(msg).to_bytes(4, "big") + msg
+    req = ("POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/grpc\r\nTE: trailers\r\n"
+           "Content-Length: %d\r\nConnection: close\r\n\r\n" % (c["path"], c["host"], len(body))).encode() + body
+    try:
+        s = socket.create_connection((c["host"], c["port"]), timeout=5)
+    except OSError as e:
+        return err_name(e)
+    try:
+        s.sendall(req)
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+    lines = buf.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+    code = lines[0].split(" ")[1] if len(lines[0].split(" ")) > 1 else "?"
+    grpc = "-"
+    for line in lines[1:]:
+        name, _, value = line.partition(":")
+        if name.strip().lower() == "grpc-status":
+            grpc = value.strip()
+    return code + " " + grpc
+
+
+def sleep(c):
+    """Waits c["seconds"]: lets a process that a call may have started do its work."""
+    import time
+    time.sleep(c["seconds"])
+    return "ok"
+
+
 def listeners(_):
     """The local TCP ports in LISTEN state (IPv4 and IPv6)."""
     ports = set()
@@ -342,5 +384,5 @@ def kernel(_):
 
 OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
-       "grpc_h2c": grpc_h2c, "listeners": listeners}
+       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

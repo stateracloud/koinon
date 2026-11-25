@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agent-substrate/env/guest"
@@ -145,6 +146,7 @@ func (f *Front) ListenAndServe(ctx context.Context) error {
 // header is removed before next sees the request. A refused gRPC request gets the status
 // Unauthenticated with no reason; the reason goes to logger only.
 func Gate(v *guestauth.Verifier, next http.Handler, logger *slog.Logger) http.Handler {
+	lim := &refusalLog{logger: logger, every: refusalLogInterval}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/readyz" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			_, _ = io.WriteString(w, "ok\n")
@@ -158,13 +160,41 @@ func Gate(v *guestauth.Verifier, next http.Handler, logger *slog.Logger) http.Ha
 			err = v.Verify(tokens[0])
 		}
 		if err != nil {
-			logger.Warn("guest API call refused", "path", r.URL.Path, "reason", err.Error())
+			lim.refused(r.URL.Path, err)
 			refuse(w, r)
 			return
 		}
 		r.Header.Del(guestauth.Header)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// refusalLogInterval is the shortest time between two log lines about refused calls.
+const refusalLogInterval = 10 * time.Second
+
+// refusalLog writes at most one line per interval about refused calls, with the number it did not
+// write, so agent code that floods the front with calls cannot flood its log.
+type refusalLog struct {
+	logger *slog.Logger
+	every  time.Duration
+
+	mu         sync.Mutex
+	last       time.Time
+	suppressed int
+}
+
+func (l *refusalLog) refused(path string, err error) {
+	l.mu.Lock()
+	now := time.Now()
+	if !l.last.IsZero() && now.Sub(l.last) < l.every {
+		l.suppressed++
+		l.mu.Unlock()
+		return
+	}
+	n := l.suppressed
+	l.last, l.suppressed = now, 0
+	l.mu.Unlock()
+	l.logger.Warn("guest API call refused", "path", path, "reason", err.Error(), "suppressed", n)
 }
 
 // refuse writes a gRPC trailers-only Unauthenticated response, or 401 to a request that is not gRPC.

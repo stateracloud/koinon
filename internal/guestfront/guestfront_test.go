@@ -7,8 +7,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,5 +165,23 @@ var _ = Describe("Front", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ctx := metadata.AppendToOutgoingContext(context.Background(), guestauth.Header, tok, guestauth.Header, tok)
 		Expect(status.Code(start(ctx, filepath.Join(ws, "two")))).To(Equal(codes.Unauthenticated))
+	})
+})
+
+var _ = Describe("Gate", func() {
+	It("logs one line per interval about refused calls, with the number it left out", func() {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		Expect(err).NotTo(HaveOccurred())
+		var buf strings.Builder
+		logger := slog.New(slog.NewTextHandler(&buf, nil))
+		v, err := guestauth.NewVerifier([]ed25519.PublicKey{pub})
+		Expect(err).NotTo(HaveOccurred())
+		h := guestfront.Gate(v, http.NotFoundHandler(), logger)
+		for range 50 {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ateenv.v1alpha.ProcessService/StartProcess", nil))
+			Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		}
+		Expect(strings.Count(buf.String(), "guest API call refused")).To(Equal(1))
 	})
 })

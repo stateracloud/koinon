@@ -590,16 +590,21 @@ var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
 		port, err := strconv.Atoi(envOr("KOINON_ESCAPE_GUEST_PORT", "80"))
 		Expect(err).NotTo(HaveOccurred(), "KOINON_ESCAPE_GUEST_PORT")
 		marker := "/tmp/koinon-escape-guest-api"
+		path := "/ateenv.v1alpha.ProcessService/StartProcess"
+		cmd := []string{"/bin/sh", "-c", "touch " + marker}
 		res := substrateProbe(ctx,
-			check{
-				"id": "call", "op": "grpc_h2c", "host": "127.0.0.1", "port": port,
-				"path": "/ateenv.v1alpha.ProcessService/StartProcess", "command": []string{"/bin/sh", "-c", "touch " + marker},
-			},
+			check{"id": "h2c", "op": "grpc_h2c", "host": "127.0.0.1", "port": port, "path": path, "command": cmd},
+			check{"id": "http1", "op": "grpc_http1", "host": "127.0.0.1", "port": port, "path": path, "command": cmd},
+			// StartProcess answers before the process runs: give a started touch time to finish.
+			check{"id": "wait", "op": "sleep", "seconds": 2},
 			check{"id": "marker", "op": "read", "path": marker},
 			check{"id": "listeners", "op": "listeners"},
 		)
-		// A refusal is trailers-only: one HEADERS frame that ends the stream, and no DATA.
-		Expect(res["call"]).To(Equal([]any{"HEADERS+END_STREAM"}), "the guest front must answer the call with a refusal")
+		// The front refuses before any handler runs: Unauthenticated (16). Over h2c the refusal is
+		// trailers-only: one HEADERS frame that ends the stream, and no DATA. Over HTTP/1 the grpc-status
+		// header is plain text; a gRPC server without the front refuses HTTP/1 with no grpc-status.
+		Expect(res["h2c"]).To(Equal([]any{"HEADERS+END_STREAM"}), "the guest front must refuse the h2c call")
+		Expect(res["http1"]).To(Equal("200 16"), "the guest front must refuse the call as Unauthenticated")
 		Expect(res["marker"]).To(Equal("ENOENT"), "the process must not start")
 		allowed := []any{float64(port)}
 		if extra := os.Getenv("KOINON_ESCAPE_GUEST_LISTEN_ALLOW"); extra != "" {

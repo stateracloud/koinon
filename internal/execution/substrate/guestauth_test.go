@@ -132,4 +132,45 @@ var _ = Describe("the guest API token", func() {
 		Expect(cl.Calls("Bind")).To(BeNumerically(">", 0))
 		Expect(cl.Pin(ws, "a")).To(Equal(aud("a")))
 	})
+
+	It("binds a restored sandbox that no call reached before a snapshot of it while suspended", func(ctx SpecContext) {
+		d, cl := newDriver()
+		ready(ctx, d, "a")
+		snap, err := d.SnapshotSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("b"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = d.WaitPhase(ctx, ws, "b", execution.PhaseReady)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = d.SuspendSandbox(ctx, ws, "b")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cl.Pin(ws, "b")).To(Equal(aud("a")), "no call reached b")
+
+		snap, err = d.SnapshotSandbox(ctx, ws, "b")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cl.Pin(ws, "b")).To(Equal(aud("b")), "the snapshot binds b first")
+		_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("c"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = d.WaitPhase(ctx, ws, "c", execution.PhaseReady)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(run(ctx, d, "c")).To(Succeed())
+		Expect(cl.Pin(ws, "c")).To(Equal(aud("c")))
+		Expect(cl.Calls("Unauthenticated")).To(BeZero())
+	})
+
+	Describe("on a guest without the guest front", func() {
+		BeforeEach(func() {
+			unguarded = true
+			DeferCleanup(func() { unguarded = false })
+		})
+
+		It("refuses the sandbox before the first guest call, and starts no process", func(ctx SpecContext) {
+			d, cl := newDriver()
+			ready(ctx, d, "sb")
+			err := run(ctx, d, "sb")
+			Expect(err).To(MatchError(execution.ErrFailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("koinon-guest-front"))
+			Expect(cl.Started(ws, "sb")).To(BeEmpty())
+		})
+	})
 })

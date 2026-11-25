@@ -69,7 +69,7 @@ front owns the only listener (ADR 0120 section 4.7, issue #1309):
 - The front embeds the upstream server in its own process. The upstream server opens no socket.
 - Every call needs the header `x-koinon-guest-auth`: an Ed25519 JWS (`internal/guestauth`) that the
   driver signs for each call. It lives 60 seconds and its audience is `koinon-guest:<atespace>/<actor>`.
-  A call without a valid token gets gRPC status `Unauthenticated` (HTTP 401 over HTTP/1) and reaches no
+  A call without a valid token gets gRPC status `Unauthenticated` (over HTTP/1: the header `grpc-status: 16` for a gRPC request, HTTP 401 for any other) and reaches no
   handler. `/readyz` is open.
 - The actor template carries the public keys in `KOINON_GUEST_VERIFY_KEYS`. The front reads them and
   removes the variable before it serves. The private key is the Secret `<release>-substrate-guest-key`
@@ -78,8 +78,15 @@ front owns the only listener (ADR 0120 section 4.7, issue #1309):
 - The front pins the audience of the first call it accepts and refuses every other audience. A sandbox
   restored from a memory snapshot has its source's pin in memory: the driver adds the claim
   `koinon_prev` with the source actor, and the front moves the pin only when that claim names the old
-  pin. Before a memory snapshot the driver calls `koinon.guestfront.v1.Front/Bind`, so the pin is the
-  snapshot's actor and one step of lineage is enough.
+  pin. The driver calls `koinon.guestfront.v1.Front/Bind` before the first guest call to each actor
+  and before each memory snapshot, so the pin is the snapshot's actor and one step of lineage is
+  enough. For a memory snapshot of a suspended actor that the driver did not bind, it resumes the
+  actor, binds it and suspends it again.
+- A guest that answers `Bind` with `Unimplemented` has no front (an image from before #1309) and would
+  accept unsigned calls: the driver refuses the sandbox before its first guest call.
+- The front checks `iat` and `exp` against the guest clock, with 30 seconds of skew. A guest clock that
+  does not step forward after a memory restore refuses every call (see Open items).
+- The front writes at most one log line per 10 seconds about refused calls, with the number it left out.
 - The escape suite (`test/escape`, "Substrate actor") calls `StartProcess` on loopback from the
   sandbox and expects a refusal, no process, and no other listener.
 
@@ -169,7 +176,15 @@ Tracked on #1087 until the maintainer files separate issues:
 4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
    every other control applied; `require` still fails closed.
 5. Rotation of the guest API signing key is not supported yet (#1326): the front accepts a list of keys, but
-   the chart and the driver have one key.
+   the chart and the driver have one key. A new key (the Secret deleted, or a new install with old
+   snapshots) makes every running sandbox and every memory snapshot that has the old public key unusable.
+6. The token check uses the guest clock. On the gVisor tiers the guest uses host time. On the `vm` tier,
+   a memory restore must step the guest clock forward; the lab probe record (ADR 0119 P-C) must confirm it.
+7. On the gVisor tiers without Landlock (best effort), the root filesystem is writable (#1150) and the
+   payload runs as uid 0 (item 4). The payload can then replace `koinon-guest-launcher` or its policy
+   file, and the next Exec of the driver runs that code without the guest controls. The guest API token
+   does not close this gap: the non-root user or Landlock does. The probe record must state it before
+   `allowUnhardened` is removed.
 
 ## Tests
 

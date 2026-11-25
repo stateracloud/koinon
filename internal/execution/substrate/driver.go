@@ -522,6 +522,9 @@ func (d *Driver) requireRunning(ctx context.Context, op string, k key) error {
 	if err := d.learn(ctx, k, actor); err != nil {
 		return execution.GRPCError(op, err)
 	}
+	if uid := actor.GetMetadata().GetUid(); !d.isBound(k, uid) {
+		return d.bind(ctx, op, k, uid)
+	}
 	return nil
 }
 

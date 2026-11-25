@@ -69,7 +69,12 @@ type lineages struct {
 	m  map[string]lineage
 }
 
-type lineage struct{ uid, prev string }
+// bound is true once a Bind call to this actor (this uid) succeeded: its guest front checks tokens
+// and its pin is this actor.
+type lineage struct {
+	uid, prev string
+	bound     bool
+}
 
 func (l *lineages) prev(actorRef string) string {
 	l.mu.Lock()
@@ -114,14 +119,35 @@ func (d *Driver) forgetLineage(k key) {
 	delete(d.lineage.m, k.String())
 }
 
+// isBound reports whether a Bind call to the actor with this uid succeeded.
+func (d *Driver) isBound(k key, uid string) bool {
+	d.lineage.mu.Lock()
+	defer d.lineage.mu.Unlock()
+	l, ok := d.lineage.m[k.String()]
+	return ok && l.uid == uid && l.bound
+}
+
 // bind makes one signed call to the guest front of a running actor, so its pin is this actor's.
-// SnapshotSandbox calls it before a memory snapshot: a restore of the snapshot then names this actor
-// in koinon_prev, whatever the actor itself was restored from.
-func (d *Driver) bind(ctx context.Context, op string, k key) error {
+// requireRunning calls it once per actor before the first guest call, and SnapshotSandbox before a
+// memory snapshot: a restore of the snapshot then names this actor in koinon_prev, whatever the
+// actor itself was restored from. A guest without the front (an image from before issue #1309)
+// answers Unimplemented and would accept unsigned calls from agent code: the driver refuses it.
+func (d *Driver) bind(ctx context.Context, op string, k key, uid string) error {
 	bctx, cancel := context.WithTimeout(ctx, d.cfg.GuestReadyTimeout)
 	defer cancel()
-	if err := d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{}); err != nil {
+	err := d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{})
+	if status.Code(err) == codes.Unimplemented {
+		return fail(op, execution.ErrFailedPrecondition,
+			"sandbox %s: the guest does not check guest API tokens; the image has no koinon-guest-front (issue #1309)", k)
+	}
+	if err != nil {
 		return execution.GRPCError(op, err)
+	}
+	d.lineage.mu.Lock()
+	defer d.lineage.mu.Unlock()
+	if l, ok := d.lineage.m[k.String()]; ok && l.uid == uid {
+		l.bound = true
+		d.lineage.m[k.String()] = l
 	}
 	return nil
 }
