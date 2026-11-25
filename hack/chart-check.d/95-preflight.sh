@@ -51,7 +51,7 @@ for f in "${value_files[@]}"; do
 			grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
 				{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
 		fi
-	elif [[ $name != values ]]; then
+	elif [[ $name != values && $name != openshell-values ]]; then
 		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
 	fi

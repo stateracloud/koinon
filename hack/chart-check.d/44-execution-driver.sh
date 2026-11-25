@@ -17,8 +17,9 @@ hit 'controlAddress: "api.ate-system.svc.cluster.local:443"' <<<"$default_out" |
 hit 'defaultTier: "hardened"' <<<"$default_out" || fail "the default tier fits the default gvisor pool (not vm)"
 hit -e '- name: gvisor' <<<"$default_out" || fail "the default worker pool is gvisor"
 if hit 'KOINON_OPENSHELL_ADDRESS' <<<"$default_out"; then fail "the default driver gives no OpenShell address to any component"; fi
-if hit 'kind: ValidatingAdmissionPolicy' <<<"$(render_default --show-only templates/sandbox-networkpolicy.yaml 2>/dev/null || true)"; then fail "no OpenShell sandbox NetworkPolicy policy with the default driver"; fi
+if hit -E 'sandbox-default-deny|sandbox-networkpolicy' <<<"$default_out"; then fail "no OpenShell sandbox NetworkPolicy writer with the default driver"; fi
 # The OpenShell driver stays selectable until #1094: it needs its address, TLS choice and three features on.
+# The openshell ci values file (charts/koinon/ci/openshell-values.yaml) keeps the driver in the preflight and smoke renders.
 has "the openshell driver is still selectable" 'driver: openshell' --show-only templates/config.yaml
 lacks "no Substrate volume with the openshell driver" 'substrate-token' --show-only templates/deployments.yaml
 env_is KOINON_OPENSHELL_ADDRESS '"openshell.openshell.svc:8080"'

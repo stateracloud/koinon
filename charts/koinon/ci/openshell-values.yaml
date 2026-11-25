@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# The OpenShell driver, still selectable until #1094 removes it (#1093 made substrate the default). The
+# three OpenShell-only features are on, as they must be with this driver, and the gateway is dialled in
+# plaintext (a values file without a client TLS Secret sets openshell.insecure).
+execution:
+  driver: openshell
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+sandboxObserver:
+  enabled: true
+sandboxNetworkPolicy:
+  enabled: true
+sandboxLimitRange:
+  enabled: true
+gateway:
+  mode: standalone
+postgres:
+  cnpg:
+    instances: 1
