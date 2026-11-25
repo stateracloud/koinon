@@ -52,6 +52,10 @@
   --color-info: var(--info);
   --color-idion: var(--idion);
   --color-logo-gold: var(--logo-gold);
+  --color-state-submitted-bg: var(--state-submitted-bg);
+  --color-state-working-bg: var(--state-working-bg);
+  --color-state-completed-bg: var(--state-completed-bg);
+  --color-state-failed-bg: var(--state-failed-bg);
   --color-cat-orange: var(--cat-orange);
   --color-cat-gold: var(--cat-gold);
   --color-cat-green: var(--cat-green);
@@ -98,6 +102,12 @@
   --info: #90b7f8;
   --idion: #8cd6cb;
   --logo-gold: #f7c68c;
+  /* Task-state badge fills (ADR 0126 section 3). The text is info, primary, success or danger; Blocked on you
+     uses attention; Canceled is hollow. */
+  --state-submitted-bg: #2b3850;
+  --state-working-bg: #3e3745;
+  --state-completed-bg: #343e33;
+  --state-failed-bg: #483535;
   --cat-orange: #f6ae84;
   --cat-gold: #d6c665;
   --cat-green: #a7dca1;
@@ -142,6 +152,10 @@
   --info: #2763a8;
   --idion: #067067;
   --logo-gold: #9a6200;
+  --state-submitted-bg: #dde9fb;
+  --state-working-bg: #ebe0f8;
+  --state-completed-bg: #dff0dd;
+  --state-failed-bg: #fae3e1;
   --cat-orange: #b1512d;
   --cat-gold: #8c6801;
   --cat-green: #357339;

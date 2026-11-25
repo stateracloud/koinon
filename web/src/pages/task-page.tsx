@@ -12,7 +12,7 @@ import { ConfirmAction } from '@/components/confirm-action'
 import { RunStatus } from '@/components/run-status'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/status-badge'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import type { Cost, Run, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
@@ -20,7 +20,7 @@ import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { useMemberNames } from '@/hooks/use-member-names'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
 import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
-import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
+import { isEnded, runFinished, runStateLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 const route = getRouteApi('/app/tasks/$taskId')
@@ -79,7 +79,7 @@ export function TaskPage() {
           </Link>
           <h1 className="text-xl font-semibold">{t?.title}</h1>
           <p className="text-muted-foreground text-sm">
-            <Badge variant="secondary">{stateLabel(t?.state ?? TaskState.UNSPECIFIED)}</Badge> {agentName && <>· {agentName}</>}
+            <StatusBadge state={t?.state ?? TaskState.UNSPECIFIED} /> {agentName && <>· {agentName}</>}
             {t?.cost && (
               <>
                 {' '}

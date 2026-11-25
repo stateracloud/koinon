@@ -106,7 +106,7 @@ export function Inbox({ items, ...actions }: InboxProps) {
       }}
     >
       {rows.map((item) => (
-        <li key={item.key} data-testid="inbox-item" data-kind={item.kind} className="bg-card rounded-md border border-amber-500/60 p-3 shadow-xs">
+        <li key={item.key} data-testid="inbox-item" data-kind={item.kind} className="bg-card rounded-md border border-warning p-3 shadow-xs">
           {render(item, actions)}
         </li>
       ))}

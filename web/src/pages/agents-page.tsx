@@ -4,11 +4,11 @@ import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
+import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { agentStatusLabel, harnessLabel } from '@/lib/labels'
+import { harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 /** AgentsPage lists the org's agents. */
@@ -41,8 +41,8 @@ export function AgentsPage() {
               </Link>
               <span className="text-muted-foreground text-sm">{harnessLabel(a.harness)}</span>
               <span className="ml-auto flex flex-wrap items-center gap-2">
-                {a.unhealthyAt && <Badge variant="destructive">Unhealthy</Badge>}
-                <Badge variant={a.status === AgentStatus.DRAFT ? 'outline' : 'secondary'}>{agentStatusLabel(a.status)}</Badge>
+                {a.unhealthyAt && <AgentStatusBadge status={a.status} unhealthy />}
+                <AgentStatusBadge status={a.status} />
               </span>
             </li>
           ))}

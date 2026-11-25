@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { mkdirSync } from 'node:fs'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { mockApi, type Stream } from './mock-api.ts'
 
@@ -93,6 +94,17 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
   await expect(waiting.getByRole('link', { name: 'Which branch should releases come from? needs your reply' })).toBeVisible()
   const nav = page.getByRole('navigation', { name: 'Main' })
   await expect(nav.getByTestId('inbox-badge')).toHaveText('2')
+
+  // The badge pair (attention fill, dark text) and the state badges pass axe in the light and the dark theme.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+    // Controls fade between the themes; axe must not sample a colour mid-transition.
+    await page.waitForFunction('document.getAnimations().length === 0')
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
+    expect(results.violations.map((v) => `${scheme} ${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
+  }
+  await page.emulateMedia({ colorScheme: 'light' })
 
   // Chat with an agent next to it.
   await page.getByRole('list', { name: 'Threads' }).getByRole('button', { name: /Write release notes/ }).click()
