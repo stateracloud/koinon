@@ -431,6 +431,25 @@ func (ws Wrappers) Primary() Wrapper {
 	return ws.primary
 }
 
+// OnReadOnlyKey reports whether s is wrapped by a configured key that is not the primary and is not
+// local: after a key move, a KEK the old (read-only) key still wraps. A KEK wrapped by an adapter
+// that is not configured is not reported (it fails to load, which is its own error).
+func (ws Wrappers) OnReadOnlyKey(s StoredKEK) bool {
+	if s.Backend == BackendLocal {
+		return false
+	}
+	p := ws.Primary()
+	if p.Backend() == s.Backend && p.KeyID() == s.KeyID {
+		return false
+	}
+	for _, w := range ws.more {
+		if w.Backend() == s.Backend && w.KeyID() == s.KeyID {
+			return true
+		}
+	}
+	return false
+}
+
 // For returns the wrapper that unwraps s.
 func (ws Wrappers) For(s StoredKEK) (Wrapper, error) {
 	for _, w := range append([]Wrapper{ws.Primary()}, ws.more...) {

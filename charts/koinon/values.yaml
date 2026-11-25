@@ -617,6 +617,50 @@ secrets:
           keyAdmin: koinon-key-admin
         # Bound on one call to OpenBao, as a Go duration; empty is 5s.
         timeout: ""
+      # The read-only second wrapping key for a key move (issue 688, https://koinon.stateracloud.com/docs/operate/secret-keys/):
+      # the KMS key that you used before the move. koinon-api, the reconciler and the key-admin Job still unwrap the
+      # KEKs it wrapped; nothing new is ever wrapped with it. Set it when you change backend.openbao.key,
+      # backend.awskms.keyId, the transit mount or the backend itself (also back to local), upgrade, then
+      # add, activate, rewrap and retire KEKs (keyAdmin.addKey) and remove this block once `keys status`
+      # no longer warns. It MUST name another key than the primary. A KEK that neither key opens fails
+      # to load (fail closed). Each identity signs in to it as for the primary (no credential here).
+      readOnly:
+        # openbao, awskms or empty (none).
+        backend: ""
+        awskms:
+          # Region and key of the old AWS KMS key (ARN recommended). The IAM role or Pod Identity of
+          # koinon-api, the reconciler and the key-admin Job needs kms:Decrypt on it too; the chart
+          # sets no role for it, except roleArns below.
+          region: ""
+          keyId: ""
+          endpoint: ""
+          stsEndpoint: ""
+          # A ConfigMap in the release namespace with ca.crt for this key's endpoints; empty is the
+          # image's system roots.
+          caConfigMap: ""
+          # IRSA roles, one per identity, used only while the primary backend is not awskms (a move away
+          # from AWS KMS): then the pods still need an AWS identity to unwrap with the old key. While
+          # the primary is awskms, its own roleArns give the identity and these are not used.
+          roleArns:
+            api: ""
+            reconciler: ""
+            keyAdmin: ""
+          timeout: ""
+        openbao:
+          address: ""
+          caConfigMap: ""
+          namespace: ""
+          transitMount: transit
+          key: ""
+          authMount: kubernetes
+          # The Kubernetes auth roles on the OpenBao that holds the old key, one per identity, bound to
+          # the same service accounts as the primary's. They need update on <transitMount>/decrypt/<key>
+          # only: the key never encrypts.
+          roles:
+            api: koinon-api
+            reconciler: koinon-reconciler
+            keyAdmin: koinon-key-admin
+          timeout: ""
       keyAdmin:
         # The ID of a KEK for the key-admin Job to add, wrapped by the KMS, if the key set does not
         # hold it yet (kek-YYYYMMDD-xxxx: lower-case letters, digits and dashes). Set a new ID to

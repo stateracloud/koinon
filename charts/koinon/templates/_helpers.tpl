@@ -1040,6 +1040,131 @@ pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads st
   value: /etc/koinon/awskms-ca/ca.crt
 {{- end }}
 {{- end }}
+{{- include "koinon.kmsReadOnlyEnv" (dict "root" .root "role" .role) }}
+{{- end }}
+
+{{/*
+The read-only second wrapping key (values secrets.kek.kms.readOnly, issue 688 and 1298), as the KOINON_
+forms of the --read-only-* flags: the KMS key that you used before a key move. It only unwraps; nothing new is
+ever wrapped with it. It renders with any primary, local too (a move back to local). Each identity
+signs in with its own service account token as its own role; nothing here is a credential. The key
+must differ from the primary: koinon-api refuses to start with the same key twice, and the chart
+refuses to render it.
+*/}}
+{{- define "koinon.kmsReadOnlyEnv" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- $ro := $kms.readOnly | default dict }}
+{{- $b := $ro.backend | default "" }}
+{{- if eq $b "openbao" }}
+{{- $o := $ro.openbao }}
+{{- if not (and $o.address $o.key) }}{{ fail "secrets.kek.kms.readOnly.openbao.address and key are required with readOnly.backend openbao" }}{{ end }}
+{{- if and (eq (include "koinon.kms" .root) "openbao") (eq ($o.transitMount | default "transit") ($kms.openbao.transitMount | default "transit")) (eq $o.key $kms.openbao.key) }}
+{{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another transit mount or key name" }}
+{{- end }}
+{{- if and (hasPrefix "http://" $o.address) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $o.address)) }}
+{{- fail "secrets.kek.kms.readOnly.openbao.address must be https: the KEKs travel to OpenBao (plain http only on a loopback address)" }}
+{{- end }}
+- name: KOINON_READ_ONLY_KEK_BACKEND
+  value: openbao
+- name: KOINON_READ_ONLY_OPENBAO_ADDRESS
+  value: {{ $o.address | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_TRANSIT_MOUNT
+  value: {{ $o.transitMount | default "transit" | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_KEY
+  value: {{ $o.key | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_AUTH_MOUNT
+  value: {{ $o.authMount | default "kubernetes" | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_ROLE
+  value: {{ index $o.roles .role | quote }}
+{{- with $o.namespace }}
+- name: KOINON_READ_ONLY_OPENBAO_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- with $o.timeout }}
+- name: KOINON_READ_ONLY_OPENBAO_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $o.caConfigMap }}
+- name: KOINON_READ_ONLY_OPENBAO_CA_FILE
+  value: /etc/koinon/ro-openbao-ca/ca.crt
+{{- end }}
+{{- else if eq $b "awskms" }}
+{{- $a := $ro.awskms }}
+{{- if not (and $a.region $a.keyId) }}{{ fail "secrets.kek.kms.readOnly.awskms.region and keyId are required with readOnly.backend awskms" }}{{ end }}
+{{- if and (eq (include "koinon.kms" .root) "awskms") (eq $a.keyId $kms.awskms.keyId) }}
+{{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another AWS key ARN" }}
+{{- end }}
+{{- if hasPrefix "alias/aws/" $a.keyId }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId names an AWS managed key, whose key policy cannot limit who decrypts: use a customer managed key" }}
+{{- end }}
+{{- if and (hasPrefix "arn:" $a.keyId) (not (contains (printf ":kms:%s:" $a.region) $a.keyId)) }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId is a key ARN in another region than secrets.kek.kms.readOnly.awskms.region" }}
+{{- end }}
+{{- range $what, $e := dict "endpoint" $a.endpoint "stsEndpoint" $a.stsEndpoint }}
+{{- if and (hasPrefix "http://" $e) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $e)) }}
+{{- fail (printf "secrets.kek.kms.readOnly.awskms.%s must be https: the KEKs and signed requests travel to it (plain http only on a loopback address)" $what) }}
+{{- end }}
+{{- end }}
+{{- /* Same as the primary: no credential and no AWS_* variable. The pod's one identity (IRSA role or
+Pod Identity) needs kms:Decrypt on this key too. */}}
+- name: KOINON_READ_ONLY_KEK_BACKEND
+  value: awskms
+- name: KOINON_READ_ONLY_AWSKMS_REGION
+  value: {{ $a.region | quote }}
+- name: KOINON_READ_ONLY_AWSKMS_KEY_ID
+  value: {{ $a.keyId | quote }}
+{{- with $a.endpoint }}
+- name: KOINON_READ_ONLY_AWSKMS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.stsEndpoint }}
+- name: KOINON_READ_ONLY_AWSKMS_STS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.timeout }}
+- name: KOINON_READ_ONLY_AWSKMS_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $a.caConfigMap }}
+- name: KOINON_READ_ONLY_AWSKMS_CA_FILE
+  value: /etc/koinon/ro-awskms-ca/ca.crt
+{{- end }}
+{{- else if $b }}
+{{- fail (printf "secrets.kek.kms.readOnly.backend must be openbao or awskms (or empty), not %q" $b) }}
+{{- end }}
+{{- end }}
+
+{{/*
+The ConfigMap with the read-only key's CA when values name one, as name=ConfigMap, and its mount and
+volume. Only the pods that start with the read-only flags (koinon-api, the reconciler, the key-admin
+Job, the run-evidence Job) include these, next to the primary's.
+*/}}
+{{- define "koinon.kmsReadOnlyCA" -}}
+{{- $ro := .Values.secrets.kek.kms.readOnly | default dict }}
+{{- if and (eq ($ro.backend | default "") "openbao") $ro.openbao.caConfigMap }}ro-openbao-ca={{ $ro.openbao.caConfigMap }}
+{{- else if and (eq ($ro.backend | default "") "awskms") $ro.awskms.caConfigMap }}ro-awskms-ca={{ $ro.awskms.caConfigMap }}
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kmsReadOnlyVolumeMount" -}}
+{{- with include "koinon.kmsReadOnlyCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
+  mountPath: /etc/koinon/{{ index $v 0 }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kmsReadOnlyVolume" -}}
+{{- with include "koinon.kmsReadOnlyCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
+  configMap:
+    name: {{ index $v 1 }}
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
 {{- end }}
 
 {{/* The ConfigMap with the KMS's CA when values name one (a CA is not secret), and its volume name. */}}
@@ -1074,11 +1199,18 @@ pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads st
 {{/*
 The annotations of an identity's ServiceAccount (dict root, role: api, reconciler or keyAdmin): with
 the awskms backend and an IRSA role for it, eks.amazonaws.com/role-arn, which makes EKS's webhook give
-the pod that role's web identity. Empty otherwise.
+the pod that role's web identity. While the primary is not awskms but the read-only key is (a move
+away from AWS KMS), the read-only key's roleArns give it, so the pod can still unwrap. Empty otherwise.
 */}}
 {{- define "koinon.kmsServiceAccountAnnotations" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- $ro := $kms.readOnly | default dict }}
 {{- if eq (include "koinon.kms" .root) "awskms" }}
-{{- with index .root.Values.secrets.kek.kms.awskms.roleArns .role }}
+{{- with index $kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
+{{- else if eq ($ro.backend | default "") "awskms" }}
+{{- with index ($ro.awskms.roleArns | default dict) .role }}
 eks.amazonaws.com/role-arn: {{ . | quote }}
 {{- end }}
 {{- end }}
@@ -1470,8 +1602,8 @@ spec:
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml .ka.resources | nindent 8 }}
-      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
-      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) (include "koinon.kmsReadOnlyVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) (include "koinon.kmsReadOnlyVolume" $) | join "\n" | trim }}
       {{- with $mounts }}
       volumeMounts:
         {{- . | nindent 8 }}
@@ -1535,8 +1667,8 @@ spec:
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml $re.resources | nindent 8 }}
-      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
-      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) (include "koinon.kmsReadOnlyVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) (include "koinon.kmsReadOnlyVolume" $) | join "\n" | trim }}
       {{- with $mounts }}
       volumeMounts:
         {{- . | nindent 8 }}

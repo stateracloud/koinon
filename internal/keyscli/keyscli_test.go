@@ -713,6 +713,65 @@ var _ = Describe("koinon-api keys", func() {
 			use(admin)
 		})
 
+		It("status warns while the active KEK is wrapped only by the read-only key, and stops after the move", func(ctx SpecContext) {
+			// A key move (issue 1298): the old KMS key stays configured as the read-only second key.
+			old := &secretstoretest.FakeKMS{Name: "koinon-test-old"}
+			oldPrimary, err := secretstore.NewKeyAdminWrappers(installid.BoundOnlySource(pool), old)
+			Expect(err).NotTo(HaveOccurred())
+			oldPrimary = oldPrimary.WithInstallID(installid.Source(pool))
+			use(oldPrimary)
+			before := fmt.Sprintf("kek-20261104-%x", newKey()[:4])
+			Expect(tool.Add(ctx, before)).To(Succeed())
+			Expect(tool.Activate(ctx, before)).To(Succeed())
+
+			By("a primary-only configuration shows no read-only warning")
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).NotTo(ContainSubstring("read-only key"))
+
+			By("after the move the old key is read-only and the active KEK still names it")
+			moved, err := secretstore.NewKeyAdminWrappers(installid.BoundOnlySource(pool), kms, old)
+			Expect(err).NotTo(HaveOccurred())
+			moved = moved.WithInstallID(installid.Source(pool))
+			use(moved)
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(And(
+				ContainSubstring("WARNING: the active KEK "+before+" is still wrapped only by the read-only key (fakekms:koinon-test-old)"),
+				ContainSubstring("keyAdmin.addKey"),
+			))
+
+			By("a KEK wrapped by the primary and activated clears the warning")
+			after := fmt.Sprintf("kek-20261105-%x", newKey()[:4])
+			Expect(tool.Add(ctx, after)).To(Succeed())
+			Expect(tool.Activate(ctx, after)).To(Succeed())
+			Expect(old.Wraps()).To(BeEquivalentTo(1), "the read-only key wrapped nothing after the move")
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).NotTo(ContainSubstring("read-only key"))
+		})
+
+		It("status advises keys add, not the key-admin Job, after a move back to a local primary", func(ctx SpecContext) {
+			old := &secretstoretest.FakeKMS{Name: "koinon-test-old"}
+			oldPrimary, err := secretstore.NewKeyAdminWrappers(installid.BoundOnlySource(pool), old)
+			Expect(err).NotTo(HaveOccurred())
+			use(oldPrimary.WithInstallID(installid.Source(pool)))
+			before := fmt.Sprintf("kek-20261106-%x", newKey()[:4])
+			Expect(tool.Add(ctx, before)).To(Succeed())
+			Expect(tool.Activate(ctx, before)).To(Succeed())
+
+			local, err := secretstore.NewWrappers(installid.BoundOnlySource(pool), secretstore.Local{}, old)
+			Expect(err).NotTo(HaveOccurred())
+			use(local.WithInstallID(installid.Source(pool)))
+			out.Reset()
+			Expect(tool.Status(ctx)).To(Succeed())
+			Expect(out.String()).To(And(
+				ContainSubstring("still wrapped only by the read-only key (fakekms:koinon-test-old)"),
+				ContainSubstring("keys add"),
+				Not(ContainSubstring("keyAdmin.addKey")),
+			))
+		})
+
 		It("adds wrapped KEKs, keeps the local one readable, and moves the values over", func(ctx SpecContext) {
 			ids := seed(ctx, 2)
 			Expect(tool.Add(ctx, kekB)).To(Succeed())
