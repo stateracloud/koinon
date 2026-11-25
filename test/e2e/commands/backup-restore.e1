@@ -8,12 +8,17 @@
 # install the block acts on (default koinon, koinon). A restore into a fresh namespace sets both to the target's.
 # The chart names its objects <release>-api, <release>-pg, <release>-kek and so on when the release name contains
 # "koinon" and there is no fullnameOverride and no secrets.kek.existingSecret (helm install prints the real names).
-# Variables of the two pipe blocks (pipe-db, pipe-keys): SRC_NS and SRC_REL are the live source install, NS and REL
+# Variables of the two pipe blocks (pipe-db, pipe-keys): SRC_NS and SRC_REL (and SRC_GWKEY) are the live source install, NS and REL
 # the target (both are required: a source that is the target would be wiped before it is read). Their commands stream the source into the target, so they
 # need both installs at once: test/drill runs them, in the order stop, hold, pipe-db, pipe-keys, start, compare-keys,
 # verify-keys, release (backup-restore.sh restores in place from files and cannot).
 # Not here and not checked by any test: a CloudNativePG backup restore. The chart configures no CNPG backup yet
 # (ADR 0076 decision 9), so there is nothing to restore from. Tracked in https://github.com/stateracloud/koinon/issues/910.
+# The gateway recipient key (docs/dev/gateway-recipient-key.md): with gateway.mcp.driver=koinon the stored MCP
+# credentials are sealed to it, and only its Secret (GWKEY, default <release>-gateway-recipient-key) holds the private
+# half. Its blocks do nothing on an install without that Secret. The Secret is guarded: only the key-admin service
+# account may write it, so restore-gateway-key writes it as that account (kubectl --as; the person needs the right to
+# impersonate it). A KMS-wrapped key opens only with the same wrapping key: the target uses the source's KMS key.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/backup-restore.e1
 # e1=backup-keys
 NS=${NS:-koinon}
@@ -30,6 +35,18 @@ REL=${REL:-koinon}
 fp=$(kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys status | awk '$2 == "active" { print $NF }')
 test -n "$fp"
 grep -q "fingerprint $fp" koinon-kek-backup.yaml || { echo "the backup does not hold the active key $fp" >&2; false; }
+# e1=backup-gateway-key
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+GWKEY=${GWKEY:-$REL-gateway-recipient-key}
+# Run it before backup-db, as backup-keys. The file holds the wrapped private keys (on the local backend the keys
+# as they are): keep it with the KEK backup, never in a log. Without the Secret there is no file.
+rm -f koinon-gateway-key-backup.yaml
+if kubectl -n "$NS" get secret/"$GWKEY" > /dev/null 2>&1; then
+  (umask 077 && kubectl -n "$NS" get secret/"$GWKEY" -o go-template='apiVersion: v1{{"\n"}}kind: Secret{{"\n"}}metadata:{{"\n"}}  name: '"$GWKEY"'{{"\n"}}  labels:{{"\n"}}{{range $k, $v := .metadata.labels}}    {{$k}}: {{printf "%q" $v}}{{"\n"}}{{end}}type: Opaque{{"\n"}}data:{{"\n"}}{{range $k, $v := .data}}  {{$k}}: {{$v}}{{"\n"}}{{end}}' > koinon-gateway-key-backup.yaml)
+else
+  echo "no gateway recipient key Secret $GWKEY: nothing to back up"
+fi
 # e1=backup-db
 NS=${NS:-koinon}
 REL=${REL:-koinon}
@@ -40,6 +57,16 @@ NS=${NS:-koinon}
 REL=${REL:-koinon}
 PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
 kubectl -n "$NS" exec -i "$PRIMARY" -c postgres -- pg_restore --list < koinon.dump > /dev/null
+# e1=check-gateway-key
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+# Run it after backup-db. Every gateway key that a stored credential can name (all but retired) is in the backup.
+# Rows are never deleted, so a key that the database has and the file does not is a key added after the backup.
+PRIMARY=$(kubectl -n "$NS" get pod -l cnpg.io/cluster=$REL-pg,cnpg.io/instanceRole=primary -o name)
+ids=$(kubectl -n "$NS" exec "$PRIMARY" -c postgres -- psql --dbname=koinon -Atq -c "SELECT key_id FROM gateway_recipient_keys WHERE state <> 'retired'")
+for id in $ids; do
+  grep -q "^  $id: " koinon-gateway-key-backup.yaml 2> /dev/null || { echo "the gateway key backup does not hold the key $id: run backup-gateway-key and backup-db again" >&2; false; }
+done
 # e1=stop
 NS=${NS:-koinon}
 REL=${REL:-koinon}
@@ -47,6 +74,11 @@ kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=0
 kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=agentd --timeout=10m
 kubectl -n "$NS" scale deployment/"$REL"-reconciler deployment/"$REL"-api --replicas=0
 kubectl -n "$NS" wait --for=delete pod -l "app.kubernetes.io/instance=$REL,app.kubernetes.io/component in (api,reconciler)" --timeout=5m
+# koinon-mcp-gateway has a database login and loads the gateway keys: it stops too (an install without it skips this).
+if kubectl -n "$NS" get deployment/"$REL"-mcp-gateway > /dev/null 2>&1; then
+  kubectl -n "$NS" scale deployment/"$REL"-mcp-gateway --replicas=0
+  kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=mcp-gateway --timeout=5m
+fi
 # e1=hold
 NS=${NS:-koinon}
 REL=${REL:-koinon}
@@ -73,6 +105,21 @@ if kubectl -n "$NS" get secret/"$REL"-kek > /dev/null 2>&1; then
   kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=api --timeout=5m
 else
   kubectl -n "$NS" apply -f koinon-kek-backup.yaml
+fi
+# e1=restore-gateway-key
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+GWKEY=${GWKEY:-$REL-gateway-recipient-key}
+# Run it after restore-db. The restored rows name the backup's keys, so the Secret becomes the backup: a new install's
+# own first key has no row after restore-db. Without a backup file (no gateway key) there is nothing to do.
+if test -f koinon-gateway-key-backup.yaml; then
+  grep -qx "  name: $GWKEY" koinon-gateway-key-backup.yaml || { echo "koinon-gateway-key-backup.yaml is not the Secret $GWKEY" >&2; false; }
+  AS=system:serviceaccount:$NS:$REL-gateway-key-admin
+  if kubectl -n "$NS" get secret/"$GWKEY" > /dev/null 2>&1; then
+    kubectl -n "$NS" replace --as="$AS" -f koinon-gateway-key-backup.yaml
+  else
+    kubectl -n "$NS" create --as="$AS" -f koinon-gateway-key-backup.yaml
+  fi
 fi
 # e1=pipe-db
 NS=${NS:-koinon}
@@ -104,6 +151,15 @@ if kubectl -n "$NS" get secret/"$REL"-kek > /dev/null 2>&1; then
 else
   kubectl -n "$SRC_NS" exec deploy/"$SRC_REL"-api -- koinon-api keys export | kubectl -n "$NS" apply -f -
 fi
+# The gateway recipient key, as backup-gateway-key and restore-gateway-key do it, named after the target's Secret.
+GWKEY=${GWKEY:-$REL-gateway-recipient-key}
+SRC_GWKEY=${SRC_GWKEY:-$SRC_REL-gateway-recipient-key}
+if kubectl -n "$SRC_NS" get secret/"$SRC_GWKEY" > /dev/null 2>&1; then
+  AS=system:serviceaccount:$NS:$REL-gateway-key-admin
+  verb=create
+  if kubectl -n "$NS" get secret/"$GWKEY" > /dev/null 2>&1; then verb=replace; fi
+  kubectl -n "$SRC_NS" get secret/"$SRC_GWKEY" -o go-template='apiVersion: v1{{"\n"}}kind: Secret{{"\n"}}metadata:{{"\n"}}  name: '"$GWKEY"'{{"\n"}}  labels:{{"\n"}}{{range $k, $v := .metadata.labels}}    {{$k}}: {{printf "%q" $v}}{{"\n"}}{{end}}type: Opaque{{"\n"}}data:{{"\n"}}{{range $k, $v := .data}}  {{$k}}: {{$v}}{{"\n"}}{{end}}' | kubectl -n "$NS" "$verb" --as="$AS" -f -
+fi
 # e1=start
 NS=${NS:-koinon}
 REL=${REL:-koinon}
@@ -111,6 +167,9 @@ kubectl -n "$NS" scale deployment/"$REL"-api deployment/"$REL"-reconciler --repl
 kubectl -n "$NS" rollout status deployment/"$REL"-api deployment/"$REL"-reconciler --timeout=5m
 kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=1
 kubectl -n "$NS" rollout status deployment/"$REL"-agentd --timeout=5m
+if kubectl -n "$NS" get deployment/"$REL"-mcp-gateway > /dev/null 2>&1; then
+  kubectl -n "$NS" scale deployment/"$REL"-mcp-gateway --replicas=1
+fi
 # e1=resync
 NS=${NS:-koinon}
 REL=${REL:-koinon}
@@ -125,6 +184,14 @@ kubectl -n "$NS" exec -i deploy/"$REL"-api -- koinon-api keys compare < koinon-k
 NS=${NS:-koinon}
 REL=${REL:-koinon}
 kubectl -n "$NS" exec deploy/"$REL"-api -- koinon-api keys verify
+# e1=verify-gateway-key
+NS=${NS:-koinon}
+REL=${REL:-koinon}
+# koinon-mcp-gateway is ready only when it holds the private key of every key row that is not retired and each
+# matches its public row: then every MCP credential sealed to those keys opens. It prints no key material.
+if kubectl -n "$NS" get deployment/"$REL"-mcp-gateway > /dev/null 2>&1; then
+  kubectl -n "$NS" rollout status deployment/"$REL"-mcp-gateway --timeout=5m
+fi
 # e1=release
 NS=${NS:-koinon}
 REL=${REL:-koinon}

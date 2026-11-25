@@ -88,6 +88,38 @@ Run the re-seal in a later upgrade than the rotation. The Job must see the new k
 run in one upgrade, the re-seal can find the old key still active, move nothing and end. Then change
 `rotationId` to run it again. The Job has no egress except DNS, the database and the KMS.
 
+## Backup and restore
+
+The database holds the public keys and the sealed MCP credentials. Only the Secret
+`<release>-gateway-recipient-key` holds the private keys. Back up the Secret with the KEK and the database
+dump: without it, no stored MCP credential opens again, and koinon-mcp-gateway does not become ready
+after a restore, because the restored rows name keys that it does not have.
+
+The guide's blocks are in `test/e2e/commands/backup-restore.e1`:
+
+1. `backup-gateway-key` writes `koinon-gateway-key-backup.yaml` before `backup-db`. Only its owner can
+   read the file. On `local` it holds the private keys as they are; on `openbao` and `awskms` it holds them
+   wrapped. Keep it as safe as the KEK backup. Never put it in a log or a ticket.
+2. `check-gateway-key`, after `backup-db`, makes sure that the file holds every key that is not retired.
+3. `stop` also scales koinon-mcp-gateway to 0: it has a database login and loads the keys.
+4. `restore-gateway-key`, after `restore-db`, makes the Secret equal to the backup. The new install's own
+   first key goes away, because no restored row names it. The guard lets only the key-admin service
+   account write the Secret, so the block writes it as that account (`kubectl --as`). The person who
+   restores needs the right to impersonate that service account. The guard stays on.
+5. `verify-gateway-key` waits until koinon-mcp-gateway is ready. It is ready only when it holds the private
+   key of each key that is not retired and each key matches its public row.
+
+What fails without it:
+
+- Without the Secret: koinon-mcp-gateway stays not ready, and each stored MCP credential is lost. Each
+  org must enter its MCP credentials again.
+- On `openbao` and `awskms`, the target must use the same wrapping key and the same policies (the sections
+  below). With another wrapping key the backup does not open.
+- Do not run `rotate` or `retire` between the backup of the Secret and the dump. If `check-gateway-key`
+  fails, take both again.
+
+Let the key-admin Job of a new install finish before the restore.
+
 ## OpenBao policy
 
 Use a transit key `gateway.mcp.koinon.recipientKey.kms.openbao.key` (default `koinon-gateway`) that
