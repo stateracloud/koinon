@@ -218,7 +218,7 @@ from an assertion (at any shell level) makes it exit non-zero, which `hack/chart
 (the `scripts` job) proves with planted failures. Anything that changes how a Koinon binary starts
 (a flag or env var it requires, a mount, a Secret key, an RBAC rule) is covered by
 `make test-chart-smoke` (`test/chartsmoke`: runs the rendered Jobs and Deployments as containers);
-`make test-fence-kind` (`test/e2e/kind/apiserver-egress.sh`: a throwaway kind cluster proves that the Substrate fence lets a control pod reach the API server by port and nothing else, #1172);
+`make test-fence-kind` (`test/e2e/kind/apiserver-egress.sh`: a throwaway kind cluster proves that the Substrate fence lets a control pod reach the API server by port and nothing else; the `e2e-kind` job runs it after the quickstart, #1172);
 extend it when you add a component or a startup input, since a unit test of the flag parser does
 not see what the chart really passes (old issue 284).
 
