@@ -127,7 +127,10 @@ var _ = Describe("substrate worker namespace", func() {
 	})
 
 	It("renders no WorkerPool with the OpenShell driver", func(ctx SpecContext) {
-		r := helmRender(ctx, filepath.Join(chartDir, "ci", "external-standalone-values.yaml"))
+		r := helmRenderWith(ctx, filepath.Join(chartDir, "ci", "external-standalone-values.yaml"), append([]string{
+			"--set", "execution.driver=openshell", "--set", "sandboxObserver.enabled=true", "--set", "sandboxNetworkPolicy.enabled=true",
+			"--set", "sandboxLimitRange.enabled=true", "--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080",
+		}, externalDatabase...)...)
 		Expect(r.Ignored).NotTo(HaveKey("WorkerPool"))
 	})
 
