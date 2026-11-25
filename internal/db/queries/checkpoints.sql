@@ -180,9 +180,9 @@ WHERE e.org_id = @org_id AND e.seed_from_epoch IS NOT NULL AND e.seeded_at IS NU
 -- source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
 -- same times. No row: the source is gone or not complete.
 INSERT INTO home_checkpoints (org_id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
-                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch, content_digest)
 SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c.epoch, @snapshot_id,
-       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch
+       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch, @content_digest
 FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.id = @source_id AND c.status = 'complete'
 RETURNING *;
@@ -301,7 +301,8 @@ RETURNING *;
 -- name: CompleteHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'complete', snapshot_id = @snapshot_id, size_bytes = @size_bytes, epoch = @epoch,
-    generation = @generation, repository_epoch = @repository_epoch, error = NULL, finished_at = now()
+    generation = @generation, repository_epoch = @repository_epoch, content_digest = @content_digest,
+    error = NULL, finished_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'running'
 RETURNING *;
 

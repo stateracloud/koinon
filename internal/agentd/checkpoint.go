@@ -42,7 +42,10 @@ import (
 // HomeStore is the checkpoint writer as agentd uses it (checkpoint.Writer).
 type HomeStore interface {
 	Backup(ctx context.Context, prefix, password string, tarStream io.Reader, m checkpoint.Meta) (checkpoint.Result, error)
-	Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error
+	// Restore refuses a snapshot whose files do not match wantDigest (checkpoint.ErrDigestMismatch),
+	// before it writes a byte to dst. An empty wantDigest skips the check (a checkpoint made before
+	// digests were recorded).
+	Restore(ctx context.Context, prefix, password, snapshotID, wantDigest string, dst io.Writer) error
 	Verify(ctx context.Context, prefix, password, snapshotID string) error
 	// DeleteRepository deletes the blobs of a retired repository, never a later epoch's under it.
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
@@ -353,6 +356,7 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 		_, cerr := p.q.CompleteHomeCheckpoint(octx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
 			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
+			ContentDigest: pgtype.Text{String: res.Digest, Valid: res.Digest != ""},
 		})
 		if cerr == nil {
 			return
@@ -612,7 +616,7 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 	pr, pw := io.Pipe()
 	restored := make(chan error, 1)
 	go func() {
-		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, pw)
+		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, cp.ContentDigest.String, pw)
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()

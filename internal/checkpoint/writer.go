@@ -149,6 +149,9 @@ type Result struct {
 	Bytes      int64
 	Files      int64
 	Skipped    int64
+	// Digest is the content digest of the staged home (TreeDigest), "sha256:<hex>". The caller
+	// records it and gives it back to Restore.
+	Digest string
 }
 
 func (w *Writer) limits() Limits {
@@ -182,6 +185,10 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		if err := m.Ready(); err != nil {
 			return Result{}, err
 		}
+	}
+	digest, err := TreeDigest(home)
+	if err != nil {
+		return Result{}, fmt.Errorf("digesting the home: %w", err)
 	}
 	rep, err := w.open(ctx, work, prefix, password, true)
 	if err != nil {
@@ -222,11 +229,16 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{SnapshotID: string(id), Bytes: stats.Bytes, Files: stats.Files, Skipped: stats.Skipped}, nil
+	return Result{SnapshotID: string(id), Bytes: stats.Bytes, Files: stats.Files, Skipped: stats.Skipped, Digest: digest}, nil
 }
 
-// Restore writes the snapshot as a tar stream to out. A snapshot ID of "" restores the newest.
-func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error {
+// Restore writes the snapshot as a tar stream to dst. A snapshot ID of "" restores the newest.
+//
+// wantDigest is the digest that Backup returned for the snapshot (Result.Digest). Restore stages
+// the snapshot, recomputes the digest and returns [ErrDigestMismatch] when it differs, before it
+// writes the first byte to dst. An empty wantDigest skips the check: it is for a checkpoint made
+// before digests were recorded, and the caller says so in its log.
+func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID, wantDigest string, dst io.Writer) error {
 	work, err := os.MkdirTemp(w.Scratch, "restore-")
 	if err != nil {
 		return err
@@ -273,6 +285,15 @@ func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID strin
 	_, err = restore.Entry(ctx, rep, out, root, restore.Options{Parallel: 2, RestoreDirEntryAtDepth: math.MaxInt32})
 	if err != nil {
 		return fmt.Errorf("restoring snapshot %s: %w", man.ID, err)
+	}
+	if wantDigest != "" {
+		got, err := TreeDigest(target)
+		if err != nil {
+			return fmt.Errorf("digesting snapshot %s: %w", man.ID, err)
+		}
+		if got != wantDigest {
+			return fmt.Errorf("%w: snapshot %s is %s, the record says %s", ErrDigestMismatch, man.ID, got, wantDigest)
+		}
 	}
 	return WriteTar(target, dst)
 }

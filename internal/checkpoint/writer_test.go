@@ -73,13 +73,52 @@ var _ = Describe("Writer", func() {
 		Expect(r2.SnapshotID).NotTo(Equal(r1.SnapshotID))
 
 		var newest, older bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &newest)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &newest)).To(Succeed())
 		Expect(readTar(newest.Bytes())).To(HaveKeyWithValue("notes/b.md", "second"))
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", r1.SnapshotID, &older)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", r1.SnapshotID, "", &older)).To(Succeed())
 		got := readTar(older.Bytes())
 		Expect(got).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(got).NotTo(HaveKey("notes/b.md"))
 		Expect(w.Verify(ctx, prefix, "koinon_test_not-a-real-token", r2.SnapshotID)).To(Succeed())
+	})
+
+	It("records a content digest and restores only a snapshot that matches it (issue #1090)", func() {
+		pw := "koinon_test_not-a-real-token"
+		r1, err := w.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(checkpoint.ValidDigest(r1.Digest)).To(BeTrue(), r1.Digest)
+		again, err := w.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c2"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again.Digest).To(Equal(r1.Digest), "the same home has the same digest")
+		r2, err := w.Backup(ctx, prefix, pw, home(entry{name: "./notes/b.md", body: "second"}), checkpoint.Meta{CheckpointID: "c3"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r2.Digest).NotTo(Equal(r1.Digest), "a changed home has another digest")
+
+		var ok bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r1.SnapshotID, r1.Digest, &ok)).To(Succeed())
+		Expect(readTar(ok.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
+
+		// The record of another snapshot, or any other value, refuses the restore and sends nothing.
+		for _, wrong := range []string{r2.Digest, "sha256:" + strings.Repeat("0", 64)} {
+			var out bytes.Buffer
+			err := w.Restore(ctx, prefix, pw, r1.SnapshotID, wrong, &out)
+			Expect(err).To(MatchError(checkpoint.ErrDigestMismatch))
+			Expect(out.Len()).To(BeZero(), "no byte reaches the sandbox")
+		}
+	})
+
+	It("digests a home with unreadable modes and links, and ignores times", func() {
+		pw := "koinon_test_not-a-real-token"
+		odd := home(
+			entry{name: "./secret.txt", body: "shh", mode: 0o200},
+			entry{name: "./locked/", typ: tar.TypeDir, mode: 0o500},
+			entry{name: "./locked/inner.txt", body: "inner"},
+			entry{name: "./ln", typ: tar.TypeSymlink, link: "notes/a.md"},
+		)
+		r, err := w.Backup(ctx, prefix, pw, odd, checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
 	})
 
 	It("writes nothing to the bucket in restore-only mode (#940)", func() {
@@ -106,7 +145,7 @@ var _ = Describe("Writer", func() {
 
 		ro := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir(), ReadOnly: true}
 		var out bytes.Buffer
-		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, &out)).To(Succeed())
+		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, "", &out)).To(Succeed())
 		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(ro.Verify(ctx, prefix, pw, r.SnapshotID)).To(Succeed())
 		snaps, err := ro.Snapshots(ctx, prefix, pw)
@@ -143,7 +182,7 @@ var _ = Describe("Writer", func() {
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", "", "", &out)).NotTo(Succeed())
 		_, err = w.Backup(ctx, prefix, "koinon_test_wrong", home(), checkpoint.Meta{})
 		Expect(err).To(HaveOccurred())
 	})
@@ -190,7 +229,7 @@ var _ = Describe("Writer", func() {
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, other, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, other, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed())
 	})
 
 	It("deletes a retired repository's blobs and leaves the later epoch under it readable", func() {
@@ -206,11 +245,11 @@ var _ = Describe("Writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(BeNumerically(">", 0))
 		var gone bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &gone)).NotTo(Succeed(), "epoch 0 is deleted")
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &gone)).NotTo(Succeed(), "epoch 0 is deleted")
 
 		By("epoch 1 still opens and restores")
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, e1, "koinon_test_not-a-real-token-1", "", &out)).To(Succeed())
+		Expect(w.Restore(ctx, e1, "koinon_test_not-a-real-token-1", "", "", &out)).To(Succeed())
 		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/b.md", "epoch one"))
 		Expect(w.Verify(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID)).To(Succeed())
 
@@ -245,7 +284,7 @@ var _ = Describe("Writer", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, pass, "", &out)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, pass, "", "", &out)).To(Succeed())
 		last, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "last"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(w.Verify(ctx, prefix, pass, last.SnapshotID)).To(Succeed())
@@ -268,7 +307,7 @@ var _ = Describe("Writer", func() {
 
 	It("restores from a repository that has no snapshot as an error", func() {
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed())
 	})
 
 	It("refuses a home over the limit and leaves no snapshot", func() {
