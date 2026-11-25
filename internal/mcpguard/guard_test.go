@@ -1643,7 +1643,7 @@ var _ = Describe("the MCP leak guard (ADR 0091)", func() {
 		// notification and then a guarded result looks to the guard exactly like a stream with the result
 		// alone: the call closes and the session holds the result's legs. Koinon's gateway, the default MCP
 		// driver since #1239, hands the guard every message, so the gap holds only with
-		// gateway.mcp.driver=agentgateway. Exit: ADR 0097 step 3 deletes agentgateway and this spec with it.
+		// gateway.mcp.driver=agentgateway. Exit: ADR 0097 step 3 (#1334) deletes agentgateway and this spec with it.
 		// When this spec fails before then, the gap is closed: update ADR 0097 and #254.
 		It("does not see a notification on a call's stream: the documented gap of the agentgateway fallback (#254)", func(ctx SpecContext) {
 			var inputs []string
