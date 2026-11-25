@@ -618,7 +618,7 @@ secrets:
         # Bound on one call to OpenBao, as a Go duration; empty is 5s.
         timeout: ""
       # The read-only second wrapping key for a key move (issue 688, https://koinon.stateracloud.com/docs/operate/secret-keys/):
-      # the KMS key of before the move. koinon-api, the reconciler and the key-admin Job still unwrap the
+      # the KMS key that you used before the move. koinon-api, the reconciler and the key-admin Job still unwrap the
       # KEKs it wrapped; nothing new is ever wrapped with it. Set it when you change backend.openbao.key,
       # backend.awskms.keyId, the transit mount or the backend itself (also back to local), upgrade, then
       # add, activate, rewrap and retire KEKs (keyAdmin.addKey) and remove this block once `keys status`
@@ -630,7 +630,7 @@ secrets:
         awskms:
           # Region and key of the old AWS KMS key (ARN recommended). The IAM role or Pod Identity of
           # koinon-api, the reconciler and the key-admin Job needs kms:Decrypt on it too; the chart
-          # sets no role for it.
+          # sets no role for it, except roleArns below.
           region: ""
           keyId: ""
           endpoint: ""
@@ -638,6 +638,13 @@ secrets:
           # A ConfigMap in the release namespace with ca.crt for this key's endpoints; empty is the
           # image's system roots.
           caConfigMap: ""
+          # IRSA roles, one per identity, used only while the primary backend is not awskms (a move away
+          # from AWS KMS): then the pods still need an AWS identity to unwrap with the old key. While
+          # the primary is awskms, its own roleArns give the identity and these are not used.
+          roleArns:
+            api: ""
+            reconciler: ""
+            keyAdmin: ""
           timeout: ""
         openbao:
           address: ""

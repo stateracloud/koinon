@@ -156,6 +156,18 @@ var _ = Describe("the KEK monitor", func() {
 		Expect(logs.String()).To(ContainSubstring("still wrapped only by the read-only key"))
 	})
 
+	It("advises keys add, not the key-admin Job, when a key move went back to a local primary (issue 1298)", func(ctx SpecContext) {
+		old := &secretstoretest.FakeKMS{Name: "koinon-test-old"}
+		ws, err := secretstore.NewWrappers(secretstoretest.BoundOnlyUnset, secretstore.Local{}, old)
+		Expect(err).NotTo(HaveOccurred())
+		mon := &kekhealth.Monitor{Wrappers: ws, Metrics: m, Log: log}
+		mon.Observe(ctx, secretstore.Loaded{Active: "kek-2", Stored: map[string]secretstore.StoredKEK{
+			"kek-2": {Backend: secretstoretest.FakeKMSBackend, KeyID: old.KeyID(), Wrapped: []byte("x"), InstallID: secretstoretest.InstallA},
+		}})
+		Expect(logs.String()).To(And(ContainSubstring("still wrapped only by the read-only key"), ContainSubstring("keys add"),
+			Not(ContainSubstring("with the key-admin Job"))))
+	})
+
 	It("does not advise a rewrap when the bound-only policy refused the unbound KEKs (old issue 615)", func(ctx SpecContext) {
 		kms := &secretstoretest.FakeKMS{}
 		ws, err := secretstore.NewWrappers(secretstore.StaticBoundOnly(secretstoretest.BoundOnlySet), kms)

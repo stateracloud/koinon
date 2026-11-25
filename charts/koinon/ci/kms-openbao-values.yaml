@@ -22,6 +22,7 @@ secrets:
         backend: openbao
         openbao:
           address: https://openbao:8443
+          caConfigMap: openbao-ca
           key: koinon-kek-old
       keyAdmin:
         addKey: smoke-added-kek

@@ -625,6 +625,15 @@
                         "endpoint": {"type": "string", "pattern": "^(|https?://[^\\s/]+/?)$"},
                         "stsEndpoint": {"type": "string", "pattern": "^(|https?://[^\\s/]+/?)$"},
                         "caConfigMap": {"type": "string"},
+                        "roleArns": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "api": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"},
+                            "reconciler": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"},
+                            "keyAdmin": {"type": "string", "pattern": "^(|arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@/_-]+)$"}
+                          }
+                        },
                         "timeout": {"type": "string", "pattern": "^(|[0-9]+(ms|s|m))$"}
                       }
                     },

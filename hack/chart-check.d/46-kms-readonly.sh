@@ -17,8 +17,8 @@ ro_bao=(--set secrets.kek.kms.readOnly.backend=openbao --set secrets.kek.kms.rea
 lacks "no read-only key env by default" 'KOINON_READ_ONLY_|ro-awskms-ca|ro-openbao-ca'
 lacks "no read-only key env with a KMS primary alone" 'KOINON_READ_ONLY_|ro-awskms-ca|ro-openbao-ca' "${ro_primary[@]}"
 
-# AWS KMS: the flags reach koinon-api and the reconciler (deployments), the key-admin Job and the
-# run-evidence Job; the key ID is the old one; no credential and no AWS_* variable.
+# AWS KMS: the flags reach koinon-api and the reconciler (deployments) and the key-admin Job; the key
+# ID is the old one; no credential and no AWS_* variable.
 env_is KOINON_READ_ONLY_KEK_BACKEND awskms "${ro_primary[@]}" "${ro_aws[@]}"
 env_is KOINON_READ_ONLY_AWSKMS_REGION '"eu-central-1"' "${ro_primary[@]}" "${ro_aws[@]}"
 env_is KOINON_READ_ONLY_AWSKMS_KEY_ID "\"$ro_old\"" "${ro_primary[@]}" "${ro_aws[@]}"
@@ -53,7 +53,7 @@ env_is KOINON_READ_ONLY_OPENBAO_KEY '"koinon-kek-old"' "${bao_primary[@]}" "${ro
 env_is KOINON_READ_ONLY_OPENBAO_ROLE '"koinon-api"' "${bao_primary[@]}" "${ro_bao[@]}"
 env_is KOINON_OPENBAO_KEY '"koinon-kek"' "${bao_primary[@]}" "${ro_bao[@]}"
 bao_all=$(render "${bao_primary[@]}" "${ro_bao[@]}")
-hit -F 'value: "koinon-key-admin"' <<<"$bao_all" || fail "the key-admin Job signs in to the old key as the key-admin role"
+grep -F -A1 'name: KOINON_READ_ONLY_OPENBAO_ROLE' <<<"$bao_all" | grep -qF 'value: "koinon-key-admin"' || fail "the key-admin Job signs in to the old key as the key-admin role"
 [[ $(grep -c 'name: KOINON_READ_ONLY_OPENBAO_KEY' <<<"$bao_all") == 3 ]] || fail "koinon-api, the reconciler and the key-admin Job get the read-only OpenBao key"
 # A move back to local: the primary is local, the old KMS key is read-only.
 env_is KOINON_READ_ONLY_KEK_BACKEND openbao "${ro_bao[@]}"
@@ -85,4 +85,27 @@ if render --set secrets.kek.kms.readOnly.backend=openbao >/dev/null 2>"$out/ro-b
 fi
 if render --set secrets.kek.kms.readOnly.backend=local >/dev/null 2>"$out/ro-local.err"; then
 	fail "a local read-only backend must not render (a local KEK always opens)"
+fi
+
+# The old key's refusals mirror the primary's.
+ro_refuse() { # name, then helm args
+	local n=$1
+	shift
+	if render "$@" >/dev/null 2>"$out/ro-$n.err"; then fail "read-only key refusal: $n must not render"; fi
+}
+ro_refuse managed-aws --set secrets.kek.kms.readOnly.backend=awskms --set secrets.kek.kms.readOnly.awskms.region=eu-central-1 \
+	--set secrets.kek.kms.readOnly.awskms.keyId=alias/aws/kms
+ro_refuse arn-region --set secrets.kek.kms.readOnly.backend=awskms --set secrets.kek.kms.readOnly.awskms.region=eu-west-1 \
+	--set "secrets.kek.kms.readOnly.awskms.keyId=$ro_old"
+ro_refuse http-endpoint "${ro_aws[@]}" --set secrets.kek.kms.readOnly.awskms.endpoint=http://kms.example:8080
+ro_refuse http-bao --set secrets.kek.kms.readOnly.backend=openbao --set secrets.kek.kms.readOnly.openbao.address=http://old-bao.example:8200 \
+	--set secrets.kek.kms.readOnly.openbao.key=koinon-kek-old
+
+# IRSA: a move away from AWS KMS still gives the pods the AWS identity that unwraps with the old key.
+ro_irsa=arn:aws:iam::111122223333:role/koinon-old-kms
+if ! grep -qF "eks.amazonaws.com/role-arn: \"$ro_irsa\"" <<<"$(render "${bao_primary[@]}" "${ro_aws[@]}" --set "secrets.kek.kms.readOnly.awskms.roleArns.api=$ro_irsa")"; then
+	fail "the read-only awskms roleArns annotate the ServiceAccount while the primary is not awskms"
+fi
+if grep -qF "eks.amazonaws.com/role-arn" <<<"$(render "${ro_primary[@]}" "${ro_aws[@]}" --set "secrets.kek.kms.readOnly.awskms.roleArns.api=$ro_irsa")"; then
+	fail "with an awskms primary only the primary's roleArns annotate a ServiceAccount"
 fi

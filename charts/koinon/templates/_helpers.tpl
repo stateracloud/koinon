@@ -1029,7 +1029,7 @@ pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads st
 
 {{/*
 The read-only second wrapping key (values secrets.kek.kms.readOnly, issue 688 and 1298), as the KOINON_
-forms of the --read-only-* flags: the KMS key of before a key move. It only unwraps; nothing new is
+forms of the --read-only-* flags: the KMS key that you used before a key move. It only unwraps; nothing new is
 ever wrapped with it. It renders with any primary, local too (a move back to local). Each identity
 signs in with its own service account token as its own role; nothing here is a credential. The key
 must differ from the primary: koinon-api refuses to start with the same key twice, and the chart
@@ -1044,6 +1044,9 @@ refuses to render it.
 {{- if not (and $o.address $o.key) }}{{ fail "secrets.kek.kms.readOnly.openbao.address and key are required with readOnly.backend openbao" }}{{ end }}
 {{- if and (eq (include "koinon.kms" .root) "openbao") (eq ($o.transitMount | default "transit") ($kms.openbao.transitMount | default "transit")) (eq $o.key $kms.openbao.key) }}
 {{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another transit mount or key name" }}
+{{- end }}
+{{- if and (hasPrefix "http://" $o.address) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $o.address)) }}
+{{- fail "secrets.kek.kms.readOnly.openbao.address must be https: the KEKs travel to OpenBao (plain http only on a loopback address)" }}
 {{- end }}
 - name: KOINON_READ_ONLY_KEK_BACKEND
   value: openbao
@@ -1074,6 +1077,17 @@ refuses to render it.
 {{- if not (and $a.region $a.keyId) }}{{ fail "secrets.kek.kms.readOnly.awskms.region and keyId are required with readOnly.backend awskms" }}{{ end }}
 {{- if and (eq (include "koinon.kms" .root) "awskms") (eq $a.keyId $kms.awskms.keyId) }}
 {{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another AWS key ARN" }}
+{{- end }}
+{{- if hasPrefix "alias/aws/" $a.keyId }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId names an AWS managed key, whose key policy cannot limit who decrypts: use a customer managed key" }}
+{{- end }}
+{{- if and (hasPrefix "arn:" $a.keyId) (not (contains (printf ":kms:%s:" $a.region) $a.keyId)) }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId is a key ARN in another region than secrets.kek.kms.readOnly.awskms.region" }}
+{{- end }}
+{{- range $what, $e := dict "endpoint" $a.endpoint "stsEndpoint" $a.stsEndpoint }}
+{{- if and (hasPrefix "http://" $e) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $e)) }}
+{{- fail (printf "secrets.kek.kms.readOnly.awskms.%s must be https: the KEKs and signed requests travel to it (plain http only on a loopback address)" $what) }}
+{{- end }}
 {{- end }}
 {{- /* Same as the primary: no credential and no AWS_* variable. The pod's one identity (IRSA role or
 Pod Identity) needs kms:Decrypt on this key too. */}}
@@ -1169,11 +1183,18 @@ Job, the run-evidence Job) include these, next to the primary's.
 {{/*
 The annotations of an identity's ServiceAccount (dict root, role: api, reconciler or keyAdmin): with
 the awskms backend and an IRSA role for it, eks.amazonaws.com/role-arn, which makes EKS's webhook give
-the pod that role's web identity. Empty otherwise.
+the pod that role's web identity. While the primary is not awskms but the read-only key is (a move
+away from AWS KMS), the read-only key's roleArns give it, so the pod can still unwrap. Empty otherwise.
 */}}
 {{- define "koinon.kmsServiceAccountAnnotations" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- $ro := $kms.readOnly | default dict }}
 {{- if eq (include "koinon.kms" .root) "awskms" }}
-{{- with index .root.Values.secrets.kek.kms.awskms.roleArns .role }}
+{{- with index $kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
+{{- else if eq ($ro.backend | default "") "awskms" }}
+{{- with index ($ro.awskms.roleArns | default dict) .role }}
 eks.amazonaws.com/role-arn: {{ . | quote }}
 {{- end }}
 {{- end }}
