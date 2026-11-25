@@ -198,3 +198,43 @@ func AllAcked(ctx context.Context, db store.DBTX, revision int64, half gwv1.Half
 	}
 	return n == int64(len(ids)), nil
 }
+
+// LiveCopyMaxAge is how long after its last touch a gateway copy still counts as live. A copy touches
+// its row at the stream's poll interval (5 s by default), so this allows several missed beats.
+const LiveCopyMaxAge = 30 * time.Second
+
+// TouchCopy records that copy holds the State stream open now.
+func TouchCopy(ctx context.Context, db store.DBTX, copyID string) error {
+	if copyID == "" {
+		return errors.New("staterev: touch without a copy id")
+	}
+	if err := store.New(db).TouchGatewayStateCopy(ctx, copyID); err != nil {
+		return fmt.Errorf("staterev: touch copy: %w", err)
+	}
+	return nil
+}
+
+// ForgetCopy removes copy from the live set: its stream ended.
+func ForgetCopy(ctx context.Context, db store.DBTX, copyID string) error {
+	if err := store.New(db).DeleteGatewayStateCopy(ctx, copyID); err != nil {
+		return fmt.Errorf("staterev: forget copy: %w", err)
+	}
+	return nil
+}
+
+// LiveCopies returns the copies that touched their row within maxAge (LiveCopyMaxAge when zero).
+// Rows of copies that died without a clean end are removed after they pass that bound.
+func LiveCopies(ctx context.Context, db store.DBTX, maxAge time.Duration) ([]string, error) {
+	if maxAge <= 0 {
+		maxAge = LiveCopyMaxAge
+	}
+	q := store.New(db)
+	secs := int32(maxAge / time.Second)
+	ids, err := q.ListLiveGatewayStateCopies(ctx, secs)
+	if err != nil {
+		return nil, fmt.Errorf("staterev: list live copies: %w", err)
+	}
+	// Housekeeping at ten times the bound: a stale row never counts, so a failure here is harmless.
+	_, _ = q.PruneGatewayStateCopies(ctx, secs*10)
+	return ids, nil
+}

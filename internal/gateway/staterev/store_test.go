@@ -32,7 +32,7 @@ var _ = Describe("Publisher and acks", Ordered, func() {
 	}, NodeTimeout(3*time.Minute))
 
 	BeforeEach(func(ctx SpecContext) {
-		_, err := pool.Exec(ctx, "DELETE FROM gateway_state_revisions")
+		_, err := pool.Exec(ctx, "DELETE FROM gateway_state_revisions; DELETE FROM gateway_state_copies")
 		Expect(err).NotTo(HaveOccurred())
 		pub = staterev.Publisher{DB: pool}
 	})
@@ -202,6 +202,24 @@ var _ = Describe("Publisher and acks", Ordered, func() {
 		var acks int
 		Expect(pool.QueryRow(ctx, "SELECT count(*) FROM gateway_state_acks").Scan(&acks)).To(Succeed())
 		Expect(acks).To(BeZero(), "the ack of a pruned revision goes with it")
+	})
+
+	Describe("live copies", func() {
+		It("lists a copy that touched its row, drops one that is stale or ended, and one touch is one row", func(ctx SpecContext) {
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1")).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-1")).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "copy-2")).To(Succeed())
+			Expect(staterev.TouchCopy(ctx, pool, "")).NotTo(Succeed())
+			_, err := pool.Exec(ctx, "INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ('copy-old', now() - interval '5 minutes')")
+			Expect(err).NotTo(HaveOccurred())
+			live, err := staterev.LiveCopies(ctx, pool, 0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(live).To(Equal([]string{"copy-1", "copy-2"}))
+
+			Expect(staterev.ForgetCopy(ctx, pool, "copy-1")).To(Succeed())
+			live, _ = staterev.LiveCopies(ctx, pool, 0)
+			Expect(live).To(Equal([]string{"copy-2"}))
+		})
 	})
 
 	Describe("AllAcked", func() {

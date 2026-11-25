@@ -73,7 +73,7 @@ var _ = Describe("the gateway State stream", Ordered, func() {
 	}, NodeTimeout(3*time.Minute))
 
 	BeforeEach(func(ctx SpecContext) {
-		_, err := pool.Exec(ctx, "DELETE FROM gateway_state_revisions")
+		_, err := pool.Exec(ctx, "DELETE FROM gateway_state_revisions; DELETE FROM gateway_state_copies")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -171,6 +171,33 @@ var _ = Describe("the gateway State stream", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(u.GetRevision()).To(BeNumerically("<", r2))
 		Expect(u.GetMcp().GetTargets()[0].GetName()).To(Equal("one"))
+	})
+
+	It("keeps a copy in the live set while its stream is open and removes it when the stream ends (#1260)", func(ctx SpecContext) {
+		publish(ctx, "one")
+		_, c, _ := serve(stateserver.Config{PollInterval: 50 * time.Millisecond})
+		sctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		st, err := c.StreamState(sctx, &gwv1.StreamStateRequest{CopyId: "copy-live"})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(st.Close)
+		_, err = receive(ctx, st)
+		Expect(err).NotTo(HaveOccurred())
+		live := func() []string {
+			ids, err := staterev.LiveCopies(ctx, pool, 0)
+			Expect(err).NotTo(HaveOccurred())
+			return ids
+		}
+		Eventually(live).WithTimeout(5 * time.Second).Should(Equal([]string{"copy-live"}))
+		// The beat keeps last_seen moving while the stream is open.
+		var first, later time.Time
+		Expect(pool.QueryRow(ctx, "SELECT last_seen FROM gateway_state_copies WHERE copy_id = 'copy-live'").Scan(&first)).To(Succeed())
+		Eventually(func() time.Time {
+			Expect(pool.QueryRow(ctx, "SELECT last_seen FROM gateway_state_copies WHERE copy_id = 'copy-live'").Scan(&later)).To(Succeed())
+			return later
+		}).WithTimeout(5 * time.Second).Should(BeTemporally(">", first))
+		cancel()
+		Eventually(live).WithTimeout(5 * time.Second).Should(BeEmpty())
 	})
 
 	It("sends nothing before the first revision exists, then the first one", func(ctx SpecContext) {

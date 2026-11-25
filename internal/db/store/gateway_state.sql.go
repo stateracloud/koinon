@@ -46,6 +46,15 @@ func (q *Queries) CountGatewayCopiesAcked(ctx context.Context, arg CountGatewayC
 	return count, err
 }
 
+const deleteGatewayStateCopy = `-- name: DeleteGatewayStateCopy :exec
+DELETE FROM gateway_state_copies WHERE copy_id = $1
+`
+
+func (q *Queries) DeleteGatewayStateCopy(ctx context.Context, copyID string) error {
+	_, err := q.db.Exec(ctx, deleteGatewayStateCopy, copyID)
+	return err
+}
+
 const getLatestGatewayStateRevision = `-- name: GetLatestGatewayStateRevision :one
 SELECT revision, snapshot, digest, created_at FROM gateway_state_revisions
 ORDER BY revision DESC
@@ -114,6 +123,33 @@ func (q *Queries) InsertMCPCallLog(ctx context.Context, arg InsertMCPCallLogPara
 	return err
 }
 
+const listLiveGatewayStateCopies = `-- name: ListLiveGatewayStateCopies :many
+SELECT copy_id FROM gateway_state_copies
+WHERE last_seen > now() - make_interval(secs => $1::int)
+ORDER BY copy_id
+`
+
+// The copies seen within @max_age_seconds (the database clock, so replicas need no common clock).
+func (q *Queries) ListLiveGatewayStateCopies(ctx context.Context, maxAgeSeconds int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, listLiveGatewayStateCopies, maxAgeSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var copy_id string
+		if err := rows.Scan(&copy_id); err != nil {
+			return nil, err
+		}
+		items = append(items, copy_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockGatewayStatePublish = `-- name: LockGatewayStatePublish :exec
 
 SELECT pg_advisory_xact_lock(hashtextextended('koinon.gateway_state_revisions', 0))
@@ -138,6 +174,18 @@ func (q *Queries) NotifyGatewayStateRevision(ctx context.Context, payload string
 	return err
 }
 
+const pruneGatewayStateCopies = `-- name: PruneGatewayStateCopies :execrows
+DELETE FROM gateway_state_copies WHERE last_seen < now() - make_interval(secs => $1::int)
+`
+
+func (q *Queries) PruneGatewayStateCopies(ctx context.Context, maxAgeSeconds int32) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneGatewayStateCopies, maxAgeSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const pruneGatewayStateRevisions = `-- name: PruneGatewayStateRevisions :execrows
 DELETE FROM gateway_state_revisions
 WHERE revision < (SELECT max(revision) FROM gateway_state_revisions)
@@ -158,4 +206,15 @@ func (q *Queries) PruneGatewayStateRevisions(ctx context.Context, arg PruneGatew
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const touchGatewayStateCopy = `-- name: TouchGatewayStateCopy :exec
+INSERT INTO gateway_state_copies (copy_id, last_seen) VALUES ($1, now())
+ON CONFLICT (copy_id) DO UPDATE SET last_seen = now()
+`
+
+// A gateway copy holds the State stream open: it is live now.
+func (q *Queries) TouchGatewayStateCopy(ctx context.Context, copyID string) error {
+	_, err := q.db.Exec(ctx, touchGatewayStateCopy, copyID)
+	return err
 }
