@@ -327,6 +327,7 @@ printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n
 printf 'm\n' >"$tmp/m.txt"
 if check "$tmp/m.yml" "$tmp/m.txt" >/dev/null 2>&1; then echo "FAIL: a matrix job passed"; exit 1; fi
 # A matrix job owned by a required job that needs it and reads its result passes; one that does not read it fails.
+# shellcheck disable=SC2016 # the fixture holds a literal workflow expression, not a shell variable
 printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n  agg:\n    name: agg\n    needs: [m]\n    steps:\n      - run: echo "${{ needs.m.result }}"\n' >"$tmp/m2.yml"
 printf 'agg\n' >"$tmp/m2.txt"
 check "$tmp/m2.yml" "$tmp/m2.txt" >/dev/null 2>&1 || { echo "FAIL: a matrix job owned by a required job failed"; exit 1; }
