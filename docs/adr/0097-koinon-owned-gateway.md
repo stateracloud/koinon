@@ -538,6 +538,24 @@ prefix in the guest, the egress listener in the chart and a kind e2e) and part C
 transition profile) follow. Prior art: Fly.io's Tokenizer, the MCP credential path of decision 12
 (`mcpgateway.StaticCredentials`, the credential scrubber).
 
+Record (2026-11-25, #1086 part C2): the actor token and the egress listener. `gateway.mcp.koinon.egress`
+turns on koinon-gateway's egress listener (its own port, default 8081, never the MCP port; it needs
+`gateway.mcp.driver=koinon`). The ensure-secrets Job makes one Ed25519 key; koinon-agentd mounts only its
+seed and koinon-gateway only its public key, as `<key ID>.pub`. koinon-agentd mints the actor token outside
+the guest for both drivers: a compact JWS with the org slug, the agent ID and the run ID, 15 minutes
+long, written again every 5 minutes. It writes the token and the git prefix
+(`url.<gateway>/egress/<host>/.insteadOf`, with the token in `http.extraHeader` as `Koinon-Actor-Token`)
+into the sandbox through the driver's exec, to `/tmp/.koinon-egress`: outside the home, so no checkpoint
+holds it, and it removes the file when the run ends. The token is never logged. No forge credential is in
+the guest. The reconciler adds an enforced L7 sandbox rule (`koinon_egress`) for the listener: it mirrors
+each allow and deny rule of the forge read grant under `/egress/<host[:port]>`, so the guest reaches the
+same paths through the gateway as it did directly. `--egress-ca-file` (`gateway.mcp.koinon.egress.caBundle`) adds private
+roots for the upstreams of the listener only. The network policies let sandboxes reach the egress port
+only. A run of an agent whose grant gives no read access gets 503 `credential_unavailable` from the
+gateway: it fails closed. The kind e2e clones from a fake Gitea over HTTPS through the listener.
+Prior art: SPIFFE JWT-SVIDs (a short-lived identity, not a credential), git's
+`insteadOf` and `http.extraHeader`.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
