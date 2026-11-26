@@ -48,8 +48,9 @@ def http_status(c):
     """GET / with `Host: host:port` through the egress gateway. The TCP connection goes to the address
     of "via" (a name the `*` rule lets through, resolved here), so it leaves the guest and the gateway
     resolves "host" itself; a name that the guest resolves to its own loopback is never connected to.
-    Returns "status NNN server=<Server header or ->  envoy=<0|1>", or the error name. A via address
-    that is loopback or unspecified is reported as "badvia", so a check cannot pass without a gateway."""
+    Returns "status NNN server=<Server header or ->  envoy=<0|1> upstream=<0|1>", or the error name. A via address
+    that is loopback or unspecified is reported as "badvia". The request carries the headers that the GCE
+    (Metadata-Flavor) and Azure (Metadata) metadata servers require, so a server that is reached answers 200, so a check cannot pass without a gateway."""
     try:
         infos = socket.getaddrinfo(c["via"], c["port"], type=socket.SOCK_STREAM)
     except OSError as e:
@@ -61,7 +62,7 @@ def http_status(c):
     s.settimeout(8)
     try:
         s.connect(addr)
-        s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
+        s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nMetadata-Flavor: Google\r\nMetadata: true\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
         data = b""
         while b"\r\n\r\n" not in data and len(data) < 8192:
             chunk = s.recv(2048)
@@ -74,7 +75,10 @@ def http_status(c):
             return "noresponse"
         headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
         envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
-        return "status %s server=%s envoy=%d" % (parts[1], headers.get("server", "-"), envoy)
+        # x-envoy-upstream-service-time is set only on an answer that Envoy proxied from an upstream: the
+        # gateway's own refusal never has it, so it marks a destination that was reached.
+        upstream = int("x-envoy-upstream-service-time" in headers)
+        return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
     except OSError as e:
         return err_name(e)
     finally:

@@ -119,7 +119,7 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 		t := targets(envOr("KOINON_ESCAPE_EGRESS_CONTROL", defaultControl))[0]
 		res := rig.probeIn(ctx, rig.workspace, name, check{"id": "control", "op": "http_status", "host": t.host, "via": t.host, "port": t.port})
 		Expect(res["control"]).To(MatchRegexp(`^status [23]\d\d `),
-			"the `*` rule did not let %s through (does atenet-egress have a route to it? see the precondition above), so a denial below would mean nothing", t)
+			"the `*` rule did not let %s through (does atenet-egress have a route to it? see the precondition above and docs/dev/escape-substrate.md), so a denial below would mean nothing", t)
 	}, NodeTimeout(2*time.Minute))
 
 	It("refuses the metadata address, the egress pod's loopback and the Envoy admin port, also under the `*` rule", func(ctx SpecContext) {
@@ -133,10 +133,13 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 			got, _ := res[c["id"].(string)].(string)
 			GinkgoWriter.Printf("%s -> %s\n", c["id"], got)
 			// A refusal is the gateway's own: a reset it sends, or 403, 502 or 503 with an Envoy marker
-			// (the `server` or an `x-envoy-*` header). A 401 or 400 is no refusal: a metadata server
+			// (the `server` or an `x-envoy-*` header) and no `x-envoy-upstream-service-time`, which Envoy adds
+			// to every answer it proxied from an upstream (upstream=1: the destination was reached). The probe
+			// sends the headers that GCE and Azure metadata servers need, so a server that is reached
+			// answers 200, not 403. A 401 or 400 is no refusal: a metadata server
 			// that is reached answers that to a bare GET (AWS IMDSv2, Azure IMDS). "badvia" and
 			// "ECONNREFUSED" mean the connection never reached the gateway, so they prove nothing.
-			Expect(got).To(Or(Equal("ECONNRESET"), MatchRegexp(`^status (403|502|503) .* envoy=1$`)), c["id"])
+			Expect(got).To(Or(Equal("ECONNRESET"), MatchRegexp(`^status (403|502|503) .* envoy=1 upstream=0$`)), c["id"])
 		}
 	}, NodeTimeout(racescale.D(3*time.Minute)))
 })
