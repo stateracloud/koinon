@@ -19,10 +19,11 @@ import { orgName, useOrg } from '@/lib/org-context'
 /**
  * OrgSwitcher is the org menu under the logo (ADR 0126 section 4): the team orgs of the user with the role, and a
  * "Platform console" item for platform admins. The personal org is not in the list (OrgProvider leaves it out), and
- * there is no "Create org" item (ADR 0126 section 7).
+ * there is no "Create org" item (ADR 0126 section 7). In an org that a platform admin opened without being a member
+ * of it, the role reads "Platform admin" and no item is checked; picking a team org ends the acting state.
  */
 export function OrgSwitcher({ platformAdmin }: { platformAdmin: boolean }) {
-  const { org, memberships, setOrgId } = useOrg()
+  const { org, memberships, setOrgId, acting } = useOrg()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -33,7 +34,7 @@ export function OrgSwitcher({ platformAdmin }: { platformAdmin: boolean }) {
               <span className="sr-only">Org:</span>{' '}
               {orgName(org)}
             </span>
-            <span className="text-muted-foreground text-xs font-normal">{orgRoleLabel(org.role)}</span>
+            <span className="text-muted-foreground text-xs font-normal">{acting ? 'Platform admin' : orgRoleLabel(org.role)}</span>
           </span>
           <ChevronsUpDownIcon aria-hidden className="text-muted-foreground" />
         </Button>
