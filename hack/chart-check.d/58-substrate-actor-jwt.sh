@@ -40,7 +40,7 @@ n=$(render "${aj[@]}" --show-only templates/ensure-secrets.yaml | grep -c 'actor
 # The CA: a read-only mount of the servicedns ClusterTrustBundle, or a ConfigMap that replaces it. Never a Secret.
 gw=$(render "${aj[@]}" "${aj_gw[@]}")
 grep -Eq -A2 '^            - name: substrate-idp-ca$' <<<"$gw" || fail "substrate: the gateway does not mount the issuer CA"
-grep -A2 '^            - name: substrate-idp-ca$' <<<"$gw" | grep -Fq 'readOnly: true' || fail "substrate: the issuer CA mount must be read-only"
+grep -A2 '^            - name: substrate-idp-ca$' <<<"$gw" | hit -F 'readOnly: true' || fail "substrate: the issuer CA mount must be read-only"
 vol=$(awk '/^        - name: substrate-idp-ca$/{p=1; print; next} p && /^        - name: /{p=0} p' <<<"$gw")
 grep -Fq 'signerName: "servicedns.podcert.ate.dev/identity"' <<<"$vol" || fail "substrate: the CA must be the servicedns ClusterTrustBundle"
 grep -Fq 'podcert.ate.dev/canarying: live' <<<"$vol" || fail "substrate: the CA bundle must select the live bundles"
