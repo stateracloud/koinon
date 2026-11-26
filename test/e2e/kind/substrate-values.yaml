@@ -56,7 +56,7 @@ execution:
     # the image reference names, and an egress rule for that range and port.
     imageCache:
       upstreams:
-        - {host: localhost:5001, url: "http://kind-registry:5000"}
+        - {host: localhost:5001, url: "http://kind-registry:5000", allowHTTP: true}
         - {host: ghcr.io, url: "https://ghcr.io"}
         - {host: docker.io, url: "https://registry-1.docker.io"}
         - {host: quay.io, url: "https://quay.io"}

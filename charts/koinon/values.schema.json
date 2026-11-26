@@ -817,7 +817,7 @@
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["host", "url"],
-                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https://"}}
+                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https?://"}, "allowHTTP": {"type": "boolean"}}
                   }
                 },
                 "clusterDomain": {"$ref": "#/definitions/nonEmpty"},

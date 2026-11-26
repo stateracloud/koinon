@@ -692,6 +692,7 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
 {{- if or $s.imageMirrors $s.imageRegistry -}}{{- fail "execution.substrate.imageCache.enabled is the one image source: do not set imageMirrors or imageRegistry with it. For an operator mirror set imageCache.enabled=false" -}}{{- end -}}
 {{- if not $s.imageCache.upstreams -}}{{- fail "execution.substrate.imageCache.upstreams is empty: the cache would sync nothing" -}}{{- end -}}
 {{- range $s.imageCache.upstreams -}}
+{{- if and (hasPrefix "http://" .url) (not .allowHTTP) -}}{{- fail (printf "execution.substrate.imageCache.upstreams: %s is a plain http URL; set allowHTTP: true on that entry to accept it (a private registry), and add its range to imageCache.egress.extra" .host) -}}{{- end -}}
 {{- $entries = append $entries (printf "%s=%s/%s" (lower .host) (include "koinon.imageCache.host" $) (lower .host)) -}}
 {{- end -}}
 {{- else -}}

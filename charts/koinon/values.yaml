@@ -1137,6 +1137,8 @@ execution:
       # url is where the cache pulls it. A reference whose host is not listed is not rewritten, so atelet (which has no
       # route to it) cannot pull it: add the host here, or leave it out on purpose. Docker Hub redirects blob downloads
       # to a CDN, and the cache follows the redirect itself; atelet never sees the redirect host.
+      # A plain http url (a private registry) is refused unless the entry sets allowHTTP: true; add its range and port to
+      # egress.extra as well.
       upstreams:
         - {host: ghcr.io, url: "https://ghcr.io"}
         - {host: docker.io, url: "https://registry-1.docker.io"}

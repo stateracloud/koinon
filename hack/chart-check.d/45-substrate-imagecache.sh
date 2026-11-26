@@ -161,3 +161,4 @@ grep -Fq 'cidr: "172.18.0.0/16"' <<<"$ic_extra" || fail "egress.extra must name 
 grep -Eq 'port: 5000, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must name its port"
 grep -Eq 'port: 443, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must keep the 443 rule"
 capacity_refused "an egress.extra entry without a port" "port" "${isub[@]}" "${icache[@]}" --set 'execution.substrate.imageCache.egress.extra[0].cidr=172.18.0.0/16'
+has "an http upstream renders with allowHTTP" '"destination": "/r.example.com"' "${isub[@]}" --set 'execution.substrate.imageCache.upstreams[0].host=r.example.com' --set 'execution.substrate.imageCache.upstreams[0].url=http://r.example.com:5000' --set 'execution.substrate.imageCache.upstreams[0].allowHTTP=true' "${icache[@]}"
