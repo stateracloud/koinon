@@ -141,7 +141,7 @@ example "documentation" "" 1 docs/design.md
 for f in go.mod go.sum hack/govulncheck.sh .github/workflows/govulncheck.yml hack/versions.env; do
 	if paths_job_triggers vuln "$f"; then ok; else bad "the vuln rule must match $f"; fi
 done
-for f in hack/spike/acpdrive/go.mod hack/spike/acpdrive/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
+for f in hack/spike/approver/go.mod hack/spike/approver/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
 	if paths_job_triggers vuln "$f"; then bad "the vuln rule must not match $f"; else ok; fi
 done
 # The `fuzz` rule (#684): the fuzzed packages and the script, not every Go file.
