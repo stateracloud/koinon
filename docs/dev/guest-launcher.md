@@ -157,15 +157,15 @@ kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
 The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
 modes. Two results follow:
 
-- **Upload.** The front writes the archive, and the payload (uid 10001) extracts it. The driver first lets
-  the payload make a staging directory, `mkdir -m 0733 /tmp/koinon-upload-<random>`. The front writes
-  `archive.tar` there with mode `0644`, the payload runs `tar`, then `rm -rf` of the staging directory. The
-  payload owns the directory, so it can remove the root-owned archive. The checkpoint restore uses Upload too.
+- **Upload.** The driver is unchanged by #1387. How Upload and the checkpoint restore work with a non-root
+  payload is open work in #1478. A directory that the payload owns must not hold the archive that the root
+  front writes (a symlink swap).
 - **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
   `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
-  of #1387 must show Exec in `/sandbox`, Upload and the checkpoint restore with the real front image.
+  of #1387 must show the runsc network mode, Exec in `/sandbox` as uid 10001, `CapEff` 0 and the escape
+  suite. The Upload and restore proof belongs to #1478.
 
 **`vm` tier.** The template keeps the Substrate default set. The Substrate v1.0.1 microVM guest gave
 payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so the drop failed

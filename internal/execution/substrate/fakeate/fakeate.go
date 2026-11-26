@@ -280,18 +280,6 @@ func (c *Cluster) File(atespace, name, path string) ([]byte, bool) {
 	return append([]byte(nil), b...), ok
 }
 
-// FileMode returns the mode that WriteFile sent for a file in an actor's guest.
-func (c *Cluster) FileMode(atespace, name, path string) (uint32, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	a, ok := c.actors[key{atespace, name}]
-	if !ok {
-		return 0, false
-	}
-	m, ok := a.modes[path]
-	return m, ok
-}
-
 // Templates returns the names of the templates of an atespace.
 func (c *Cluster) Templates(atespace string) []string {
 	c.mu.Lock()

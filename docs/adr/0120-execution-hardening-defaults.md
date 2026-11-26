@@ -791,14 +791,15 @@ root payload from two tiers and leaves the third as it was.
   `ip_unprivileged_port_start`). The lab run above started the front with this set. This is true only when runsc
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
-- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. So the driver lets the
-  payload make a staging directory (mode `0733`). The front writes the archive there with mode `0644`, and the
-  payload extracts it and removes the directory. A spec in `internal/execution/substrate` checks the order and the
-  modes. The checkpoint restore uses the same path.
+- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
+  Upload code of before #1387 unchanged. A safe design for Upload and the checkpoint restore under a non-root
+  payload is open work in [#1478](https://github.com/stateracloud/koinon/issues/1478). A staging directory that
+  the payload owns lets the payload swap a symlink while the root front writes, so this amendment does not
+  contain one.
 - **Before #1387 closes.** A proof run with the real front image and the escape suite on the lab. The maintainer
-  runs it. It must show the runsc network mode, Exec in `/sandbox`, Upload and the checkpoint restore. The owner
-  and mode of the home volume at run time decide whether the front, without `CAP_DAC_READ_SEARCH`, can enter
-  `/sandbox`.
+  runs it. It must show the runsc network mode, Exec in `/sandbox` as uid 10001, `CapEff` 0, and the escape
+  suite. The proof for Upload and the checkpoint restore belongs to #1478. The owner and mode of the home volume
+  at run time decide whether the front, without `CAP_DAC_READ_SEARCH`, can enter `/sandbox`.
 
 ### Prior art
 
