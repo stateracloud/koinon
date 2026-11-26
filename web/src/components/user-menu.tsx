@@ -26,8 +26,11 @@ export function UserMenu({ name, email, onSignOut, signingOut }: { name: string;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="w-full justify-between px-3" aria-label={`User menu: ${name}`}>
-          <span className="truncate">{name}</span>
+        <Button variant="ghost" className="w-full justify-between px-3">
+          <span className="truncate">
+            <span className="sr-only">User menu:</span>{' '}
+            {name}
+          </span>
           <ChevronsUpDownIcon aria-hidden className="text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>

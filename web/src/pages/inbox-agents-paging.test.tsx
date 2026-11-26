@@ -18,7 +18,7 @@ describe('Inbox agents paging', () => {
       service(AgentService, { listAgents })
       service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
-    renderApp(transport, '/')
+    renderApp(transport, '/inbox')
     expect(await screen.findByText(/is unhealthy and takes no runs/)).toBeInTheDocument()
         expect(asked).toEqual(['', 'p1', 'p2'])
   })

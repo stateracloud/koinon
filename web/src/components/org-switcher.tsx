@@ -26,9 +26,13 @@ export function OrgSwitcher({ platformAdmin }: { platformAdmin: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="h-auto w-full justify-between px-3 py-1.5 text-left" aria-label={`Org: ${orgName(org)}`}>
+        {/* The name is the visible text with a hidden "Org:" in front (WCAG 2.5.3, label in name). */}
+        <Button variant="outline" className="h-auto w-full justify-between px-3 py-1.5 text-left">
           <span className="grid min-w-0">
-            <span className="truncate font-medium">{orgName(org)}</span>
+            <span className="truncate font-medium">
+              <span className="sr-only">Org:</span>{' '}
+              {orgName(org)}
+            </span>
             <span className="text-muted-foreground text-xs font-normal">{orgRoleLabel(org.role)}</span>
           </span>
           <ChevronsUpDownIcon aria-hidden className="text-muted-foreground" />
