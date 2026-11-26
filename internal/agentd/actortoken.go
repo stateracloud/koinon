@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 )
@@ -39,9 +40,34 @@ const DefaultActorTokenRefresh = 5 * time.Minute
 // actorTokenWriteTimeout bounds each write and the final remove of the token file.
 const actorTokenWriteTimeout = 30 * time.Second
 
+// Agent Substrate (Config.ActorIdentityOutside, issue #1386, ADR 0120 amendment of 2026-11-26) differs:
+// atenet-egress, outside the guest, replaces the public placeholder in the actor token header with the
+// actor's own token. koinon-agentd then mints no token and writes no token file, and the guest's git
+// configuration sends only actortoken.Placeholder (codehost.EgressPlaceholderGitConfig).
+
 // egressGit reports whether git of a run on code host h goes through the gateway.
 func (r *runner) egressGit(h codeHost) bool {
-	return r.p.cfg.ActorTokens != nil && h.connector != ""
+	return (r.p.cfg.ActorTokens != nil || r.tokenOutside()) && h.connector != ""
+}
+
+// tokenOutside reports whether git goes through the gateway with the actor identity added outside the
+// guest: no token file and no refresh.
+func (r *runner) tokenOutside() bool {
+	return r.p.cfg.ActorIdentityOutside && r.p.cfg.EgressURL != ""
+}
+
+// egressGitConfig is what the guest's git configuration adds for the gateway, and before it, on
+// OpenShell, the token file it includes.
+func (r *runner) egressGitConfig(ctx context.Context, workspace, sandbox string, loc connectors.Location) ([]byte, error) {
+	if r.tokenOutside() {
+		return codehost.EgressPlaceholderGitConfig(r.p.cfg.EgressURL, loc), nil
+	}
+	// The token first: the config's include of a file that is not there yet is ignored by git, but a
+	// rewrite to the gateway without the token would be refused.
+	if err := r.writeActorToken(ctx, workspace, sandbox); err != nil {
+		return nil, err
+	}
+	return codehost.EgressGitConfig(r.p.cfg.EgressURL, loc), nil
 }
 
 // actor is who the run's tokens speak for.
@@ -120,15 +146,29 @@ func (r *runner) keepActorToken(ctx context.Context, workspace, sandbox string) 
 }
 
 // checkEgress checks the egress settings: ActorTokens and EgressURL go together, and the URL is a
-// plain http or https base that holds nothing a guest must not see.
+// plain http or https base that holds nothing a guest must not see. With ActorIdentityOutside there
+// are no ActorTokens, and the URL must be http.
 func (c *Config) checkEgress() error {
+	if c.ActorIdentityOutside {
+		if c.ActorTokens != nil {
+			return errors.New("agentd: ActorTokens and ActorIdentityOutside exclude each other: the egress layer adds the actor identity outside the guest")
+		}
+		if c.EgressURL == "" {
+			return nil
+		}
+		if err := CheckEgressURL(c.EgressURL, true); err != nil {
+			return err
+		}
+		c.EgressURL = strings.TrimRight(c.EgressURL, "/")
+		return nil
+	}
 	if c.ActorTokens == nil && c.EgressURL == "" {
 		return nil
 	}
 	if c.ActorTokens == nil || c.EgressURL == "" {
 		return errors.New("agentd: ActorTokens and EgressURL go together")
 	}
-	if err := CheckEgressURL(c.EgressURL); err != nil {
+	if err := CheckEgressURL(c.EgressURL, false); err != nil {
 		return err
 	}
 	c.EgressURL = strings.TrimRight(c.EgressURL, "/")
@@ -141,11 +181,16 @@ func (c *Config) checkEgress() error {
 
 // CheckEgressURL checks that s is a plain http or https base URL that holds nothing a guest must not
 // see: it is written into the sandbox's git configuration. koinon-agentd checks its flag with it at
-// start, before it reads any key.
-func CheckEgressURL(s string) error {
+// start, before it reads any key. With identityOutside (Agent Substrate) it must be http: atenet-egress
+// replaces the actor token header only on its clear-text rule, and through TLS the guest's placeholder
+// would reach the gateway unchanged (ADR 0120 amendment of 2026-11-26, item 3).
+func CheckEgressURL(s string, identityOutside bool) error {
 	u, err := url.Parse(s)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("agentd: EgressURL must be an http or https URL, got %q", s)
+	}
+	if identityOutside && u.Scheme != "http" {
+		return fmt.Errorf("agentd: EgressURL must be an http URL on Agent Substrate, got %q: the egress layer adds the actor token only to clear-text requests", s)
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" || u.Opaque != "" || u.ForceQuery {
 		return errors.New("agentd: EgressURL must not carry user info, a path, a query or a fragment")

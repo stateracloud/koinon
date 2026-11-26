@@ -52,6 +52,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		r    *reconciler.Reconciler
 		now  atomic.Pointer[time.Time]
 		ws   string
+		ctl  ateapiv1.ControlClient
 	)
 	pass := func(ctx context.Context) {
 		GinkgoHelper()
@@ -69,6 +70,12 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		return sb
 	}
 	actorOf := func(ctx context.Context, agent pgtype.UUID) string { return sandboxRow(ctx, agent).ActorRef() }
+	forgeRows := func(ctx context.Context, agent pgtype.UUID) int {
+		GinkgoHelper()
+		var n int
+		Expect(pool.QueryRow(ctx, "SELECT count(*) FROM gateway_agent_forge WHERE org_id = $1 AND agent_id = $2", org, agent).Scan(&n)).To(Succeed())
+		return n
+	}
 	// stateActors are the actors of agent in the newest stored gateway State.
 	stateActors := func(ctx context.Context, agent pgtype.UUID) []gateway.EgressActor {
 		GinkgoHelper()
@@ -90,6 +97,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		DeferCleanup(cl.Stop)
 		DeferCleanup(control.Close)
 		DeferCleanup(router.Close)
+		ctl = ateapiv1.NewControlClient(control)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
 			GatewayRoutes:       []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
@@ -204,7 +212,11 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(cl.EgressAllowed(ws, plainActor, gw, egressPort)).To(BeFalse(), "an actor without a code-host grant has no route to the egress listener")
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, egressPort)).To(BeTrue(), "the agent with the grant")
-		creates := cl.Calls("CreateActor")
+		// Issue #1386: only an agent with a forge row can reach the egress listener, so a run that does not
+		// wait for its forge row needs no wait for its actor either (forgeWant).
+		Expect(forgeRows(ctx, plain.ID)).To(BeZero(), "no egress listener, no forge row")
+		Expect(forgeRows(ctx, forge.ID)).To(Equal(1))
+		creates, deletes := cl.Calls("CreateActor"), cl.Calls("DeleteActor")
 
 		By("a new version without the grant takes the listener away on the next pass, without a new sandbox")
 		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: forge.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user})
@@ -215,7 +227,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, egressPort)).To(BeFalse())
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
 		Expect(cl.Calls("CreateActor")).To(Equal(creates), "the grant is not part of the sandbox spec")
-		Expect(cl.Calls("DeleteActor")).To(BeZero())
+		Expect(cl.Calls("DeleteActor")).To(Equal(deletes))
+		Expect(forgeRows(ctx, forge.ID)).To(BeZero(), "the listener and the forge row go together")
 		Expect(cl.State(ws, forgeActor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	})
 
@@ -224,10 +237,11 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		pass(ctx)
 		actor := actorOf(ctx, agent.ID)
 		Eventually(func() ateapiv1.ActorState { return cl.State(ws, actor) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		deletes := cl.Calls("DeleteActor")
 		pass(ctx)
 		pass(ctx)
 		Expect(cl.Calls("CreateActor")).To(Equal(1), "the Substrate driver keeps no labels: the spec identity must hold across passes")
-		Expect(cl.Calls("DeleteActor")).To(BeZero())
+		Expect(cl.Calls("DeleteActor")).To(Equal(deletes))
 		Expect(actorOf(ctx, agent.ID)).To(Equal(actor))
 	})
 
@@ -272,6 +286,34 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Atespace: ws, Name: second.ActorName.String, UID: second.ActorUid.String,
 			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
 		}}), "only the current actor")
+	})
+
+	// Issue #1386: a create can make an actor that goes before a pass records its UID. atenet-egress keeps
+	// tokens by actor name, so the next create must not use that name again. The driver forgets the
+	// gateway access of the old name (ForgetGatewayAccess, tested with the driver).
+	It("never sends an actor name to a create twice, also when no UID was recorded", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, user)
+		pass(ctx)
+		first := sandboxRow(ctx, agent.ID)
+		Expect(first.ActorName.Valid).To(BeTrue())
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, first.ActorName.String) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+
+		By("the actor goes behind the reconciler's back, and its UID is not recorded")
+		_, err := pool.Exec(ctx, `UPDATE agent_sandboxes SET actor_uid = NULL WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = ctl.DeleteActor(ctx, &ateapiv1.DeleteActorRequest{Actor: &ateapiv1.ObjectRef{Atespace: ws, Name: first.ActorName.String}})
+		Expect(err).NotTo(HaveOccurred())
+		creates, deletes := cl.Calls("CreateActor"), cl.Calls("DeleteActor")
+
+		pass(ctx)
+		second := sandboxRow(ctx, agent.ID)
+		Expect(second.ActorName.String).NotTo(Equal(first.ActorName.String), "a new name for the new actor")
+		Expect(second.ActorName.String).To(HavePrefix(first.SandboxName + "-"))
+		Expect(cl.Calls("CreateActor")).To(Equal(creates + 1))
+		Expect(cl.Calls("DeleteActor")).To(Equal(deletes), "the old name holds no actor: only the driver's record of it goes")
+		Expect(cl.State(ws, first.ActorName.String)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "nothing under the old name")
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, second.ActorName.String) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		Expect(cl.EgressAllowed(ws, second.ActorName.String, fakeate.GatewayHost, fakeate.GatewayPort)).To(BeTrue(), "the new name has its gateway access")
 	})
 })
 

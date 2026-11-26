@@ -146,6 +146,10 @@ type GatewayAccessSetter interface {
 	// time). A sandbox that does not exist yet gets it when it is created or restored. A
 	// driver that has no access recorded for a sandbox gives it the zero value: it fails closed.
 	SetGatewayAccess(ctx context.Context, workspace, name string, access GatewayAccess) error
+	// ForgetGatewayAccess drops the access recorded for sandbox name, with no call to the control plane.
+	// The reconciler calls it for a name that no sandbox uses again (an old Substrate actor name, issue
+	// #1386), so that the record does not outlive the name.
+	ForgetGatewayAccess(workspace, name string)
 }
 
 // GatewayAccessSetterOf returns the capability of b, or nil when b has none. It looks through the

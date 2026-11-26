@@ -205,6 +205,11 @@ func (d *Driver) SetGatewayAccess(ctx context.Context, workspace, name string, a
 	return err
 }
 
+// ForgetGatewayAccess implements [execution.GatewayAccessSetter]. It changes no actor and no policy.
+func (d *Driver) ForgetGatewayAccess(workspace, name string) {
+	d.forgetAccess(key{workspace, name})
+}
+
 // forgetAccess drops the access recorded for the sandbox, so that the record does not outlive the actor (an
 // ephemeral agent gets a new sandbox for each task). The reconciler sets the access again before a later create.
 func (d *Driver) forgetAccess(k key) {

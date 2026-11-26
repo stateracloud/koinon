@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -316,4 +317,73 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 			c.ActorTokens, c.EgressURL, c.ActorTokenRefresh = minter(), egressURL, 6*time.Minute
 		}),
 	)
+
+	// Agent Substrate (issue #1386, ADR 0120 amendment of 2026-11-26): atenet-egress adds the actor
+	// identity outside the guest, so koinon-agentd writes no token into the guest.
+	Describe("with the actor identity added outside the guest", func() {
+		outside := func(c *agentd.Config) { c.ActorIdentityOutside, c.EgressURL = true, egressURL }
+
+		It("sends the placeholder through the gateway, writes no token file and still waits for the forge credential", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 0, false, "")
+			// Closing the harness takes two seconds: a refresh loop would write in that time.
+			e.harness.set(func(h *fakeHarness) { h.lingers = true })
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", outside, func(c *agentd.Config) {
+				c.ActorTokenRefresh, c.ReconcileNudge = 100*time.Millisecond, 100*time.Millisecond
+			})
+			Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.waiting_for_forge") }).
+				WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			record(ctx, e, 4, true, "")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+
+			cfg, ok := e.files.get(codehost.SandboxGitConfig)
+			Expect(ok).To(BeTrue())
+			Expect(string(cfg)).To(ContainSubstring("[url \"" + egressURL + "/egress/ghes.example.test/\"]\n\tinsteadOf = https://ghes.example.test/\n"))
+			Expect(string(cfg)).To(ContainSubstring("[http \"" + egressURL + "/egress/\"]\n\textraHeader = " + codehost.ActorTokenHeader + ": " + actortoken.Placeholder + "\n"))
+			Expect(string(cfg)).NotTo(ContainSubstring("[include]"))
+			Expect(string(cfg)).NotTo(ContainSubstring(codehost.SandboxEgressToken))
+			Expect(e.files.history(codehost.SandboxEgressToken)).To(BeEmpty(), "no token file is written or removed")
+		})
+
+		It("leaves git on the driver's egress without an egress URL", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside = true })
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			cfg, _ := e.files.get(codehost.SandboxGitConfig)
+			Expect(string(cfg)).NotTo(ContainSubstring("/egress/"))
+			Expect(e.files.history(codehost.SandboxEgressToken)).To(BeEmpty())
+		})
+
+		DescribeTable("refuses settings that would send the placeholder unchanged or put a token in the guest",
+			func(mutate func(*agentd.Config), want string) {
+				c := agentd.Config{OwnerID: "agentd-a", GatewayURL: "http://gw:8080", ActorIdentityOutside: true}
+				mutate(&c)
+				_, err := agentd.New(nil, nil, c)
+				Expect(err).To(MatchError(ContainSubstring(want)))
+			},
+			Entry("an https egress URL", func(c *agentd.Config) { c.EgressURL = "https://koinon-mcp-gateway.koinon.svc:8081" }, "must be an http URL on Agent Substrate"),
+			Entry("a minter", func(c *agentd.Config) { c.ActorTokens, c.EgressURL = minter(), egressURL }, "exclude each other"),
+			Entry("user info", func(c *agentd.Config) { c.EgressURL = "http://u:p@gw:8081" }, "must not carry user info"),
+		)
+	})
+
+	It("names the sandbox's actor in every driver call (#1386)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		// A Substrate actor has its own name; the sandbox name has no actor any more.
+		actor := e.sandbox + "-0123abcd"
+		_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: actor, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetAgentSandboxActorName(ctx, store.SetAgentSandboxActorNameParams{OrgID: e.org, AgentID: e.agent.ID, ActorName: actor})
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		execs := e.gw.Execs()
+		Expect(execs).NotTo(BeEmpty())
+		for _, x := range execs {
+			Expect(x.GetSandbox()).To(Equal(actor), "%q", x.GetCommand())
+		}
+	})
 })

@@ -161,4 +161,38 @@ var _ = Describe("koinon-agentd's egress settings (#1086 part C2)", func() {
 		}
 		Expect(start(nil, "--egress-url", egress, "--actor-token-key-file", keyFile, "--actor-token-key-id", "")).To(MatchError(ContainSubstring("must not be empty")))
 	})
+
+	// On Agent Substrate the egress layer adds the actor identity outside the guest (issue #1386).
+	Describe("on Agent Substrate", func() {
+		substrate := func(env map[string]string, args ...string) error {
+			all := map[string]string{
+				"KOINON_EXECUTION_DRIVER":           cli.DriverSubstrate,
+				"KOINON_SUBSTRATE_CONTROL_ADDRESS":  "api.ate-system.svc:443",
+				"KOINON_SUBSTRATE_ROUTER_ADDRESS":   "atenet-router.ate-system.svc:443",
+				"KOINON_SUBSTRATE_ALLOW_UNHARDENED": "true",
+				"KOINON_SUBSTRATE_DEFAULT_TIER":     "dev",
+				"KOINON_SUBSTRATE_GUEST_KEY_FILE":   "/secrets/guest-key/seed",
+			}
+			for k, v := range env {
+				all[k] = v
+			}
+			return start(all, args...)
+		}
+
+		It("starts with the egress URL and no actor token key", func() {
+			Expect(substrate(nil)).To(Succeed())
+			Expect(substrate(map[string]string{"KOINON_EGRESS_URL": egress})).To(Succeed())
+		})
+
+		It("refuses an actor token key: koinon-agentd holds no signing key there", func() {
+			Expect(substrate(map[string]string{"KOINON_EGRESS_URL": egress, "KOINON_ACTOR_TOKEN_KEY_FILE": keyFile})).
+				To(MatchError(ContainSubstring("--actor-token-key-file must not be set")))
+		})
+
+		It("refuses an https egress URL: the egress layer replaces the header only on clear text", func() {
+			Expect(substrate(map[string]string{"KOINON_EGRESS_URL": "https://koinon-mcp-gateway.koinon.svc:8081"})).
+				To(MatchError(And(ContainSubstring("--egress-url"), ContainSubstring("http"))))
+			Expect(substrate(map[string]string{"KOINON_EGRESS_URL": "http://u:p@gw:8081"})).To(MatchError(ContainSubstring("--egress-url")))
+		})
+	})
 })

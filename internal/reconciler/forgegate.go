@@ -73,6 +73,13 @@ func (r *Reconciler) forgeRev(name string) (int64, bool) {
 // none. The rule is agentEgress's (forgeExpects): the install has the egress listener and the agent has
 // a forge read grant (codehost.Registry.ReadGrant, which koinon-agentd reads too). An agent that expects
 // a credential and has none gets its cause.
+//
+// An agent without forgeExpects gets no row, so a run does not wait for its actor's State revision
+// either. That is safe (issue #1386): the actor token is checked only on the egress listener, and on
+// Agent Substrate an actor's egress policy holds that listener only with CodeHostEgress, which needs a
+// read grant (GitHubReadAccessAt) and the egress listener, the same rule as forgeExpects. The model and
+// MCP listeners do not read the actor token. So an actor that can reach the listener always has a row,
+// and its row waits for the actor revision below.
 func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects {
 		return forgeRow{}, false

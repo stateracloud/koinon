@@ -549,12 +549,12 @@ func (r *runner) execute(ctx context.Context) error {
 	for attempt := 0; ; attempt++ {
 		r.home = sb.HomeGeneration
 		r.sandboxID = sb.SandboxID.String
-		main, ended, err = r.sweepSlot(fctx, sb.Workspace, sb.SandboxName)
+		main, ended, err = r.sweepSlot(fctx, sb.Workspace, sb.ActorRef())
 		var sv *survivorsError
 		if !errors.As(err, &sv) {
 			break
 		}
-		out, herr := r.handleSurvivors(ctx, sb.Workspace, sb.SandboxName, sv)
+		out, herr := r.handleSurvivors(ctx, sb.Workspace, sb.ActorRef(), sv)
 		if herr != nil {
 			return r.execErr(ctx, "handle the stuck sandbox", herr)
 		}
@@ -575,7 +575,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "end the processes left in the sandbox", err)
 	}
-	workspace, sandbox := sb.Workspace, sb.SandboxName
+	// Every driver call names the sandbox's actor: on Agent Substrate each new actor gets its own name
+	// (issue #1386); elsewhere it is the sandbox name.
+	workspace, sandbox := sb.Workspace, sb.ActorRef()
 	log := r.log.With("sandbox", sandbox)
 	if unknown {
 		// Visible on the task timeline: the run is costlier than the price list suggests.
@@ -628,7 +630,9 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.execErr(ctx, "write the git configuration", err)
 	}
 	if r.egress {
-		defer r.keepActorToken(ctx, workspace, sandbox)()
+		if !r.tokenOutside() {
+			defer r.keepActorToken(ctx, workspace, sandbox)()
+		}
 		// The agent clones through koinon-gateway: its forge credential must be served first (forgewait.go).
 		if err := r.waitForge(fctx); err != nil {
 			return r.execErr(ctx, "wait for the forge credential", err)

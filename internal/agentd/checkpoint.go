@@ -432,7 +432,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	generation := sb.HomeGeneration.String
 
 	var stderr tail
-	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
+	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.ActorRef(), execution.ExecRequest{
 		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "--hard-dereference", "-cf", "-", ".")...)...),
 		Stderr:  &stderr, Timeout: c.Timeout,
 	})
@@ -628,7 +628,7 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()
-	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.SandboxName, checkpoint.HomeDir, pr)
+	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.ActorRef(), checkpoint.HomeDir, pr)
 	if uerr == nil {
 		// The upload read an end-of-file, so the writer is done.
 		return <-restored

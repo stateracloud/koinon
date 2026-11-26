@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 )
 
 // What a connection's host adds to the git setup of a sandbox (ADR 0062). The harness images
@@ -124,11 +125,34 @@ func EgressGitConfig(base string, loc connectors.Location) []byte {
 	b.WriteString("# Git reaches the code host through the Koinon gateway, which attaches the credential.\n")
 	b.WriteString("[include]\n")
 	b.WriteString("\tpath = " + SandboxEgressToken + "\n")
+	writeEgressRewrite(&b, base, loc)
+	return []byte(b.String())
+}
+
+// EgressPlaceholderGitConfig renders what SandboxGitConfig adds when git goes through the gateway and
+// the actor identity is added outside the guest (Agent Substrate, issue #1386, ADR 0120 amendment of
+// 2026-11-26). It is EgressGitConfig without the include of a token file: git sends the public
+// actortoken.Placeholder in the actor token header to the gateway's egress prefix, and atenet-egress
+// replaces it with the actor's token on its way out of the guest. No token is in the guest. It holds
+// nothing secret.
+func EgressPlaceholderGitConfig(base string, loc connectors.Location) []byte {
+	var b strings.Builder
+	b.WriteString("# Git reaches the code host through the Koinon gateway, which attaches the credential.\n")
+	b.WriteString("# The egress layer outside the guest replaces the placeholder with the actor's token.\n")
+	writeEgressRewrite(&b, base, loc)
+	b.WriteString("[http \"" + strings.TrimRight(base, "/") + "/egress/\"]\n")
+	b.WriteString("\textraHeader = " + ActorTokenHeader + ": " + actortoken.Placeholder + "\n")
+	return []byte(b.String())
+}
+
+// writeEgressRewrite writes the URL rewrite of the code host at loc to the gateway prefix and the
+// empty credential helper for the gateway, so no helper is asked for a credential that only the
+// gateway holds.
+func writeEgressRewrite(b *strings.Builder, base string, loc connectors.Location) {
 	b.WriteString("[url \"" + EgressPrefix(base, loc) + "\"]\n")
 	b.WriteString("\tinsteadOf = https://" + loc.Web.Authority() + "/\n")
 	b.WriteString("[credential \"" + strings.TrimRight(base, "/") + "/egress/\"]\n")
 	b.WriteString("\thelper =\n")
-	return []byte(b.String())
 }
 
 // EgressTokenGitConfig renders SandboxEgressToken: the actor token as an extra header that git sends

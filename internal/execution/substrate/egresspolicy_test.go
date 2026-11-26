@@ -233,6 +233,18 @@ var _ = Describe("the egress listener in the actor egress policy", func() {
 		Expect(c.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
 	})
 
+	// Issue #1386: the reconciler drops the record of an old actor name, so that no later actor gets it.
+	It("forgets the recorded access of a name without a call to the control plane", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		calls := c.Calls("DeleteActor")
+		d.ForgetGatewayAccess(ws, "a")
+		Expect(c.Calls("DeleteActor")).To(Equal(calls))
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "no access recorded: the driver fails closed")
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+	})
+
 	It("takes the egress listener away from a running actor when the grant goes, without a replacement", func(ctx SpecContext) {
 		d, c := newDriver()
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())

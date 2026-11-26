@@ -23,15 +23,21 @@ import (
 // reconciler first sees it, and the next State revision carries the actor. A run then waits for that
 // revision, as it waits for its forge credential (forgegate.go).
 
-// nameNewActor records a new actor name for w when the backend names actors and w needs a new actor:
-// no actor is named yet, or the named actor got a UID and is gone. It then gives the new name its gateway
-// access, before the create. It reports whether it named a new actor; the caller renders the spec again.
+// nameNewActor records a new actor name for w, before each create, when the backend names actors. The
+// caller found no actor under the current name. That name can still have been used: a create can succeed
+// (or fail in a way that does not say whether it created the actor) and the actor can go before a pass
+// records its UID. atenet-egress keeps tokens by actor name, so a new actor under that name could get a
+// token of the old one. So each create gets a new name, and the reconciler never sends a name to
+// CreateSandbox twice.
+//
+// The driver drops the gateway access it recorded for the old name, which no sandbox uses again, and the
+// new name gets its access. It reports whether it named a new actor; the caller renders the spec again.
 func (r *Reconciler) nameNewActor(ctx context.Context, w *work, ws string, access execution.GatewayAccess) (bool, error) {
 	n, ok := execution.ActorNamerOf(r.backend)
-	if !ok || (w.sb.ActorName.Valid && !w.sb.ActorUid.Valid) {
-		// OpenShell, or a named actor that was never seen: it is not made yet, so its name is still unused.
-		return false, nil
+	if !ok {
+		return false, nil // OpenShell: the sandbox name is the name of every driver call
 	}
+	old := w.sb.ActorRef()
 	row, err := r.q.SetAgentSandboxActorName(ctx, store.SetAgentSandboxActorNameParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID, ActorName: n.NewActorName(w.sb.SandboxName),
 	})
@@ -41,6 +47,7 @@ func (r *Reconciler) nameNewActor(ctx context.Context, w *work, ws string, acces
 	w.sb = row
 	r.log.Info("named a new sandbox actor", w.logAttrs()...)
 	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
+		s.ForgetGatewayAccess(ws, old)
 		if err := s.SetGatewayAccess(ctx, ws, row.ActorName.String, access); err != nil {
 			return true, err
 		}
