@@ -203,6 +203,8 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 		Profile:      substrateinstall.Profile{StorageBucket: "snapshots", Platform: substrateinstall.PlatformGKE},
 		Out:          io.Discard,
 		PollInterval: time.Millisecond, WaitTimeout: 50 * time.Millisecond,
+		ProvisionerNamespace: "koinon", ProvisionerServiceAccount: "koinon-provisioner",
+		Control: grantCluster(nil).dial,
 	}, r, client
 }
 

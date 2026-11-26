@@ -215,6 +215,18 @@ type Installer struct {
 	// port-forward to its rustfs pod, and a plain HTTP GET (gvisorstore.go).
 	GVisorStore   func(ctx context.Context) (AssetStore, func(), error)
 	GVisorFetcher AssetFetcher
+	// ProvisionerNamespace and ProvisionerServiceAccount name the ServiceAccount of Koinon's provisioner, which
+	// the installer makes an owner in Substrate's global access policy (ADR 0128).
+	ProvisionerNamespace      string
+	ProvisionerServiceAccount string
+	// APITokenFile is a token of a principal that holds the global owner role, for an install whose bootstrap
+	// owners are not ate-client. Empty mints a token for ate-client.
+	APITokenFile string
+	// APICAFile is a PEM CA file that verifies ate-api-server's serving certificate. Empty reads the CA from
+	// Substrate's ClusterTrustBundle.
+	APICAFile string
+	// Control opens the control API as a global owner; nil is the port-forward of openControl. For the tests.
+	Control ControlDialer
 }
 
 // ErrPrerequisites is returned when the prerequisite preflight fails: nothing was installed.
@@ -557,6 +569,10 @@ func (i *Installer) Install(ctx context.Context) error {
 		return err
 	}
 	if err := i.EnsureRouterSPIFFE(ctx); err != nil {
+		return err
+	}
+	// The one grant in the global policy (ADR 0128); every upgrade runs it again.
+	if _, err := i.EnsureProvisionerGrant(ctx); err != nil {
 		return err
 	}
 	if err := i.EnsureGVisorAssets(ctx); err != nil {

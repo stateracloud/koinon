@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/substrateauthz"
 )
 
 // Execution drivers, the values of execution.driver (ADR 0119). OpenShell stays the default until
@@ -58,6 +59,11 @@ type Substrate struct {
 	// the sandbox cannot use the guest API. The key stays in a Secret outside the sandbox; the actor
 	// template holds only the public key. Required with the substrate driver.
 	GuestKeyFile string
+	// ProvisionerURL and ProvisionerTokenFile reach the provisioner that creates org atespaces (ADR 0128). With
+	// them the driver never calls CreateAtespace: the reconciler holds no global Substrate role. Only the
+	// reconciler sets them. The token's audience is the provisioner's, not ateapi's.
+	ProvisionerURL       string
+	ProvisionerTokenFile string
 	// SnapshotStore is the S3-compatible bucket that holds the snapshots. Its endpoint and bucket
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
@@ -130,6 +136,12 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 		if cfg.ContentDigest, err = o.ContentDigester(); err != nil {
 			return cfg, err
 		}
+	}
+	if (s.ProvisionerURL == "") != (s.ProvisionerTokenFile == "") {
+		return cfg, errors.New("--substrate-provisioner-url and --substrate-provisioner-token-file go together")
+	}
+	if s.ProvisionerURL != "" {
+		cfg.Provisioner = &substrateauthz.Client{URL: s.ProvisionerURL, TokenFile: s.ProvisionerTokenFile}
 	}
 	if s.DefaultTier != "" {
 		t, err := parseTier(s.DefaultTier)
@@ -212,6 +224,8 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.GuestKeyFile, "substrate-guest-key-file", "", "file with the hex seed of the Ed25519 key that signs every guest API call (issue #1309); required with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.ProvisionerURL, "substrate-provisioner-url", "", "base URL of the provisioner that creates org atespaces (ADR 0128); empty makes the driver create them itself, which needs the global owner role")
+	fs.StringVar(&e.Substrate.ProvisionerTokenFile, "substrate-provisioner-token-file", "", "projected ServiceAccount token (the provisioner's audience) sent to the provisioner; read again on every call")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
 }
 

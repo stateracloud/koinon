@@ -745,6 +745,39 @@ actor template carries only the public key.
 {{- end }}
 {{- end }}
 
+{{/*
+The provisioner (ADR 0128): "true" with execution.driver=substrate and execution.substrate.provisioner.enabled. Its
+ServiceAccount is the only Koinon principal that holds a global role in Substrate.
+*/}}
+{{- define "koinon.provisioner" -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.provisioner.enabled -}}true{{- end -}}
+{{- end }}
+
+{{- define "koinon.provisionerTokenDir" -}}
+/var/run/koinon/provisioner
+{{- end }}
+
+{{/* The reconciler's token for the provisioner (audience execution.substrate.provisioner.tokenAudience). Only the reconciler mounts it. */}}
+{{- define "koinon.provisionerVolumeMount" -}}
+{{- if include "koinon.provisioner" . -}}
+- name: provisioner-token
+  mountPath: {{ include "koinon.provisionerTokenDir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.provisionerVolume" -}}
+{{- if include "koinon.provisioner" . -}}
+- name: provisioner-token
+  projected:
+    sources:
+      - serviceAccountToken:
+          audience: {{ .Values.execution.substrate.provisioner.tokenAudience | quote }}
+          expirationSeconds: 3600
+          path: token
+{{- end }}
+{{- end }}
+
 {{- define "koinon.substrateVolume" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
