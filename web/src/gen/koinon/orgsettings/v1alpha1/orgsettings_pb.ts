@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/orgsettings/v1alpha1/orgsettings.proto.
  */
 export const file_koinon_orgsettings_v1alpha1_orgsettings: GenFile = /*@__PURE__*/
-  fileDesc("Ci1rb2lub24vb3Jnc2V0dGluZ3MvdjFhbHBoYTEvb3Jnc2V0dGluZ3MucHJvdG8SG2tvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMSJdChNSdW5Db250ZW50UmV0ZW50aW9uEgwKBGRheXMYASABKAUSFAoMZGVmYXVsdF9kYXlzGAIgASgFEhAKCG1pbl9kYXlzGAMgASgFEhAKCG1heF9kYXlzGAQgASgFIi8KHUdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJlCh5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkNvbnRlbnRSZXRlbnRpb24iPQodU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGRheXMYAiABKAUiZQoeU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEkMKCXJldGVudGlvbhgBIAEoCzIwLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5Db250ZW50UmV0ZW50aW9uIl0KE0hvbWVCYWNrdXBSZXRlbnRpb24SDAoEZGF5cxgBIAEoBRIUCgxkZWZhdWx0X2RheXMYAiABKAUSEAoIbWluX2RheXMYAyABKAUSEAoIbWF4X2RheXMYBCABKAUiLwodR2V0SG9tZUJhY2t1cFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJImUKHkdldEhvbWVCYWNrdXBSZXRlbnRpb25SZXNwb25zZRJDCglyZXRlbnRpb24YASABKAsyMC5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuSG9tZUJhY2t1cFJldGVudGlvbiI9Ch1TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEZGF5cxgCIAEoBSJlCh5TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkhvbWVCYWNrdXBSZXRlbnRpb24iMAoeR2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSItCh9HZXRBcHByb3Zlck5vdFJlcXVlc3RlclJlc3BvbnNlEgoKAm9uGAEgASgIIjwKHlNldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSCgoCb24YAiABKAgiLQofU2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXNwb25zZRIKCgJvbhgBIAEoCDKhBwoST3JnU2V0dGluZ3NTZXJ2aWNlEpYBChZHZXRSdW5Db250ZW50UmV0ZW50aW9uEjoua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Gjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXNwb25zZSIDkAIBEpEBChZTZXRSdW5Db250ZW50UmV0ZW50aW9uEjoua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Gjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXNwb25zZRKWAQoWR2V0SG9tZUJhY2t1cFJldGVudGlvbhI6LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5HZXRIb21lQmFja3VwUmV0ZW50aW9uUmVxdWVzdBo7LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5HZXRIb21lQmFja3VwUmV0ZW50aW9uUmVzcG9uc2UiA5ACARKRAQoWU2V0SG9tZUJhY2t1cFJldGVudGlvbhI6LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVxdWVzdBo7LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVzcG9uc2USmQEKF0dldEFwcHJvdmVyTm90UmVxdWVzdGVyEjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVxdWVzdBo8LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5HZXRBcHByb3Zlck5vdFJlcXVlc3RlclJlc3BvbnNlIgOQAgESlAEKF1NldEFwcHJvdmVyTm90UmVxdWVzdGVyEjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVxdWVzdBo8LmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRBcHByb3Zlck5vdFJlcXVlc3RlclJlc3BvbnNlQl1aW2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL29yZ3NldHRpbmdzL3YxYWxwaGExO29yZ3NldHRpbmdzdjFhbHBoYTFiBnByb3RvMw");
+  fileDesc("Ci1rb2lub24vb3Jnc2V0dGluZ3MvdjFhbHBoYTEvb3Jnc2V0dGluZ3MucHJvdG8SG2tvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMSJdChNSdW5Db250ZW50UmV0ZW50aW9uEgwKBGRheXMYASABKAUSFAoMZGVmYXVsdF9kYXlzGAIgASgFEhAKCG1pbl9kYXlzGAMgASgFEhAKCG1heF9kYXlzGAQgASgFIi8KHUdldFJ1bkNvbnRlbnRSZXRlbnRpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJlCh5HZXRSdW5Db250ZW50UmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkNvbnRlbnRSZXRlbnRpb24iPQodU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBGRheXMYAiABKAUiZQoeU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEkMKCXJldGVudGlvbhgBIAEoCzIwLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5Db250ZW50UmV0ZW50aW9uIl0KE0hvbWVCYWNrdXBSZXRlbnRpb24SDAoEZGF5cxgBIAEoBRIUCgxkZWZhdWx0X2RheXMYAiABKAUSEAoIbWluX2RheXMYAyABKAUSEAoIbWF4X2RheXMYBCABKAUiLwodR2V0SG9tZUJhY2t1cFJldGVudGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJImUKHkdldEhvbWVCYWNrdXBSZXRlbnRpb25SZXNwb25zZRJDCglyZXRlbnRpb24YASABKAsyMC5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuSG9tZUJhY2t1cFJldGVudGlvbiI9Ch1TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDAoEZGF5cxgCIAEoBSJlCh5TZXRIb21lQmFja3VwUmV0ZW50aW9uUmVzcG9uc2USQwoJcmV0ZW50aW9uGAEgASgLMjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkhvbWVCYWNrdXBSZXRlbnRpb24iMAoeR2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSItCh9HZXRBcHByb3Zlck5vdFJlcXVlc3RlclJlc3BvbnNlEgoKAm9uGAEgASgIIjwKHlNldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSCgoCb24YAiABKAgiLQofU2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXNwb25zZRIKCgJvbhgBIAEoCCJKCghSdW5MaW1pdBINCgV2YWx1ZRgBIAEoBRIVCg1kZWZhdWx0X3ZhbHVlGAIgASgFEgsKA21pbhgDIAEoBRILCgNtYXgYBCABKAUiqAIKCVJ1bkxpbWl0cxJCChNtYXhfY29uY3VycmVudF9ydW5zGAEgASgLMiUua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlJ1bkxpbWl0EkIKE3RyaWdnZXJfY29uY3VycmVuY3kYAiABKAsyJS5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuUnVuTGltaXQSRgoXdHJpZ2dlcl9yYXRlX3Blcl9taW51dGUYAyABKAsyJS5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuUnVuTGltaXQSSwocc2FuZGJveF9jcmVhdGlvbnNfcGVyX21pbnV0ZRgEIAEoCzIlLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5SdW5MaW1pdCIlChNHZXRSdW5MaW1pdHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJOChRHZXRSdW5MaW1pdHNSZXNwb25zZRI2CgZsaW1pdHMYASABKAsyJi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuUnVuTGltaXRzIqcCChNTZXRSdW5MaW1pdHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIgChNtYXhfY29uY3VycmVudF9ydW5zGAIgASgFSACIAQESIAoTdHJpZ2dlcl9jb25jdXJyZW5jeRgDIAEoBUgBiAEBEiQKF3RyaWdnZXJfcmF0ZV9wZXJfbWludXRlGAQgASgFSAKIAQESKQocc2FuZGJveF9jcmVhdGlvbnNfcGVyX21pbnV0ZRgFIAEoBUgDiAEBQhYKFF9tYXhfY29uY3VycmVudF9ydW5zQhYKFF90cmlnZ2VyX2NvbmN1cnJlbmN5QhoKGF90cmlnZ2VyX3JhdGVfcGVyX21pbnV0ZUIfCh1fc2FuZGJveF9jcmVhdGlvbnNfcGVyX21pbnV0ZSJOChRTZXRSdW5MaW1pdHNSZXNwb25zZRI2CgZsaW1pdHMYASABKAsyJi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuUnVuTGltaXRzMpAJChJPcmdTZXR0aW5nc1NlcnZpY2USlgEKFkdldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlIgOQAgESkQEKFlNldFJ1bkNvbnRlbnRSZXRlbnRpb24SOi5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlcXVlc3QaOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuQ29udGVudFJldGVudGlvblJlc3BvbnNlEpYBChZHZXRIb21lQmFja3VwUmV0ZW50aW9uEjoua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldEhvbWVCYWNrdXBSZXRlbnRpb25SZXF1ZXN0Gjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldEhvbWVCYWNrdXBSZXRlbnRpb25SZXNwb25zZSIDkAIBEpEBChZTZXRIb21lQmFja3VwUmV0ZW50aW9uEjoua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldEhvbWVCYWNrdXBSZXRlbnRpb25SZXF1ZXN0Gjsua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldEhvbWVCYWNrdXBSZXRlbnRpb25SZXNwb25zZRKZAQoXR2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXISOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXF1ZXN0Gjwua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVzcG9uc2UiA5ACARKUAQoXU2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXISOy5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0QXBwcm92ZXJOb3RSZXF1ZXN0ZXJSZXF1ZXN0Gjwua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLlNldEFwcHJvdmVyTm90UmVxdWVzdGVyUmVzcG9uc2USeAoMR2V0UnVuTGltaXRzEjAua29pbm9uLm9yZ3NldHRpbmdzLnYxYWxwaGExLkdldFJ1bkxpbWl0c1JlcXVlc3QaMS5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuR2V0UnVuTGltaXRzUmVzcG9uc2UiA5ACARJzCgxTZXRSdW5MaW1pdHMSMC5rb2lub24ub3Jnc2V0dGluZ3MudjFhbHBoYTEuU2V0UnVuTGltaXRzUmVxdWVzdBoxLmtvaW5vbi5vcmdzZXR0aW5ncy52MWFscGhhMS5TZXRSdW5MaW1pdHNSZXNwb25zZUJdWltnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9vcmdzZXR0aW5ncy92MWFscGhhMTtvcmdzZXR0aW5nc3YxYWxwaGExYgZwcm90bzM");
 
 /**
  * RunContentRetention is the org's effective retention of stored run content. Once a finished run is
@@ -318,6 +318,177 @@ export const SetApproverNotRequesterResponseSchema: GenMessage<SetApproverNotReq
   messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 13);
 
 /**
+ * RunLimit is one run limit of the org. value is the limit in force; it is default_value when the
+ * org set none.
+ *
+ * @generated from message koinon.orgsettings.v1alpha1.RunLimit
+ */
+export type RunLimit = Message<"koinon.orgsettings.v1alpha1.RunLimit"> & {
+  /**
+   * @generated from field: int32 value = 1;
+   */
+  value: number;
+
+  /**
+   * @generated from field: int32 default_value = 2;
+   */
+  defaultValue: number;
+
+  /**
+   * @generated from field: int32 min = 3;
+   */
+  min: number;
+
+  /**
+   * @generated from field: int32 max = 4;
+   */
+  max: number;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.RunLimit.
+ * Use `create(RunLimitSchema)` to create a new message.
+ */
+export const RunLimitSchema: GenMessage<RunLimit> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 14);
+
+/**
+ * RunLimits are the org's run limits (DB2, ADR 0066).
+ *
+ * @generated from message koinon.orgsettings.v1alpha1.RunLimits
+ */
+export type RunLimits = Message<"koinon.orgsettings.v1alpha1.RunLimits"> & {
+  /**
+   * max_concurrent_runs is the most runs of the org that start or run at the same time. The other
+   * runs wait in the queue.
+   *
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimit max_concurrent_runs = 1;
+   */
+  maxConcurrentRuns?: RunLimit | undefined;
+
+  /**
+   * trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at
+   * the same time.
+   *
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimit trigger_concurrency = 2;
+   */
+  triggerConcurrency?: RunLimit | undefined;
+
+  /**
+   * trigger_rate_per_minute is the most of those items that start in one minute.
+   *
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimit trigger_rate_per_minute = 3;
+   */
+  triggerRatePerMinute?: RunLimit | undefined;
+
+  /**
+   * sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in
+   * one minute.
+   *
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimit sandbox_creations_per_minute = 4;
+   */
+  sandboxCreationsPerMinute?: RunLimit | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.RunLimits.
+ * Use `create(RunLimitsSchema)` to create a new message.
+ */
+export const RunLimitsSchema: GenMessage<RunLimits> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 15);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.GetRunLimitsRequest
+ */
+export type GetRunLimitsRequest = Message<"koinon.orgsettings.v1alpha1.GetRunLimitsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.GetRunLimitsRequest.
+ * Use `create(GetRunLimitsRequestSchema)` to create a new message.
+ */
+export const GetRunLimitsRequestSchema: GenMessage<GetRunLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 16);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.GetRunLimitsResponse
+ */
+export type GetRunLimitsResponse = Message<"koinon.orgsettings.v1alpha1.GetRunLimitsResponse"> & {
+  /**
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimits limits = 1;
+   */
+  limits?: RunLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.GetRunLimitsResponse.
+ * Use `create(GetRunLimitsResponseSchema)` to create a new message.
+ */
+export const GetRunLimitsResponseSchema: GenMessage<GetRunLimitsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 17);
+
+/**
+ * SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0
+ * returns it to the default.
+ *
+ * @generated from message koinon.orgsettings.v1alpha1.SetRunLimitsRequest
+ */
+export type SetRunLimitsRequest = Message<"koinon.orgsettings.v1alpha1.SetRunLimitsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: optional int32 max_concurrent_runs = 2;
+   */
+  maxConcurrentRuns?: number | undefined;
+
+  /**
+   * @generated from field: optional int32 trigger_concurrency = 3;
+   */
+  triggerConcurrency?: number | undefined;
+
+  /**
+   * @generated from field: optional int32 trigger_rate_per_minute = 4;
+   */
+  triggerRatePerMinute?: number | undefined;
+
+  /**
+   * @generated from field: optional int32 sandbox_creations_per_minute = 5;
+   */
+  sandboxCreationsPerMinute?: number | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.SetRunLimitsRequest.
+ * Use `create(SetRunLimitsRequestSchema)` to create a new message.
+ */
+export const SetRunLimitsRequestSchema: GenMessage<SetRunLimitsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 18);
+
+/**
+ * @generated from message koinon.orgsettings.v1alpha1.SetRunLimitsResponse
+ */
+export type SetRunLimitsResponse = Message<"koinon.orgsettings.v1alpha1.SetRunLimitsResponse"> & {
+  /**
+   * @generated from field: koinon.orgsettings.v1alpha1.RunLimits limits = 1;
+   */
+  limits?: RunLimits | undefined;
+};
+
+/**
+ * Describes the message koinon.orgsettings.v1alpha1.SetRunLimitsResponse.
+ * Use `create(SetRunLimitsResponseSchema)` to create a new message.
+ */
+export const SetRunLimitsResponseSchema: GenMessage<SetRunLimitsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 19);
+
+/**
  * OrgSettingsService is the UI's face of the org's settings that are not owned by another service
  * (leak guard and trace settings have their own). It is the connect-rpc face of the same service
  * layer the admin API uses. Admins and owners only. Every change is audited.
@@ -381,6 +552,26 @@ export const OrgSettingsService: GenService<{
     methodKind: "unary";
     input: typeof SetApproverNotRequesterRequestSchema;
     output: typeof SetApproverNotRequesterResponseSchema;
+  },
+  /**
+   * @generated from rpc koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunLimits
+   */
+  getRunLimits: {
+    methodKind: "unary";
+    input: typeof GetRunLimitsRequestSchema;
+    output: typeof GetRunLimitsResponseSchema;
+  },
+  /**
+   * SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set
+   * stays as it is; 0 returns it to the default. Runs that are queued but not started get the new
+   * limits when they start. Audited as org.run_limits.set.
+   *
+   * @generated from rpc koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunLimits
+   */
+  setRunLimits: {
+    methodKind: "unary";
+    input: typeof SetRunLimitsRequestSchema;
+    output: typeof SetRunLimitsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_orgsettings_v1alpha1_orgsettings, 0);

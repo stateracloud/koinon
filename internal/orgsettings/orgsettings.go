@@ -162,7 +162,10 @@ type Override struct {
 	SandboxCreationsPerMinute *int
 }
 
-// Set replaces the org's overrides. The database bounds each value (see migrations 00022 and 00023).
+// Set replaces the org's whole settings row with o: a nil field clears that override, also one that o does not
+// mention. It writes no audit record. It is for tests and fixtures only (issue #492). An admin change goes through a
+// Service method that changes only its own fields and audits them, for example Service.SetRunLimits. The database
+// bounds each value (see migrations 00022 and 00023).
 func Set(ctx context.Context, q *store.Queries, org pgtype.UUID, o Override) error {
 	_, err := q.UpsertOrgSettings(ctx, store.UpsertOrgSettingsParams{
 		OrgID:                 org,
