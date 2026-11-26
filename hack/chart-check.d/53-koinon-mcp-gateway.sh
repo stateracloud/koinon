@@ -141,6 +141,18 @@ sub_np=$(render -f "$CHART/ci/substrate-values.yaml" --show-only templates/subst
 grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
 sub_fb=$(render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" --show-only templates/substrate-networkpolicy.yaml)
 if grep -q 'component: mcp-gateway$' <<<"$sub_fb"; then fail "the Substrate control plane egress reaches koinon-gateway with the fallback"; fi
+# Issue #1372: the control plane reaches koinon-gateway's MCP pods on the named ports an actor needs, not on every port.
+# The stats port (the metrics of all agents) and the health port stay closed.
+mcp_rule() { awk '/^  egress:/{f=1} f' <<<"$1" | awk '/^    - to:/{if (buf ~ /component: mcp-gateway/) printf "%s", buf; buf=""} {buf = buf $0 "\n"} END { if (buf ~ /component: mcp-gateway/) printf "%s", buf }'; }
+sub_mcp=$(mcp_rule "$sub_np")
+[ -n "$sub_mcp" ] || fail "the Substrate control plane egress has no rule for koinon-gateway"
+grep -q 'port: mcp,' <<<"$sub_mcp" || fail "the Substrate egress rule for koinon-gateway does not name the mcp port"
+if grep -Eq 'port: (stats|health|15020|15021)' <<<"$sub_mcp"; then fail "the Substrate egress rule for koinon-gateway opens the stats or health port"; fi
+if grep -q 'port: egress,' <<<"$sub_mcp"; then fail "the Substrate egress rule for koinon-gateway names the egress port without the egress listener"; fi
+grep -q 'ports:' <<<"$sub_mcp" || fail "the Substrate egress rule for koinon-gateway has no ports: every port would be open"
+sub_eg=$(mcp_rule "$(render -f "$CHART/ci/substrate-values.yaml" --set gateway.mcp.koinon.egress.enabled=true --show-only templates/substrate-networkpolicy.yaml)")
+grep -q 'port: egress,' <<<"$sub_eg" || fail "the Substrate egress rule for koinon-gateway does not name the egress port with the egress listener"
+if grep -Eq 'port: (stats|health|15020|15021)' <<<"$sub_eg"; then fail "the Substrate egress rule for koinon-gateway opens the stats port with the egress listener"; fi
 grep -q 'port: 8081$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the tools port of koinon-api"
 grep -q 'cnpg.io/cluster: koinon-pg$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the Postgres pods"
 grep -q 'port: 5432$' <<<"$mcp_np" || fail "koinon-gateway egress does not name the Postgres port"
