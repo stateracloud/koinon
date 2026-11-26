@@ -87,12 +87,12 @@ func bundle(name, signer, pemCA string, labels map[string]string) *certsv1.Clust
 var liveLabel = map[string]string{"podcert.ate.dev/canarying": "live"}
 
 func TestAPIServerTLSVerifiesTheServerCertificate(t *testing.T) {
-	g := NewWithT(t)
 	ca, cert := testCA(t, "api.ate-system.svc")
 	otherCA, _ := testCA(t, "api.ate-system.svc")
 	signer := "servicedns.podcert.ate.dev/identity"
 
 	t.Run("the right CA passes", func(t *testing.T) {
+		g := NewWithT(t)
 		i, _, _ := setup("37", true, []runtime.Object{bundle("primary-bundle", signer, string(ca), liveLabel)})
 		cfg, err := i.APIServerTLS(context.Background(), "ate-system")
 		g.Expect(err).NotTo(HaveOccurred())
@@ -101,31 +101,46 @@ func TestAPIServerTLSVerifiesTheServerCertificate(t *testing.T) {
 		g.Expect(handshake(t, cert, cfg)).To(Succeed())
 	})
 	t.Run("a wrong CA fails", func(t *testing.T) {
+		g := NewWithT(t)
 		i, _, _ := setup("37", true, []runtime.Object{bundle("b", signer, string(otherCA), liveLabel)})
 		cfg, err := i.APIServerTLS(context.Background(), "ate-system")
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(handshake(t, cert, cfg)).To(HaveOccurred())
 	})
 	t.Run("a wrong server name fails", func(t *testing.T) {
+		g := NewWithT(t)
 		i, _, _ := setup("37", true, []runtime.Object{bundle("b", signer, string(ca), liveLabel)})
 		cfg, err := i.APIServerTLS(context.Background(), "other-ns")
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(handshake(t, cert, cfg)).To(HaveOccurred())
 	})
 	t.Run("no CA fails closed", func(t *testing.T) {
+		g := NewWithT(t)
 		i, _, _ := setup("37", true, nil)
 		_, err := i.APIServerTLS(context.Background(), "ate-system")
 		g.Expect(err).To(MatchError(ContainSubstring("no ClusterTrustBundle")))
 	})
 	t.Run("a bundle of another signer or without the live label is not a CA", func(t *testing.T) {
+		g := NewWithT(t)
 		i, _, _ := setup("37", true, []runtime.Object{
 			bundle("a", "podidentity.podcert.ate.dev/identity", string(ca), liveLabel),
 			bundle("b", signer, string(ca), nil),
 		})
 		_, err := i.APIServerTLS(context.Background(), "ate-system")
-		g.Expect(err).To(HaveOccurred())
+		g.Expect(err).To(MatchError(ContainSubstring("no ClusterTrustBundle of signer servicedns.podcert.ate.dev/identity")))
+	})
+	t.Run("a rotated CA passes when only the second live bundle holds it", func(t *testing.T) {
+		g := NewWithT(t)
+		i, _, _ := setup("37", true, []runtime.Object{
+			bundle("a", signer, string(otherCA), liveLabel),
+			bundle("b", signer, string(ca), liveLabel),
+		})
+		cfg, err := i.APIServerTLS(context.Background(), "ate-system")
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(handshake(t, cert, cfg)).To(Succeed())
 	})
 	t.Run("--api-ca-file replaces the bundle", func(t *testing.T) {
+		g := NewWithT(t)
 		f := filepath.Join(t.TempDir(), "ca.pem")
 		g.Expect(os.WriteFile(f, ca, 0o600)).To(Succeed())
 		i, _, _ := setup("37", true, nil)

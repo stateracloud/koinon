@@ -109,7 +109,7 @@ rewrite the global policy, and control the atespaces of another product on a sha
 - **What is left:** the provisioner can still delete or rewrite anything in Substrate if it is compromised. The
   traffic to the provisioner is plain HTTP inside the cluster: a projected token that is replayed works only
   against the provisioner, for the reconciler's name, and the call only creates an atespace. The installer's
-  port-forward verifies the api server certificate. The token lives for ten minutes.
+  port-forward verifies the api server certificate. The token that the installer mints lives for ten minutes. A token from `--api-token-file` has the life that its issuer gave it.
 
 ## Consequences
 

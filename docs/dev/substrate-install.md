@@ -184,6 +184,9 @@ The kubeconfig of the installer needs these rules:
 - `deployments`: get, update in the Substrate namespace
 - `workerpools` (group `ate.dev`): get in the worker namespace (`--substrate-worker-namespace`)
 - non-resource URL `/.well-known/openid-configuration`: get
+- for the provisioner grant (ADR 0128): `clustertrustbundles` (group `certificates.k8s.io`, cluster scope): list (the CA of
+  the api server); `pods` in the Substrate namespace: list; `serviceaccounts/token`: create for `ate-client` in the
+  Substrate namespace; `pods/portforward`: create in the Substrate namespace
 
 `ate-setup` needs more (it creates the Substrate objects); those rules are those of Substrate.
 
