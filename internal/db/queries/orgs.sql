@@ -99,6 +99,19 @@ WHERE o.deleted_at IS NULL
 ORDER BY o.slug
 LIMIT @row_limit;
 
+-- name: ListOrgRefs :many
+-- The live orgs by slug after @after_slug, without counts, for the platform console's lists of org
+-- resources (PlatformResourceService, ADR 0126). Platform admins only. @only_org_id narrows the list
+-- to one org; personal orgs are left out unless @include_personal or @only_org_id is set.
+SELECT o.id AS org_id, o.slug, o.display_name, o.kind
+FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND (sqlc.narg(only_org_id)::uuid IS NULL OR o.id = sqlc.narg(only_org_id)::uuid)
+  AND (@include_personal::bool OR sqlc.narg(only_org_id)::uuid IS NOT NULL OR o.kind = 'team')
+  AND o.slug > @after_slug::text
+ORDER BY o.slug
+LIMIT @row_limit;
+
 -- name: ListOrgMembers :many
 -- The users with an effective role in the org, by display name and then id, after the cursor
 -- (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships

@@ -133,18 +133,11 @@ func orgSummaryToProto(r store.ListOrgSummariesRow) (*platformv1alpha1.OrgSummar
 	if err != nil {
 		return nil, err
 	}
-	kind := orgv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
-	switch r.Kind {
-	case store.OrgKindPersonal:
-		kind = orgv1alpha1.OrgKind_ORG_KIND_PERSONAL
-	case store.OrgKindTeam:
-		kind = orgv1alpha1.OrgKind_ORG_KIND_TEAM
-	}
 	return &platformv1alpha1.OrgSummary{
 		OrgId:              r.OrgID.String(),
 		Slug:               r.Slug,
 		DisplayName:        r.DisplayName,
-		Kind:               kind,
+		Kind:               orgKindProto(r.Kind),
 		MemberCount:        clampInt32(r.MemberCount),
 		AgentCount:         clampInt32(r.AgentCount),
 		SpentThisMonthUsd:  spent.String(),
@@ -152,6 +145,16 @@ func orgSummaryToProto(r store.ListOrgSummariesRow) (*platformv1alpha1.OrgSummar
 		PlatformCeilingUsd: formatAmount(r.PlatformCeiling),
 		CreatedAt:          timestamppb.New(r.CreatedAt.Time),
 	}, nil
+}
+
+func orgKindProto(k store.OrgKind) orgv1alpha1.OrgKind {
+	switch k {
+	case store.OrgKindPersonal:
+		return orgv1alpha1.OrgKind_ORG_KIND_PERSONAL
+	case store.OrgKindTeam:
+		return orgv1alpha1.OrgKind_ORG_KIND_TEAM
+	}
+	return orgv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
 }
 
 func clampInt32(n int64) int32 {

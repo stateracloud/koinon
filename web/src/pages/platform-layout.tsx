@@ -9,14 +9,15 @@ import { useSignOut } from '@/hooks/use-sign-out'
 import { orgName, useOrgSession } from '@/lib/org-context'
 import { navActive, navGroup, navGroupHeading, navLink, sidebar, skipLink } from '@/lib/shell-styles'
 
-/**
- * The sidebar of the platform console (ADR 0126 section 4), in the order of the board "Platform console: home". The
- * console has no Providers, Templates or MCP servers page yet: those need platform-wide APIs that do not exist, so the
- * sidebar does not show them.
- */
+/** The sidebar of the platform console (ADR 0126 section 4), in the order of the board "Platform console: home". */
 const usageItems = [
   { to: '/platform/usage/budgets', label: 'Budget ceilings' },
   { to: '/platform/usage/prices', label: 'Prices' },
+] as const
+const resourceItems = [
+  { to: '/platform/providers', label: 'Providers' },
+  { to: '/platform/templates', label: 'Templates' },
+  { to: '/platform/mcp-servers', label: 'MCP servers' },
 ] as const
 const settingsItems = [{ to: '/platform/settings/observability', label: 'Observability' }] as const
 
@@ -57,6 +58,16 @@ export function PlatformLayout() {
             Usage and cost
           </h2>
           {usageItems.map((i) => (
+            <Link key={i.to} to={i.to} className={navLink} activeProps={navActive}>
+              {i.label}
+            </Link>
+          ))}
+        </nav>
+        <nav aria-labelledby="platform-resources-nav" className={navGroup}>
+          <h2 id="platform-resources-nav" className={navGroupHeading}>
+            Org resources
+          </h2>
+          {resourceItems.map((i) => (
             <Link key={i.to} to={i.to} className={navLink} activeProps={navActive}>
               {i.label}
             </Link>

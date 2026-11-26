@@ -13,6 +13,9 @@ import { parseOverviewTab, type OverviewTab } from '@/lib/overview'
 import { PlatformConsolePage } from '@/pages/platform-console-page'
 import { PlatformLayout } from '@/pages/platform-layout'
 import { PlatformOrgsPage } from '@/pages/platform-orgs-page'
+import { PlatformProvidersPage } from '@/pages/platform-providers-page'
+import { PlatformTemplatesPage } from '@/pages/platform-templates-page'
+import { PlatformMcpServersPage } from '@/pages/platform-mcp-servers-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
 import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
@@ -177,6 +180,9 @@ export const platformHomeRoute = createRoute({ getParentRoute: () => platformRou
 export const platformOrgsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/orgs', component: PlatformOrgsPage })
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/budgets', component: PlatformBudgetsPage })
 export const platformPricesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/prices', component: PlatformPricesPage })
+export const platformProvidersRoute = createRoute({ getParentRoute: () => platformRoute, path: '/providers', component: PlatformProvidersPage })
+export const platformTemplatesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/templates', component: PlatformTemplatesPage })
+export const platformMcpServersRoute = createRoute({ getParentRoute: () => platformRoute, path: '/mcp-servers', component: PlatformMcpServersPage })
 export const platformObservabilityRoute = createRoute({
   getParentRoute: () => platformRoute,
   path: '/settings/observability',
@@ -231,7 +237,17 @@ const routeTree = rootRoute.addChildren([
       observabilityRoute,
       tokensRoute,
     ]),
-    platformRoute.addChildren([platformHomeRoute, platformOrgsRoute, platformBudgetsRoute, platformPricesRoute, platformObservabilityRoute, ...platformRedirects]),
+    platformRoute.addChildren([
+      platformHomeRoute,
+      platformOrgsRoute,
+      platformBudgetsRoute,
+      platformPricesRoute,
+      platformProvidersRoute,
+      platformTemplatesRoute,
+      platformMcpServersRoute,
+      platformObservabilityRoute,
+      ...platformRedirects,
+    ]),
   ]),
 ])
 
