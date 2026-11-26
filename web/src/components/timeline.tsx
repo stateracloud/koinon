@@ -5,12 +5,22 @@ import { ActorKind } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { isMine, type TimelineItem } from '@/lib/timeline'
 import { cn } from '@/lib/utils'
 
-function actorLabel(a: ActorKind, mine: boolean, name?: string): string {
+const platformNames: Record<string, string> = { slack: 'Slack', teams: 'Teams' }
+
+/** The label of a person without a Koinon account (ADR 0130): the platform and its user ID, never a name. */
+function externalLabel(x?: { platform: string; platformUserId: string }): string {
+  const platform = (x && platformNames[x.platform]) || 'Chat'
+  return x?.platformUserId ? `${platform} user ${x.platformUserId}` : `${platform} user`
+}
+
+function actorLabel(a: ActorKind, mine: boolean, name?: string, external?: { platform: string; platformUserId: string }): string {
   switch (a) {
     case ActorKind.USER:
       return mine ? 'You' : name || 'Another member'
     case ActorKind.AGENT:
       return 'Agent'
+    case ActorKind.EXTERNAL:
+      return externalLabel(external)
     default:
       return 'Koinon'
   }
@@ -49,7 +59,8 @@ function TimelineEntry({ item, renderApproval, meUserId }: { item: TimelineItem;
       return (
         <article className={cn('max-w-prose rounded-lg border p-3', mine ? 'bg-secondary ml-auto' : 'bg-card')}>
           <header className="text-muted-foreground mb-1 flex gap-2 text-xs">
-            <span className="text-foreground font-medium">{actorLabel(item.actor, mine, item.actorName)}</span>
+            <span className="text-foreground font-medium">{actorLabel(item.actor, mine, item.actorName, item.external)}</span>
+            {item.actor === ActorKind.EXTERNAL && <span data-testid="external-actor">No Koinon account</span>}
             <time dateTime={new Date(item.at).toISOString()}>{time(item.at)}</time>
           </header>
           <p className="whitespace-pre-wrap">{item.text}</p>
