@@ -38,8 +38,9 @@ var _ = Describe("the typed task events migration (#735)", func() {
 			Expect(db.QueryRowContext(ctx, query, args...).Scan(&s)).To(Succeed(), query)
 			return s
 		}
-		org := scan(`INSERT INTO orgs (slug, display_name, kind) VALUES ('typed-events', 'Typed', 'personal') RETURNING id`)
+		org := scan(`INSERT INTO orgs (slug, display_name, kind, deleted_at) VALUES ('typed-events', 'Typed', 'personal', now()) RETURNING id`)
 		agent := scan(`INSERT INTO agents (org_id, display_name, harness) VALUES ($1, 'a', 'opencode') RETURNING id`, org)
+		user := scan(`INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', 'typed-events', $1) RETURNING id`, org)
 		task := scan(`INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_agent_id) VALUES ($1, 'x', $2, 'agent', $2) RETURNING id`, org, agent)
 		rows := []struct {
 			kind, actor, payload string
@@ -54,8 +55,15 @@ var _ = Describe("the typed task events migration (#735)", func() {
 			{"status.changed", "user", `{"from":"working","to":"canceled","source":"x"}`, false},
 		}
 		for i, r := range rows {
-			_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, payload) VALUES ($1, $2, $3, $4, $5, $6)`,
-				org, task, i+1, r.kind, r.actor, r.payload)
+			var byUser, byAgent any
+			switch r.actor {
+			case "user":
+				byUser = user
+			case "agent":
+				byAgent = agent
+			}
+			_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				org, task, i+1, r.kind, r.actor, byUser, byAgent, r.payload)
 			Expect(err).NotTo(HaveOccurred())
 		}
 
@@ -71,7 +79,7 @@ var _ = Describe("the typed task events migration (#735)", func() {
 		}
 
 		By("a new row without the columns gets version 0 and no prompt mark")
-		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, payload) VALUES ($1, $2, 99, 'message', 'user', '{}')`, org, task)
+		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload) VALUES ($1, $2, 99, 'message', 'user', $3, '{}')`, org, task, user)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = 99`, task)).To(Equal("false|0"))
 		_, err = db.ExecContext(ctx, `UPDATE task_events SET payload_version = -1 WHERE task_id = $1 AND seq = 99`, task)
