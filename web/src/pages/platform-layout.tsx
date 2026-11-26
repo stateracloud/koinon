@@ -12,9 +12,11 @@ import { navActive, navGroup, navGroupHeading, navLink, sidebar, skipLink } from
 /**
  * The sidebar of the platform console (ADR 0126 section 4), in the order of the board "Platform console: home". The
  * console has no Providers, Templates or MCP servers page yet: those need platform-wide APIs that do not exist, so the
- * sidebar does not show them.
+ * sidebar does not show them. The usage links match their exact path: "Usage" is /platform/usage, and the other
+ * pages are under it.
  */
 const usageItems = [
+  { to: '/platform/usage', label: 'Usage' },
   { to: '/platform/usage/budgets', label: 'Budget ceilings' },
   { to: '/platform/usage/prices', label: 'Prices' },
 ] as const
@@ -57,7 +59,7 @@ export function PlatformLayout() {
             Usage and cost
           </h2>
           {usageItems.map((i) => (
-            <Link key={i.to} to={i.to} className={navLink} activeProps={navActive}>
+            <Link key={i.to} to={i.to} className={navLink} activeOptions={{ exact: true }} activeProps={navActive}>
               {i.label}
             </Link>
           ))}
