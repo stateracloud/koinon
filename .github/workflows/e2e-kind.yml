@@ -190,6 +190,30 @@ jobs:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
         shell: bash
     steps:
+      # A dispatch with inputs.commit runs that commit's code in the cache scope of the dispatch ref (main for
+      # hack/e2e-bisect.sh). Code in a job can write cache entries without a save step, so an unmerged commit (a
+      # fork's commit is reachable by sha) could poison the caches that main's runs restore (CodeQL
+      # cache-poisoning, issue 1365). So the commit must be the head of the dispatch ref or an ancestor of it:
+      # code that was merged there. This step runs before the checkout and runs no code of the commit.
+      # The drill job has the same step.
+      - name: The commit input is on the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          # behind_by: the commits of COMMIT that the ref head does not have. 0: COMMIT is the head or an ancestor.
+          behind=$(gh api "repos/$GH_REPO/compare/$COMMIT...$GITHUB_SHA" --jq .behind_by)
+          if [[ $behind != 0 ]]; then
+            echo "::error::commit $COMMIT is not on $GITHUB_REF ($GITHUB_SHA); only a merged commit can run here"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }} # empty: the event's own ref
@@ -544,6 +568,24 @@ jobs:
       run:
         shell: bash
     steps:
+      # Only a commit on the dispatch ref runs here: the reason is at the same step of the quickstart job.
+      - name: The commit input is on the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          behind=$(gh api "repos/$GH_REPO/compare/$COMMIT...$GITHUB_SHA" --jq .behind_by)
+          if [[ $behind != 0 ]]; then
+            echo "::error::commit $COMMIT is not on $GITHUB_REF ($GITHUB_SHA); only a merged commit can run here"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}
