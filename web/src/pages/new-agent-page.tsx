@@ -22,7 +22,7 @@ import { useOrg } from '@/lib/org-context'
 const templateRoute = getRouteApi('/app/agents/new/template/$templateId')
 
 /** Shell is the frame of the three new-agent pages: the way back, the title and the viewer check. */
-function Shell({ back, title, description, children }: { back: { to: '/agents' | '/agents/new'; label: string }; title: string; description?: ReactNode; children: ReactNode }) {
+function Shell({ back, title, description, children }: { back: { to: '/' | '/agents/new'; label: string }; title: string; description?: ReactNode; children: ReactNode }) {
   const { org } = useOrg()
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
@@ -60,7 +60,7 @@ export function NewAgentPage() {
   const platform = list.filter((t) => t.scope !== TemplateScope.ORG)
   const own = list.filter((t) => t.scope === TemplateScope.ORG)
   return (
-    <Shell back={{ to: '/agents', label: 'Agents' }} title="New agent" description="Start from a template, or from a blank form. Every new agent is a draft until an org admin or owner activates it.">
+    <Shell back={{ to: '/', label: 'Agents' }} title="New agent" description="Start from a template, or from a blank form. Every new agent is a draft until an org admin or owner activates it.">
       {templates.error && <LoadError error={templates.error} />}
       <Group title="Start from nothing">
         <GalleryCard to={{ to: '/agents/new/blank' }} title="Blank agent" description="One form for the name, instructions, model, access, triggers and limits." />

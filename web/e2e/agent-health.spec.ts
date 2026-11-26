@@ -2,7 +2,7 @@
 
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockApi, type Handlers, type Stream } from './mock-api.ts'
+import { agentSummaries, mockApi, type Handlers, type Stream } from './mock-api.ts'
 
 const org = 'org-1'
 const sha = 'c'.repeat(64)
@@ -87,6 +87,7 @@ function api(role = 'ORG_ROLE_OWNER') {
       'koinon.connection.v1alpha1.ConnectionService/ListConnections': () => ({ connections: [] }),
       'koinon.agent.v1alpha1.AgentService/GetAgent': () => ({ agent: agent() }),
       'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [agent()] }),
+      'koinon.agent.v1alpha1.AgentService/ListAgentSummaries': () => agentSummaries([agent()])(),
       'koinon.agent.v1alpha1.AgentService/ResumeAgent': (req) => {
         seen.resume.push(req)
         unhealthy = false
@@ -197,15 +198,15 @@ for (const vp of viewports) {
       await expectAccessible(page)
     })
 
-    test('agent page: unhealthy notice, Resume agent, and the agents list badge', async ({ page }) => {
+    test('agent page: unhealthy notice, Resume agent, and the agent card badge', async ({ page }) => {
       const { handlers, seen } = api()
       await mockApi(page, handlers)
-      await page.goto('/agents')
-      await expect(page.getByText('Unhealthy', { exact: true })).toBeVisible()
+      await page.goto('/')
+      await expect(page.getByRole('article', { name: 'Repo helper' }).getByText('Unhealthy', { exact: true })).toBeVisible()
       await expectNoHorizontalScroll(page)
       await expectAccessible(page)
 
-      await page.getByRole('link', { name: 'Repo helper' }).click()
+      await page.getByRole('link', { name: 'Repo helper', exact: true }).click()
       const health = page.getByRole('region', { name: 'Agent health' })
       await expect(health.getByRole('alert')).toContainText('its sandbox was recreated three times in a row')
       await expectNoHorizontalScroll(page)
