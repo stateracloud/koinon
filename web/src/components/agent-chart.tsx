@@ -2,7 +2,7 @@
 
 import { useNavigate } from '@tanstack/react-router'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import type { AgentSummary } from '@/gen/koinon/agent/v1alpha1/agent_pb'
@@ -69,23 +69,44 @@ function TeamTree({ team }: { team: TeamGroup<AgentSummary> }) {
   const [limit, setLimit] = useState(chartRowStep)
   const [focused, setFocused] = useState<string>()
   const refs = useRef(new Map<string, HTMLLIElement>())
+  // A row to focus once it renders: Right can move to a child past the row limit, which raises the limit first.
+  const pendingFocus = useRef<string>(undefined)
   const rows = useMemo(() => visibleRows(roots, open), [roots, open])
+  const parentOf = useMemo(() => new Map(rows.map((r) => [r.node.agent.agentId, r.parentId])), [rows])
   const shown = rows.slice(0, limit)
+  useEffect(() => {
+    const id = pendingFocus.current
+    if (id === undefined) return
+    pendingFocus.current = undefined
+    refs.current.get(id)?.focus()
+  })
   const focusId = shown.some((r) => r.node.agent.agentId === focused) ? focused : shown[0]?.node.agent.agentId
   const headingId = `chart-team-${team.team === '' ? 'none' : encodeURIComponent(team.team)}`
 
   const moveTo = (id: string | undefined) => {
     if (id === undefined) return
+    const i = rows.findIndex((r) => r.node.agent.agentId === id)
+    if (i >= limit) setLimit(Math.ceil((i + 1) / chartRowStep) * chartRowStep)
     setFocused(id)
-    refs.current.get(id)?.focus()
+    const el = refs.current.get(id)
+    if (el) el.focus()
+    else pendingFocus.current = id
   }
-  const toggle = (id: string, to: boolean) =>
+  /** isUnder says whether row id is in the branch of ancestor (the row itself excluded). */
+  const isUnder = (id: string | undefined, ancestor: string) => {
+    for (let p = id === undefined ? undefined : parentOf.get(id); p !== undefined; p = parentOf.get(p)) if (p === ancestor) return true
+    return false
+  }
+  const toggle = (id: string, to: boolean) => {
+    // Closing a branch removes its rows: the focus goes to the branch's own row, not to the page.
+    if (!to && isUnder(focused, id)) moveTo(id)
     setOpen((prev) => {
       const next = new Set(prev)
       if (to) next.add(id)
       else next.delete(id)
       return next
     })
+  }
   const openAgent = (id: string) => void navigate({ to: '/agents/$agentId', params: { agentId: id } })
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>, i: number) => {

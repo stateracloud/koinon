@@ -119,10 +119,13 @@ describe('agent cards', () => {
     renderApp(transport({ pages: [[summary('a-1', 'First page bot')], [summary('a-2', 'Second page bot')]], asked }), '/')
     await card('First page bot')
     expect(asked).toEqual([''])
+    // While pages remain, the last group can be partial.
+    expect(screen.getByRole('region', { name: 'No team · 1 agent so far' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
     await card('Second page bot')
     expect(asked).toEqual(['', 'p1'])
     expect(screen.queryByRole('button', { name: 'Show more agents' })).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'No team · 2 agents' })).toBeInTheDocument()
   })
 
   it.each([
@@ -203,6 +206,47 @@ describe('Chart tab', () => {
     expect(item(/^Dev bot/)).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(history.location.pathname).toBe('/agents/dev'))
+  })
+
+  it('keeps the chart, its open branches and the focus when a later poll finds one more page', async () => {
+    const pages = [team]
+    const { queryClient } = renderApp(transport({ pages }), '/?tab=chart')
+    const tree = await screen.findByRole('tree', { name: 'Platform · 3 agents' })
+    within(tree).getByRole('treeitem', { name: /^Dev bot/ }).focus()
+    pages.push([summary('new', 'New bot', { team: 'Web' })])
+    await queryClient.refetchQueries()
+    expect(await screen.findByRole('tree', { name: 'Web · 1 agent' })).toBeInTheDocument()
+    expect(within(tree).getByRole('treeitem', { name: /^Dev bot/ })).toHaveFocus()
+    expect(within(tree).getAllByRole('treeitem')).toHaveLength(3)
+  })
+
+  it('moves the focus to the branch row when a mouse click closes the branch', async () => {
+    renderApp(transport({ pages: [team] }), '/?tab=chart')
+    const tree = await screen.findByRole('tree', { name: 'Platform · 3 agents' })
+    within(tree).getByRole('treeitem', { name: /^Dev bot/ }).focus()
+    const lead = within(tree).getByRole('treeitem', { name: /^Lead bot/ })
+    await userEvent.click(lead.querySelector('[aria-hidden]')!)
+    expect(lead).toHaveAttribute('aria-expanded', 'false')
+    expect(lead).toHaveFocus()
+    expect(lead.tabIndex).toBe(0)
+  })
+
+  it('shows more rows when Right moves to a child past the row limit', async () => {
+    // 199 roots, then a root with one child: that child is row 201, past the first 200.
+    const big = [
+      ...Array.from({ length: 199 }, (_, i) => summary(`r-${i}`, `Root ${i}`, { team: 'Big' })),
+      summary('last', 'Last root', { team: 'Big' }),
+      summary('kid', 'Kid bot', { team: 'Big', reportsTo: toAgent('last', 'Last root') }),
+    ]
+    renderApp(transport({ pages: [big] }), '/?tab=chart')
+    const tree = await screen.findByRole('tree', { name: 'Big · 201 agents' })
+    within(tree).getAllByRole('treeitem')[0].focus()
+    await userEvent.keyboard('{End}')
+    expect(within(tree).getByRole('treeitem', { name: /^Last root/ })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(screen.getByRole('button', { name: 'Show more of Big (1 more)' })).toBeInTheDocument()
+    await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => expect(within(tree).getByRole('treeitem', { name: /^Kid bot/ })).toHaveFocus())
   })
 
   it('starts a large team with only its roots open', async () => {

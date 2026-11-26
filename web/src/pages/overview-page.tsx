@@ -100,10 +100,10 @@ function AgentsTab() {
       ) : list.isError && !list.agents ? null : teams.length === 0 ? (
         <NoAgents />
       ) : (
-        teams.map((t) => (
+        teams.map((t, i) => (
           <section key={t.team} aria-labelledby={`team-${t.team === '' ? 'none' : encodeURIComponent(t.team)}`} className="grid gap-3">
             <h2 id={`team-${t.team === '' ? 'none' : encodeURIComponent(t.team)}`} className="text-sm font-semibold">
-              {t.label} <span className="text-muted-foreground font-normal">· {t.agents.length === 1 ? '1 agent' : `${t.agents.length} agents`}</span>
+              {t.label} <span className="text-muted-foreground font-normal">· {teamCount(t.agents.length, list.hasMore && i === teams.length - 1)}</span>
             </h2>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {t.agents.map((a) => (
@@ -123,15 +123,28 @@ function AgentsTab() {
   )
 }
 
+/**
+ * teamCount is the size of a team heading. The server orders by team with "No team" last, so while pages remain only
+ * the last group can be partial: it says "so far".
+ */
+function teamCount(n: number, partial: boolean) {
+  return `${n === 1 ? '1 agent' : `${n} agents`}${partial ? ' so far' : ''}`
+}
+
 /** ChartTab is the reports-to trees. It loads every page first: a tree with a missing page would put agents in the wrong place. */
 function ChartTab() {
   const { org } = useOrg()
   const list = useAgentSummaries(org.orgId, { all: true })
   const teams = useMemo(() => groupByTeam(list.agents ?? []), [list.agents])
+  // Wait for every page only on the first load. A later poll can find one more page (an agent added earlier in the
+  // order); the chart then stays, with its open branches and its focus, while that page loads.
+  const [loaded, setLoaded] = useState(false)
+  const complete = !list.isPending && !list.hasMore
+  if (complete && !loaded) setLoaded(true)
   return (
     <div className="grid gap-4">
       <QueryError error={list.isError ? list.error : undefined} />
-      {list.isPending || (list.hasMore && !list.isError) ? (
+      {!loaded && !list.isError ? (
         <SkeletonRows label="Loading agents…" />
       ) : list.isError && !list.agents ? null : teams.length === 0 ? (
         <NoAgents />

@@ -66,17 +66,20 @@ export function reportsToForest(agents: readonly AgentSummary[]): ChartNode[] {
     const t = a.reportsTo?.target
     return t?.case === 'agentId' && t.value !== a.agentId && nodes.has(t.value) ? t.value : undefined
   }
-  // A walk up the parent links that comes back to an agent found a cycle: that agent becomes a root.
+  // A walk up the parent links that comes back to an agent found a cycle: that agent becomes a root. A walk stops at an
+  // agent an earlier walk resolved (its chain up ends), so the whole check is O(n) also for one long chain.
   const cut = new Set<string>()
+  const resolved = new Set<string>()
   for (const a of agents) {
     const seen = new Set<string>([a.agentId])
-    for (let p = parentOf(a); p !== undefined; p = cut.has(p) ? undefined : parentOf(nodes.get(p)!.agent)) {
+    for (let p = parentOf(a); p !== undefined && !resolved.has(p); p = cut.has(p) ? undefined : parentOf(nodes.get(p)!.agent)) {
       if (seen.has(p)) {
         cut.add(p)
         break
       }
       seen.add(p)
     }
+    for (const id of seen) resolved.add(id)
   }
   const roots: ChartNode[] = []
   for (const a of agents) {
