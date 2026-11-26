@@ -158,10 +158,12 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 		})
 
 		It("counts a key that the upstream echoes in an error body", func(ctx SpecContext) {
-			url, material := serve(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The upstream answers with the fake key as a constant: a handler that copies request input into its
+			// answer is reflected input for code scanning, and the key is the same bytes.
+			url, material := serve(ctx, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = io.WriteString(w, `{"error":{"message":"invalid key: `+r.Header.Get("Authorization")+`"}}`)
+				_, _ = io.WriteString(w, `{"error":{"message":"invalid key: Bearer `+echoKey+`"}}`)
 			}))
 			status, _ := call(ctx, url, material, `{"model":"m","messages":[]}`)
 			Expect(status).To(Equal(http.StatusUnauthorized))
@@ -170,9 +172,9 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 		})
 
 		It("counts a key echoed in a response header and in the body once per response", func(ctx SpecContext) {
-			url, material := serve(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			url, material := serve(ctx, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Debug-Auth", r.Header.Get("Authorization"))
+				w.Header().Set("X-Debug-Auth", "Bearer "+echoKey)
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = io.WriteString(w, `{"error":{"message":"no access for `+echoKey+`"}}`)
 			}))
