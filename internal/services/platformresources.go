@@ -93,12 +93,15 @@ func orgRefProto(r store.ListOrgRefsRow) *platformv1alpha1.OrgRef {
 
 // ListProviders implements PlatformResourceService.
 func (a platformResourcesAPI) ListProviders(ctx context.Context, req *platformv1alpha1.ListProvidersRequest) (*platformv1alpha1.ListProvidersResponse, error) {
-	p, err := a.orgPage(ctx, req)
-	if err != nil {
+	if _, err := platformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	if a.s.catalog == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "model providers are not configured")
+	}
+	p, err := a.orgPage(ctx, req)
+	if err != nil {
+		return nil, err
 	}
 	res := &platformv1alpha1.ListProvidersResponse{NextPageToken: p.next}
 	for _, o := range p.orgs {
@@ -145,12 +148,15 @@ func (a platformResourcesAPI) ListTemplates(ctx context.Context, req *platformv1
 
 // ListMcpServers implements PlatformResourceService.
 func (a platformResourcesAPI) ListMcpServers(ctx context.Context, req *platformv1alpha1.ListMcpServersRequest) (*platformv1alpha1.ListMcpServersResponse, error) {
-	p, err := a.orgPage(ctx, req)
-	if err != nil {
+	if _, err := platformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	if a.s.mcp == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "remote MCP servers are not configured")
+	}
+	p, err := a.orgPage(ctx, req)
+	if err != nil {
+		return nil, err
 	}
 	res := &platformv1alpha1.ListMcpServersResponse{NextPageToken: p.next}
 	for _, o := range p.orgs {

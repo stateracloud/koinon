@@ -151,6 +151,40 @@ var _ = Describe("the platform console lists of org resources (PlatformResourceS
 		}
 	})
 
+	It("leaves out personal orgs unless asked, and deleted orgs always", func(ctx SpecContext) {
+		// a becomes a personal org and b is deleted. The SQL stands in for the flows that make them, so the spec
+		// keeps the rows of newResourceOrg.
+		_, err := e.pool.Exec(ctx, `UPDATE orgs SET kind = 'personal' WHERE id = $1`, a.org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `UPDATE orgs SET deleted_at = now() WHERE id = $1`, b.org)
+		Expect(err).NotTo(HaveOccurred())
+		providerOrgs := func(req *platformv1alpha1.ListProvidersRequest) []string {
+			req.PageSize = 100
+			res, err := admin.platformResources.ListProviders(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetNextPageToken()).To(BeEmpty())
+			var orgs []string
+			for _, p := range res.GetProviders() {
+				orgs = append(orgs, p.GetOrg().GetOrgId())
+			}
+			return orgs
+		}
+
+		all := providerOrgs(&platformv1alpha1.ListProvidersRequest{})
+		Expect(all).NotTo(ContainElement(a.org), "personal org without include_personal")
+		Expect(all).NotTo(ContainElement(b.org), "deleted org")
+		withPersonal := providerOrgs(&platformv1alpha1.ListProvidersRequest{IncludePersonal: true})
+		Expect(withPersonal).To(ContainElement(a.org))
+		Expect(withPersonal).NotTo(ContainElement(b.org))
+
+		res, err := admin.platformResources.ListProviders(ctx, &platformv1alpha1.ListProvidersRequest{OrgId: a.org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetProviders()).To(HaveLen(1))
+		Expect(res.GetProviders()[0].GetOrg().GetKind()).To(Equal(orgv1alpha1.OrgKind_ORG_KIND_PERSONAL))
+		_, err = admin.platformResources.ListProviders(ctx, &platformv1alpha1.ListProvidersRequest{OrgId: b.org})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+	})
+
 	It("refuses a bad page token and an org that does not exist", func(ctx SpecContext) {
 		_, err := admin.platformResources.ListProviders(ctx, &platformv1alpha1.ListProvidersRequest{PageToken: "!"})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))

@@ -67,7 +67,10 @@ export function PlatformTemplatesPage() {
   )
   return (
     <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-4">
-      <PageHeader title="Templates" description="The platform templates and the templates of all the team orgs." />
+      <PageHeader
+        title="Templates"
+        description={orgId ? 'The templates of the org that you selected.' : 'The platform templates and the templates of all the team orgs.'}
+      />
       <PlatformResourceFilters
         idPrefix="template"
         orgId={orgId}
