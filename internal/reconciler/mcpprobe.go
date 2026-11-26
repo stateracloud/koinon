@@ -332,17 +332,30 @@ func (g *keyGate) waits(ctx context.Context, w *work) (bool, int64) {
 	if rev == 0 {
 		return false, 0
 	}
+	return !g.ackedRev(ctx, rev), rev
+}
+
+// ackedRev reports whether every live koinon-gateway copy acked the MCP half of State revision rev
+// (staterev.AllAcked). With no live copy it is true: nothing serves from the stream. When the copy list
+// or the acks cannot be read it is false, so the work that needs them waits.
+func (g *keyGate) ackedRev(ctx context.Context, rev int64) bool {
+	if g.liveErr != nil {
+		return false
+	}
+	if len(g.live) == 0 {
+		return true
+	}
 	done, seen := g.acked[rev]
 	if !seen {
 		var err error
 		done, err = staterev.AllAcked(ctx, g.r.pool, rev, gwv1.Half_HALF_MCP, g.live)
 		if err != nil {
-			g.r.log.Warn("reading the gateway acks failed; sandbox work waits for the acks", "err", err)
+			g.r.log.Warn("reading the gateway acks failed; the work that needs them waits", "err", err)
 			done = false
 		}
 		g.acked[rev] = done
 	}
-	return !done, rev
+	return done
 }
 
 // split returns the work items of idx that may go now, and those that wait with the highest revision

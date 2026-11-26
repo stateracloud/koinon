@@ -86,8 +86,10 @@ trailing:
 		switch m := req.Messages[i]; m.Role {
 		case "tool":
 			c.toolResults = append(c.toolResults, names[m.ToolCallID])
+			c.toolResultTexts = append(c.toolResultTexts, contentText(m.Content))
 		case "function":
 			c.toolResults = append(c.toolResults, m.Name)
+			c.toolResultTexts = append(c.toolResultTexts, contentText(m.Content))
 		default:
 			break trailing
 		}

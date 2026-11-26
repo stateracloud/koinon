@@ -143,3 +143,22 @@ var _ = Describe("OTLP exporter settings", func() {
 		Expect(err.Error()).NotTo(ContainSubstring("hunter2"))
 	})
 })
+
+var _ = Describe("koinon-agentd's egress settings (#1086 part C2)", func() {
+	const egress = "http://koinon-mcp-gateway.koinon.svc:8081"
+	const keyFile = "/secrets/actor-token/seed"
+
+	It("starts with the egress URL and the key file together", func() {
+		Expect(start(map[string]string{"KOINON_EGRESS_URL": egress, "KOINON_ACTOR_TOKEN_KEY_FILE": keyFile})).To(Succeed())
+		Expect(start(nil, "--egress-url", egress, "--actor-token-key-file", keyFile, "--actor-token-key-id", "k2")).To(Succeed())
+	})
+
+	It("refuses one without the other, a URL that would leak into the sandbox and an empty key ID", func() {
+		Expect(start(nil, "--egress-url", egress)).To(MatchError(ContainSubstring("required together")))
+		Expect(start(nil, "--actor-token-key-file", keyFile)).To(MatchError(ContainSubstring("required together")))
+		for _, bad := range []string{"koinon-mcp-gateway:8081", "http://u:p@gw:8081", "http://gw:8081/x", "http://gw:8081?a=b", "ftp://gw:8081"} {
+			Expect(start(nil, "--egress-url", bad, "--actor-token-key-file", keyFile)).To(MatchError(ContainSubstring("--egress-url")), bad)
+		}
+		Expect(start(nil, "--egress-url", egress, "--actor-token-key-file", keyFile, "--actor-token-key-id", "")).To(MatchError(ContainSubstring("must not be empty")))
+	})
+})

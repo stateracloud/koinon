@@ -276,5 +276,43 @@ turns:
 			Expect(after("foo_create_pull_request")).To(Equal("another result"))
 			Expect(after("mcp__other__create_pull_request")).To(Equal("another result"))
 		})
+
+		It("matches a tool result by its text, in both APIs; no turn matches a result without the text", func(ctx SpecContext) {
+			_, ts := start(fakemodel.Script{Model: "m", Turns: []fakemodel.Turn{
+				{When: fakemodel.When{ToolResult: "bash", ToolResultContains: "clone-ok"}, Text: "cloned"},
+				{Text: "first"},
+			}})
+			openAI := func(result any) *http.Response {
+				return post(ctx, ts.URL+"/v1/chat/completions", map[string]any{"model": "m", "messages": []map[string]any{
+					userMsg("hi"),
+					{"role": "assistant", "content": nil, "tool_calls": []map[string]any{{
+						"id": "call_1", "type": "function", "function": map[string]any{"name": "bash", "arguments": "{}"},
+					}}},
+					{"role": "tool", "tool_call_id": "call_1", "content": result},
+				}})
+			}
+			anthropic := func(result any) *http.Response {
+				return post(ctx, ts.URL+"/v1/messages", map[string]any{"model": "m", "max_tokens": 8, "messages": []map[string]any{
+					userMsg("hi"),
+					{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_1", "name": "bash", "input": map[string]any{}}}},
+					{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": result}}},
+				}}, "anthropic-version", "2023-06-01")
+			}
+			var c oaCompletion
+			decode(openAI("abc123\nclone-ok\n"), &c)
+			Expect(*c.Choices[0].Message.Content).To(Equal("cloned"))
+			decode(openAI([]map[string]any{{"type": "text", "text": "clone-ok"}}), &c)
+			Expect(*c.Choices[0].Message.Content).To(Equal("cloned"))
+			var m anMessage
+			decode(anthropic("clone-ok"), &m)
+			Expect(m.Content).To(Equal([]anBlock{{Type: "text", Text: "cloned"}}))
+			decode(anthropic([]map[string]any{{"type": "text", "text": "x clone-ok"}}), &m)
+			Expect(m.Content).To(Equal([]anBlock{{Type: "text", Text: "cloned"}}))
+
+			for _, resp := range []*http.Response{openAI("fatal: repository not found"), anthropic("fatal: repository not found")} {
+				Expect(resp.StatusCode).To(Equal(http.StatusBadRequest), "a failed command leaves no turn that matches")
+				_ = resp.Body.Close()
+			}
+		})
 	})
 })

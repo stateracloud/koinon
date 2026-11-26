@@ -111,29 +111,16 @@ func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err err
 // connection's baseUrl; empty is the connector's default host). The network rules are rendered
 // at that host (ADR 0062), so nothing else is reachable.
 func GitHubReadAccessAt(cfg agentconfig.Config, baseURL string) (read GitHubRead, ok bool, err error) {
-	connector, g, found := providers.Default().Grant(cfg)
-	if !found {
-		return GitHubRead{}, false, nil
+	rg, ok, err := providers.Default().ReadGrant(cfg)
+	if err != nil || !ok {
+		return GitHubRead{}, false, err
 	}
-	ct, found := connectors.Get(connector)
-	if !found {
-		return GitHubRead{}, false, fmt.Errorf("the %s connector type is not embedded", connector)
-	}
-	var scopes []string
-	for _, s := range g.Scopes {
-		if ct.HasNetwork(g.Preset, []string{s}) {
-			scopes = append(scopes, s)
-		}
-	}
-	b, bound := cfg.Binding(connector)
-	if len(scopes) == 0 || !bound || len(b.Targets) == 0 {
-		return GitHubRead{}, false, nil
-	}
+	connector, ct, scopes, b := rg.Connector, rg.Type, rg.Scopes, rg.Binding
 	loc, err := ct.Locate(baseURL)
 	if err != nil {
 		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
 	}
-	hosts, err := ct.NetworkAt(loc, g.Preset, scopes, b.Targets)
+	hosts, err := ct.NetworkAt(loc, rg.Preset, scopes, b.Targets)
 	if err != nil {
 		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
 	}

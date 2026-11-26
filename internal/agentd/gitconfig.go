@@ -27,7 +27,7 @@ import (
 
 // gitScriptMarker names the scripts below, for logs and for tests that fake the sandbox.
 const (
-	gitConfigMarker = "koinon-gitconfig"
+	gitConfigMarker = codehost.GitScriptMarker
 	gitCAMarker     = "koinon-gitca"
 )
 
@@ -125,10 +125,19 @@ func (r *runner) writeGitConfig(ctx context.Context, workspace, sandbox string) 
 		return &failure{reason: "git configuration for the code host: " + err.Error()}
 	}
 	hasCA := strings.TrimSpace(h.site.CABundle) != ""
+	cfg := codehost.GitConfig(h.loc, hasCA)
+	r.egress = r.egressGit(h)
+	if r.egress {
+		// The token first: the config's include of a file that is not there yet is ignored by git,
+		// but a rewrite to the gateway without the token would be refused.
+		if err := r.writeActorToken(ctx, workspace, sandbox); err != nil {
+			return &failure{reason: "git through the Koinon gateway: " + err.Error()}
+		}
+		cfg = append(cfg, codehost.EgressGitConfig(r.p.cfg.EgressURL, h.loc)...)
+	}
 	dir := dirOf(codehost.SandboxGitConfig)
 	_, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox,
-		[]string{"/bin/sh", "-c", writeGitScript, "sh", dir, codehost.SandboxGitConfig},
-		codehost.GitConfig(h.loc, hasCA))
+		[]string{"/bin/sh", "-c", writeGitScript, "sh", dir, codehost.SandboxGitConfig}, cfg)
 	if err != nil {
 		return err
 	}

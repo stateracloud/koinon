@@ -14,7 +14,7 @@ cd "$tmp"
 git init -q -b main .
 g() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
 printf 'module example.invalid/m\n\ngo 1.21\n' >go.mod
-for b in koinon-api koinon-reconciler koinon-agentd koinon-gateway koinon-fakemodel koinon-fakegithub koinon-fakemcp koinon-faketls; do
+for b in koinon-api koinon-reconciler koinon-agentd koinon-gateway koinon-fakemodel koinon-fakegithub koinon-fakegitea koinon-fakemcp koinon-faketls; do
   mkdir -p "cmd/$b"
   printf 'package main\n\nfunc main() {}\n' >"cmd/$b/main.go"
 done
