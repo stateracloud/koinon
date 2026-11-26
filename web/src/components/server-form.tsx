@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -51,7 +51,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
       onSaved?.(server?.name ?? f.name)
       onDone()
     } catch (e2) {
-      const message = ConnectError.from(e2).rawMessage
+      const message = describeError(e2).message
       setRefusal({ message: typed ? `${message} The secret was cleared from this page. Type it again.` : message, field: serverErrorField(message) })
     } finally {
       setPending(false)

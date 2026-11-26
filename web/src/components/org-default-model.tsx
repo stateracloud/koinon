@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -32,7 +32,7 @@ export function OrgDefaultModel({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the org default model: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the org default model: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -66,7 +66,7 @@ export function OrgDefaultModel({ orgId }: { orgId: string }) {
       </div>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div>

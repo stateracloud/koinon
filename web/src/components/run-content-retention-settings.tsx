@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -26,7 +26,7 @@ export function RunContentRetentionSettings({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the run content retention: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the run content retention: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -87,7 +87,7 @@ export function RunContentRetentionSettings({ orgId }: { orgId: string }) {
       </form>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
     </section>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -43,7 +43,7 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
       setNote('')
       await queryClient.invalidateQueries()
     } catch (e) {
-      setRefused(ConnectError.from(e).rawMessage)
+      setRefused(describeError(e).message)
     } finally {
       setPending(false)
     }

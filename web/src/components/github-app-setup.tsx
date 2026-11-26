@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError, createClient } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
+import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -60,7 +61,7 @@ export function GitHubAppSetup({ orgId }: { orgId: string }) {
       })
       setState(res.state)
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
       setPending(false)
     }
   }

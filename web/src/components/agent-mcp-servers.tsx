@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -27,7 +27,7 @@ export function AgentMcpServers({ agentId }: { agentId: string }) {
       </h2>
       {failed ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       ) : !servers.data || !tools.data || !allowed.data ? (
         <p role="status">Loading MCP servers…</p>
@@ -65,7 +65,7 @@ function Editor({ agentId, servers, tools, initial }: { agentId: string; servers
       await actions.setAgentServers(agentId, buildAllowlist(servers, state))
       setSaved(true)
     } catch (e) {
-      setError(ConnectError.from(e).rawMessage)
+      setError(describeError(e).message)
     } finally {
       setPending(false)
     }

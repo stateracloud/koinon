@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -28,7 +28,7 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
   if (limits.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the continuation cap: {ConnectError.from(limits.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the continuation cap: {describeError(limits.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -49,7 +49,7 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
         <CapForm
           initial={loaded.overridden ? loaded.taskSpendUsd : ''}
           pending={save.isPending}
-          error={save.error ? ConnectError.from(save.error).rawMessage : undefined}
+          error={save.error ? describeError(save.error).message : undefined}
           onSave={(usd) => save.mutateAsync({ orgId, taskSpendUsd: usd }).then(() => setEditing(false))}
           onCancel={() => setEditing(false)}
         />

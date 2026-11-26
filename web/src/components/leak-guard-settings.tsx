@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -41,7 +41,7 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the leak guard settings: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the leak guard settings: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -153,7 +153,7 @@ export function LeakGuardSettings({ orgId }: { orgId: string }) {
       </div>
       {error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(error).message}</AlertDescription>
         </Alert>
       )}
     </section>

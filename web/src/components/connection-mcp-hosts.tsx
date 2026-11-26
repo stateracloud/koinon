@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type FormEvent } from 'react'
@@ -32,7 +32,7 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
       await add.mutateAsync({ orgId, connectionId, host: host.trim() })
       setHost('')
     } catch (err) {
-      setError(`Could not add the host: ${ConnectError.from(err).rawMessage}`)
+      setError(`Could not add the host: ${describeError(err).message}`)
     }
   }
 

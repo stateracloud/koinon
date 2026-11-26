@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -43,7 +43,7 @@ export function AgentSandboxResources({ agent }: { agent: Agent }) {
   if (res.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the sandbox size: {ConnectError.from(res.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the sandbox size: {describeError(res.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -89,7 +89,7 @@ export function AgentSandboxResources({ agent }: { agent: Agent }) {
       </p>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div className="flex gap-2">

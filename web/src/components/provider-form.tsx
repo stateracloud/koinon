@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -122,7 +122,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
       onSaved?.(provider?.name ?? name)
       onDone()
     } catch (err) {
-      const msg = ConnectError.from(err).rawMessage
+      const msg = describeError(err).message
       // The key left the page with the request, so the person has to supply it again.
       const cleared = [key && 'API key', costKeyValue && 'cost API key'].filter(Boolean)
       const names = cleared.join(' and the ')

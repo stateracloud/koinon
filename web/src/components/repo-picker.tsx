@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { useId, useState, type KeyboardEvent } from 'react'
 import { Input } from '@/components/ui/input'
@@ -116,7 +116,7 @@ export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-la
           </ul>
           <p className="text-muted-foreground border-t px-3 py-1.5 text-xs" role="status">
             {list.isError && settled
-              ? `Could not list the connection’s repositories (${ConnectError.from(list.error).rawMessage}); type owner/name.`
+              ? `Could not list the connection’s repositories (${describeError(list.error).message}); type owner/name.`
               : searching
                 ? 'Searching the connection’s repositories…'
                 : repos.length === 0

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -81,7 +81,7 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
       onSaved?.(warnings)
       onDone()
     } catch (e2) {
-      setError(ConnectError.from(e2).rawMessage)
+      setError(describeError(e2).message)
     } finally {
       setPending(false)
     }

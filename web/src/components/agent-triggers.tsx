@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { describeError } from '@/lib/api-error'
 import { create } from '@bufbuild/protobuf'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -107,7 +107,7 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
       </div>
       {run.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not run the trigger: {ConnectError.from(run.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not run the trigger: {describeError(run.error).message}</AlertDescription>
         </Alert>
       )}
       {pending && <p className="text-muted-foreground">These take effect when version {agent.latestVersion} is activated.</p>}
@@ -244,7 +244,7 @@ function Editor({
                       </option>
                     ))}
                   </NativeSelect>
-                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {ConnectError.from(members.error).rawMessage}</p>}
+                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {describeError(members.error).message}</p>}
                 </>
               )}
             </>
@@ -272,7 +272,7 @@ function Editor({
       {problem && <p className="text-muted-foreground">{problem}</p>}
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div className="flex gap-2">

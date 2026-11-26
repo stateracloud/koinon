@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { describeError } from '@/lib/api-error'
 import { ConnectError } from '@connectrpc/connect'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -61,7 +62,7 @@ export function ConfirmAction({ label, subject, consequence, confirmLabel, onOpe
       returnFocus.current = true
       setAsking(false)
       const err = ConnectError.from(e)
-      onError?.(err.rawMessage, err)
+      onError?.(describeError(err).message, err)
     } finally {
       setPending(false)
     }

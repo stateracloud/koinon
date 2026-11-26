@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { describeError } from '@/lib/api-error'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -89,7 +89,7 @@ export function ProviderEchoCheck({ provider, models }: { provider: Provider; mo
       )}
       {check.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>The check did not run: {ConnectError.from(check.error).rawMessage}</AlertDescription>
+          <AlertDescription>The check did not run: {describeError(check.error).message}</AlertDescription>
         </Alert>
       )}
       {last && (

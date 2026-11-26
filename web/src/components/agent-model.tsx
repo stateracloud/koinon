@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -30,7 +30,7 @@ export function AgentModel({ agent }: { agent: Agent }) {
   if (model.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the model: {ConnectError.from(model.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the model: {describeError(model.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -72,7 +72,7 @@ export function AgentModel({ agent }: { agent: Agent }) {
       </div>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div>
@@ -136,7 +136,7 @@ function AgentThinking({ agent, model, archived }: { agent: Agent; model: GetAge
           </p>
           {save.error && (
             <Alert variant="destructive" role="alert">
-              <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+              <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
             </Alert>
           )}
           <div>

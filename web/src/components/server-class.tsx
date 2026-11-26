@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -51,7 +51,7 @@ export function ServerClass({ server: s, actions }: { server: Server; actions: P
       await actions.setServerClass(s.id, kind, legs, connection)
       setEditing(false)
     } catch (e) {
-      setError(ConnectError.from(e).rawMessage)
+      setError(describeError(e).message)
     } finally {
       setPending(false)
     }
