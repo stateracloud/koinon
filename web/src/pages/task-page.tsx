@@ -22,7 +22,7 @@ import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
 import { isEnded, runFinished, runStateLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/tasks/$taskId')
+const route = getRouteApi('/app/org/tasks/$taskId')
 
 // sentence ends a message with a full stop when it has no end punctuation, so the link after it does not run on.
 const sentence = (m: string) => (/[.!?]$/.test(m) ? m : `${m}.`)

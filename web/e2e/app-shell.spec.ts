@@ -84,7 +84,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await page.goto('/')
       await expect(page).toHaveURL(/\/platform$/)
       await expect(page.getByRole('heading', { level: 1, name: 'Platform console' })).toBeVisible()
-      await expect(page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Platform console' }).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
       await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0)
       await expectAccessible(page)
     })

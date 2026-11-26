@@ -247,7 +247,7 @@ describe('Agent unhealthy notifications', () => {
 
 describe('Platform ceilings', () => {
   it('lists every org with its ceiling, cap and spend and sets a ceiling in place', async () => {
-    const calls = setup({ platformAdmin: true, path: '/platform/budgets' })
+    const calls = setup({ platformAdmin: true, path: '/platform/usage/budgets' })
     expect(await screen.findByRole('heading', { name: 'Platform budget ceilings' })).toBeInTheDocument()
     const list = await screen.findByRole('list', { name: 'Orgs' })
     const acme = within(list).getByRole('heading', { name: 'Acme' }).closest('li')!
@@ -260,10 +260,12 @@ describe('Platform ceilings', () => {
     await waitFor(() => expect(calls.ceilings).toEqual([expect.objectContaining({ orgId: 'org-1', platformCeilingUsd: '1000' })]))
   })
 
-  it('is refused to org admins who are not platform admins, without a flash while loading', async () => {
-    const calls = setup({ path: '/platform/budgets' })
-    expect(screen.queryByText('Only platform admins can set the platform ceiling.')).not.toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Only platform admins can set the platform ceiling.')
+  it('is refused to org admins who are not platform admins: they go to the org area', async () => {
+    const calls = setup({ path: '/platform/usage/budgets' })
+    expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Platform budget ceilings' })).not.toBeInTheDocument()
     expect(calls.listed).toBe(0)
     expect(screen.queryByRole('navigation', { name: 'Platform' })).not.toBeInTheDocument()
   })

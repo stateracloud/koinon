@@ -3,6 +3,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { forgetActingOrg } from '@/lib/org-storage'
 import { logout } from '@/lib/session'
 
 /** useSignOut ends the session, drops every cached query and goes to the login page, also when the call fails. */
@@ -15,6 +16,7 @@ export function useSignOut(): { signOut: () => void; signingOut: boolean } {
     try {
       await logout()
     } finally {
+      forgetActingOrg()
       queryClient.clear()
       await navigate({ to: '/login', search: {} })
     }
