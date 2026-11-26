@@ -2897,6 +2897,11 @@ type QuestionRecipient struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type ReconcilerLeader struct {
+	ID   int16
+	Term int64
+}
+
 type RecoveryRequest struct {
 	Nonce        string
 	CrUid        string

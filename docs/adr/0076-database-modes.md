@@ -183,6 +183,29 @@ prune objects the new one made.
 - The spec "stops the old leader within the detection bound after a silent connection loss" cuts the
   connection with a proxy that drops all bytes and keeps the sockets open.
 
+## Amendment (2026-11-26): the leader term fences the reconciler's database writes (#635)
+
+The maintainer chose option 1 of issue 635 (comment of 2026-11-26): a term on database writes.
+
+- **The term.** Migration 00116 adds the table `reconciler_leader` with one row and a `term`. A new
+  leader increments the term on its lock connection while it holds the lock
+  (`leaderterm.Take`), and logs it (`reconciler is leading ... term=N`).
+- **The check.** The lead context carries the term (`leaderterm.WithTerm`). The reconciler's queries
+  (`store.Queries`), its audit writes and the publish of the State stream (`staterev`) go through
+  `leaderterm.DB`. It sends each statement in one batch with `reconciler_check_term(term)`: one round
+  trip and one implicit transaction. A transaction starts with the check. The check fails with
+  SQLSTATE `KO635` when the term is not current, and the lead ends at once.
+- **No write of an old term commits after a newer term.** The check holds a share lock on the term
+  row until its transaction ends. The increment of the next leader waits for each open statement of
+  the old term.
+- **Not covered: Kubernetes deletes and execution-layer calls.** The database cannot refuse them.
+  They keep the time fence of the amendment above. Issue #1465 names their exit condition: the
+  gateway reads only the State stream (ADR 0097). Writes of the MCP prober and the remote agent
+  checker (`mcpservers`, `remoteagents`) use their own pool and are not fenced yet. Issue #1465
+  covers them too.
+- The spec "refuses the writes of a leader whose term a newer leader took, and ends its lead" and
+  the specs of `internal/reconciler/leaderterm` show that a write with a stale term is refused.
+
 ## Consequences
 
 - **A plain cluster is enough** with `standalone`: no operator and no cloud database.

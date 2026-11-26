@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/reconciler/leaderterm"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -108,6 +109,12 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	if err := lockBlocking(ctx, conn.Conn(), leaderLock); err != nil {
 		return false, fmt.Errorf("take leader lock: %w", err)
 	}
+	// The term fences this lead's database writes: once a newer leader takes it, the database refuses
+	// every statement of this lead (issue 635).
+	term, err := leaderterm.Take(ctx, conn.Conn())
+	if err != nil {
+		return false, err
+	}
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
 		return false, fmt.Errorf("listen: %w", err)
 	}
@@ -117,9 +124,11 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 		return false, fmt.Errorf("listen: %w", err)
 	}
 	r.log.Info("reconciler is leading", "waited", time.Since(start).Round(time.Millisecond),
-		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout)
+		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout, "term", term)
 
 	lctx, cancel := context.WithCancelCause(ctx)
+	// A refused term ends the whole lead, as a lost lock connection does: a newer leader works now.
+	lctx = leaderterm.WithTerm(lctx, term, cancel)
 	wake := make(chan struct{}, 1)
 	readerDone := make(chan struct{})
 	// alive is the time of the last proof that the lock connection works: a notification or the

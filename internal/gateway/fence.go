@@ -9,8 +9,9 @@ import "context"
 // or a partition) is seen only after a bound (issue 635, ADR 0076 amendment 2026-11-18). A driver that
 // takes a step another leader cannot undo (deleting objects) checks the fence of its ctx first, so
 // the old leader's destructive step stops at the earliest moment the reconciler doubts its lease,
-// not only when the lead context is cancelled. This is not the leader-term fence: issue 635 stays open
-// for that (every write carries the term, the database refuses a stale one).
+// not only when the lead context is cancelled. The leader term (package reconciler/leaderterm) fences
+// the database writes; the database cannot fence a Kubernetes delete, so this fence stays for them
+// until issue 1465 ends it.
 
 type fenceKey struct{}
 

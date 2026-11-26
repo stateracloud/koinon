@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
+	"github.com/stateracloud/koinon/internal/reconciler/leaderterm"
 	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -256,9 +257,12 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg     Config
-	log     *slog.Logger
-	pool    *pgxpool.Pool
+	cfg  Config
+	log  *slog.Logger
+	pool *pgxpool.Pool
+	// db is the pool behind the leader term: the statements of a lead carry its term, and the database
+	// refuses them once a newer leader took the term (issue 635). q runs on it.
+	db      leaderterm.DB
 	q       *store.Queries
 	backend execution.Backend
 	gw      gateway.ModelGateway
@@ -418,8 +422,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
+	db := leaderterm.DB{Pool: pool}
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
+		cfg: cfg, log: cfg.Logger, pool: pool, db: db, q: store.New(db), states: staterev.Publisher{DB: stateDB(cfg, db)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
 		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
@@ -431,11 +436,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 }
 
 // stateDB is the database the State stream's revisions go to: the pool, unless the config names one.
-func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
+// Both carry the leader term, so a stale leader cannot publish (issue 635).
+func stateDB(cfg Config, db leaderterm.DB) staterev.DB {
 	if cfg.StateRevisionDB != nil {
-		return cfg.StateRevisionDB
+		return leaderterm.TxDB{DB: cfg.StateRevisionDB}
 	}
-	return pool
+	return db
 }
 
 // statePublishTimeout bounds one attempt of publishState; statePublishAttempts and
