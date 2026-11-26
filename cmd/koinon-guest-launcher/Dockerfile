@@ -17,6 +17,7 @@
 # is no RUN step, so a multi-platform build needs no emulation.
 # "flavor" is a named build context, not a stage
 # hadolint ignore=DL3006
+# dockerfile-lint: allow=digest flavor is a named build context; the caller passes the harness image pinned by digest (OCI layout or docker-image://<digest>)
 FROM flavor
 ARG TARGETARCH
 # "launcher" is a named build context, not a stage
