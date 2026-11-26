@@ -5,8 +5,8 @@
 # Claude Code sandbox, which allows writes only to the worktree, $TMPDIR and the entries of
 # .claude/settings.json. The tools under the gates write state outside those paths by default
 # (buildx its activity file under ~/.docker/buildx, pnpm its store under ~/.local/share or
-# ~/Library, buf its module cache under ~/.cache/buf), so a sandboxed run got EPERM instead of a verdict. gate_state_env points each one at
-# a path the sandbox allows. Sourced by hack/lane-gates.sh after hack/gate-reuse-lib.sh (it uses
+# ~/Library, buf its module cache under ~/.cache/buf), so a sandboxed run got EPERM instead of a
+# verdict. gate_state_env points each one at a path the sandbox allows. Sourced by hack/lane-gates.sh after hack/gate-reuse-lib.sh (it uses
 # gate_logdir), inside the repository root.
 #
 # A value that is already set wins: CI and a person who exports one keep their own.
@@ -21,9 +21,10 @@
 #                       relinks node_modules when the store changes, so the first gate run in a
 #                       worktree (and a later plain `make test-opencode-plugin`) installs again from
 #                       the registry: slower, not wrong.
-#   BUF_CACHE_DIR       $TMPDIR/koinon-buf-cache, the module cache of buf (the generate gate). buf
-#                       writes it under ~/.cache/buf by default. The lanes of one machine share it;
-#                       buf keys its entries by module digest, so a shared cache is safe.
+#   BUF_CACHE_DIR       $TMPDIR/koinon-buf-cache, the module cache of buf (the proto and generate
+#                       gates). buf writes it under ~/.cache/buf by default. The lanes with the same
+#                       $TMPDIR share it; buf locks its entries, so a shared cache is safe. The first
+#                       run with an empty cache downloads the BSR modules from buf.build.
 #
 # Not moved here, on purpose:
 #   - the envtest port locks (controller-runtime's os.UserCacheDir()/kubebuilder-envtest). They

@@ -561,8 +561,10 @@ value that is already set (CI, your shell) wins:
   gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
   pnpm links the plugin `node_modules` again when the store changes, so the first gate run in a
   worktree (and a later plain `make test-opencode-plugin`) downloads from the registry again.
-- `BUF_CACHE_DIR` is `$TMPDIR/koinon-buf-cache`, the module cache of buf (the generate gate). buf
-  writes it to `~/.cache/buf` by default. The lanes of one machine share it.
+- `BUF_CACHE_DIR` is `$TMPDIR/koinon-buf-cache`, the module cache of buf (the proto and generate
+  gates). buf writes it to `~/.cache/buf` by default. The lanes with the same `$TMPDIR` share it. The
+  first run with an empty cache downloads the BSR modules from `buf.build`. If the sandbox blocks that
+  host, run `BUF_CACHE_DIR=$TMPDIR/koinon-buf-cache make generate` once outside the sandbox.
 - The envtest binaries: lane-gates runs `make envtest-assets` once, before the gates start, and passes
   the directory to `make test-chart-smoke` and `make test-admission` as `KOINON_ENVTEST_ASSETS`.
   setup-envtest only reads a store that has the version, so run `make envtest-assets` once outside the
