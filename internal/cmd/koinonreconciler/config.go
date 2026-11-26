@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -139,6 +140,38 @@ func (c *config) egressEndpoint() (*reconciler.Endpoint, error) {
 		return nil, err
 	}
 	return &e, nil
+}
+
+// substrateGatewayRoutes are the gateway listeners that the egress policy of every Substrate actor allows (issue
+// #1444): the LLM listener, koinon-gateway's MCP listener and its egress listener, where they are set. The guest
+// calls them over cleartext HTTP (ADR 0120), and the policy has HTTP rules only, so an https URL is refused.
+func (c *config) substrateGatewayRoutes() ([]substrate.GatewayRoute, error) {
+	var routes []substrate.GatewayRoute
+	for _, f := range []struct{ flag, raw string }{
+		{"--gateway-url", c.gatewayURL},
+		{"--gateway-mcp-url", c.gatewayMCPURL},
+		{"--gateway-egress-url", c.egressURL},
+	} {
+		if f.raw == "" {
+			continue
+		}
+		if u, err := url.Parse(f.raw); err == nil && u.Scheme != "http" {
+			return nil, fmt.Errorf("%s %q: the Substrate egress policy allows cleartext HTTP to the gateway only; use an http:// URL", f.flag, f.raw)
+		}
+		e, err := endpointOf(f.flag, f.raw)
+		if err != nil {
+			return nil, err
+		}
+		r := substrate.GatewayRoute{Host: e.Host, Port: e.Port}
+		if err := substrate.ValidateGatewayRoutes([]substrate.GatewayRoute{r}); err != nil {
+			return nil, fmt.Errorf("%s %q: the Substrate egress policy cannot allow it: %w", f.flag, f.raw, err)
+		}
+		routes = append(routes, r)
+	}
+	if err := substrate.ValidateGatewayRoutes(routes); err != nil {
+		return nil, fmt.Errorf("substrate egress policy: %w", err)
+	}
+	return routes, nil
 }
 
 // endpointOf parses an http(s)://host[:port] URL, named flag in errors, into a host and a port.

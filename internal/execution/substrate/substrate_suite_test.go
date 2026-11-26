@@ -26,6 +26,9 @@ const ws = "org-acme"
 // noContentDigest makes newDriver leave Config.ContentDigest nil, for the specs of the fail-closed rule.
 var noContentDigest bool
 
+// noGatewayRoutes makes newDriver leave Config.GatewayRoutes nil, for the specs of the egress policy's fail-closed rule.
+var noGatewayRoutes bool
+
 // noTier makes newDriver leave the tier settings empty, for the specs of the launcher's fail-closed rule.
 var noTier bool
 
@@ -59,6 +62,9 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	if c.GuestSigner == nil && !noSigner {
 		c.GuestSigner = fakeate.Signer()
 	}
+	if c.GatewayRoutes == nil && !noGatewayRoutes {
+		c.GatewayRoutes = gatewayRoutes
+	}
 	if c.ContentDigest == nil && !noContentDigest {
 		// The fake has no object store: the object's content is its address.
 		c.ContentDigest = func(_ context.Context, uri string) (string, error) { return "fake-" + uri, nil }
@@ -68,6 +74,9 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	Expect(err).NotTo(HaveOccurred())
 	return d, cl
 }
+
+// gatewayRoutes is the one gateway route of the specs' driver.
+var gatewayRoutes = []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}}
 
 // img is the actor image of the specs: the driver refuses one that is not pinned by digest.
 const img = "img" + digest

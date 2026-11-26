@@ -122,6 +122,11 @@ type Config struct {
 	// GuestVerifyKeys are more public keys that templates give the guest front next to the signer's,
 	// for a key rotation. They are part of the template hash.
 	GuestVerifyKeys []ed25519.PublicKey
+	// GatewayRoutes are the gateway listeners a guest calls (issue #1444). The driver writes them as the
+	// actor's egress policy before every resume, and the actor reaches nothing else. Required: without
+	// them every create, restore, start and resume fails with [execution.ErrFailedPrecondition]. Check
+	// them with [ValidateGatewayRoutes].
+	GatewayRoutes []GatewayRoute
 }
 
 func (c Config) withDefaults() Config {
@@ -308,6 +313,9 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	if err := d.requireSigner(op); err != nil {
 		return execution.Sandbox{}, err
 	}
+	if err := d.requireGatewayRoutes(op); err != nil {
+		return execution.Sandbox{}, err
+	}
 	tmpl, err := renderTemplate(workspace, spec, d.cfg)
 	if err != nil {
 		return execution.Sandbox{}, fail(op, execution.ErrInvalid, "%v", err)
@@ -334,6 +342,10 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	// existed keeps its state; the reconciler stops and starts it.
 	if created && actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
 		return d.resume(ctx, op, workspace, spec.Name)
+	}
+	// An actor that already exists gets the policy too: it may come from a driver without issue #1444.
+	if err := d.ensureEgressPolicy(ctx, op, key{workspace, spec.Name}); err != nil {
+		return execution.Sandbox{}, err
 	}
 	return sandboxFrom(workspace, actor), nil
 }
@@ -537,7 +549,12 @@ func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor
 	}
 }
 
+// resume writes the actor's egress policy and then resumes the actor. When the policy write fails, the
+// actor stays suspended: it does not run with a policy the driver did not write (issue #1444).
 func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
+	if err := d.ensureEgressPolicy(ctx, op, key{workspace, name}); err != nil {
+		return execution.Sandbox{}, err
+	}
 	resp, err := d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)

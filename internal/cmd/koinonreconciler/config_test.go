@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -514,5 +515,28 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 	It("does not apply to the OpenShell driver", func() {
 		_, err := parse(chartConfig, cli.DriverOpenShell)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("allows the gateway URLs in the actor egress policy, and refuses one it cannot carry (#1444)", func() {
+		c, err := parse(substrateConfig(pinned), cli.DriverSubstrate)
+		Expect(err).NotTo(HaveOccurred())
+		routes, err := c.substrateGatewayRoutes()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(routes).To(Equal([]substrate.GatewayRoute{{Host: "koinon-gateway.koinon.svc", Port: 8080}}))
+
+		c.gatewayMCPURL, c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8080", "http://koinon-mcp-gateway.koinon.svc:8081"
+		routes, err = c.substrateGatewayRoutes()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(routes).To(ConsistOf(
+			substrate.GatewayRoute{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			substrate.GatewayRoute{Host: "koinon-mcp-gateway.koinon.svc", Port: 8080},
+			substrate.GatewayRoute{Host: "koinon-mcp-gateway.koinon.svc", Port: 8081},
+		))
+
+		for _, bad := range []string{"https://koinon-gateway.koinon.svc:8443", "http://10.96.0.10:8080", "http://Gateway.koinon.svc:8080"} {
+			c.gatewayURL, c.gatewayMCPURL, c.egressURL = bad, "", ""
+			_, err = c.substrateGatewayRoutes()
+			Expect(err).To(MatchError(ContainSubstring("--gateway-url")), bad)
+		}
 	})
 })

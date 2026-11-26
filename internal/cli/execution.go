@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -75,6 +76,10 @@ type Substrate struct {
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
 	SnapshotStore SnapshotStore
+	// GatewayRoutes are the gateway listeners that the driver writes into the egress policy of every actor
+	// (issue #1444). Only the reconciler sets them, from its gateway URLs: it is the only binary that creates,
+	// starts or resumes sandboxes, and without routes those calls fail closed.
+	GatewayRoutes []substrate.GatewayRoute
 }
 
 // SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
@@ -122,6 +127,12 @@ func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
 // checks only that the flag is set, and Dial reads and parses the key.
 func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
+	if len(s.GatewayRoutes) > 0 {
+		if err := substrate.ValidateGatewayRoutes(s.GatewayRoutes); err != nil {
+			return cfg, fmt.Errorf("substrate egress policy: %w", err)
+		}
+		cfg.GatewayRoutes = slices.Clone(s.GatewayRoutes)
+	}
 	if readKey && s.GuestKeyFile != "" {
 		b, err := os.ReadFile(s.GuestKeyFile)
 		if err != nil {

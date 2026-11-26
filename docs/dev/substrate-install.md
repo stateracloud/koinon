@@ -606,6 +606,11 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- Each actor gets one Substrate `EgressPolicy` (issue #1444). The reconciler writes it before each resume: one `http`
+  rule for each gateway host, with the ports of `--gateway-url`, `--gateway-mcp-url` and `--gateway-egress-url`.
+  There is no other rule, so an actor reaches the gateway and nothing else. The gateway URLs must be `http://` URLs
+  with a DNS name (no IP address): the reconciler refuses to start otherwise. `DeleteActor` also deletes the policy.
+  The chart NetworkPolicy of the atenet-egress pods is the second fence.
 - The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
   pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
   no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server ports only (to any address). The `rustfs-bucket-init`

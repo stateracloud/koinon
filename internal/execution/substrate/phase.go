@@ -16,6 +16,7 @@ import (
 const (
 	codeNotFound      = codes.NotFound
 	codeAlreadyExists = codes.AlreadyExists
+	codeAborted       = codes.Aborted
 )
 
 func isCode(err error, c codes.Code) bool { return err != nil && status.Code(err) == c }
