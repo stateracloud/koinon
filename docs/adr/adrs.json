@@ -149,7 +149,8 @@
     "relates": [],
     "related_by": [
       "0075",
-      "0113"
+      "0113",
+      "0127"
     ]
   },
   {
@@ -177,7 +178,8 @@
     "superseded_by": [],
     "relates": [],
     "related_by": [
-      "0071"
+      "0071",
+      "0127"
     ]
   },
   {
@@ -246,7 +248,9 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0011",
@@ -423,7 +427,9 @@
       "0055"
     ],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0018",
@@ -587,7 +593,8 @@
       "0110",
       "0116",
       "0121",
-      "0125"
+      "0125",
+      "0127"
     ]
   },
   {
@@ -1443,7 +1450,9 @@
     ],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0056",
@@ -1766,7 +1775,8 @@
       "0089",
       "0096",
       "0123",
-      "0126"
+      "0126",
+      "0127"
     ]
   },
   {
@@ -1800,7 +1810,8 @@
       "0076",
       "0081",
       "0085",
-      "0123"
+      "0123",
+      "0127"
     ]
   },
   {
@@ -3161,7 +3172,8 @@
     ],
     "related_by": [
       "0119",
-      "0120"
+      "0120",
+      "0127"
     ]
   },
   {
@@ -3620,6 +3632,37 @@
       "0065",
       "0067",
       "0125"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0127",
+    "file": "0127-chat-adapter-pure-core.md",
+    "title": "Slack and Teams adapter as a pure event-to-actions core",
+    "status": "proposed",
+    "date": "2026-11-26",
+    "area": "connectors-tools",
+    "tags": [
+      "connectors",
+      "eventing",
+      "triggers",
+      "secrets",
+      "testing"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0006",
+      "0007",
+      "0010",
+      "0017",
+      "0023",
+      "0055",
+      "0065",
+      "0066",
+      "0110"
     ],
     "related_by": []
   }
