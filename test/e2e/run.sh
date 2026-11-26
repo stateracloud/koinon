@@ -83,6 +83,7 @@ case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; e
 DRIVER=${DRIVER:-openshell}
 case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 export DRIVER
+[[ $DRIVER == openshell || ${BACKUP_RESTORE:-0} != 1 ]] || { echo "BACKUP_RESTORE=1 is not wired for DRIVER=substrate yet: the restore drill on the Substrate leg is a follow-up of issue #1091 (docs/dev/ci.md)" >&2; exit 2; }
 [[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}

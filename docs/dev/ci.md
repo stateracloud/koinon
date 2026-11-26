@@ -342,7 +342,7 @@ OpenShell run:
   is for a host that cannot reach `storage.googleapis.com`.
 - The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
 
-Not covered yet: the harness contract tests and the restore drill on this leg, and the CI job. The CI job is a `.github`
+Not covered yet: the harness contract tests and the restore drill on this leg (`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a message that names #1091), and the CI job. The CI job is a `.github`
 change, so it is a separate pull request (a build-input change and a `.github` change have no merge route in one pull
 request). It starts as an advisory leg in `hack/ci-required.txt` and becomes the required quickstart leg at the switch (#1093,
 no soak). The quickstart reaches an approved pull request on Substrate only after #1086 (gateway routes and the actor
