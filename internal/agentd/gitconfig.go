@@ -27,7 +27,7 @@ import (
 
 // gitScriptMarker names the scripts below, for logs and for tests that fake the sandbox.
 const (
-	gitConfigMarker = "koinon-gitconfig"
+	gitConfigMarker = codehost.GitScriptMarker
 	gitCAMarker     = "koinon-gitca"
 )
 

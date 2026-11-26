@@ -75,6 +75,6 @@ func checkEd25519Data(data map[string][]byte) (addPublic []byte, err error) {
 	return nil, nil
 }
 
-// errSeedChanged is the error of a public-key patch whose seed test failed: the Secret changed
-// after it was read.
-var errSeedChanged = errors.New("its key changed while the public key was added; run again")
+// errSeedChanged is the error of a public-key patch whose test failed: the Secret changed after it
+// was read.
+var errSeedChanged = errors.New("it changed while the public key was added; run again")

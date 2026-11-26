@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -239,21 +240,58 @@ func NewPassword() (string, error) {
 }
 
 // addEd25519Public adds PublicKeyKey to the Secret s with a JSON patch. The patch first tests that
-// KeyKey still holds the seed that was read, so it never pairs a public key with another seed, and it
-// changes nothing else in the Secret.
+// the Secret is still the one that was read (its resourceVersion) and that KeyKey still holds the
+// seed that was read, so it never pairs a public key with another seed and never replaces a public
+// key that another writer added. It changes nothing else in the Secret.
 func addEd25519Public(ctx context.Context, secrets typedcorev1.SecretInterface, s *corev1.Secret, pub []byte) error {
-	patch, err := json.Marshal([]map[string]any{
-		{"op": "test", "path": "/data/" + KeyKey, "value": s.Data[KeyKey]},
-		{"op": "add", "path": "/data/" + jsonPointerEscape(PublicKeyKey), "value": pub},
-	})
+	ops := []map[string]any{}
+	if s.ResourceVersion != "" {
+		ops = append(ops, map[string]any{"op": "test", "path": "/metadata/resourceVersion", "value": s.ResourceVersion})
+	}
+	ops = append(ops,
+		map[string]any{"op": "test", "path": "/data/" + KeyKey, "value": s.Data[KeyKey]},
+		map[string]any{"op": "add", "path": "/data/" + jsonPointerEscape(PublicKeyKey), "value": pub},
+	)
+	patch, err := json.Marshal(ops)
 	if err != nil {
 		return err
 	}
 	_, err = secrets.Patch(ctx, s.Name, types.JSONPatchType, patch, metav1.PatchOptions{FieldManager: "koinon-api"})
-	if apierrors.IsInvalid(err) || apierrors.IsConflict(err) {
+	switch {
+	case err == nil:
+		return nil
+	case apierrors.IsConflict(err) || jsonPatchApplyFailed(err):
 		return errSeedChanged
+	default:
+		// The reason and the code only: an apiserver message can quote a value of the Secret.
+		return fmt.Errorf("the apiserver refused the patch: %s (%d)",
+			apierrors.ReasonForError(err), statusCode(err))
 	}
-	return err
+}
+
+// jsonPatchApplyFailed reports the 422 that the apiserver returns when a JSON patch does not apply
+// (k8s.io/apiserver handlers/patch.go): reason Invalid, no resource, no name and no causes. A 422 from
+// validation names the Secret and its fields. Every op of the patch in addEd25519Public applies to
+// the Secret that was read, so a patch that does not apply means that a test op failed.
+func jsonPatchApplyFailed(err error) bool {
+	var s apierrors.APIStatus
+	if !errors.As(err, &s) {
+		return false
+	}
+	st := s.Status()
+	if st.Code != http.StatusUnprocessableEntity || st.Reason != metav1.StatusReasonInvalid {
+		return false
+	}
+	return st.Details == nil || (st.Details.Kind == "" && st.Details.Name == "" && len(st.Details.Causes) == 0)
+}
+
+// statusCode is the HTTP code of an apiserver error, or 0.
+func statusCode(err error) int32 {
+	var s apierrors.APIStatus
+	if errors.As(err, &s) {
+		return s.Status().Code
+	}
+	return 0
 }
 
 // jsonPointerEscape escapes a JSON Pointer reference token (RFC 6901).

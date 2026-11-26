@@ -484,3 +484,31 @@ requires.
 - **The durable directory is in a snapshot.** It is part of every fidelity's snapshot, so a snapshot holds
   the home. Section 1 still applies: the home holds no credential, and the 0044 exception stays refused for
   a sandbox with snapshots on.
+
+## Amendment (2026-11-26, issue #1086 part C2): the actor token file in the guest, an interim
+
+Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is its exit.
+
+- **What "minted and injected outside the guest" (section 1.2) means until #1386.** koinon-agentd mints the
+  actor token outside the guest. It writes the token through the driver's exec into exactly one guest file,
+  `/tmp/.koinon-egress/token.gitconfig` (`codehost.SandboxEgressToken`). The file is outside the home. Git
+  reads it and sends the token only to the gateway's egress prefix, as the `Koinon-Actor-Token` header.
+- **Limits of the interim.**
+  - The agent user can read the token while the run is live. Other processes of the guest can read it too.
+  - Its lifetime is 15 minutes (inside the 300 to 3600 seconds of section 1.2). koinon-agentd writes a new
+    token every 5 minutes and removes the file when the run ends.
+  - Its audience is the Koinon gateway. It names the org, the agent and the run, and the gateway accepts it
+    only on the forge routes of that agent. A token that leaks out of the guest therefore reaches only what
+    that agent's git could reach, and only until it expires.
+  - The token is not a credential: it holds no forge, registry, provider or MCP credential. Section 1.1
+    does not change.
+- **Section 5.1 until #1386.** It reads: credentials stay out of the guest, and the actor token stays out of
+  the home and of every snapshot. The token file is outside the home, so a home checkpoint does not hold
+  it. A memory snapshot of the whole guest would hold it, so section 5 must handle the file before a driver
+  enables the `MEMORY` fidelity. A restore always gets a fresh token.
+- **The escape suite checks it.** The Substrate spec `holds the actor token only in the egress token file that
+  koinon-agentd writes` writes a real token with koinon-agentd's command (`codehost.WriteEgressTokenCommand`).
+  It fails if the token or another JWT-shaped value is in any other place that the agent can read: another
+  file, the environment or the command line of a process.
+- **Exit (#1386).** A hop outside the guest adds the identity header, and the guest holds no token. Then the
+  token file, its command and this amendment are removed, and the escape spec expects to find no token.

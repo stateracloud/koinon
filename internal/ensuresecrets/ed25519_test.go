@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -110,18 +111,47 @@ var _ = Describe("Ensure with an Ed25519 key and its public key (#1086 part C2)"
 		}
 	})
 
-	It("patches only after a test that the seed is still the one it read", func(ctx SpecContext) {
-		client := fake.NewClientset(secret(map[string][]byte{"key": fakeSeed("01")}))
-		// The apiserver fails the JSON patch's test op when the seed changed after the read.
+	It("patches only after a test that the Secret and its seed are still the ones it read", func(ctx SpecContext) {
+		old := secret(map[string][]byte{"key": fakeSeed("01")})
+		old.ResourceVersion = "7"
+		client := fake.NewClientset(old)
+		var patch string
 		client.PrependReactor("patch", "secrets", func(a k8stesting.Action) (bool, runtime.Object, error) {
-			Expect(string(a.(k8stesting.PatchAction).GetPatch())).To(HavePrefix(`[{"op":"test","path":"/data/key"`))
-			return true, nil, apierrors.NewInvalid(schema.GroupKind{Kind: "Secret"}, "actor", nil)
+			patch = string(a.(k8stesting.PatchAction).GetPatch())
+			return true, old, nil
 		})
 		var out bytes.Buffer
 		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
-		Expect(err).To(MatchError(ContainSubstring("its key changed while the public key was added")))
-		Expect(err.Error()).NotTo(ContainSubstring(string(fakeSeed("01"))))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(patch).To(HavePrefix(`[{"op":"test","path":"/metadata/resourceVersion","value":"7"},{"op":"test","path":"/data/key"`))
+		Expect(patch).To(ContainSubstring(`{"op":"add","path":"/data/public.pem"`))
 	})
+
+	// What the apiserver returns for a JSON patch whose test op fails (k8s.io/apiserver handlers/patch.go).
+	testFailed := apierrors.NewGenericServerResponse(422, "", schema.GroupResource{}, "",
+		"testing value /data/key failed: test failed", 0, false)
+
+	DescribeTable("maps only a failed test op or a conflict to a Secret that changed, and never logs the key",
+		func(ctx SpecContext, apiErr error, want string) {
+			client := fake.NewClientset(secret(map[string][]byte{"key": fakeSeed("01")}))
+			client.PrependReactor("patch", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apiErr
+			})
+			var out bytes.Buffer
+			_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(err.Error()).NotTo(ContainSubstring(string(fakeSeed("01"))))
+			Expect(err.Error()).NotTo(ContainSubstring("koinon_test_not-a-real-value"))
+		},
+		Entry("a failed test op", testFailed, "it changed while the public key was added"),
+		Entry("a conflict", apierrors.NewConflict(schema.GroupResource{Resource: "secrets"}, "actor", nil),
+			"it changed while the public key was added"),
+		Entry("another 422, whose message quotes a value",
+			apierrors.NewInvalid(schema.GroupKind{Kind: "Secret"}, "actor", field.ErrorList{
+				field.Invalid(field.NewPath("data"), "koinon_test_not-a-real-value", "bad"),
+			}),
+			"the apiserver refused the patch: Invalid (422)"),
+	)
 
 	It("refuses a bad Secret, with or without a public key, and never changes it or logs the key", func(ctx SpecContext) {
 		for name, data := range map[string]map[string][]byte{

@@ -55,6 +55,11 @@ func GitConfig(loc connectors.Location, hasCA bool) []byte {
 // symbolic link, so the guest cannot send the file into the home. A memory snapshot of the whole
 // guest would hold the token; no production path takes one today. The token lives 300 to 3600
 // seconds, and agentd writes a new one before the old one ends.
+//
+// INTERIM (ADR 0120, amendment of 2026-11-26): the agent user can read SandboxEgressToken while the
+// run is live, because git reads it in the guest. It is the only place in the guest that holds the
+// token; the escape suite fails if the token is in any other place. Exit: issue #1386, where a hop
+// outside the guest adds the header and no token is in the guest. Then remove the file and this text.
 const (
 	// SandboxEgressDir holds the token file. It is not under /sandbox.
 	SandboxEgressDir = "/tmp/.koinon-egress"
@@ -65,6 +70,34 @@ const (
 	//nolint:gosec // a header name, not a credential
 	ActorTokenHeader = "Koinon-Actor-Token"
 )
+
+// GitScriptMarker is in the first line of every script that writes git configuration into a
+// sandbox, for logs and for tests that fake the sandbox.
+const GitScriptMarker = "koinon-gitconfig"
+
+// writeEgressTokenScript replaces $2 with stdin in one rename, in the directory $1, which is outside
+// the home. The guest can write to /tmp, so the script refuses a $1 that is a symbolic link or not a
+// directory: a link planted before the run could otherwise send each token into the checkpointed home.
+const writeEgressTokenScript = `# ` + GitScriptMarker + `
+umask 077
+if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then echo "$1 is not a plain directory" >&2; exit 1; fi
+mkdir -p -- "$1" && [ ! -L "$1" ] && t=$(mktemp "$1/.git.XXXXXX") && cat > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
+
+// removeEgressTokenScript removes the token file.
+const removeEgressTokenScript = `# ` + GitScriptMarker + `
+rm -f -- "$2"`
+
+// WriteEgressTokenCommand is the sandbox command that writes SandboxEgressToken from its stdin (the
+// output of EgressTokenGitConfig). koinon-agentd runs it through the driver's exec, and the escape
+// suite runs the same command, so the suite checks the place that production writes.
+func WriteEgressTokenCommand() []string {
+	return []string{"/bin/sh", "-c", writeEgressTokenScript, "sh", SandboxEgressDir, SandboxEgressToken}
+}
+
+// RemoveEgressTokenCommand is the sandbox command that removes SandboxEgressToken.
+func RemoveEgressTokenCommand() []string {
+	return []string{"/bin/sh", "-c", removeEgressTokenScript, "sh", SandboxEgressDir, SandboxEgressToken}
+}
 
 // EgressPrefix returns the gateway URL that git uses for the code host at loc: base is the gateway's
 // egress listener (http://host:port, no trailing slash).

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package agentd_test
+package codehost_test
 
 import (
 	"os"
@@ -11,14 +11,16 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/codehost"
 )
 
 // The token script runs in a real shell: the guest owns /tmp, so a link it plants at the token
 // directory must not send the token into the home (#1086 part C2).
 var _ = Describe("the actor token write script", func() {
 	run := func(dir, file, in string) (string, error) {
-		cmd := exec.Command("/bin/sh", "-c", agentd.WriteActorTokenScript, "sh", dir, file)
+		// The production command, with the directory and the file of a temporary root.
+		c := codehost.WriteEgressTokenCommand()
+		cmd := exec.Command(c[0], c[1], c[2], c[3], dir, file)
 		cmd.Stdin = strings.NewReader(in)
 		out, err := cmd.CombinedOutput()
 		return string(out), err

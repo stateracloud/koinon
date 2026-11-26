@@ -72,7 +72,7 @@ cluster input is a failure.
 
 ## Expected output
 
-On the gVisor tier, every spec passes, except three that report **not applicable** as a skip with a reason:
+On the gVisor tier, every spec passes, except two that report **not applicable** as a skip with a reason:
 
 1. `runs in a microVM guest, not on the host kernel`: not applicable on `hardened` and `dev`
    (ADR 0075 decision 9). The `vm` tier is issue #1349.
@@ -80,9 +80,10 @@ On the gVisor tier, every spec passes, except three that report **not applicable
    by decision (ADR 0120 section 4, issue #1150). The syscall half of the spec runs and passes. On the
    `vm` tier this spec must pass, and the harness fails it if Landlock is missing.
 
-3. `holds no actor identity token that it could read`: the execution layer injects no actor token into a guest
-   yet, so a scan would find nothing and prove nothing. The offline `contract` specs pin the minted token.
-   The spec needs a real token and a gateway control when the injection exists.
+`holds the actor token only in the egress token file that koinon-agentd writes` runs on every tier. It
+writes a real actor token with koinon-agentd's command, checks that the gateway's verifier accepts it, and
+fails if the token or another JWT-shaped value is in any place other than that file. The agent user can
+read the file: this is the interim of the ADR 0120 amendment of 2026-11-26, and issue #1386 is its exit.
 
 The final line reads `0 Failed`, with these two among the skipped. Any other skip is a fault of the run.
 The offline `contract` specs (token audience and lifetime) run in every `go test ./test/escape/` and need
