@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-26
 area: work-model
 tags: [tasks, chat, identity, database, api]
@@ -8,7 +8,7 @@ relates: ["0006", "0023", "0065", "0066", "0127"]
 ---
 # 0130. The external actor kind: people without a Koinon account on the task timeline
 
-- Status: Proposed (issue #1408; the maintainer decided the open points on 2026-11-26)
+- Status: Accepted (decided by the maintainer on 2026-11-26, issue #1408)
 - Date: 2026-11-26
 - Area: work-model
 - Tags: tasks, chat, identity, database, api
