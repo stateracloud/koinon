@@ -2,19 +2,15 @@
 
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import type { UsageTotals } from '@/gen/koinon/usage/v1alpha1/usage_pb'
-import { formatPico } from '@/lib/money'
+import { formatPico, parseLedgerPico } from '@/lib/money'
 
 // The "Usage and cost" views (issue #1281, ADR 0126 section 4) read UsageService (issue #1268). The server sends one
 // row per day and dimension; the views group the rows on the client. The sums use BigInt pico-USD, so a group total is
 // the exact sum of its rows and the sum of all groups equals the `totals` of the response.
 
-const unit = 10n ** 12n
-
-/** usdToPico reads a ledger amount ("12.5", "0.000001") as pico-USD. Anything else counts as 0. */
+/** usdToPico reads a ledger amount ("12.5", "0.000001") as pico-USD. Anything else counts as 0 (the ledger has no negative cost). */
 export function usdToPico(s: string): bigint {
-  const m = /^(\d+)(?:\.(\d{1,12}))?$/.exec(s.trim())
-  if (!m) return 0n
-  return BigInt(m[1]) * unit + BigInt((m[2] ?? '').padEnd(12, '0'))
+  return parseLedgerPico(s) ?? 0n
 }
 
 /** UsageGroup is the sum of the rows that share one key (an org, a model, a day, an agent or a provider). */

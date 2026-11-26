@@ -129,12 +129,22 @@ describe('Budgets page', () => {
     // The month to date, for this org only.
     expect(calls.usage[0].orgId).toBe('org-1')
     expect(calls.usage[0].range).toBeUndefined()
-    URL.createObjectURL = vi.fn(() => 'blob:usage')
+    const saved: Blob[] = []
+    URL.createObjectURL = vi.fn((b: Blob) => {
+      saved.push(b)
+      return 'blob:usage'
+    })
     URL.revokeObjectURL = vi.fn()
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    let file = ''
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      file = this.download
+    })
     await userEvent.click(within(usage).getByRole('button', { name: 'Export CSV' }))
     await waitFor(() => expect(click).toHaveBeenCalledOnce())
     click.mockRestore()
+    // The saved file is the server's CSV, under the server's file name.
+    expect(file).toBe('usage.csv')
+    expect(await saved[0].text()).toBe('day\n')
     expect(calls.exports[0].orgId).toBe('org-1')
     expect(calls.exports[0].range).toBeUndefined()
   })

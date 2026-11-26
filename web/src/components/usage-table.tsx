@@ -37,7 +37,18 @@ export function UsageTable({ caption, name, groups, sortByName = false }: { capt
       col.accessor((g) => Number(g.requests), { id: 'requests', header: 'Requests', sortFn: 'basic', meta: num, cell: (c) => formatCount(c.row.original.requests) }),
       col.accessor((g) => Number(tokensOf(g)), { id: 'tokens', header: 'Tokens', sortFn: 'basic', meta: num, cell: (c) => formatCount(tokensOf(c.row.original)) }),
       col.accessor((g) => cacheReadShare(g), { id: 'cache', header: 'Cache read share', sortFn: 'basic', meta: num, cell: (c) => formatShare(c.getValue()) }),
-      col.accessor((g) => Number(g.costPico), { id: 'cost', header: 'Cost', sortFn: 'basic', meta: num, cell: (c) => formatUSD(c.row.original.costUsd) }),
+      // Sort on the exact bigint: a Number loses the far fraction digits above about $9,007.
+      col.accessor('costPico', {
+        id: 'cost',
+        header: 'Cost',
+        sortFn: (a, b) => {
+          const x = a.original.costPico
+          const y = b.original.costPico
+          return x === y ? 0 : x > y ? 1 : -1
+        },
+        meta: num,
+        cell: (c) => formatUSD(c.row.original.costUsd),
+      }),
     ],
     [name],
   )

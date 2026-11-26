@@ -13,7 +13,7 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { UsageService } from '@/gen/koinon/usage/v1alpha1/usage_pb'
 import { formatUSD } from '@/lib/cost'
-import { formatCount, formatShare, groupUsage, monthLabel, monthRange, usageMonths } from '@/lib/usage'
+import { formatCount, formatShare, groupUsage, monthLabel, monthRange, tokensOf, usageMonths } from '@/lib/usage'
 
 /**
  * PlatformUsagePage is "Usage and cost" of the platform console (issue #1281, ADR 0126 section 4): the spend of every
@@ -57,7 +57,7 @@ export function PlatformUsagePage() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile label="Spend" value={formatUSD(t.costUsd)} hint={`${formatUSD(t.estimatedUsd)} of it estimated`} />
               <StatTile label="Requests" value={formatCount(t.requests)} />
-              <StatTile label="Tokens" value={formatCount(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)} hint={`${formatCount(t.outputTokens)} output`} />
+              <StatTile label="Tokens" value={formatCount(tokensOf(t))} hint={`${formatCount(t.outputTokens)} output`} />
               <StatTile label="Cache read share" value={formatShare(t.cacheReadShare)} hint="Of all input tokens" />
             </div>
             <Tabs defaultValue="org">
