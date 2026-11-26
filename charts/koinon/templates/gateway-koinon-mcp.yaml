@@ -150,8 +150,16 @@ spec:
             {{- if $egress }}
             # The egress listener (#1086 part C2): the forge routes of the State stream, behind the actor token.
             - --egress-addr=:{{ int $eg.port }}
+            {{- if include "koinon.substrateActorJWT" . }}
+            # Substrate (ADR 0120, amendment of issue #1386, item 4): atenet-egress adds the actor token that ateapi
+            # mints. The gateway trusts one issuer, from these values only, and checks its TLS with the CA bundle.
+            - --actor-token-verifier=substrate
+            - {{ printf "--actor-jwt-issuer=%s" (include "koinon.substrateActorJWTIssuer" .) | quote }}
+            - --actor-jwt-ca-file={{ include "koinon.substrateActorJWTCADir" . }}/ca.crt
+            {{- else }}
             - {{ printf "--actor-token-issuer=%s" $eg.actorToken.issuer | quote }}
             - --actor-token-keys-dir=/etc/koinon/actor-token-keys
+            {{- end }}
             {{- with concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
             - --egress-allowed-hosts={{ join "," . }}
             {{- end }}
@@ -222,10 +230,16 @@ spec:
             {{- include "koinon.dbVolumeMount" . | nindent 12 }}
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
             {{- if $egress }}
+            {{- if include "koinon.ed25519ActorToken" . }}
             # The public actor token key only, as <key id>.pub: the gateway verifies, it cannot sign.
             - name: actor-token-keys
               mountPath: /etc/koinon/actor-token-keys
               readOnly: true
+            {{- end }}
+            {{- with include "koinon.substrateActorJWTCAVolumeMount" . | trim }}
+            # The CA bundle of the Substrate issuer (issue #1386): public certificates only.
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if $eg.caBundle }}
             - name: egress-ca
               mountPath: /etc/koinon/egress-ca
@@ -269,6 +283,7 @@ spec:
         {{- include "koinon.dbVolume" . | nindent 8 }}
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
         {{- if $egress }}
+        {{- if include "koinon.ed25519ActorToken" . }}
         - name: actor-token-keys
           secret:
             secretName: {{ include "koinon.actorTokenKeyName" . }}
@@ -276,6 +291,10 @@ spec:
             items:
               - key: public.pem
                 path: {{ $eg.actorToken.keyId }}.pub
+        {{- end }}
+        {{- with include "koinon.substrateActorJWTCAVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- if $eg.caBundle }}
         - name: egress-ca
           configMap:

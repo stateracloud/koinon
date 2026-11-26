@@ -926,6 +926,34 @@ execution:
     gatewayClientNamespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: ate-system
+    # The actor token of the egress listener (ADR 0120, amendment of issue #1386; used with
+    # gateway.mcp.koinon.egress.enabled). On substrate no actor token is in the guest: atenet-egress adds a token
+    # that ateapi mints, and koinon-gateway verifies it against Substrate's issuer, ate-idp-server. Then the
+    # chart makes no Ed25519 actor token key, and koinon-agentd gets none.
+    actorJwt:
+      # The one issuer the gateway trusts, as ate-api-server's --actor-jwt-issuer: https://<host>, no path. The
+      # gateway never reads it from a token. Empty: Substrate's installer default, https://idp.<namespace>.svc
+      # (the Service idp of ate-idp-server in execution.substrate.namespace).
+      issuer: ""
+      # The CA bundle that verifies the issuer's TLS certificate, mounted read-only into koinon-gateway. Default:
+      # the ClusterTrustBundle of Substrate's servicedns signer, which signs ate-idp-server's certificate (the
+      # same bundle that koinon-agentd trusts for the router). The kubelet updates the file when the CA rotates.
+      ca:
+        signerName: servicedns.podcert.ate.dev/identity
+        labelSelector:
+          matchLabels:
+            podcert.ate.dev/canarying: live
+        # A ConfigMap in Koinon's namespace (key configMapKey, PEM) replaces the ClusterTrustBundle, for an issuer
+        # that another CA signs (an issuer outside the cluster). Public certificates only.
+        configMap: ""
+        configMapKey: ca.crt
+      # The NetworkPolicy egress rule of the gateway to the issuer: the ate-idp-server pods in
+      # execution.substrate.namespace, on their pod port (8443, named https; the Service port 443 maps to it).
+      # From Substrate v1.0.1 manifests/ate-install/ate-idp-server.yaml.
+      idpPodSelector:
+        matchLabels:
+          app: ate-idp-server
+      idpPort: 8443
     # Substrate's control-plane namespace (ate-api, ate-controller, atenet, atelet, the object store and
     # the database). It must exist (koinon-api substrate install creates it) and holds nothing but
     # Substrate (ADR 0120 section 6.2). Worker pods do not run here: see workerNamespace.

@@ -313,6 +313,80 @@ true
 {{- .Values.gateway.mcp.koinon.egress.actorToken.existingSecret | default (include "koinon.componentName" (list . "actor-token-key")) -}}
 {{- end }}
 
+{{/*
+Which verifier checks the actor token of the egress listener (ADR 0120, amendment of issue #1386, item 4). Until #1094
+removes the OpenShell driver, the execution driver selects it:
+- koinon.ed25519ActorToken: openshell. koinon-agentd signs with the Ed25519 seed and writes the interim token file into
+  the guest; the gateway verifies with the public key. Exit: #1386 PR B, after #1094, removes it.
+- koinon.substrateActorJWT: substrate. atenet-egress adds a token that ateapi mints, outside the guest; the gateway
+  verifies it against Substrate's issuer (ate-idp-server). No Ed25519 key exists, and agentd signs nothing.
+*/}}
+{{- define "koinon.ed25519ActorToken" -}}
+{{- if and (include "koinon.egressListener" .) (ne (include "koinon.substrate" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "koinon.substrateActorJWT" -}}
+{{- if and (include "koinon.egressListener" .) (eq (include "koinon.substrate" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The one issuer the gateway trusts (execution.substrate.actorJwt.issuer). Empty: Substrate's installer default,
+https://idp.<execution.substrate.namespace>.svc (ate-setup actorJWT.issuer; the Service idp of ate-idp-server). */}}
+{{- define "koinon.substrateActorJWTIssuer" -}}
+{{- $i := .Values.execution.substrate.actorJwt.issuer | default (printf "https://idp.%s.svc" .Values.execution.substrate.namespace) -}}
+{{- if not (regexMatch "^https://[^/?#]+$" $i) -}}
+{{- fail (printf "execution.substrate.actorJwt.issuer %q must be https://<host> with no path, query or fragment, as Substrate's issuer" $i) -}}
+{{- end -}}
+{{- $i -}}
+{{- end }}
+
+{{- define "koinon.substrateActorJWTCADir" -}}
+/etc/koinon/substrate-idp-ca
+{{- end }}
+
+{{/* The CA bundle that verifies the issuer's TLS certificate: public certificates only, never a key. */}}
+{{- define "koinon.substrateActorJWTCAVolumeMount" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+- name: substrate-idp-ca
+  mountPath: {{ include "koinon.substrateActorJWTCADir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Default: the ClusterTrustBundle of Substrate's servicedns signer, which signs the serving certificate of ate-idp-server
+(manifests/ate-install/ate-idp-server.yaml, podCertificate servicedns.podcert.ate.dev/identity). The kubelet keeps the
+file in step with the bundle, so a CA rotation needs no chart change. execution.substrate.actorJwt.ca.configMap
+replaces it, for an issuer that a different CA signs (an issuer outside the cluster).
+*/}}
+{{- define "koinon.substrateActorJWTCAVolume" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+{{- $ca := .Values.execution.substrate.actorJwt.ca }}
+- name: substrate-idp-ca
+  projected:
+    defaultMode: 0444
+    sources:
+      {{- if $ca.configMap }}
+      - configMap:
+          name: {{ $ca.configMap | quote }}
+          items:
+            - key: {{ $ca.configMapKey | quote }}
+              path: ca.crt
+      {{- else }}
+      - clusterTrustBundle:
+          signerName: {{ required "execution.substrate.actorJwt.ca.signerName is required without execution.substrate.actorJwt.ca.configMap" $ca.signerName | quote }}
+          {{- with $ca.labelSelector }}
+          labelSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          path: ca.crt
+      {{- end }}
+{{- end }}
+{{- end }}
+
 {{/* The URL koinon-api sends approved MCP calls to. */}}
 {{- define "koinon.gatewayMCPURL" -}}
 {{- if include "koinon.mcpKoinon" . -}}
@@ -932,7 +1006,7 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
 {{- end -}}
-{{- if and (include "koinon.egressListener" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
+{{- if and (include "koinon.ed25519ActorToken" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.actorTokenKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "agentd")))) -}}
 {{- end -}}
 {{- $specs | toJson -}}
@@ -1668,15 +1742,17 @@ it carries no credentials.
   value: {{ . | quote }}
 {{- end }}
 {{- if include "koinon.egressListener" . }}
-{{- /* Git through the gateway's egress listener (#1086 part C2): agentd mints the actor token with the seed, outside the guest. */}}
+{{- /* Git through the gateway's egress listener (#1086 part C2). On openshell agentd mints the actor token with the seed, outside the guest. On substrate atenet-egress adds the token, so agentd gets no key (issue #1386). */}}
 - name: KOINON_EGRESS_URL
   value: {{ include "koinon.egressURL" . | quote }}
+{{- if include "koinon.ed25519ActorToken" . }}
 - name: KOINON_ACTOR_TOKEN_KEY_FILE
   value: /secrets/actor-token/key
 - name: KOINON_ACTOR_TOKEN_KEY_ID
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.keyId | quote }}
 - name: KOINON_ACTOR_TOKEN_ISSUER
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.issuer | quote }}
+{{- end }}
 {{- end }}
 {{- with include "koinon.agentMCPURL" . }}
 {{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}

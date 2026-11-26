@@ -124,7 +124,7 @@ func Reason(err error) string {
 
 // SubstrateConfig configures a SubstrateVerifier.
 type SubstrateConfig struct {
-	// Issuer is the one issuer the verifier trusts, for example "https://ate-idp.ate-system.svc".
+	// Issuer is the one issuer the verifier trusts, for example "https://idp.ate-system.svc".
 	// It must be an https URL. The verifier reads <Issuer>/.well-known/openid-configuration, and
 	// the document's issuer must equal Issuer exactly. The token never chooses the issuer.
 	Issuer string

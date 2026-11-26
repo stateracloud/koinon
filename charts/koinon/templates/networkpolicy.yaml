@@ -251,6 +251,24 @@ spec:
       ports:
         - port: 5432
     {{- end }}
+    {{- if include "koinon.substrateActorJWT" . }}
+    {{- $aj := .Values.execution.substrate.actorJwt }}
+    {{- $idpSel := $aj.idpPodSelector | default dict }}
+    {{- if not (or $idpSel.matchLabels $idpSel.matchExpressions) }}
+    {{- fail "execution.substrate.actorJwt.idpPodSelector needs matchLabels or matchExpressions: an empty selector would let the gateway reach every pod in the Substrate namespace" }}
+    {{- end }}
+    # The Substrate verifier (ADR 0120, amendment of issue #1386, item 7): the discovery document and the key set of
+    # ate-idp-server. The pod port (8443, named https), not the Service port 443: a NetworkPolicy matches the port after
+    # the Service maps it. No route to ateapi.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.execution.substrate.namespace | quote }}
+          podSelector:
+            {{- toYaml $idpSel | nindent 12 }}
+      ports:
+        - {port: {{ int $aj.idpPort }}, protocol: TCP}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -277,11 +295,28 @@ spec:
     {{- if include "koinon.egressListener" . }}
     # The egress listener (#1086 part C2): sandboxes send git here, as they reach agentgateway's llm port.
     # The actor token and the routes gate each request; the reconciler's L7 rule limits the paths.
+    {{- if include "koinon.substrateActorJWT" . }}
+    {{- $sel := .Values.execution.substrate.workerNetworkPolicy.atenetEgressSelector | default dict }}
+    {{- if not (or $sel.matchLabels $sel.matchExpressions) }}
+    {{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let every pod of the Substrate namespace reach the egress port" }}
+    {{- end }}
+    # Substrate (ADR 0120, amendment of issue #1386, item 8): only atenet-egress, which adds the actor token. A pod that
+    # skips that hop, a sandbox pod included, gets no answer. The second fence; the first is the actor's EgressPolicy.
+    - ports:
+        - port: egress
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.execution.substrate.namespace | quote }}
+          podSelector:
+            {{- toYaml $sel | nindent 12 }}
+    {{- else }}
     - ports:
         - port: egress
       from:
         - namespaceSelector:
             {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+    {{- end }}
     {{- end }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
