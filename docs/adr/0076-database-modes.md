@@ -183,6 +183,40 @@ prune objects the new one made.
 - The spec "stops the old leader within the detection bound after a silent connection loss" cuts the
   connection with a proxy that drops all bytes and keeps the sockets open.
 
+## Amendment (2026-11-26): the leader term fences the reconciler's database writes (#635)
+
+The maintainer chose option 1 of issue 635 (comment of 2026-11-26): a term on database writes.
+
+- **The term.** Migration 00116 adds the table `reconciler_leader` with one row and a `term`. A new
+  leader takes the next term (`reconciler_take_term`, through `leaderterm.Take`) on its lock
+  connection while it holds the lock, and logs it (`reconciler is leading ... term=N`).
+- **The check.** The lead context carries the term (`leaderterm.WithTerm`). These writes go through
+  `leaderterm.DB`: the reconciler's queries (`store.Queries`), its audit writes, the budget stop of
+  runs (`ledger.StopSpent`), the sandbox creation slots (`orgsettings`) and the publish of the State
+  stream (`staterev`). It sends each statement in one batch with `reconciler_check_term(term)`: one
+  round trip and one implicit transaction. A transaction starts with the check. The check fails with
+  SQLSTATE `KO635` when the term is not current, and the lead ends at once. Reads go through the
+  check too: a stale leader stops at its first statement.
+- **No write of an old term commits after a newer term.** The check holds a transaction advisory
+  lock in shared mode until its transaction ends; the take holds it in exclusive mode. The take of
+  the next leader waits for each open transaction of the old term, and a check that starts while a
+  take waits queues behind it and then reads the new term. The transactions must be READ COMMITTED
+  (the default), so that the check reads the term after it holds the lock. An advisory lock lives in
+  the lock table only: the check assigns no transaction ID and writes no WAL. A transaction of a lead
+  also sets `idle_in_transaction_session_timeout` to 10 s, in the same statement as the check: a
+  leader that vanished in an open transaction (a partition) delays the take of the next leader by at
+  most that time, not until Postgres sees the dead client. Two rare cases are not bounded by it: a
+  batch whose end (Sync) did not reach the server, and a backend that is blocked on a full send
+  buffer. They hold the lock until Postgres sees the dead client. The check refuses a transaction
+  that is not READ COMMITTED (SQLSTATE `KO636`).
+- **Not covered: Kubernetes deletes and execution-layer calls.** The database cannot refuse them.
+  They keep the time fence of the amendment above. Issue #1465 names their exit condition: the
+  gateway reads only the State stream (ADR 0097). Writes of the MCP prober and the remote agent
+  checker (`mcpservers`, `remoteagents`) use their own pool and are not fenced yet. Issue #1465
+  covers them too.
+- The spec "refuses the writes of a leader whose term a newer leader took, and ends its lead" and
+  the specs of `internal/reconciler/leaderterm` show that a write with a stale term is refused.
+
 ## Consequences
 
 - **A plain cluster is enough** with `standalone`: no operator and no cloud database.
