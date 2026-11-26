@@ -133,6 +133,77 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 		Expect(e.files.history(codehost.SandboxEgressToken)).To(BeEmpty())
 	})
 
+	Describe("the wait for koinon-gateway to serve the agent's forge credential", func() {
+		// record writes the agent's gateway_agent_forge row, as koinon-reconciler does.
+		record := func(ctx context.Context, e *env, rev int64, served bool, failure string) {
+			GinkgoHelper()
+			_, err := db.Exec(ctx, `INSERT INTO gateway_agent_forge (org_id, agent_id, state_revision, served_at, failure)
+				VALUES ($1, $2, NULLIF($3::bigint, 0), CASE WHEN $4::bool THEN now() END, $5)
+				ON CONFLICT (org_id, agent_id) DO UPDATE SET state_revision = EXCLUDED.state_revision,
+				served_at = EXCLUDED.served_at, failure = EXCLUDED.failure`, e.org, e.agent.ID, rev, served, failure)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		waits := func(ctx context.Context, r store.Run) func() []store.RunEvent {
+			return func() []store.RunEvent { return eventOf(events(ctx, r), "run.waiting_for_forge") }
+		}
+
+		It("starts at once without a record; a new credential on the same agent holds the next run until it is served", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			first := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress, func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+			Eventually(runState(ctx, first)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(waits(ctx, first)()).To(BeEmpty(), "no record: the agent expects no credential")
+
+			By("the agent gets a new grant: its ready sandbox stays, the reconciler records the credential as pending")
+			record(ctx, e, 0, false, "")
+			execs := len(e.gw.Execs())
+			next := e.enqueue(ctx, e.task(ctx, "again"))
+			Eventually(waits(ctx, next)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			Expect(payload(waits(ctx, next)()[0])).To(HaveKeyWithValue("reason", "waiting for koinon-gateway to serve the agent's code-host credential"))
+			record(ctx, e, 7, false, "")
+			Consistently(runState(ctx, next)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
+				"a revision that a live copy has not acked holds the run")
+			Expect(waits(ctx, next)()).To(HaveLen(1), "the wait is recorded once")
+
+			record(ctx, e, 7, true, "")
+			Eventually(runState(ctx, next)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(len(e.gw.Execs())).To(BeNumerically(">", execs))
+		})
+
+		It("fails the run with the reconciler's cause, and the harness never starts", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 0, false, "koinon-reconciler has no forge credential for the agent: mint the code-host token: suspended")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress)
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("koinon-reconciler has no forge credential for the agent: mint the code-host token: suspended; "))
+			Expect(waits(ctx, r)()).To(BeEmpty())
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(BeEmpty(), "the harness never starts")
+		})
+
+		It("fails the run when the credential is not served in time", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 0, false, "")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress, func(c *agentd.Config) { c.ForgeServeTimeout = 700 * time.Millisecond })
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("koinon-gateway did not serve the agent's code-host credential within 700ms"))
+			Expect(waits(ctx, r)()).To(HaveLen(1))
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(BeEmpty(), "the harness never starts")
+		})
+
+		It("does not read the record of an agent that does not clone through the gateway", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 0, false, "")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(waits(ctx, r)()).To(BeEmpty())
+		})
+	})
+
 	DescribeTable("refuses egress settings that do not go together or that would leak into the sandbox",
 		func(mutate func(*agentd.Config)) {
 			c := agentd.Config{OwnerID: "agentd-a", GatewayURL: "http://gw:8080"}

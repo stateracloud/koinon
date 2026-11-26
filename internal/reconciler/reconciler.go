@@ -311,8 +311,13 @@ type Reconciler struct {
 	keyRevMu    sync.Mutex
 	keyRevs     map[string]int64
 	pendingKeys map[string]bool
-	probeDue    []dueProbe
-	probeWake   chan struct{}
+	// forgeRevs maps each forge credential name in the stored State to the first revision that held it
+	// (noteForge), under keyRevMu. forgeRows is what the database holds for each agent (recordForge,
+	// pass goroutine only).
+	forgeRevs map[string]int64
+	forgeRows map[agentKey]forgeRow
+	probeDue  []dueProbe
+	probeWake chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -476,6 +481,7 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, 
 				r.log.Debug("gateway state revision stored", "revision", p.Revision)
 			}
 			r.noteKeys(served.Keys, p.Revision, s.Keys)
+			r.noteForge(served.EgressCredentials, p.Revision)
 			return p.Revision, nil
 		}
 		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)
@@ -516,6 +522,8 @@ type work struct {
 	// when the agent has none.
 	forge     *gatewayplan.ForgeCredential
 	forgeFile []byte
+	// forgeErr says why an agent with a forge read grant has no credential (recordForge).
+	forgeErr error
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -945,6 +953,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		}
 	}
 	r.submit(q, b, workOf(items, run), workspaces)
+	// What the run start of each agent waits for on its forge credential (#1086 part C2). It comes after
+	// the submit: the sandbox work does not wait for it, only the harness start in koinon-agentd does.
+	if err := r.recordForge(ctx, items); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	// Each rejected object is reported on its org's agents, after their own work item has recorded its
 	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
@@ -1198,7 +1212,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
-		w.egress, w.forge, w.forgeFile = r.agentEgress(ctx, w)
+		w.egress, w.forge, w.forgeFile, w.forgeErr = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err

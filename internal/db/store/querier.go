@@ -379,6 +379,8 @@ type Querier interface {
 	DeleteExpiredGitHubLinkFlows(ctx context.Context, arg DeleteExpiredGitHubLinkFlowsParams) error
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	// The agents of the org that no longer expect a forge credential.
+	DeleteGatewayAgentForge(ctx context.Context, arg DeleteGatewayAgentForgeParams) error
 	// Only the stream that touched the row last removes it.
 	DeleteGatewayStateCopy(ctx context.Context, arg DeleteGatewayStateCopyParams) error
 	DeleteGitHubAppSetup(ctx context.Context, arg DeleteGitHubAppSetupParams) (int64, error)
@@ -548,6 +550,7 @@ type Querier interface {
 	// between runs) the task of the agent's latest finished run whose task is not in an end state.
 	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
 	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
+	GetGatewayAgentForge(ctx context.Context, arg GetGatewayAgentForgeParams) (GetGatewayAgentForgeRow, error)
 	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
 	// while it was down keeps being served with the previous file until the new one has arrived.
 	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
@@ -1344,6 +1347,8 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// Every live copy acked the revision that holds the agent's credential.
+	MarkGatewayAgentForgeServed(ctx context.Context, arg MarkGatewayAgentForgeServedParams) error
 	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
 	// snapshot_missing_at tells it apart from a backup that failed: the recreate gate does not block on
@@ -1639,6 +1644,12 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// When koinon-gateway serves an agent's forge credential (#1086 part C2). Org-owned.
+	// Records what the agent expects of its forge credential (#1086 part C2). A new revision or cause
+	// clears served_at; the same values change nothing.
+	SetGatewayAgentForge(ctx context.Context, arg SetGatewayAgentForgeParams) error
 	// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
 	// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
 	// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.

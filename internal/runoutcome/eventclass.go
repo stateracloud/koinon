@@ -82,6 +82,7 @@ var eventClasses = map[string]EventClass{
 	"run.mcp_server_missing":    ClassDiagnostic,
 	"run.mcp_server_recovered":  ClassDiagnostic,
 	"run.waiting_for_model":     ClassDiagnostic,
+	"run.waiting_for_forge":     ClassDiagnostic,
 	"run.refusal":               ClassDiagnostic,
 	"run.retry":                 ClassDiagnostic,
 	"run.loop_nudge":            ClassDiagnostic,

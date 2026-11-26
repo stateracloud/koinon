@@ -153,37 +153,42 @@ func exactQuery(q map[string]string) (map[string]string, error) {
 // its forge routes name (#1086 part C). A fault leaves the agent with no route, which closes its gateway
 // egress and opens nothing; it is logged, and the sandbox still gets its OpenShell rules from
 // ensureSandbox. A credential that cannot be sealed leaves the routes without it: they fail closed.
-func (r *Reconciler) agentEgress(ctx context.Context, w *work) ([]route.Route, *gatewayplan.ForgeCredential, []byte) {
+// forgeErr is set only for an agent with a forge read grant (GitHubReadAccessAt): it says why that agent
+// has no credential, and its run start fails with it (recordForge).
+func (r *Reconciler) agentEgress(ctx context.Context, w *work) (routes []route.Route, cred *gatewayplan.ForgeCredential, file []byte, forgeErr error) {
 	ref := agentRef(w.org, w.agent.ID)
 	baseURL, err := r.baseURLOf(ctx, w)
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	read, hasRead, err := GitHubReadAccessAt(w.cfg, baseURL)
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	var forge []execution.Endpoint
 	if hasRead {
 		forge = read.Endpoints
 	}
-	routes, err := EgressRoutes(ref, forge, PluginInstallsOn(w.cfg, w.agent.Harness))
+	routes, err = EgressRoutes(ref, forge, PluginInstallsOn(w.cfg, w.agent.Harness))
 	if err != nil {
 		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil, nil, nil
+		if hasRead {
+			return nil, nil, nil, fmt.Errorf("the agent's forge routes: %w", err)
+		}
+		return nil, nil, nil, nil
 	}
 	if !hasRead {
-		return routes, nil, nil
+		return routes, nil, nil, nil
 	}
-	cred, file, err := r.forgeCredential(ctx, w, read, routes)
+	cred, file, err = r.forgeCredential(ctx, w, read, routes)
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
 		r.log.Error("the agent's forge routes have no credential; they fail closed", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return routes, nil, nil
+		return routes, nil, nil, err
 	}
-	return routes, cred, file
+	return routes, cred, file, nil
 }
 
 // egressRule names the sandbox policy entry of the gateway's egress listener.

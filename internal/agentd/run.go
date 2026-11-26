@@ -629,6 +629,10 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if r.egress {
 		defer r.keepActorToken(ctx, workspace, sandbox)()
+		// The agent clones through koinon-gateway: its forge credential must be served first (forgewait.go).
+		if err := r.waitForge(fctx); err != nil {
+			return r.execErr(ctx, "wait for the forge credential", err)
+		}
 	}
 
 	var stderr tail

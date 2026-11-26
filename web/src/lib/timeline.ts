@@ -321,6 +321,11 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
       const what = provider ? `the model provider ${provider}` : 'the model provider'
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for ${what} to reach the gateway${model ? ` (model ${model})` : ''}`, runId }
     }
+    case 'run.waiting_for_forge': {
+      // agentd waits before it starts the harness until koinon-gateway serves the agent's forge
+      // credential: a new credential is still reaching the gateway (#1086 part C2). {reason}.
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for the gateway to serve the agent's code-host credential`, runId }
+    }
     case 'run.mcp_server_missing': {
       // agentd found an MCP server the agent may use not serving tools before it started the harness
       // (old issue 326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
