@@ -11,8 +11,12 @@
 -- or a system message whose payload names its source). The update below gives the old rows the
 -- same mark, so a prompt reads the same events as before.
 --
--- Expand only (ADR 0085): two new columns with defaults and a backfill; nothing is renamed or
--- dropped. An old binary does not know the columns: its rows get version 0 and no prompt mark.
+-- Expand only (ADR 0085): two new columns with defaults, a backfill and a trigger; nothing is
+-- renamed or dropped. An old binary does not know the columns: its rows get version 0, and the
+-- trigger gives its prompt messages the mark with the old rule. Without the trigger, a message that
+-- an old pod writes during a rolling upgrade, or after an app-only rollback, would not be in the
+-- next run's prompt. The new writers set the mark themselves; for them the trigger changes nothing.
+-- The contract step drops the trigger when no binary without the column can run (issue #1393).
 
 -- +goose Up
 
@@ -23,3 +27,17 @@ ALTER TABLE task_events
 UPDATE task_events SET prompt = true
 WHERE kind = 'message'
   AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL));
+
+-- +goose StatementBegin
+CREATE FUNCTION task_events_prompt_by_old_rule() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.prompt := NEW.prompt OR (NEW.kind = 'message'
+        AND (NEW.actor_kind = 'user' OR (NEW.actor_kind = 'system' AND NEW.payload ->> 'source' IS NOT NULL)));
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER task_events_prompt_by_old_rule BEFORE INSERT ON task_events
+    FOR EACH ROW EXECUTE FUNCTION task_events_prompt_by_old_rule();

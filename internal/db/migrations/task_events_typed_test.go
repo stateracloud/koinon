@@ -17,7 +17,7 @@ import (
 )
 
 var _ = Describe("the typed task events migration (#735)", func() {
-	It("marks as prompt exactly the old rows that the prompt query read, and keeps their payload as version 0", func(ctx SpecContext) {
+	It("marks as prompt exactly the rows that the old prompt query read, old and new, and keeps their payload as version 0", func(ctx SpecContext) {
 		names, err := fs.Glob(migrations.FS, "*_task_events_typed.sql")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(names).To(HaveLen(1))
@@ -78,10 +78,27 @@ var _ = Describe("the typed task events migration (#735)", func() {
 			Expect(v).To(BeZero())
 		}
 
-		By("a new row without the columns gets version 0 and no prompt mark")
-		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload) VALUES ($1, $2, 99, 'message', 'user', $3, '{}')`, org, task, user)
+		By("an old binary's insert, without the columns, gets version 0 and the prompt mark by the old rule")
+		for i, r := range rows {
+			seq := 100 + i
+			var byUser, byAgent any
+			switch r.actor {
+			case "user":
+				byUser = user
+			case "agent":
+				byAgent = agent
+			}
+			_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				org, task, seq, r.kind, r.actor, byUser, byAgent, r.payload)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = $2`, task, seq)).
+				To(Equal(strconv.FormatBool(r.prompt)+"|0"), "old insert %d (%s by %s)", i+1, r.kind, r.actor)
+		}
+
+		By("a new binary's own mark is kept")
+		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload, payload_version, prompt) VALUES ($1, $2, 99, 'message', 'user', $3, '{}', 1, true)`, org, task, user)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = 99`, task)).To(Equal("false|0"))
+		Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = 99`, task)).To(Equal("true|1"))
 		_, err = db.ExecContext(ctx, `UPDATE task_events SET payload_version = -1 WHERE task_id = $1 AND seq = 99`, task)
 		Expect(err).To(HaveOccurred(), "a version is never negative")
 	})
