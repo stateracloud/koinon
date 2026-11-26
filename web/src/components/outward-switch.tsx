@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -9,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { OutwardService, OutwardTargetKind, type AdminDisabled } from '@/gen/koinon/outward/v1alpha1/outward_pb'
+import { describeError } from '@/lib/api-error'
 import { formatTime } from '@/lib/providers'
 import { useOrg } from '@/lib/org-context'
 
@@ -43,7 +43,7 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
       setNote('')
       await queryClient.invalidateQueries()
     } catch (e) {
-      setRefused(ConnectError.from(e).rawMessage)
+      setRefused(describeError(e).message)
     } finally {
       setPending(false)
     }

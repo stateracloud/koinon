@@ -3,7 +3,7 @@
 The default shared WorkerPool of the Substrate driver (ate.dev/v1; D6: shared pools on vm). ate-setup
 and the installer create no pool, and the preflight needs one per sandbox class, so the chart owns it
 (issue #1089): on by default with execution.driver=substrate, never with openshell. helm upgrade changes
-its size, helm uninstall removes it. The generated spec follows Substrate v1.0.0's WorkerPoolSpec:
+its size, helm uninstall removes it. The generated spec follows Substrate v1.0.1's WorkerPoolSpec:
 workerImage (koinon.substrate.workerPoolImage: the pinned release image of the class unless the values
 name one), replicas, sandboxClasses (exactly one entry, immutable) and
 spec.template.{nodeSelector,tolerations,serviceAccountName,resources}. The spec has no
@@ -104,7 +104,7 @@ metadata:
   namespace: {{ $s.workerNamespace | quote }}
   labels:
     {{- include "koinon.commonLabels" . | nindent 4 }}
-    {{- /* Substrate v1.0.0 copies the WorkerPool labels to every Worker record (workersync/syncer.go:368), and
+    {{- /* Substrate v1.0.1 copies the WorkerPool labels to every Worker record (workersync/syncer.go:368), and
     the substrate driver selects workers on this label with the runtime class of the sandbox
     (internal/execution/substrate/template.go RuntimeClassSelector). */}}
     {{- with .Values.openshell.runtimeClassName }}

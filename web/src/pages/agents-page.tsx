@@ -1,55 +1,74 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
-import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { BotIcon } from 'lucide-react'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { DataTable } from '@/components/ui/data-table'
+import { EmptyState } from '@/components/ui/empty-state'
+import { QueryError } from '@/components/ui/inline-error'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { useAllAgents } from '@/hooks/use-all-agents'
+import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { dataTableColumns, type DataTableColumn } from '@/lib/data-table'
 import { harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
+
+const col = dataTableColumns<Agent>()
+const columns: DataTableColumn<Agent>[] = [
+  col.accessor('displayName', {
+    header: 'Name',
+    sortFn: 'text',
+    meta: { rowHeader: true },
+    cell: (c) => (
+      <Link to="/agents/$agentId" params={{ agentId: c.row.original.id }} className="text-link hover:underline">
+        {c.getValue()}
+      </Link>
+    ),
+  }),
+  col.accessor((a) => harnessLabel(a.harness), { id: 'harness', header: 'Harness', sortFn: 'text', meta: { className: 'text-muted-foreground' } }),
+  col.display({
+    id: 'status',
+    header: 'Status',
+    cell: (c) => (
+      <span className="flex flex-wrap items-center gap-2">
+        {c.row.original.unhealthyAt && <AgentStatusBadge status={c.row.original.status} unhealthy />}
+        <AgentStatusBadge status={c.row.original.status} />
+      </span>
+    ),
+  }),
+]
 
 /** AgentsPage lists the org's agents. */
 export function AgentsPage() {
   const { org } = useOrg()
-  const list = useQuery(AgentService.method.listAgents, { orgId: org.orgId })
+  const list = useAllAgents(org.orgId)
+  const canCreate = org.role >= OrgRole.MEMBER
+  const newAgent = canCreate && (
+    <Button asChild size="sm">
+      <Link to="/agents/new">New agent</Link>
+    </Button>
+  )
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Agents</h1>
-        {org.role >= OrgRole.MEMBER && (
-          <Button asChild size="sm" className="ml-auto">
-            <Link to="/agents/new">New agent</Link>
-          </Button>
-        )}
-      </div>
-      {list.isError && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
-        </Alert>
-      )}
+      <PageHeader title="Agents" actions={newAgent} />
+      <QueryError error={list.isError ? list.error : undefined} />
       {list.isPending ? (
-        <p role="status">Loading agents…</p>
-      ) : list.data?.agents.length ? (
-        <ul className="grid gap-2">
-          {list.data.agents.map((a) => (
-            <li key={a.id} className="bg-card flex items-center gap-3 rounded-md border p-3">
-              <Link to="/agents/$agentId" params={{ agentId: a.id }} className="font-medium hover:underline">
-                {a.displayName}
-              </Link>
-              <span className="text-muted-foreground text-sm">{harnessLabel(a.harness)}</span>
-              <span className="ml-auto flex flex-wrap items-center gap-2">
-                {a.unhealthyAt && <AgentStatusBadge status={a.status} unhealthy />}
-                <AgentStatusBadge status={a.status} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-muted-foreground text-sm">No agents yet.</p>
+        <SkeletonRows label="Loading agents…" />
+      ) : list.isError && !list.data ? null : (
+        <DataTable
+          caption="Agents"
+          columns={columns}
+          data={list.data?.agents ?? []}
+          getRowId={(a) => a.id}
+          initialSorting={[{ id: 'displayName', desc: false }]}
+          empty={<EmptyState icon={BotIcon} title="No agents yet." description={canCreate ? 'Create an agent to give it work.' : 'An org admin creates the agents of this org.'} />}
+        />
       )}
+      {list.isFetchingMore && <p role="status" className="text-muted-foreground text-sm">Loading more agents…</p>}
+      {list.isError && list.data && <p className="text-muted-foreground text-sm">This list may be incomplete.</p>}
     </div>
   )
 }

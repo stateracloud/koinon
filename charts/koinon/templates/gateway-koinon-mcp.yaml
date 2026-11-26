@@ -123,6 +123,11 @@ spec:
             {{- if $gwKey }}
             - --recipient-key-dir={{ include "koinon.gwKeyDir" . }}
             {{- end }}
+            {{- if include "koinon.restoreHold" . }}
+            # Held install (restoreHold, ADR 0107, issue #1358): ready with no State revision (a held
+            # reconciler publishes none) and deny-all, as the held standalone gateway of issue #530.
+            - --restore-hold
+            {{- end }}
           env:
             {{- if eq .Values.postgres.mode "cnpg" }}
             - name: PGPASSWORD

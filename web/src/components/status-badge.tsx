@@ -3,6 +3,7 @@
 import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { agentStatusLabel, stateLabel } from '@/lib/labels'
+import type { TokenStatus } from '@/lib/providers'
 import { cn } from '@/lib/utils'
 
 // ADR 0126 section 3. A badge is a tinted fill with a dot and the name as text: colour is never the only signal.
@@ -51,4 +52,12 @@ export function StatusBadge({ state }: { state: TaskState }) {
 export function AgentStatusBadge({ status, unhealthy = false }: { status: AgentStatus; unhealthy?: boolean }) {
   if (unhealthy) return <Pill tone="failed" label="Unhealthy" testId="status-badge" />
   return <Pill tone={status === AgentStatus.ACTIVE ? 'completed' : 'neutral'} label={agentStatusLabel(status)} testId="status-badge" />
+}
+
+const tokenTones = { active: 'completed', expired: 'neutral', revoked: 'failed' } as const satisfies Record<TokenStatus, Tone>
+const tokenLabels: Record<TokenStatus, string> = { active: 'Active', expired: 'Expired', revoked: 'Revoked' }
+
+/** TokenStatusBadge shows an API token's status: Active (green), Expired (hollow) or Revoked (red). */
+export function TokenStatusBadge({ status }: { status: TokenStatus }) {
+  return <Pill tone={tokenTones[status]} label={tokenLabels[status]} testId="status-badge" />
 }

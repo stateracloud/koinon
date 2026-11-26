@@ -108,3 +108,22 @@ var _ = Describe("the actor template image", func() {
 		Expect(a.GetMetadata().GetName()).NotTo(Equal(b.GetMetadata().GetName()))
 	})
 })
+
+var _ = Describe("the actor template command", func() {
+	It("refuses a command: it would replace the guest front (issue #1092)", func(ctx SpecContext) {
+		spec := execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest, Command: []string{"sleep", "infinity"}}
+		_, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{GuestSigner: fakeate.Signer()})
+		Expect(err).To(MatchError(ContainSubstring("replace the guest front")))
+
+		d, _ := newDriver()
+		_, err = d.CreateSandbox(ctx, ws, spec)
+		Expect(err).To(MatchError(execution.ErrInvalid))
+		Expect(err).To(MatchError(ContainSubstring("replace the guest front")))
+	})
+
+	It("leaves the entrypoint alone when no command is set", func() {
+		t, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest}, substrate.Config{GuestSigner: fakeate.Signer()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.GetContainers()[0].GetCommand()).To(BeEmpty())
+	})
+})

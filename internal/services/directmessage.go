@@ -278,7 +278,11 @@ func (a taskAPI) SendDirectMessage(ctx context.Context, req *taskv1alpha1.SendDi
 	}
 	out := &taskv1alpha1.SendDirectMessageResponse{Task: taskProto(res.Task), Created: res.Created, Reopened: res.Reopened}
 	if res.Event != nil {
-		out.Event = taskEventProto(*res.Event)
+		names, err := eventActorNames(ctx, a.q, c.org, []store.TaskEvent{*res.Event})
+		if err != nil {
+			return nil, a.dbError(err, "agent")
+		}
+		out.Event = taskEventProto(*res.Event, names)
 	}
 	return out, nil
 }

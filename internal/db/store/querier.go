@@ -297,6 +297,8 @@ type Querier interface {
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
+	// Saves an org template. No row comes back when the org already has a template with the slug.
+	CreateOrgTemplate(ctx context.Context, arg CreateOrgTemplateParams) (Template, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Per-org model providers and models (plan item PV1). api_key is an envelope
@@ -720,7 +722,11 @@ type Querier interface {
 	// What the task's runs have spent, by the ledger's settled cost: the figure the per-task cap is
 	// checked against (issue #99).
 	GetTaskSpend(ctx context.Context, arg GetTaskSpendParams) (string, error)
+	// By ID, for any org: the caller has the ID from an agent it can read. A caller that takes the ID from
+	// a request uses GetTemplateForOrg.
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
+	// A platform template or a template of the org; any other org's template is not found.
+	GetTemplateForOrg(ctx context.Context, arg GetTemplateForOrgParams) (Template, error)
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
@@ -937,7 +943,7 @@ type Querier interface {
 	// Every provider of every org with a cost API key, in a type that has a cost source; the
 	// reconciliation asks each of them once a day.
 	ListCostReportProviders(ctx context.Context, types []string) ([]ListCostReportProvidersRow, error)
-	// The most recently synced content of each template.
+	// The most recently synced content of each platform template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
@@ -965,6 +971,10 @@ type Querier interface {
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Display names of the people who wrote events of this org, by user id: what a task read shows beside
+	// each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+	// inside the org whose events name the user; a deleted user has no name.
+	ListEventActorNames(ctx context.Context, arg ListEventActorNamesParams) ([]ListEventActorNamesRow, error)
 	// Approved requests no executor holds: Trusted-preset calls, and calls whose
 	// executor died or failed to record the outcome.
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
@@ -1120,6 +1130,7 @@ type Querier interface {
 	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
 	// member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
 	ListOrgSummaries(ctx context.Context, arg ListOrgSummariesParams) ([]ListOrgSummariesRow, error)
+	ListOrgTemplates(ctx context.Context, orgID pgtype.UUID) ([]Template, error)
 	// Orgs whose default model migration 00045 left for BackfillDefaults.
 	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1412,6 +1423,11 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// The ledger of every org in [@from_at, @to_at) by UTC day, org and model. Platform admins only.
+	// It reads each org through the (org_id, occurred_at) index.
+	PlatformUsageByDay(ctx context.Context, arg PlatformUsageByDayParams) ([]PlatformUsageByDayRow, error)
+	// The runs of every org created since @since and how many of them are failed. Platform admins only.
+	PlatformUsageRunsSince(ctx context.Context, since pgtype.Timestamptz) (PlatformUsageRunsSinceRow, error)
 	// The ledger's cost of one provider's entries in [@since, @until), with how many there were.
 	ProviderLedgerForDay(ctx context.Context, arg ProviderLedgerForDayParams) (ProviderLedgerForDayRow, error)
 	// Whether any org has an enabled provider of this type (the refresh's auto mode). A yes or no only:
@@ -1868,10 +1884,22 @@ type Querier interface {
 	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// Templates are platform data (not org-owned); see 00002_agents.sql.
-	// Records a template synced from the binary. Re-syncing known content only
+	// A template with a NULL org_id is platform data (synced from templates/*.yaml, read-only through the
+	// API); a template with an org_id belongs to that org and no other org may read it (00110_org_templates.sql).
+	// Records a platform template synced from the binary. Re-syncing known content only
 	// bumps last_synced_at.
 	UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The usage and cost read model (issue #1268, ADR 0126 section 4). It reads the spend ledger and
+	// the runs table, never Prometheus. USD amounts cross the Go boundary as decimal text.
+	// The day is the UTC day of occurred_at, as the budgets count it.
+	// The ledger of one org in [@from_at, @to_at) by UTC day, principal, agent, model and provider.
+	// A NULL agent is a system check of the org. The filters are optional. The buckets are disjoint
+	// (ADR 0097 decision 3): input_tokens excludes the cache tokens.
+	UsageByDay(ctx context.Context, arg UsageByDayParams) ([]UsageByDayRow, error)
+	// The runs of an org created since @since and how many of them are failed.
+	UsageRunsSince(ctx context.Context, arg UsageRunsSinceParams) (UsageRunsSinceRow, error)
 	// The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
 	// fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the
 	// agent has no sandbox record yet (the reconciler creates it on activation, and a new sandbox

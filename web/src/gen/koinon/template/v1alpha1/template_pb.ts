@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/template/v1alpha1/template.proto.
  */
 export const file_koinon_template_v1alpha1_template: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkidAoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhYKCm1heF90b2tlbnMYAiABKANCAhgBEhoKEm1heF9tb2RlbF9yZXF1ZXN0cxgDIAEoAxIVCg1tYXhfc3BlbmRfdXNkGAQgASgJIrcBCgdUcmlnZ2VyEgoKAmlkGAEgASgJEjMKBHR5cGUYAiABKA4yJS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlclR5cGUSDAoEY3JvbhgDIAEoCRIQCgh0aW1lem9uZRgEIAEoCRITCgtpbnN0cnVjdGlvbhgFIAEoCRI2CgZub3RpZnkYBiABKAsyJi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTm90aWZ5VGFyZ2V0IpoBCgxOb3RpZnlUYXJnZXQSOAoEa2luZBgBIAEoDjIqLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5Ob3RpZnlUYXJnZXRLaW5kEg8KB3VzZXJfaWQYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUSEgoKY2hhbm5lbF9pZBgEIAEoCSKpBAoIVGVtcGxhdGUSCgoCaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxjb250ZW50X2hhc2gYAyABKAkSDwoHdmVyc2lvbhgEIAEoCRIUCgxkaXNwbGF5X25hbWUYBSABKAkSEwoLZGVzY3JpcHRpb24YBiABKAkSPQoPYWxsb3dlZF9mbGF2b3JzGAcgAygOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvckICGAESPAoOZGVmYXVsdF9mbGF2b3IYCCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yQgIYARINCgVtb2RlbBgJIAEoCRIUCgxpbnN0cnVjdGlvbnMYCiABKAkSLwoGZ3JhbnRzGAsgAygLMh8ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkdyYW50EjcKCnJ1bl9saW1pdHMYDCABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEhcKD3NwZW5kX2xpbWl0X3VzZBgNIAEoCRIzCgh0cmlnZ2VycxgOIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEhEKCWVwaGVtZXJhbBgPIAEoCBIQCgh0aGlua2luZxgQIAEoCRIZChFhbGxvd2VkX2hhcm5lc3NlcxgRIAMoCRIXCg9kZWZhdWx0X2hhcm5lc3MYEiABKAkiFgoUTGlzdFRlbXBsYXRlc1JlcXVlc3QiTgoVTGlzdFRlbXBsYXRlc1Jlc3BvbnNlEjUKCXRlbXBsYXRlcxgBIAMoCzIiLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UZW1wbGF0ZSpfCgZGbGF2b3ISFgoSRkxBVk9SX1VOU1BFQ0lGSUVEEAASEwoPRkxBVk9SX09QRU5DT0RFEAESFQoNRkxBVk9SX0hFUk1FUxACGgIIARIRCglGTEFWT1JfUEkQAxoCCAEqXwoGUHJlc2V0EhYKElBSRVNFVF9VTlNQRUNJRklFRBAAEhQKEFBSRVNFVF9SRUFEX09OTFkQARITCg9QUkVTRVRfU1RBTkRBUkQQAhISCg5QUkVTRVRfVFJVU1RFRBADKqkBCgtUcmlnZ2VyVHlwZRIcChhUUklHR0VSX1RZUEVfVU5TUEVDSUZJRUQQABIZChVUUklHR0VSX1RZUEVfU0NIRURVTEUQARIfChtUUklHR0VSX1RZUEVfRElSRUNUX01FU1NBR0UQAhIgChxUUklHR0VSX1RZUEVfQ09ERV9IT1NUX0VWRU5UEAMSHgoaVFJJR0dFUl9UWVBFX0NIQU5ORUxfRVZFTlQQBCqQAQoQTm90aWZ5VGFyZ2V0S2luZBIiCh5OT1RJRllfVEFSR0VUX0tJTkRfVU5TUEVDSUZJRUQQABIbChdOT1RJRllfVEFSR0VUX0tJTkRfVVNFUhABEhsKF05PVElGWV9UQVJHRVRfS0lORF9ST0xFEAISHgoaTk9USUZZX1RBUkdFVF9LSU5EX0NIQU5ORUwQAzKIAQoPVGVtcGxhdGVTZXJ2aWNlEnUKDUxpc3RUZW1wbGF0ZXMSLi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1JlcXVlc3QaLy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1Jlc3BvbnNlIgOQAgFCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGVtcGxhdGUvdjFhbHBoYTE7dGVtcGxhdGV2MWFscGhhMWIGcHJvdG8z", [file_koinon_auth_v1alpha1_auth]);
+  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkidAoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhYKCm1heF90b2tlbnMYAiABKANCAhgBEhoKEm1heF9tb2RlbF9yZXF1ZXN0cxgDIAEoAxIVCg1tYXhfc3BlbmRfdXNkGAQgASgJIrcBCgdUcmlnZ2VyEgoKAmlkGAEgASgJEjMKBHR5cGUYAiABKA4yJS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlclR5cGUSDAoEY3JvbhgDIAEoCRIQCgh0aW1lem9uZRgEIAEoCRITCgtpbnN0cnVjdGlvbhgFIAEoCRI2CgZub3RpZnkYBiABKAsyJi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTm90aWZ5VGFyZ2V0IpoBCgxOb3RpZnlUYXJnZXQSOAoEa2luZBgBIAEoDjIqLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5Ob3RpZnlUYXJnZXRLaW5kEg8KB3VzZXJfaWQYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmtvaW5vbi5hdXRoLnYxYWxwaGExLk9yZ1JvbGUSEgoKY2hhbm5lbF9pZBgEIAEoCSLxBAoIVGVtcGxhdGUSCgoCaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIUCgxjb250ZW50X2hhc2gYAyABKAkSDwoHdmVyc2lvbhgEIAEoCRIUCgxkaXNwbGF5X25hbWUYBSABKAkSEwoLZGVzY3JpcHRpb24YBiABKAkSPQoPYWxsb3dlZF9mbGF2b3JzGAcgAygOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvckICGAESPAoOZGVmYXVsdF9mbGF2b3IYCCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yQgIYARINCgVtb2RlbBgJIAEoCRIUCgxpbnN0cnVjdGlvbnMYCiABKAkSLwoGZ3JhbnRzGAsgAygLMh8ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkdyYW50EjcKCnJ1bl9saW1pdHMYDCABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEhcKD3NwZW5kX2xpbWl0X3VzZBgNIAEoCRIzCgh0cmlnZ2VycxgOIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEhEKCWVwaGVtZXJhbBgPIAEoCBIQCgh0aGlua2luZxgQIAEoCRIZChFhbGxvd2VkX2hhcm5lc3NlcxgRIAMoCRIXCg9kZWZhdWx0X2hhcm5lc3MYEiABKAkSNgoFc2NvcGUYEyABKA4yJy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVGVtcGxhdGVTY29wZRIOCgZvcmdfaWQYFCABKAkiJgoUTGlzdFRlbXBsYXRlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIk4KFUxpc3RUZW1wbGF0ZXNSZXNwb25zZRI1Cgl0ZW1wbGF0ZXMYASADKAsyIi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVGVtcGxhdGUiewoeQ3JlYXRlVGVtcGxhdGVGcm9tQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSDAoEc2x1ZxgFIAEoCSJXCh9DcmVhdGVUZW1wbGF0ZUZyb21BZ2VudFJlc3BvbnNlEjQKCHRlbXBsYXRlGAEgASgLMiIua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRlbXBsYXRlKmQKDVRlbXBsYXRlU2NvcGUSHgoaVEVNUExBVEVfU0NPUEVfVU5TUEVDSUZJRUQQABIbChdURU1QTEFURV9TQ09QRV9QTEFURk9STRABEhYKElRFTVBMQVRFX1NDT1BFX09SRxACKl8KBkZsYXZvchIWChJGTEFWT1JfVU5TUEVDSUZJRUQQABITCg9GTEFWT1JfT1BFTkNPREUQARIVCg1GTEFWT1JfSEVSTUVTEAIaAggBEhEKCUZMQVZPUl9QSRADGgIIASpfCgZQcmVzZXQSFgoSUFJFU0VUX1VOU1BFQ0lGSUVEEAASFAoQUFJFU0VUX1JFQURfT05MWRABEhMKD1BSRVNFVF9TVEFOREFSRBACEhIKDlBSRVNFVF9UUlVTVEVEEAMqqQEKC1RyaWdnZXJUeXBlEhwKGFRSSUdHRVJfVFlQRV9VTlNQRUNJRklFRBAAEhkKFVRSSUdHRVJfVFlQRV9TQ0hFRFVMRRABEh8KG1RSSUdHRVJfVFlQRV9ESVJFQ1RfTUVTU0FHRRACEiAKHFRSSUdHRVJfVFlQRV9DT0RFX0hPU1RfRVZFTlQQAxIeChpUUklHR0VSX1RZUEVfQ0hBTk5FTF9FVkVOVBAEKpABChBOb3RpZnlUYXJnZXRLaW5kEiIKHk5PVElGWV9UQVJHRVRfS0lORF9VTlNQRUNJRklFRBAAEhsKF05PVElGWV9UQVJHRVRfS0lORF9VU0VSEAESGwoXTk9USUZZX1RBUkdFVF9LSU5EX1JPTEUQAhIeChpOT1RJRllfVEFSR0VUX0tJTkRfQ0hBTk5FTBADMpkCCg9UZW1wbGF0ZVNlcnZpY2USdQoNTGlzdFRlbXBsYXRlcxIuLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5MaXN0VGVtcGxhdGVzUmVxdWVzdBovLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5MaXN0VGVtcGxhdGVzUmVzcG9uc2UiA5ACARKOAQoXQ3JlYXRlVGVtcGxhdGVGcm9tQWdlbnQSOC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuQ3JlYXRlVGVtcGxhdGVGcm9tQWdlbnRSZXF1ZXN0Gjkua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkNyZWF0ZVRlbXBsYXRlRnJvbUFnZW50UmVzcG9uc2VCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGVtcGxhdGUvdjFhbHBoYTE7dGVtcGxhdGV2MWFscGhhMWIGcHJvdG8z", [file_koinon_auth_v1alpha1_auth]);
 
 /**
  * Grant is a grant on a connector type. On a template or a draft agent it is a
@@ -345,6 +345,20 @@ export type Template = Message<"koinon.template.v1alpha1.Template"> & {
    * @generated from field: string default_harness = 18;
    */
   defaultHarness: string;
+
+  /**
+   * Who owns the template.
+   *
+   * @generated from field: koinon.template.v1alpha1.TemplateScope scope = 19;
+   */
+  scope: TemplateScope;
+
+  /**
+   * The owning org of an org template; empty on a platform template.
+   *
+   * @generated from field: string org_id = 20;
+   */
+  orgId: string;
 };
 
 /**
@@ -355,11 +369,18 @@ export const TemplateSchema: GenMessage<Template> = /*@__PURE__*/
   messageDesc(file_koinon_template_v1alpha1_template, 4);
 
 /**
- * ListTemplatesRequest is empty.
+ * ListTemplatesRequest names the org whose templates to list with the platform ones.
  *
  * @generated from message koinon.template.v1alpha1.ListTemplatesRequest
  */
 export type ListTemplatesRequest = Message<"koinon.template.v1alpha1.ListTemplatesRequest"> & {
+  /**
+   * Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs
+   * the viewer role in the org.
+   *
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
 };
 
 /**
@@ -370,7 +391,8 @@ export const ListTemplatesRequestSchema: GenMessage<ListTemplatesRequest> = /*@_
   messageDesc(file_koinon_template_v1alpha1_template, 5);
 
 /**
- * ListTemplatesResponse lists the templates, sorted by slug.
+ * ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when
+ * an org template has the same slug.
  *
  * @generated from message koinon.template.v1alpha1.ListTemplatesResponse
  */
@@ -387,6 +409,100 @@ export type ListTemplatesResponse = Message<"koinon.template.v1alpha1.ListTempla
  */
 export const ListTemplatesResponseSchema: GenMessage<ListTemplatesResponse> = /*@__PURE__*/
   messageDesc(file_koinon_template_v1alpha1_template, 6);
+
+/**
+ * CreateTemplateFromAgentRequest saves an agent as a template of its org.
+ *
+ * @generated from message koinon.template.v1alpha1.CreateTemplateFromAgentRequest
+ */
+export type CreateTemplateFromAgentRequest = Message<"koinon.template.v1alpha1.CreateTemplateFromAgentRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+
+  /**
+   * The template's name, 1 to 200 characters.
+   *
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: string description = 4;
+   */
+  description: string;
+
+  /**
+   * Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name.
+   *
+   * @generated from field: string slug = 5;
+   */
+  slug: string;
+};
+
+/**
+ * Describes the message koinon.template.v1alpha1.CreateTemplateFromAgentRequest.
+ * Use `create(CreateTemplateFromAgentRequestSchema)` to create a new message.
+ */
+export const CreateTemplateFromAgentRequestSchema: GenMessage<CreateTemplateFromAgentRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_template_v1alpha1_template, 7);
+
+/**
+ * CreateTemplateFromAgentResponse is the new org template.
+ *
+ * @generated from message koinon.template.v1alpha1.CreateTemplateFromAgentResponse
+ */
+export type CreateTemplateFromAgentResponse = Message<"koinon.template.v1alpha1.CreateTemplateFromAgentResponse"> & {
+  /**
+   * @generated from field: koinon.template.v1alpha1.Template template = 1;
+   */
+  template?: Template | undefined;
+};
+
+/**
+ * Describes the message koinon.template.v1alpha1.CreateTemplateFromAgentResponse.
+ * Use `create(CreateTemplateFromAgentResponseSchema)` to create a new message.
+ */
+export const CreateTemplateFromAgentResponseSchema: GenMessage<CreateTemplateFromAgentResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_template_v1alpha1_template, 8);
+
+/**
+ * TemplateScope says who owns a template.
+ *
+ * @generated from enum koinon.template.v1alpha1.TemplateScope
+ */
+export enum TemplateScope {
+  /**
+   * @generated from enum value: TEMPLATE_SCOPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Ships with Koinon; read-only; every signed-in user sees it.
+   *
+   * @generated from enum value: TEMPLATE_SCOPE_PLATFORM = 1;
+   */
+  PLATFORM = 1,
+
+  /**
+   * Saved by an org; only that org sees it.
+   *
+   * @generated from enum value: TEMPLATE_SCOPE_ORG = 2;
+   */
+  ORG = 2,
+}
+
+/**
+ * Describes the enum koinon.template.v1alpha1.TemplateScope.
+ */
+export const TemplateScopeSchema: GenEnum<TemplateScope> = /*@__PURE__*/
+  enumDesc(file_koinon_template_v1alpha1_template, 0);
 
 /**
  * Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since
@@ -426,7 +542,7 @@ export enum Flavor {
  * Describes the enum koinon.template.v1alpha1.Flavor.
  */
 export const FlavorSchema: GenEnum<Flavor> = /*@__PURE__*/
-  enumDesc(file_koinon_template_v1alpha1_template, 0);
+  enumDesc(file_koinon_template_v1alpha1_template, 1);
 
 /**
  * Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
@@ -459,7 +575,7 @@ export enum Preset {
  * Describes the enum koinon.template.v1alpha1.Preset.
  */
 export const PresetSchema: GenEnum<Preset> = /*@__PURE__*/
-  enumDesc(file_koinon_template_v1alpha1_template, 1);
+  enumDesc(file_koinon_template_v1alpha1_template, 2);
 
 /**
  * TriggerType says what starts work on an agent (ADR 0066).
@@ -501,7 +617,7 @@ export enum TriggerType {
  * Describes the enum koinon.template.v1alpha1.TriggerType.
  */
 export const TriggerTypeSchema: GenEnum<TriggerType> = /*@__PURE__*/
-  enumDesc(file_koinon_template_v1alpha1_template, 2);
+  enumDesc(file_koinon_template_v1alpha1_template, 3);
 
 /**
  * NotifyTargetKind says who a trigger's task asks (ADR 0066 amendment 2026-10-28).
@@ -540,18 +656,20 @@ export enum NotifyTargetKind {
  * Describes the enum koinon.template.v1alpha1.NotifyTargetKind.
  */
 export const NotifyTargetKindSchema: GenEnum<NotifyTargetKind> = /*@__PURE__*/
-  enumDesc(file_koinon_template_v1alpha1_template, 3);
+  enumDesc(file_koinon_template_v1alpha1_template, 4);
 
 /**
- * TemplateService lists the agent templates shipped with Koinon (ADR 0020).
- * Templates are platform data: they belong to no org, and every signed-in
- * user can list them.
+ * TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs
+ * to no org and is read-only; an org template belongs to one org, which saved it from an agent
+ * (ADR 0126 section 5), and no other org sees it.
  *
  * @generated from service koinon.template.v1alpha1.TemplateService
  */
 export const TemplateService: GenService<{
   /**
-   * ListTemplates returns the current content of every template.
+   * ListTemplates returns the current content of every platform template and, when the request
+   * names an org, the org's own templates. Every signed-in user can list the platform templates;
+   * the org's templates need membership of the org.
    *
    * @generated from rpc koinon.template.v1alpha1.TemplateService.ListTemplates
    */
@@ -559,6 +677,20 @@ export const TemplateService: GenService<{
     methodKind: "unary";
     input: typeof ListTemplatesRequestSchema;
     output: typeof ListTemplatesResponseSchema;
+  },
+  /**
+   * CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as
+   * template"). It needs the member role, as creating an agent does. The template keeps the agent's
+   * definition (instructions, model, grants without their bindings, limits, triggers, settings) and
+   * nothing the agent is bound to: no connection, repository or run data. Promotion to a platform
+   * template is not part of this API.
+   *
+   * @generated from rpc koinon.template.v1alpha1.TemplateService.CreateTemplateFromAgent
+   */
+  createTemplateFromAgent: {
+    methodKind: "unary";
+    input: typeof CreateTemplateFromAgentRequestSchema;
+    output: typeof CreateTemplateFromAgentResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_template_v1alpha1_template, 0);

@@ -10,7 +10,7 @@ import (
 
 // imageCacheTrustPatch is the kustomize patch that makes atelet trust the CA of Koinon's image cache (issue #1191).
 //
-// atelet pulls actor images through the cache over TLS with Go's default transport, and Substrate v1.0.0 has no CA
+// atelet pulls actor images through the cache over TLS with Go's default transport, and Substrate v1.0.1 has no CA
 // option. Go reads the system roots from /etc/ssl/certs/ca-certificates.crt of the image and then adds every
 // certificate file of the directories in SSL_CERT_DIR (crypto/x509 loadOnDiskRoots; proved by a test in
 // internal/imagecacheca). So the patch mounts the ConfigMap imagecacheca.ConfigMapName at imagecacheca.MountPath and

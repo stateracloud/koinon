@@ -6,10 +6,10 @@ import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { ErrorInfoSchema } from '@/gen/google/rpc/error_details_pb'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { ActorKind, TaskEventSchema, TaskSchema, TaskService, TaskState, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { agent, orgId, renderApp, task, whoAmI } from '@/test-utils'
 
@@ -29,36 +29,37 @@ function taskEvent(seq: number, kind: string, payload: Record<string, string>, a
   return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
 }
 
-describe('TaskPage member names', () => {
-  async function askableCalls(role: OrgRole) {
-    let calls = 0
+describe('TaskPage message authors', () => {
+  // The name comes on the task event, so it does not depend on the role (#1031).
+  it.each([
+    ['a member', OrgRole.MEMBER],
+    ['a viewer', OrgRole.VIEWER],
+  ])('names another person who wrote a message for %s', async (_label, role) => {
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI({ role }) })
       service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
-      service(QuestionService, {
-        listAskableMembers: () => {
-          calls++
-          return { members: [] }
-        },
+      service(TaskService, {
+        getTask: () => ({
+          task: task('t-1', 'Say hello', TaskState.WORKING),
+          events: [
+            create(TaskEventSchema, {
+              seq: 1n,
+              kind: 'message',
+              actorKind: ActorKind.USER,
+              actorUserId: 'u-2',
+              actorDisplayName: 'Sam Example',
+              payload: { text: 'hello from Sam' },
+              createdAt: timestampFromMs(t0),
+            }),
+          ],
+          runs: [],
+        }),
       })
-      service(TaskService, { getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events: [], runs: [] }) })
     })
     renderApp(transport, '/tasks/t-1')
-    await screen.findByRole('button', { name: 'Cancel task Say hello' })
-    return { calls: () => calls }
-  }
-
-  it('does not ask for member names as a member', async () => {
-    const { calls } = await askableCalls(OrgRole.MEMBER)
-    // The page has rendered the task; give a wrongly enabled query the chance to fire, then check it did not.
-    await screen.findByRole('heading', { name: 'Say hello' })
-    await Promise.resolve()
-    expect(calls()).toBe(0)
-  })
-
-  it('asks for member names as an admin', async () => {
-    const { calls } = await askableCalls(OrgRole.ADMIN)
-    await waitFor(() => expect(calls()).toBeGreaterThan(0))
+    const article = (await screen.findByText('hello from Sam')).closest('article')
+    expect(article).toHaveTextContent('Sam Example')
+    expect(article).not.toHaveTextContent('Another member')
   })
 })
 
@@ -247,5 +248,25 @@ describe('TaskPage', () => {
       expect(alert).toHaveTextContent('An org admin or owner can resume it.')
       expect(screen.queryByRole('link', { name: 'Open the agent to resume it' })).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('TaskPage errors', () => {
+  // The page words an error with describeError: a reason that has copy shows the copy, not the server's text (#778).
+  it('shows the copy of a reason when the task does not load', async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.MEMBER }) })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, {
+        getTask: () => {
+          const err = new ConnectError('raw server text', Code.PermissionDenied)
+          err.details.push({ desc: ErrorInfoSchema, value: create(ErrorInfoSchema, { reason: 'ADMIN_REQUIRED', domain: 'koinon.dev' }) })
+          throw err
+        },
+      })
+    })
+    renderApp(transport, '/tasks/t-1')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only org admins and owners can do that.')
+    expect(screen.queryByText(/raw server text/)).not.toBeInTheDocument()
   })
 })

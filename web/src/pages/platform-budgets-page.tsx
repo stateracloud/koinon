@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { AmountForm } from '@/components/amount-form'
@@ -10,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { BudgetService, type OrgBudgetSummary } from '@/gen/koinon/budget/v1alpha1/budget_pb'
 import { usePlatformActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
 import { formatUSD } from '@/lib/cost'
 
 /**
@@ -46,7 +46,7 @@ function PlatformBudgets() {
       </p>
       {orgs.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(orgs.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(orgs.error).message}</AlertDescription>
         </Alert>
       )}
       {refused && (

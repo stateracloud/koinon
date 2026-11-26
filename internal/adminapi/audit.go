@@ -43,9 +43,10 @@ func (s *Server) ListAuditEvents(ctx context.Context, req ListAuditEventsRequest
 	}
 	if !p.Org.Valid {
 		return ListAuditEventsdefaultJSONResponse{Body: Error{Error: struct {
-			Code    ErrorCode `json:"code"`
-			Message string    `json:"message"`
-		}{PermissionDenied, "this token has no org"}}, StatusCode: http.StatusForbidden}, nil
+			Code    ErrorCode    `json:"code"`
+			Message string       `json:"message"`
+			Reason  *ErrorReason `json:"reason,omitempty"`
+		}{Code: PermissionDenied, Message: "this token has no org"}}, StatusCode: http.StatusForbidden}, nil
 	}
 	f := auditFilter(req.Params)
 	f.Org = p.Org
@@ -108,9 +109,10 @@ func (s *Server) installAuditDenied(ctx context.Context, p tokens.Principal) (*E
 // forbidden is the 403 body.
 func forbidden(msg string) *Error {
 	return &Error{Error: struct {
-		Code    ErrorCode `json:"code"`
-		Message string    `json:"message"`
-	}{PermissionDenied, msg}}
+		Code    ErrorCode    `json:"code"`
+		Message string       `json:"message"`
+		Reason  *ErrorReason `json:"reason,omitempty"`
+	}{Code: PermissionDenied, Message: msg}}
 }
 
 // listInstallAuditEvents reads the install chain (ADR 0100). The check is on the token's root

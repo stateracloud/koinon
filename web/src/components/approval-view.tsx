@@ -9,6 +9,7 @@ import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { ApprovalService, ScopeKind } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { describeError } from '@/lib/api-error'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
@@ -44,7 +45,7 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   if (get.isError) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the approval: {ConnectError.from(get.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the approval: {describeError(get.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -63,11 +64,11 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
       currentUserId={who.data?.user?.id}
       canDecide={a.canDecide && isApprover(org.role)}
       pending={approve.isPending || deny.isPending}
-      error={err && !changed ? err.rawMessage : undefined}
+      error={err && !changed ? describeError(err).message : undefined}
       changed={changed}
       diff={diff.data}
       diffPending={isPullRequest && diff.isPending}
-      diffError={diff.error ? ConnectError.from(diff.error).rawMessage : undefined}
+      diffError={diff.error ? describeError(diff.error).message : undefined}
       onReload={() => void reload()}
       showPermalink={showPermalink}
       onApprove={(note, scope) =>
