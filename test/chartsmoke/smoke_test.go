@@ -719,6 +719,7 @@ func describeMode(name, valuesFile string) {
 			Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), "a token that is not valid is refused; logs:\n%s", w.Logs(ctx))
 			logs := w.Logs(ctx)
 			Expect(logs).To(ContainSubstring("token not accepted"), "the provisioner reviewed the token; logs:\n%s", logs)
+			Expect(logs).To(ContainSubstring("token review: not authenticated"), "the API server answered the review (no transport error); logs:\n%s", logs)
 			Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"), "the provisioner may create a TokenReview; logs:\n%s", logs)
 			expectRunning(ctx, w, "still running; logs:\n%s", logs)
 			// The reconciler started above with the provisioner-token mount and the provisioner url and tokenFile keys.

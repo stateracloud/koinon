@@ -129,6 +129,23 @@ func TestGrantGivesUpWhenTheAPIServerNeverComes(t *testing.T) {
 	g.Expect(err).To(MatchError(ContainSubstring(provisionerMember)))
 }
 
+// A dial that hangs does not hold the grant past WaitTimeout: the deadline reaches the dial.
+func TestGrantIsBoundedByTheWaitTimeoutWhenTheDialHangs(t *testing.T) {
+	g := NewWithT(t)
+	f := grantCluster(nil)
+	defer f.cl.Stop()
+	i := installerWith(f, &bytes.Buffer{})
+	i.WaitTimeout, i.PollInterval = 50*time.Millisecond, time.Millisecond
+	i.Control = func(ctx context.Context) (ateapiv1.ControlClient, func(), error) {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+	start := time.Now()
+	_, err := i.EnsureProvisionerGrant(t.Context())
+	g.Expect(err).To(MatchError(context.DeadlineExceeded))
+	g.Expect(time.Since(start)).To(BeNumerically("<", 5*time.Second))
+}
+
 // Install runs the grant, so every install and every upgrade has it; it is the only Koinon member of the global policy.
 func TestInstallGrantsTheProvisioner(t *testing.T) {
 	g := NewWithT(t)

@@ -65,7 +65,9 @@ func (i *Installer) EnsureProvisionerGrant(ctx context.Context) (bool, error) {
 		dial = i.openControl
 	}
 	timeout := orDuration(i.WaitTimeout, 2*time.Minute)
-	deadline := time.Now().Add(timeout)
+	// One deadline bounds the whole grant: the dial, the policy calls and the retries between them.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for {
 		changed, err := i.grantOnce(ctx, dial, member)
 		if err == nil {
@@ -76,12 +78,12 @@ func (i *Installer) EnsureProvisionerGrant(ctx context.Context) (bool, error) {
 		}
 		// The api server restarts after the authentication ConfigMap changes: it is not reachable, or does not
 		// know the issuer yet, for a short time.
-		if c := status.Code(err); (c != codes.Unavailable && c != codes.Unauthenticated) || time.Now().After(deadline) {
+		if c := status.Code(err); (c != codes.Unavailable && c != codes.Unauthenticated) || ctx.Err() != nil {
 			return false, fmt.Errorf("grant the provisioner %s in Substrate's global access policy: %w", member, err)
 		}
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return false, fmt.Errorf("grant the provisioner %s in Substrate's global access policy: %w (last error: %w)", member, ctx.Err(), err)
 		case <-time.After(orDuration(i.PollInterval, 2*time.Second)):
 		}
 	}
