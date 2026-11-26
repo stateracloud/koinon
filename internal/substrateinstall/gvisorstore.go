@@ -28,6 +28,11 @@ import (
 // rustFSRegion is the region rustfs reports; its bucket-init Job uses the same value.
 const rustFSRegion = "us-east-1"
 
+// ErrNoBucket is returned by the store of the cluster when its bucket does not exist (yet). On kind the
+// bucket-init Job of the object store makes it a few seconds after rustfs starts, so the installer retries
+// on this error before it gives up.
+var ErrNoBucket = errors.New("the bucket does not exist in the cluster object store")
+
 // minioStore is an AssetStore over an S3 endpoint.
 type minioStore struct {
 	c      *minio.Client
@@ -64,7 +69,7 @@ func (s minioStore) Digest(ctx context.Context, key string) (string, bool, error
 			return "", false, nil
 		}
 		if minio.ToErrorResponse(err).Code == "NoSuchBucket" {
-			return "", false, fmt.Errorf("the bucket %q does not exist in the cluster object store (the platform creates only its own snapshot bucket): %w", s.bucket, err)
+			return "", false, fmt.Errorf("the bucket %q does not exist in the cluster object store (the platform creates only its own snapshot bucket): %w: %w", s.bucket, ErrNoBucket, err)
 		}
 		return "", false, err
 	}
