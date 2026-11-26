@@ -7,7 +7,8 @@ relates: ["0006", "0007", "0010", "0017", "0023", "0024", "0055", "0065", "0066"
 ---
 # 0127. Slack and Teams adapter as a pure event-to-actions core
 
-- Status: Proposed (step 1 of #24: the maintainer reviews this ADR before any code)
+- Status: Proposed (step 1 of #24: the maintainer reviews this ADR before any code); amended by
+  [0129](0129-external-actor-kind.md) (the identity of an `external` actor is a row, not payload fields)
 - Date: 2026-11-26
 - Area: connectors-tools
 - Tags: connectors, eventing, triggers, secrets, testing

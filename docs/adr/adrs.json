@@ -151,7 +151,8 @@
     "related_by": [
       "0075",
       "0113",
-      "0127"
+      "0127",
+      "0129"
     ]
   },
   {
@@ -595,7 +596,8 @@
       "0116",
       "0121",
       "0125",
-      "0127"
+      "0127",
+      "0129"
     ]
   },
   {
@@ -1779,7 +1781,8 @@
       "0096",
       "0123",
       "0126",
-      "0127"
+      "0127",
+      "0129"
     ]
   },
   {
@@ -1814,7 +1817,8 @@
       "0081",
       "0085",
       "0123",
-      "0127"
+      "0127",
+      "0129"
     ]
   },
   {
@@ -3656,7 +3660,9 @@
       "testing"
     ],
     "amends": [],
-    "amended_by": [],
+    "amended_by": [
+      "0129"
+    ],
     "supersedes": [],
     "superseded_by": [],
     "relates": [
@@ -3671,7 +3677,9 @@
       "0066",
       "0110"
     ],
-    "related_by": []
+    "related_by": [
+      "0129"
+    ]
   },
   {
     "number": "0128",
@@ -3695,6 +3703,35 @@
       "0075",
       "0119",
       "0120"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0129",
+    "file": "0129-external-actor-kind.md",
+    "title": "The external actor kind: people without a Koinon account on the task timeline",
+    "status": "proposed",
+    "date": "2026-11-26",
+    "area": "work-model",
+    "tags": [
+      "tasks",
+      "chat",
+      "identity",
+      "database",
+      "api"
+    ],
+    "amends": [
+      "0127"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0006",
+      "0023",
+      "0065",
+      "0066",
+      "0127"
     ],
     "related_by": []
   }
