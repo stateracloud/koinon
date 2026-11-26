@@ -190,6 +190,11 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 		echo "docker unavailable"
 	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|agent proxy: no rule|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
 		echo "network denied"
+	elif grep -qE 'SSL certificate problem: self-signed certificate in certificate chain' "$log"; then
+		# A proxy that intercepts TLS, with a CA that a build container does not trust (#1296).
+		echo "network denied (TLS interception)"
+	elif grep -qE 'unexpected status from [A-Z]+ request to https://[^ ]+: 429 Too Many Requests|toomanyrequests: ' "$log"; then
+		echo "registry rate limit"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
 	elif grep -qiE 'operation not permitted' "$log"; then

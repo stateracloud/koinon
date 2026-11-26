@@ -62,6 +62,9 @@ gate_state_env() {
 	if [[ -z ${DOCKER_CONFIG:-} ]]; then
 		# Links, not copies: config.json can hold registry credentials, and a link puts no second copy
 		# of them on disk. Made again each run, so an entry removed from ~/.docker goes here too.
+		# A gate must not write config.json (docker login, docker context use): the write goes through
+		# the link and fails across file systems or in the sandbox. Like the buildx copy, two runs that
+		# start at the same time in one worktree can see a half-made directory for a moment.
 		src=$HOME/.docker
 		rm -rf "${state:?}/docker"
 		mkdir -p "$state/docker" || return 1

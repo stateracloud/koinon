@@ -62,6 +62,8 @@ sandbox) echo "open /x: operation not permitted"; exit 1 ;;
 dockerperm) echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"; exit 1 ;;
 network) echo "go: github.com/x/y@v1: Get \"https://proxy.golang.org/x\": proxyconnect tcp: CONNECT tunnel failed, response 403"; exit 1 ;;
 netallow) echo "failed downloading schema at https://schemas.example.invalid/x.json: not in this command's allowed_domains ? re-run the command"; exit 1 ;;
+tlsproxy) echo '#30 0.212 curl: (60) SSL certificate problem: self-signed certificate in certificate chain'; exit 1 ;;
+ratelimit) echo 'ERROR: failed to solve: unexpected status from HEAD request to https://registry.example.invalid/v2/x/manifests/1: 429 Too Many Requests'; exit 1 ;;
 agentproxy) echo 'govulncheck: fetching vulnerabilities: Get "https://vuln.example.invalid/index.json": Forbidden (agent proxy: no rule or network setting allows this host)'; exit 1 ;;
 networkfail) printf -- '--- FAIL: TestX (0.1s)\ndial tcp: lookup proxy.golang.org: no such host\n'; exit 1 ;;
 esac
@@ -162,6 +164,10 @@ run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=netallow
 expect "job allowed_domains denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=agentproxy
 expect "job agent proxy refusal" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=tlsproxy
+expect "job TLS interception" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied \(TLS interception\)"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=ratelimit
+expect "job registry rate limit" 3 '^gate=escape rc=1 .*verdict=notrun reason="registry rate limit"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
 expect "a real failure beats a network line" 1 '^gate=escape rc=1 .*verdict=fail'
 
@@ -399,6 +405,7 @@ echo mybuilder >"$tmp/home/.docker/buildx/current"
 echo '{"Name":"mybuilder"}' >"$tmp/home/.docker/buildx/instances/mybuilder"
 mkdir -p "$tmp/home/.docker/buildx/activity" "$tmp/home/.docker/contexts"
 echo '{"auths":{}}' >"$tmp/home/.docker/config.json"
+echo seed >"$tmp/home/.docker/.token_seed" && echo x >"$tmp/home/.docker/.foo"
 staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR= DOCKER_CONFIG=
 expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass' '^gate=opencodeplugin .*verdict=pass'
 st=$(cat "$(gate_log harnesses)")
@@ -414,8 +421,8 @@ if [[ $(cat "$bx/current" 2>/dev/null) != mybuilder || ! -f $bx/instances/mybuil
 fi
 dc=${st#*docker=}; dc=${dc%% *}
 total=$((total + 1))
-if [[ $(readlink "$dc/config.json") != "$tmp/home/.docker/config.json" || $(readlink "$dc/contexts") != "$tmp/home/.docker/contexts" || -e $dc/buildx || ! -w $dc ]]; then
-	echo "FAIL: state: the docker config dir links config.json and contexts, not buildx: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
+if [[ $(readlink "$dc/config.json") != "$tmp/home/.docker/config.json" || $(readlink "$dc/contexts") != "$tmp/home/.docker/contexts" || -e $dc/buildx || -e $dc/.token_seed || ! -L $dc/.foo || ! -w $dc ]]; then
+	echo "FAIL: state: the docker config dir links config.json, contexts and dotfiles, not buildx or .token_seed: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
 fi
 # A builder removed after the last run goes from the copy too.
 rm -f "$tmp/home/.docker/buildx/current" && rm -rf "$tmp/home/.docker/buildx/instances"
