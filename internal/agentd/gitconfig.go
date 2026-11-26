@@ -127,7 +127,6 @@ func (r *runner) writeGitConfig(ctx context.Context, workspace, sandbox string) 
 	hasCA := strings.TrimSpace(h.site.CABundle) != ""
 	cfg := codehost.GitConfig(h.loc, hasCA)
 	r.egress = r.egressGit(h)
-	r.forgeHost = h
 	if r.egress {
 		// The token first: the config's include of a file that is not there yet is ignored by git,
 		// but a rewrite to the gateway without the token would be refused.

@@ -277,16 +277,11 @@ spec:
     {{- if include "koinon.egressListener" . }}
     # The egress listener (#1086 part C2): sandboxes send git here, as they reach agentgateway's llm port.
     # The actor token and the routes gate each request; the reconciler's L7 rule limits the paths.
-    # koinon-agentd probes the agent's forge route here before the harness starts, with its own actor
-    # token, so the agent's first git command is not refused while the forge credential settles.
     - ports:
         - port: egress
       from:
         - namespaceSelector:
             {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
-        - podSelector:
-            matchLabels:
-              {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
     {{- end }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:

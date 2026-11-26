@@ -199,16 +199,6 @@ type Config struct {
 	// ActorTokenRefresh is how often a live run writes a new actor token. Default
 	// DefaultActorTokenRefresh; it must be under a third of the token's lifetime.
 	ActorTokenRefresh time.Duration
-	// ForgeServeTimeout bounds the wait, before a run with git through EgressURL starts its harness,
-	// for the gateway to serve the agent's forge route (a new forge credential is still reaching the
-	// gateway, #1086 part C2). A run whose route is not served in time fails with a reason that names
-	// the code host. Default DefaultForgeServeTimeout.
-	ForgeServeTimeout time.Duration
-	// EgressProbe sends koinon-agentd's probe of the forge route (forgewait.go). Default: a client
-	// without a proxy that does not follow redirects.
-	EgressProbe interface {
-		Do(*http.Request) (*http.Response, error)
-	}
 	// MCPURL is the MCP URL harnesses get, as sandboxes reach it, for example
 	// http://koinon-mcp-gateway.koinon.svc:8080/mcp when koinon-gateway serves the agents' MCP path
 	// (gateway.mcp.driver=koinon, ADR 0097 decision 5). Empty: <GatewayURL>/mcp. It must not carry
