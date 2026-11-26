@@ -10,7 +10,9 @@
 # driver: the default values (digest empty) leave the harness image without a digest, and the copy
 # carries the one the tool wrote.
 fake_digest=sha256:0000000000000000000000000000000000000000000000000000000000000001
-digest_values="$out/release-digest-values.yaml"
+# A subdirectory: chart-check.sh feeds "$out"/*.yaml to chartlint, vapcheck and kubeconform.
+mkdir -p "$out/release-digest"
+digest_values="$out/release-digest/values.yaml"
 cp "$CHART/values.yaml" "$digest_values"
 go run ./hack/cmd/chartdigest -values "$digest_values" -digest "$fake_digest" || fail "chartdigest must write the digest into the chart values"
 lacks "the default chart values leave the harness image without a digest with substrate" 'image: .*/sandbox-substrate:[^@ ]+@sha256:' "${sub[@]}" --show-only templates/config.yaml
