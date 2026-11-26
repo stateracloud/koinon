@@ -64,6 +64,11 @@ describe('describeError', () => {
     expect(describeError(undefined).message).not.toBe('')
   })
 
+  it('shows the fallback of the caller when the server sent no message', () => {
+    expect(describeError(refused(Code.Aborted, ''), {}, 'Already answered.').message).toBe('Already answered.')
+    expect(describeError(refused(Code.Aborted, 'Ana answered first.'), {}, 'Already answered.').message).toBe('Ana answered first.')
+  })
+
   it('reads the reason of an error', () => {
     expect(errorReason(refused(Code.Aborted, 'm', 'CHANGED'))).toBe('CHANGED')
     expect(errorReason(refused(Code.Aborted, 'm'))).toBeUndefined()

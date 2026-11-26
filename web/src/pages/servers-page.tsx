@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
@@ -16,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Health, McpServerService, Tier, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { useMcpActions, type McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
 import { availabilityMinutes, formatTime } from '@/lib/providers'
@@ -76,7 +76,7 @@ function ServersContent() {
       )}
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {servers.isPending || tools.isPending ? (
@@ -318,7 +318,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
     try {
       await p
     } catch (e) {
-      onRefused(ConnectError.from(e).rawMessage)
+      onRefused(describeError(e).message)
     } finally {
       setPending(false)
     }

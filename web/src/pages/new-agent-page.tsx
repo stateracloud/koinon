@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -11,6 +10,7 @@ import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { describeError } from '@/lib/api-error'
 import { isApprover } from '@/lib/approvals'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
@@ -57,7 +57,7 @@ export function NewAgentPage() {
       <h1 className="text-xl font-semibold">New agent from a template</h1>
       {loadError && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(loadError).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(loadError).message}</AlertDescription>
         </Alert>
       )}
       {templates.isPending || connections.isPending ? (
@@ -73,7 +73,7 @@ export function NewAgentPage() {
             canConnect={isApprover(org.role)}
             canListRepos={isApprover(org.role)}
             pending={create.isPending}
-            error={create.error ? ConnectError.from(create.error).rawMessage : undefined}
+            error={create.error ? describeError(create.error).message : undefined}
             onCreate={(a) => create.mutate({ orgId, ...a })}
           />
         )

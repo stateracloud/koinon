@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
@@ -13,6 +12,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { PriceService, type PlatformPriceVersion, type PriceProposal, type PriceProvenance } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePlatformPriceActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
@@ -58,7 +58,7 @@ function PlatformPrices() {
       const failed = Object.entries(result.failed)
       say(`Checked ${result.fetched.length} source(s); ${result.proposals} proposal(s) made or refreshed.${failed.map(([source, why]) => ` ${source} failed: ${why}.`).join('')}`)
     } catch (e) {
-      refuse(ConnectError.from(e).rawMessage)
+      refuse(describeError(e).message)
     } finally {
       setChecking(false)
     }
@@ -186,7 +186,7 @@ function Proposals({ say, refuse, actions }: Feedback) {
         <p role="status">Loading…</p>
       ) : list.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       ) : list.data.proposals.length === 0 ? (
         <p className="text-muted-foreground text-sm">No open proposals.</p>
@@ -217,7 +217,7 @@ function ProposalCard({ p, say, refuse, actions }: { p: PriceProposal } & Feedba
       const result = await actions.accept(p.id, typed, needsMax ? maxN : 0)
       say(`Accepted ${p.model}: platform price version ${result.version} written.${result.warnings.map((warning) => ` ${warning}`).join('')}`)
     } catch (err) {
-      refuse(ConnectError.from(err).rawMessage)
+      refuse(describeError(err).message)
     } finally {
       setBusy(false)
     }
@@ -299,7 +299,7 @@ function Versions({ say, refuse, actions }: Feedback) {
         <p role="status">Loading…</p>
       ) : versions.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(versions.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(versions.error).message}</AlertDescription>
         </Alert>
       ) : versions.data.versions.length === 0 ? (
         <p className="text-muted-foreground text-sm">No platform version yet. Models are priced from the default list.</p>
@@ -359,7 +359,7 @@ function VersionDetail({ version }: { version: bigint }) {
         {diff.isPending ? (
           <p role="status">Loading…</p>
         ) : diff.error ? (
-          <p role="alert">{ConnectError.from(diff.error).rawMessage}</p>
+          <p role="alert">{describeError(diff.error).message}</p>
         ) : diff.data.changes.length === 0 ? (
           <p className="text-muted-foreground text-sm">No change.</p>
         ) : (
@@ -380,7 +380,7 @@ function VersionDetail({ version }: { version: bigint }) {
         {detail.isPending ? (
           <p role="status">Loading…</p>
         ) : detail.error ? (
-          <p role="alert">{ConnectError.from(detail.error).rawMessage}</p>
+          <p role="alert">{describeError(detail.error).message}</p>
         ) : (
           <ul className="grid gap-2">
             {(detail.data.version?.entries ?? []).map((e) => (
@@ -433,7 +433,7 @@ function Explain() {
         </Button>
       </form>
       {ask && res.isPending && <p role="status">Loading…</p>}
-      {ask && res.error && <p role="alert">{ConnectError.from(res.error).rawMessage}</p>}
+      {ask && res.error && <p role="alert">{describeError(res.error).message}</p>}
       {ask && res.data && (
         <div role="group" aria-label="Price in use" className="grid gap-1 text-sm">
           <p>
@@ -459,7 +459,7 @@ function FetchLog() {
         <p role="status">Loading…</p>
       ) : fetches.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(fetches.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(fetches.error).message}</AlertDescription>
         </Alert>
       ) : fetches.data.fetches.length === 0 ? (
         <p className="text-muted-foreground text-sm">No source has been fetched yet.</p>

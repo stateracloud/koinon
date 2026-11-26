@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
@@ -15,6 +14,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TokenService } from '@/gen/koinon/token/v1alpha1/token_pb'
 import { useTokenActions } from '@/hooks/use-catalog-actions'
+import { describeError } from '@/lib/api-error'
 import { tokenRoleLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 import { createdByLabel, daysToSeconds, defaultTokenDays, formatTime, maxTokenDays, tokenDaysError, tokenStatus } from '@/lib/providers'
@@ -57,7 +57,7 @@ function TokensContent() {
       )}
       {list.isError && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       )}
       {list.isPending ? (
@@ -155,7 +155,7 @@ function CreateTokenForm({
       setDays(String(defaultTokenDays))
       onCreated({ name: res.token?.name ?? name.trim(), secret: res.secret })
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
     } finally {
       setPending(false)
     }

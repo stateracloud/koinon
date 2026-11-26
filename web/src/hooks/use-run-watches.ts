@@ -3,6 +3,7 @@
 import { useTransport } from '@connectrpc/connect-query'
 import { useEffect, useReducer, useRef } from 'react'
 import { RunState, type LiveChunk, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { describeError } from '@/lib/api-error'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
 export type RunWatch = {
@@ -159,7 +160,7 @@ export function useRunWatches(
           onLive: (chunks) => dispatch({ type: 'live', runId, chunks }),
           onStatus: (status, err) => {
             if (status === 'ended') ended.current.add(runId)
-            dispatch({ type: 'status', runId, status, error: err?.rawMessage })
+            dispatch({ type: 'status', runId, status, error: err ? describeError(err).message : undefined })
           },
         },
       )
