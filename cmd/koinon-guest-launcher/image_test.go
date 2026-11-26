@@ -4,6 +4,8 @@ package main_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +45,12 @@ func TestImagePolicyDirReadableByNonRoot(t *testing.T) {
 		}
 	}
 
-	tag := "koinon-guest-launcher-image-test:" + filepath.Base(ctx)
+	// The tag is unique per run: t.TempDir() names repeat ("001") across processes on one Docker daemon.
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	tag := "koinon-guest-launcher-image-test:" + hex.EncodeToString(suffix)
 	build := exec.CommandContext(t.Context(), "docker", "build", "--quiet", "--build-arg", "FLAVOR_IMAGE=busybox:1.37",
 		"--build-context", "launcher="+launcher, "--tag", tag, ctx)
 	if out, err := build.CombinedOutput(); err != nil {
