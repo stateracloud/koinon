@@ -242,6 +242,11 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		Expect(section).To(ContainSubstring("lower precedence"))
 		// OpenCode attaches a subdirectory AGENTS.md on read (issue #71): the section names its label.
 		Expect(section).To(ContainSubstring("`Instructions from: <path>`"))
+		// The rule ranks by where text arrives, not by the path after the label, which a repository
+		// file can forge (Koinon's own path included).
+		Expect(section).To(ContainSubstring("system prompt only"))
+		Expect(section).To(ContainSubstring("whatever path it names"))
+		Expect(section).NotTo(ContainSubstring("/sandbox/.koinon/AGENTS.md"))
 		// The rule comes before the sections and the organization's instructions it ranks.
 		Expect(strings.Index(got, section)).To(BeNumerically("<", strings.Index(got, "## Your workspace")))
 		Expect(strings.Index(got, section)).To(BeNumerically("<", strings.Index(got, "ORG-INSTRUCTIONS")))

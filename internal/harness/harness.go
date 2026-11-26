@@ -156,10 +156,11 @@ type Descriptor struct {
 	// or 50 KiB). agentd's instructions then tell the agent to query that file instead of running
 	// the command again.
 	TruncatedOutputSaved bool
-	// AttachedInstructionsLabel is the text that starts a message in which the harness, on its own,
-	// gives the model a file from the workspace as instructions, followed by the file's path
-	// (OpenCode 2.2.0: "Instructions from: <path>" for an AGENTS.md in a subdirectory of a file
-	// the read tool reads; no switch turns it off, issue #71). agentd's instructions name the label
+	// AttachedInstructionsLabel is the text that starts the line, followed by the file's path, under
+	// which the harness, on its own, gives the model a file from the workspace as instructions
+	// (OpenCode, first seen on 2.2.0 and measured on 2.2.6: "Instructions from: <path>" for each
+	// AGENTS.md between a file the read tool reads and the session directory; no switch turns it off,
+	// issue #71). agentd's instructions name the label
 	// and say that such text is repository guidance, below Koinon's and the organization's
 	// instructions. test/harnesses records the behaviour, so a new harness version that changes it
 	// fails there. "" when the harness attaches no workspace file as instructions.
@@ -203,7 +204,7 @@ var table = []Descriptor{
 		Tools: []string{"rg", "fd", "jq", "yq", "ast-grep", "duckdb", "sqlite3", "pdftotext", "pdfinfo", "python3", "python", "file", "git"},
 		// OpenCode saves the full output of a cut tool result to a file.
 		TruncatedOutputSaved: true,
-		// OpenCode 2.2.0 attaches an AGENTS.md between a read file and the project root
+		// OpenCode (2.2.0 to 2.2.6) attaches each AGENTS.md between a read file and the project root
 		// (packages/core/src/tool/plugin/read.ts:82-103, session/instructions.ts;
 		// harnesses/opencode/README.md, "Repository guidance").
 		AttachedInstructionsLabel: "Instructions from:",

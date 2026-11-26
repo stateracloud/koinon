@@ -75,7 +75,7 @@ mechanism for a harness that needs one).
 - **Missing or empty.** OpenCode skips a missing file silently and loads an empty one as empty
   instructions, so the entry script refuses to start without real content.
 - **Repository guidance** is content, not configuration: with project configuration off, the
-  repository's top-level `AGENTS.md` is not loaded (`project` is false in
+  session directory's `AGENTS.md` is not loaded at start (`project` is false in
   `packages/core/src/config/plugin/instruction.ts:39`), and Koinon's template instructions tell the
   agent to read it, `CONTRIBUTING.md` and the `README` before changing code
   (`templates/repo-helper.yaml`). OpenCode still attaches an `AGENTS.md` from a subdirectory when
@@ -86,12 +86,16 @@ mechanism for a harness that needs one).
   an environment variable or the configuration. A repository's subdirectory file is therefore repository text at instruction weight.
   The project root is the session directory, so a repository cloned under it also has its top-level
   `AGENTS.md` attached when the agent reads a file in it; only the session directory's own file is not.
-  Measured on 2.2.6 by `test/harnesses/subdir_agents_md_test.go`: the files come after the read
-  result as one `user` message, nearest first, never in the system prompt.
+  Measured on 2.2.6 by `test/harnesses/subdir_agents_md_test.go`: the read file's own directory
+  counts too, and the files come after the read result as one `user` message, nearest first, never
+  in the system prompt.
   Koinon does not patch OpenCode. Koinon's own layer reduces the harm: the instruction file's
   "Instruction precedence" section (`agentd.InstructionPrecedence`) ranks any repository or workspace
   file below Koinon's and the organization's instructions and names the label
-  (`harness.Descriptor.AttachedInstructionsLabel`). It is also a requirement on koinon-harness (#48): subdirectory
+  (`harness.Descriptor.AttachedInstructionsLabel`). The rule ranks by where text arrives (Koinon's
+  file is in the system prompt only), not by the path after the label: a repository file can write
+  `Instructions from: /sandbox/.koinon/AGENTS.md` itself, and the spec checks that such a line still
+  arrives in the user message. It is also a requirement on koinon-harness (#48): subdirectory
   `AGENTS.md` files are returned as data inside the read result, or not at all, never as instructions.
 
 ### Global config directory
