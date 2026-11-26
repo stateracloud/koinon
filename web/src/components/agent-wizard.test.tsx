@@ -50,7 +50,8 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; p
   const updates: UpdateAgentRequest[] = []
   const saves: CreateTemplateFromAgentRequest[] = []
   const orgTemplates = [...(opts.orgTemplates ?? [])]
-  // A new draft has no creator in the fake until a create call; the creates record the caller, as the server does.
+  // A new draft has no creator in the fake until a create call. The creates record the caller as the
+  // server does: 'u-1' is the user ID of the whoAmI fixture in test-utils.
   const activeVersion = opts.activeVersion ?? 0
   let agent = create(AgentSchema, { id: 'a-9', orgId, displayName: 'x', status: AgentStatus.DRAFT, latestVersion: activeVersion + 1, activeVersion, createdBy: opts.createdBy ?? '' })
   const transport = createRouterTransport(({ service }) => {

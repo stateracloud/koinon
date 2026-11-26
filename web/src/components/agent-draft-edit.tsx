@@ -14,8 +14,9 @@ import { describeError } from '@/lib/api-error'
 
 /**
  * AgentDraftEdit lets an admin or owner, or the member who created a never-activated draft, change
- * the draft's name and instructions before activation (UpdateAgent). The change is based on the latest version, so an edit made at the same time in
- * another tab is refused, not overwritten. The model, triggers and limits have their own sections.
+ * the draft's name and instructions before activation (UpdateAgent). The change is based on the
+ * latest version, so an edit made at the same time in another tab is refused, not overwritten. The
+ * model, triggers and limits have their own sections.
  */
 export function AgentDraftEdit({ agent }: { agent: Agent }) {
   const [editing, setEditing] = useState(false)

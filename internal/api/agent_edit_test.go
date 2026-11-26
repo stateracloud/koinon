@@ -217,6 +217,13 @@ var _ = Describe("agent editor", func() {
 			_, err = update(ctx, member, act, &agentv1alpha1.AgentDefinition{Instructions: "Do more."}, "instructions")
 			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "an agent that was activated is an admin's to change")
 
+			// Back to draft after it ran (ADR 0020): still a draft, but it was approved, so it stays an admin's.
+			back, err := store.New(e.pool).ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: mustUUID(org), ID: mustUUID(act.GetId())})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(back.Status).To(Equal(store.AgentStatusDraft))
+			_, err = update(ctx, member, act, &agentv1alpha1.AgentDefinition{Instructions: "Do more."}, "instructions")
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "a draft that was activated before is an admin's to change")
+
 			viewer := e.userIn(ctx, org, store.OrgRoleViewer)
 			_, err = update(ctx, viewer, act, &agentv1alpha1.AgentDefinition{DisplayName: "x"}, "display_name")
 			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
