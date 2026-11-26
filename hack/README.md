@@ -37,7 +37,6 @@ names what needs the upstream project's rights and what still works from a fork.
 | `release-harness.sh` | the release registry (`release-flavor.sh` is a link to it) |
 | `release-harness-substrate.sh` | the release registry (the release workflow runs it after `release-harness.sh`) |
 | `build-env-guest.sh` | a local directory (`build/env-guest`): it clones the public Substrate env source and builds two static binaries; no registry, no token |
-| `spike/teardown.sh` | the maintainers' spike infrastructure |
 
 ## Which repository and board
 

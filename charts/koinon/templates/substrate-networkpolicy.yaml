@@ -149,7 +149,7 @@ spec:
 ---
 # The pods that call the Kubernetes API server (ADR 0120 amendment 10, issue 1172): TCP on apiServerPorts to any
 # address. A separate policy with its own app list, so atenet-egress is not selected: it has no API server client
-# (Substrate v1.0.0 b34fbee7: atenet-egress.yaml:30-38 binds no RBAC, cmd/atenet/internal/router/router.go:75-79 builds
+# (Substrate v1.0.1 20778a6d: atenet-egress.yaml:30-38 binds no RBAC, cmd/atenet/internal/router/router.go:75-79 builds
 # no client in egress mode). atenet-router IS selected: its ingress mode watches EndpointSlices (router.go:73-95,
 # atenet-router.yaml:16-50 ServiceAccount, Role and RoleBinding). Egress rules add up with the control policy. The policy
 # lists no Ingress type.

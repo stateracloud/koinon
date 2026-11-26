@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { TraceDestinationCard } from '@/components/trace-destination-card'
@@ -10,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { usePlatformTraceActions, type PlatformTraceActions } from '@/hooks/use-trace-actions'
+import { describeError } from '@/lib/api-error'
 import { describeTraceError } from '@/lib/trace-errors'
 import { levelLabel, levelRank, levels, normalLevel, savedNotice, testNotice } from '@/lib/trace'
 
@@ -72,7 +72,7 @@ function PlatformObservability() {
       </p>
       {platform.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(platform.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(platform.error).message}</AlertDescription>
         </Alert>
       )}
       {refused && (

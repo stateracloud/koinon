@@ -44,6 +44,47 @@ def tcp(c):
         s.close()
 
 
+def http_status(c):
+    """GET / with `Host: host:port` through the egress gateway. The TCP connection goes to the address
+    of "via" (a name the `*` rule lets through, resolved here), so it leaves the guest and the gateway
+    resolves "host" itself; a name that the guest resolves to its own loopback is never connected to.
+    Returns "status NNN server=<Server header or ->  envoy=<0|1> upstream=<0|1>", or the error name. A via address
+    that is loopback or unspecified is reported as "badvia". The request carries the headers that the GCE
+    (Metadata-Flavor) and Azure (Metadata) metadata servers require, so a server that is reached answers 200, so a check cannot pass without a gateway."""
+    try:
+        infos = socket.getaddrinfo(c["via"], c["port"], type=socket.SOCK_STREAM)
+    except OSError as e:
+        return err_name(e)
+    family, kind, proto, _, addr = infos[0]
+    if addr[0].startswith("127.") or addr[0] in ("0.0.0.0", "::1", "::"):
+        return "badvia"
+    s = socket.socket(family, kind, proto)
+    s.settimeout(8)
+    try:
+        s.connect(addr)
+        s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nMetadata-Flavor: Google\r\nMetadata: true\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 8192:
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "noresponse"
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
+        # x-envoy-upstream-service-time is set only on an answer that Envoy proxied from an upstream: the
+        # gateway's own refusal never has it, so it marks a destination that was reached.
+        upstream = int("x-envoy-upstream-service-time" in headers)
+        return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def unix(c):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(5)
@@ -391,7 +432,7 @@ def kernel(_):
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
        "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

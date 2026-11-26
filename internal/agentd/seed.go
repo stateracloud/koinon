@@ -141,6 +141,7 @@ func (p *Pool) seedRepository(ctx context.Context, e store.HomeRepositoryEpoch) 
 				cp, err := q.InsertSeededHomeCheckpoint(ctx, store.InsertSeededHomeCheckpointParams{
 					OrgID: e.OrgID, SourceID: src.ID, RepositoryEpoch: e.RepositoryEpoch,
 					SnapshotID: pgtype.Text{String: seeded.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: seeded.Bytes, Valid: true},
+					ContentDigest: pgtype.Text{String: seeded.Digest, Valid: seeded.Digest != ""},
 				})
 				if err != nil {
 					return err
@@ -295,7 +296,7 @@ func (p *Pool) copyCheckpoint(ctx context.Context, src, dst checkpoint.Repositor
 	pr, pw := io.Pipe()
 	restored := make(chan error, 1)
 	go func() {
-		err := c.Store.Restore(actx, src.Prefix, src.Password, cp.SnapshotID.String, pw)
+		err := c.Store.Restore(actx, src.Prefix, src.Password, cp.SnapshotID.String, cp.ContentDigest.String, pw)
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()

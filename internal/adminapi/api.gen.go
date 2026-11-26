@@ -148,6 +148,60 @@ func (e ErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for ErrorReason.
+const (
+	ABOVECEILING          ErrorReason = "ABOVE_CEILING"
+	ADMINREQUIRED         ErrorReason = "ADMIN_REQUIRED"
+	CHANGED               ErrorReason = "CHANGED"
+	CREDENTIALTOOSHORT    ErrorReason = "CREDENTIAL_TOO_SHORT"
+	INSTALLHELD           ErrorReason = "INSTALL_HELD"
+	INVALID               ErrorReason = "INVALID"
+	NOTFOUND              ErrorReason = "NOT_FOUND"
+	NOTMEMBER             ErrorReason = "NOT_MEMBER"
+	OWNERATFULL           ErrorReason = "OWNER_AT_FULL"
+	OWNERONLY             ErrorReason = "OWNER_ONLY"
+	PLATFORMADMINREQUIRED ErrorReason = "PLATFORM_ADMIN_REQUIRED"
+	PRICEREFRESHOFF       ErrorReason = "PRICE_REFRESH_OFF"
+	ROLETOOLOW            ErrorReason = "ROLE_TOO_LOW"
+	TESTFAILED            ErrorReason = "TEST_FAILED"
+)
+
+// Valid indicates whether the value is a known member of the ErrorReason enum.
+func (e ErrorReason) Valid() bool {
+	switch e {
+	case ABOVECEILING:
+		return true
+	case ADMINREQUIRED:
+		return true
+	case CHANGED:
+		return true
+	case CREDENTIALTOOSHORT:
+		return true
+	case INSTALLHELD:
+		return true
+	case INVALID:
+		return true
+	case NOTFOUND:
+		return true
+	case NOTMEMBER:
+		return true
+	case OWNERATFULL:
+		return true
+	case OWNERONLY:
+		return true
+	case PLATFORMADMINREQUIRED:
+		return true
+	case PRICEREFRESHOFF:
+		return true
+	case ROLETOOLOW:
+		return true
+	case TESTFAILED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for McpServerHealth.
 const (
 	Healthy   McpServerHealth = "healthy"
@@ -758,11 +812,23 @@ type Error struct {
 	Error struct {
 		Code    ErrorCode `json:"code"`
 		Message string    `json:"message"`
+
+		// Reason Why the call was refused, when a client acts on the reason differently. The values are the names
+		// of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+		// strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+		// added over time: a client that does not know a reason shows `message`.
+		Reason *ErrorReason `json:"reason,omitempty"`
 	} `json:"error"`
 }
 
 // ErrorCode defines model for ErrorCode.
 type ErrorCode string
+
+// ErrorReason Why the call was refused, when a client acts on the reason differently. The values are the names
+// of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+// strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+// added over time: a client that does not know a reason shows `message`.
+type ErrorReason string
 
 // FetchTrustedHost defines model for FetchTrustedHost.
 type FetchTrustedHost struct {

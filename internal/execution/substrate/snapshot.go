@@ -198,6 +198,11 @@ func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap exec
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
+	// Like CreateSandbox: Substrate v1.0.0 may create the actor suspended, and a restored sandbox
+	// must become ready too (issue #1092). Harmless when the actor already boots.
+	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		return d.resume(ctx, op, workspace, spec.Name)
+	}
 	return sandboxFrom(workspace, actor), nil
 }
 

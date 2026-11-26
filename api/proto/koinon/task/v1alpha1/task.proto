@@ -138,6 +138,9 @@ message TaskEvent {
   string run_id = 6;
   google.protobuf.Struct payload = 7;
   google.protobuf.Timestamp created_at = 8;
+  // The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
+  // user or a deleted user. Never an email address. Any role that can read the task sees it.
+  string actor_display_name = 9;
 }
 
 // CreateTaskRequest describes the task and its first message. A person creating it through this

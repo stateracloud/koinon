@@ -121,7 +121,8 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.q.GetTemplate(ctx, templateID)
+	// A platform template or one of the caller's org; another org's template is not found.
+	row, err := s.q.GetTemplateForOrg(ctx, store.GetTemplateForOrgParams{ID: templateID, OrgID: c.org})
 	if err != nil {
 		return nil, s.dbError(err, "template")
 	}

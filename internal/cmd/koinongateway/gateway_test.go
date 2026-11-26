@@ -228,6 +228,45 @@ var _ = Describe("koinon-gateway, served", func() {
 	}, SpecTimeout(40*time.Second))
 })
 
+var _ = Describe("koinon-gateway, restore hold", func() {
+	It("is ready with no State revision and refuses every call (ADR 0107, issue #1358)", func(specCtx SpecContext) {
+		// The State stream never answers with a revision: a held reconciler publishes none.
+		api := httptest.NewServer(http.NotFoundHandler())
+		DeferCleanup(api.Close)
+		tokenFile := filepath.Join(GinkgoT().TempDir(), "token")
+		Expect(os.WriteFile(tokenFile, []byte(fakeStreamToken+"\n"), 0o600)).To(Succeed())
+		cfg := config{
+			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile, mcpPath: true,
+			restoreHold: true, podName: "koinon-gateway-2", drain: 5 * time.Second, shutdownDelay: 50 * time.Millisecond,
+		}
+		ctx, term := context.WithCancel(context.Background())
+		DeferCleanup(term)
+		go func() { _ = run(ctx, cfg) }()
+		Eventually(func() int {
+			resp, err := http.Get("http://" + cfg.healthAddr + "/readyz")
+			if err != nil {
+				return 0
+			}
+			_ = resp.Body.Close()
+			return resp.StatusCode
+		}, 10*time.Second, 50*time.Millisecond).Should(Equal(http.StatusOK))
+
+		req, err := http.NewRequestWithContext(specCtx, http.MethodPost, fmt.Sprintf("http://%s%s", cfg.listenAddr, mcpPath), strings.NewReader("{}"))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+fakeKey)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+		Expect(string(body)).To(ContainSubstring("held"))
+	}, SpecTimeout(30*time.Second))
+
+	It("is not ready without a revision when not held", func() {
+		Expect(config{}.restoreHold).To(BeFalse())
+	})
+})
+
 var _ = Describe("koinon-gateway, model path", func() {
 	It("serves a model call, taps its usage and exports the record to koinon-api", func(specCtx SpecContext) {
 		up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

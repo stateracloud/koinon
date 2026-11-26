@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { RequireAdmin } from '@/components/require-admin'
 import { FullContentBadge, TraceDestinationCard } from '@/components/trace-destination-card'
@@ -101,7 +101,7 @@ function ObservabilityContent() {
       )}
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {destinations.isPending ? (

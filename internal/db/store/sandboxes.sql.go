@@ -306,57 +306,6 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 	return i, err
 }
 
-const listAgentsForUnmarked = `-- name: ListAgentsForUnmarked :many
-SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
-FROM agents a
-JOIN orgs o ON o.id = a.org_id
-LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
-WHERE o.deleted_at IS NULL
-ORDER BY a.org_id, a.id
-`
-
-type ListAgentsForUnmarkedRow struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	Status       AgentStatus
-	Harness      string
-	SandboxState NullSandboxState
-	SandboxName  pgtype.Text
-	ProviderName pgtype.Text
-}
-
-// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
-// with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
-// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
-// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
-func (q *Queries) ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error) {
-	rows, err := q.db.Query(ctx, listAgentsForUnmarked)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListAgentsForUnmarkedRow
-	for rows.Next() {
-		var i ListAgentsForUnmarkedRow
-		if err := rows.Scan(
-			&i.OrgID,
-			&i.ID,
-			&i.Status,
-			&i.Harness,
-			&i.SandboxState,
-			&i.SandboxName,
-			&i.ProviderName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
 SELECT a.org_id, a.id, a.display_name, a.status, a.harness, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking, a.keep_warm, a.sandbox_cpu_request, a.sandbox_cpu_limit, a.sandbox_memory_request, a.sandbox_memory_limit, a.keep_warm_granted, a.team, a.reports_to_agent_id, a.reports_to_user_id FROM agents a
 WHERE a.org_id = $1
@@ -440,42 +389,6 @@ func (q *Queries) ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.U
 	for rows.Next() {
 		var i ListArchivedAgentSandboxesRow
 		if err := rows.Scan(&i.AgentID, &i.ArchivedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listOrgWorkspacesForUnmarked = `-- name: ListOrgWorkspacesForUnmarked :many
-SELECT o.id AS org_id, w.workspace
-FROM orgs o
-LEFT JOIN org_workspaces w ON w.org_id = o.id
-WHERE o.deleted_at IS NULL
-ORDER BY o.id
-`
-
-type ListOrgWorkspacesForUnmarkedRow struct {
-	OrgID     pgtype.UUID
-	Workspace pgtype.Text
-}
-
-// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
-// unmarked list command (issue 511). An org that is deleted counts as not in the database: the
-// reconciler does not walk it.
-func (q *Queries) ListOrgWorkspacesForUnmarked(ctx context.Context) ([]ListOrgWorkspacesForUnmarkedRow, error) {
-	rows, err := q.db.Query(ctx, listOrgWorkspacesForUnmarked)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListOrgWorkspacesForUnmarkedRow
-	for rows.Next() {
-		var i ListOrgWorkspacesForUnmarkedRow
-		if err := rows.Scan(&i.OrgID, &i.Workspace); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

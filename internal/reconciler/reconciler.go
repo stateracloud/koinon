@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -253,15 +252,13 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg Config
-	log *slog.Logger
-	// lastUnmarked is when the loop last counted unmarked objects; only the leading loop touches it.
-	lastUnmarked time.Time
-	pool         *pgxpool.Pool
-	q            *store.Queries
-	backend      execution.Backend
-	gw           gateway.ModelGateway
-	secrets      SecretStore
+	cfg     Config
+	log     *slog.Logger
+	pool    *pgxpool.Pool
+	q       *store.Queries
+	backend execution.Backend
+	gw      gateway.ModelGateway
+	secrets SecretStore
 	// states stores the revisions of the gateway State (the State stream, ADR 0097).
 	states staterev.Publisher
 
@@ -273,15 +270,10 @@ type Reconciler struct {
 	// forgeSeals is the sealed code-host token of each agent (under mu), so an unchanged token keeps its
 	// file name between passes.
 	forgeSeals map[agentKey]forgeSeal
-	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
+	// draftGitHubDropped holds the GitHub providers dropDraftGitHub has dropped (under mu), so a draft agent
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
 	draftGitHubDropped map[string]bool
-	// harnessProfileSettled holds the harness profiles, by workspace and profile ID (harnessProfileKey),
-	// that claimHarnessProfiles found marked or missing (under mu), so an org whose harnesses no active
-	// agent keeps current does not cost a gateway call per harness every pass. reconcileActive clears
-	// the entry when it imports the profile again; a new workspace is a new key.
-	harnessProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -420,7 +412,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
-		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, MCPKeyDir: cfg.MCPKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
@@ -574,8 +566,7 @@ func (w *work) logAttrs() []any {
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
 // could not converge; the others are converged regardless.
 //
-// It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
-// runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
+// The loop does not call it: it runs [Reconciler.reconcilePass].
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	q := r.newWorkQueue(ctx)
 	defer q.Stop()
@@ -583,7 +574,6 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	// The loop leaves the sandbox work to the queue; a caller of ReconcileAll wants it done.
 	err = errors.Join(append([]error{err}, b.wait()...)...)
 	r.observeSandboxes(ctx)
-	r.observeUnmarked(ctx)
 	return err
 }
 
@@ -628,19 +618,6 @@ func (r *Reconciler) reconcilePass(ctx context.Context, q *workQueue) (*jobs, er
 	return b, err
 }
 
-// observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
-// count, so a burst of NOTIFY wake-ups does not list the gateway every time. The count has its own
-// timeout (unmarkedTimeout) and never runs inside the pass's. The gauge keeps its values between counts.
-func (r *Reconciler) observeUnmarkedDue(ctx context.Context) {
-	if !r.lastUnmarked.IsZero() && time.Since(r.lastUnmarked) < r.cfg.ResyncInterval {
-		return
-	}
-	r.lastUnmarked = time.Now()
-	uctx, cancel := context.WithTimeout(ctx, unmarkedTimeout)
-	defer cancel()
-	r.observeUnmarked(uctx)
-}
-
 // observeSandboxes sets the sandboxes gauge from the recorded states. A failed read keeps the
 // previous values.
 func (r *Reconciler) observeSandboxes(ctx context.Context) {
@@ -658,48 +635,6 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	for _, s := range sandboxStates {
 		r.m.Sandboxes.WithLabelValues(string(s)).Set(float64(counts[s]))
 	}
-}
-
-// observeUnmarked sets koinon_openshell_unmarked_objects and
-// koinon_openshell_unmarked_objects_waiting_for_agent from one classified unmarked list (the one
-// koinon-reconciler unmarked list prints: the gateway's sandboxes, providers and profiles, whatever
-// this pass did or failed to do, issue 461, with each object's reason from the database, issue 511).
-// waits-for-agent objects go to the second gauge, every other reason to the first, so the drill gate
-// ("0 and stale 0") means no object without a known owner is left. A list that fails, on the gateway
-// or in the database, keeps the previous values and sets koinon_openshell_unmarked_objects_stale to
-// 1; a complete one sets it to 0. Without an install mark ownership is off, no object can be claimed
-// and nothing is safe: the kinds read 0 and stale reads 1, so the drill condition is not met.
-func (r *Reconciler) observeUnmarked(ctx context.Context) {
-	_, ok := r.backend.(unmarkedLister)
-	if !ok || !r.owns() {
-		for _, k := range unmarkedKinds {
-			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
-			r.m.UnmarkedWaiting.WithLabelValues(k).Set(0)
-		}
-		r.m.UnmarkedStale.Set(1)
-		return
-	}
-	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Harnesses)
-	if err != nil {
-		if ctx.Err() == nil {
-			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
-		}
-		r.m.UnmarkedStale.Set(1)
-		return
-	}
-	unowned, waiting := map[string]int{}, map[string]int{}
-	for _, o := range objs {
-		if o.Reason == ReasonWaitsForAgent {
-			waiting[o.Kind]++
-		} else {
-			unowned[o.Kind]++
-		}
-	}
-	for _, k := range unmarkedKinds {
-		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(unowned[k]))
-		r.m.UnmarkedWaiting.WithLabelValues(k).Set(float64(waiting[k]))
-	}
-	r.m.UnmarkedStale.Set(0)
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) error {
@@ -757,16 +692,6 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		if err := r.recordKeepWarmGrants(ctx, org.ID, agents, granted); err != nil {
 			// The grant itself holds; only the API's view of it is late. The next pass retries.
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
-			errs = append(errs, err)
-		}
-		if err := r.claimHarnessProfiles(ctx, org, agents); err != nil {
-			if errors.Is(err, errAbortPass) {
-				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
-				return errors.Join(append(errs, err)...)
-			}
-			// A harness profile is part of what an agent's sandbox converges (reconcileActive and
-			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
-			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 			errs = append(errs, err)
 		}
 	}
@@ -1418,24 +1343,18 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names := w.names()
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
-	ensureKey := func(claim bool) error {
+	ensureKey := func() error {
 		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
 			Name:               names.Provider,
 			Profile:            r.profile(w.agent.Harness, harness),
 			Credentials:        map[string]string{keyEnvVar: w.material},
 			CredentialRevision: w.key.ID,
 			Labels:             ownerLabels(w.org.ID, w.agent.ID),
-			ClaimLegacy:        claim,
 		})
 	}
-	if err := ensureKey(false); err != nil {
+	if err := ensureKey(); err != nil {
 		return err
 	}
-	// The ensure imported the harness profile: once no active agent keeps it current, the org pass
-	// looks at it again.
-	r.mu.Lock()
-	delete(r.harnessProfileSettled, harnessProfileKey(ws, r.profile(w.agent.Harness, harness).ID))
-	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
 	baseURL, err := r.baseURLOf(ctx, w)
@@ -1449,7 +1368,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, harness, read, false); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, harness, read); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
@@ -1480,20 +1399,6 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
-		if r.owns() {
-			// No sandbox attaches the providers now, so the ones made before the install label
-			// existed can be claimed (deleted and made again with the label), issue 461. While the
-			// sandbox lived they were taken as this install's, because OpenShell may refuse to delete
-			// an attached provider and a delete must not strip a live sandbox of it.
-			if err := ensureKey(true); err != nil {
-				return err
-			}
-			if hasRead {
-				if err := r.ensureGitHub(ctx, ws, w, names, harness, read, true); err != nil {
-					return err
-				}
-			}
-		}
 		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
 			// Nothing wants the agent, so no sandbox is created: it starts on demand (old issue 315). A
 			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
@@ -1883,12 +1788,12 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 }
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
-// for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
-// provider and harness profile for this install (claimDraft), which no other path does for a draft.
+// for its re-activation. Runs cannot be queued for a draft agent. With no sandbox it drops the
+// agent's GitHub provider and profile (dropDraftGitHub).
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
 	if errors.Is(err, execution.ErrNotFound) {
-		if err := r.claimDraft(ctx, w, true); err != nil {
+		if err := r.dropDraftGitHub(ctx, w); err != nil {
 			return err
 		}
 		return r.recordState(ctx, w, store.SandboxStatePending, "", "")
@@ -1902,55 +1807,14 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
 	}
-	if err := r.claimDraft(ctx, w, false); err != nil {
-		return err
-	}
 	return r.record(ctx, w, sb, w.sb.SpecHash, "")
 }
 
-// claimDraft marks a draft agent's objects with the install mark (issue 511, ADR 0106 decision 5).
-// Only reconcileActive claimed them before, so the objects of an agent that went back to draft stayed
-// unmarked for good and the unmarked gauge never reached 0.
-//
-// The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
-// re-activation; without a Secret that still matches it nothing is touched and no key is issued).
-// The ensure imports the harness profile with the mark; without it the org pass marks the profile
-// (claimHarnessProfiles), which needs no key. The provider record itself is recreated with
-// the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
-// OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
-// claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
-// provider and profile are dropped: the agent has no use for them until it is active, and
-// reconcileActive makes them again, marked, before it creates a sandbox.
-func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) error {
-	if !r.owns() || w.key.ID == "" {
-		return nil
-	}
-	harness, ok := r.cfg.Harnesses[w.agent.Harness]
-	if !ok || !harness.rendered() {
-		return nil
-	}
-	_, material, ok, err := r.recordedMaterial(ctx, w)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		r.log.Debug("not claiming the objects of a draft agent: its key Secret does not match the recorded key", w.logAttrs()...)
-		return nil
-	}
+// dropDraftGitHub deletes the GitHub provider and profile of a draft agent with no sandbox: the agent
+// has no use for them until it is active, and reconcileActive makes them again before it creates a
+// sandbox. Once per provider (draftGitHubDropped), so a draft agent does not cost gateway calls every pass.
+func (r *Reconciler) dropDraftGitHub(ctx context.Context, w *work) error {
 	ws, names := w.sb.Workspace, w.names()
-	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
-		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Harness, harness),
-		Credentials:        map[string]string{keyEnvVar: material},
-		CredentialRevision: w.key.ID,
-		Labels:             ownerLabels(w.org.ID, w.agent.ID),
-		ClaimLegacy:        noSandbox,
-	}); err != nil {
-		return err
-	}
-	if !noSandbox {
-		return nil
-	}
 	r.mu.Lock()
 	done := r.draftGitHubDropped[names.GitHubProvider]
 	r.mu.Unlock()
@@ -2023,12 +1887,6 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	return r.recordState(ctx, w, final, phase, "")
 }
 
-// profileClaimer is implemented by a backend that marks an existing provider profile
-// (the OpenShell backend with an owner).
-type profileClaimer interface {
-	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
-}
-
 // recordKeepWarmGrants writes the pass's keep-warm decision to agents.keep_warm_granted, so the API and
 // the agent page can say whether the operator's cap granted an admin's request (#100). Only the agents
 // whose recorded decision differs are written.
@@ -2058,69 +1916,6 @@ func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, 
 	}
 	return nil
 }
-
-// claimHarnessProfiles marks, once per org and pass, the harness profiles (koinon-agentgateway-<harness>)
-// that no active agent keeps current (issue 511). A profile belongs to the workspace and the harness, not
-// to an agent: every agent of the harness in the org shares it, and OpenShell refuses to delete one a
-// provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
-// harnesses whose agents are all draft or archived, or that have none. A draft agent does not count as
-// keeping its harness: claimDraft imports the profile only when the agent's key Secret still matches
-// the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
-// archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
-// it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
-// is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
-// un-archive needs. A profile that does not exist is not created, and an org with no recorded
-// workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
-// missing is not asked for again (harnessProfileSettled) until an active agent imports it.
-func (r *Reconciler) claimHarnessProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
-	c, ok := r.backend.(profileClaimer)
-	if !ok || !r.owns() {
-		return nil
-	}
-	kept := map[string]bool{}
-	for _, a := range agents {
-		if a.Status == store.AgentStatusActive {
-			kept[a.Harness] = true
-		}
-	}
-	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
-	}
-	var errs []error
-	for _, harness := range slices.Sorted(maps.Keys(r.cfg.Harnesses)) {
-		f := r.cfg.Harnesses[harness]
-		if kept[harness] || !f.rendered() {
-			continue
-		}
-		p := r.profile(harness, f)
-		k := harnessProfileKey(row.Workspace, p.ID)
-		r.mu.Lock()
-		settled := r.harnessProfileSettled[k]
-		r.mu.Unlock()
-		if settled {
-			continue
-		}
-		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("reconciler: claim harness profile %s of org %s: %w", harness, org.Slug, err))
-			continue
-		}
-		if claimed {
-			r.log.Info("marked a harness profile no active agent keeps current", "org", org.Slug, "harness", harness)
-		}
-		r.mu.Lock()
-		r.harnessProfileSettled[k] = true
-		r.mu.Unlock()
-	}
-	return errors.Join(errs...)
-}
-
-// harnessProfileKey is the key of a harness profile in harnessProfileSettled.
-func harnessProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
 
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,

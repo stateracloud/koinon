@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus, type Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { describeError } from '@/lib/api-error'
 
 /** keepWarmText says what the agent's keep-warm request comes to: off, granted, or asked for and held back by the operator's cap or not yet decided. */
 function keepWarmText(agent: Pick<Agent, 'keepWarm' | 'keepWarmGranted' | 'status'>): string {
@@ -49,7 +49,7 @@ export function AgentKeepWarm({ agent }: { agent: Agent }) {
       </p>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
     </section>

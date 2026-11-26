@@ -5,7 +5,7 @@
 // [execution.Egress] half, because Substrate's atenet is default-deny and L7 rules and credentials
 // belong to the Koinon gateway (ADR 0097).
 //
-// The mapping, with the version of Substrate it was written against (v1.0.0, protos in
+// The mapping, with the version of Substrate it was written against (v1.0.1, protos in
 // third_party/substrate):
 //
 //   - a workspace is an atespace (ADR 0002: an org is an atespace);
@@ -245,7 +245,7 @@ func ref(atespace, name string) *ateapiv1.ObjectRef {
 	return &ateapiv1.ObjectRef{Atespace: atespace, Name: name}
 }
 
-// EnsureWorkspace implements execution.Compute. Substrate v1.0.0 gives an atespace no labels, so
+// EnsureWorkspace implements execution.Compute. Substrate v1.0.1 gives an atespace no labels, so
 // labels are dropped and the returned workspace has none.
 func (d *Driver) EnsureWorkspace(ctx context.Context, name string, _ map[string]string) (execution.Workspace, error) {
 	const op = "EnsureWorkspace"
@@ -291,11 +291,18 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 		Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
 		ActorTemplate: ref(workspace, tmpl.GetMetadata().GetName()),
 	}})
+	created := err == nil
 	if isCode(err, codeAlreadyExists) {
 		actor, err = d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, spec.Name)})
 	}
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
+	}
+	// Substrate creates an actor suspended (v1.0.0), and the Compute contract says a created sandbox
+	// becomes ready: the driver resumes the actor it made (issue #1092). A sandbox that already
+	// existed keeps its state; the reconciler stops and starts it.
+	if created && actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		return d.resume(ctx, op, workspace, spec.Name)
 	}
 	return sandboxFrom(workspace, actor), nil
 }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type FormEvent } from 'react'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConnectionService, type UnlinkedMCPServer } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 
 /**
  * ConnectionMcpHosts lists the extra MCP hosts of a code-host connection (#240): host names besides
@@ -32,7 +32,7 @@ export function ConnectionMcpHosts({ orgId, connectionId, hosts, canEdit }: { or
       await add.mutateAsync({ orgId, connectionId, host: host.trim() })
       setHost('')
     } catch (err) {
-      setError(`Could not add the host: ${ConnectError.from(err).rawMessage}`)
+      setError(`Could not add the host: ${describeError(err).message}`)
     }
   }
 

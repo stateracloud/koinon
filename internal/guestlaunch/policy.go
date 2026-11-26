@@ -77,7 +77,7 @@ var DefaultDevices = []string{
 
 // UserPolicy drops the payload to a non-root user.
 //
-// Phase 0 (issue #1087 comment, Substrate v1.0.0 microVM) found that the guest gives payloads no
+// Phase 0 (issue #1087 comment, Substrate v1.0.1 microVM) found that the guest gives payloads no
 // CAP_SETUID or CAP_SETGID, so the drop fails there. ModeBestEffort (the default) logs that and
 // continues as the current user with every other control applied; ModeRequire refuses to start.
 type UserPolicy struct {

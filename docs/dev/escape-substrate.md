@@ -42,6 +42,19 @@ Set these:
 - `KOINON_ESCAPE_ATEAPI` and `KOINON_ESCAPE_ATELET`: `host:port` of ateapi and of atelet (a node IP and port).
 - `KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_*`: the snapshot bucket, for the restore spec.
 - `KOINON_ESCAPE_TIER`: `hardened` (default), `vm` or `dev`.
+- `KOINON_ESCAPE_EGRESS_CONTROL` (default `example.com:80`): a destination that atenet-egress can reach. The
+  egress gateway spec (issue #1363) uses it as its control: the spec that checks the refusal of metadata and
+  loopback addresses only counts when this destination is let through.
+- `KOINON_ESCAPE_EGRESS_REBIND` (default `169-254-169-254.sslip.io:80,127-0-0-1.sslip.io:80,127-0-0-1.sslip.io:15000,0-0-0-0.sslip.io:80`):
+  `host:port` names that resolve to the refused addresses. The default needs the public wildcard DNS
+  service sslip.io. Set your own names when the cluster has no route to it.
+
+### Precondition of the egress gateway spec
+
+The control spec fails unless atenet-egress has a route to `KOINON_ESCAPE_EGRESS_CONTROL`. The default
+NetworkPolicies of the chart give atenet-egress no route to external addresses. Do one of these before you run
+the suite: add the control destination to `workerNetworkPolicy.extraEgress`, or run the rig with the chart
+policies off. The refusal spec also needs the DNS names above to resolve from the egress pod.
 
 ## Command
 

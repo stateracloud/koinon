@@ -158,6 +158,10 @@ func (s *controlServer) CreateActorTemplate(_ context.Context, r *ateapiv1.Creat
 	c.count("CreateActorTemplate")
 	t := cloneTemplate(r.GetActorTemplate())
 	k := key{t.GetMetadata().GetAtespace(), t.GetMetadata().GetName()}
+	// Substrate v1.0.0 refuses a template without resources (lab, 2026-11-26, issue #1092).
+	if t.GetResources() == nil {
+		return nil, status.Error(codes.InvalidArgument, "actor_template.resources: Required value")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.atespaces[k.atespace]; !ok {
@@ -216,9 +220,12 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 	a := &actor{
 		meta:     &ateapiv1.ResourceMetadata{Atespace: k.atespace, Name: k.name, Uid: c.newUID("act"), CreateTime: timestamppb.Now()},
 		template: tk.name,
-		state:    ateapiv1.ActorState_ACTOR_STATE_RESUMING,
-		procs:    map[string]*fproc{},
-		files:    map[string][]byte{},
+		// Substrate v1.0.0 starts a new actor suspended; ResumeActor boots it (lab, 2026-11-26,
+		// issue #1092). A tag-seeded actor is suspended too: UNVERIFIED, the lab has not shown it;
+		// the driver resumes either way.
+		state: ateapiv1.ActorState_ACTOR_STATE_SUSPENDED,
+		procs: map[string]*fproc{},
+		files: map[string][]byte{},
 	}
 	if src := in.GetSourceTag().GetName(); src != "" {
 		tag, ok := c.tags[key{k.atespace, src}]
@@ -239,7 +246,6 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 		a.auth = verifierOf(tmpl)
 	}
 	c.actors[k] = a
-	c.bootLocked(k, a)
 	return a.pb(), nil
 }
 

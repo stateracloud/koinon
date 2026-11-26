@@ -58,7 +58,7 @@ func substrateCRD(name string) *unstructured.Unstructured {
 	return crd(name, "v1")
 }
 
-// workerPool is a WorkerPool of Substrate v1.0.0: status carries replicas and readyReplicas, not conditions.
+// workerPool is a WorkerPool of Substrate v1.0.1: status carries replicas and readyReplicas, not conditions.
 // ready is "True" (all workers ready), "False" (none) or "" (no status yet).
 func workerPool(name string, ready string) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{Object: map[string]any{
@@ -103,8 +103,8 @@ func healthySubstrate() *substrateCluster {
 		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "HTTP 200 OK"}},
 	}
 	c.kube = []runtime.Object{
-		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.0", nil, 1),
-		deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
+		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.1", nil, 1),
+		deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
 	}
 	for _, name := range preflight.SubstrateCRDs {
 		c.dynamic = append(c.dynamic, substrateCRD(name))
@@ -168,11 +168,11 @@ var _ = Describe("Substrate checks", func() {
 		c.kube = c.kube[1:]
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("not found"))
 		c = healthySubstrate()
-		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 0)
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 0)
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("no ready replica"))
 		c = healthySubstrate()
-		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
-		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.1 is not the pinned release v1.0.0"))
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1)
+		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.0 is not the pinned release v1.0.1"))
 		c = healthySubstrate()
 		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server", nil, 1)
 		untagged := find(c.run(ctx), "Agent Substrate")
@@ -180,7 +180,7 @@ var _ = Describe("Substrate checks", func() {
 		Expect(untagged.Message).To(ContainSubstring("no tag"))
 		// The api server is found by container name, not by position: a sidecar first does not hide it.
 		c = healthySubstrate()
-		d := deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1)
+		d := deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
 		d.Spec.Template.Spec.Containers = append([]corev1.Container{{Name: "objectstore-plugin", Image: "example.com/ate/plugin:v9"}}, d.Spec.Template.Spec.Containers...)
 		c.kube[0] = d
 		Expect(find(c.run(ctx), "Agent Substrate").Status).To(Equal(preflight.Pass))
@@ -188,7 +188,7 @@ var _ = Describe("Substrate checks", func() {
 
 	It("fails when the router does not allow the atenet client", func(ctx SpecContext) {
 		c := healthySubstrate()
-		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.0", nil, 1)
+		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.1", nil, 1)
 		r := find(c.run(ctx), "Substrate router")
 		Expect(r.Status).To(Equal(preflight.Fail))
 		Expect(r.Fix).To(ContainSubstring("--ingress-allowed-spiffe-ids="))
@@ -198,7 +198,7 @@ var _ = Describe("Substrate checks", func() {
 		c := healthySubstrate()
 		Expect(find(c.run(ctx), "Substrate router").Message).To(ContainSubstring("ns/ate-system/sa/atenet-client"))
 		c.config.Substrate.Namespace = "substrate-prod"
-		moved := deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1)
+		moved := deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1)
 		moved.Namespace = "substrate-prod"
 		c.kube = append(c.kube, moved)
 		r := find(c.run(ctx), "Substrate router")

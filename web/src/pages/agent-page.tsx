@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
@@ -21,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { describeError } from '@/lib/api-error'
 import { runLimitsLabel } from '@/lib/cost'
 import { agentStatusLabel, harnessLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
@@ -55,7 +55,7 @@ export function AgentPage() {
   if (get.isError || !get.data.agent) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>{get.error ? ConnectError.from(get.error).rawMessage : 'Agent not found'}</AlertDescription>
+        <AlertDescription>{get.error ? describeError(get.error).message : 'Agent not found'}</AlertDescription>
       </Alert>
     )
   }
@@ -93,7 +93,7 @@ export function AgentPage() {
           )}
           {resume.error && (
             <Alert variant="destructive" role="alert">
-              <AlertDescription>Could not resume the agent: {ConnectError.from(resume.error).rawMessage}</AlertDescription>
+              <AlertDescription>Could not resume the agent: {describeError(resume.error).message}</AlertDescription>
             </Alert>
           )}
         </section>
@@ -168,7 +168,7 @@ export function AgentPage() {
           )}
           {activate.error && (
             <Alert variant="destructive" role="alert">
-              <AlertDescription>Could not activate: {ConnectError.from(activate.error).rawMessage}</AlertDescription>
+              <AlertDescription>Could not activate: {describeError(activate.error).message}</AlertDescription>
             </Alert>
           )}
         </section>
