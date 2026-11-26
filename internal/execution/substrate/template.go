@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	"github.com/stateracloud/koinon/internal/guestauth"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -40,6 +41,16 @@ const (
 	HomeVolume    = "home"
 	HomeMountPath = "/sandbox"
 )
+
+// GVisorCapAdd is the capability set of the agent container on the gVisor tiers (hardened and
+// dev; issue #1387, ADR 0120 amendment of 2026-11-26). Every capability is dropped, then these are
+// added: SETUID and SETGID for the launcher's drop to the non-root user, SETPCAP for the drop of the
+// bounding set before it, and KILL for the guest front, which signals the processes it starts. The
+// payload keeps none of them: the launcher policy of the tier has an empty allowlist and requires the
+// user drop, so a guest that cannot drop does not start the payload. The guest front keeps its
+// listener on port 80 without NET_BIND_SERVICE: the gVisor netstack has no privileged-port check.
+// The vm tier keeps the Substrate default set until the lab proves it (issue #1462).
+var GVisorCapAdd = []string{"KILL", "SETGID", "SETPCAP", "SETUID"}
 
 // templatePrefix starts the name of every template the driver derives.
 const templatePrefix = "kt-"
@@ -132,12 +143,29 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if spec.RuntimeClassName != "" {
 		t.WorkerSelector = &ateapiv1.Selector{MatchLabels: map[string]string{RuntimeClassSelector: spec.RuntimeClassName}}
 	}
+	var capAdd []string // nil: the Substrate default set
+	if isGVisor(templateTier(spec, cfg)) {
+		capAdd = slices.Clone(GVisorCapAdd)
+		t.Containers[0].SecurityContext = &ateapiv1.SecurityContext{Capabilities: &ateapiv1.Capabilities{Drop: []string{"ALL"}, Add: capAdd}}
+	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v3\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s", workspace, image, spec.Command, cpu, mem,
-		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath)
+	_, _ = fmt.Fprintf(h, "v4\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q", workspace, image, spec.Command, cpu, mem,
+		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath, capAdd)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
 }
+
+// templateTier is the isolation tier of a spec, resolved the way Exec resolves it from the template:
+// the tier of the runtime class, or Config.DefaultTier without one. An unknown class has no tier here;
+// Exec then refuses every process of the sandbox.
+func templateTier(spec execution.SandboxSpec, cfg Config) harness.Tier {
+	if spec.RuntimeClassName == "" {
+		return cfg.DefaultTier
+	}
+	return cfg.RuntimeClassTiers[spec.RuntimeClassName]
+}
+
+func isGVisor(t harness.Tier) bool { return t == harness.TierHardened || t == harness.TierDev }
 
 // verifyKeys returns the value of guestauth.VerifyKeysEnv: the signer's public key first, then
 // Config.GuestVerifyKeys without repeats.

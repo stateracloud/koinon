@@ -123,6 +123,8 @@ ADR 0119 phase 1 gateway routes for OpenShell exist.
    reach the guest.
 5. A guest runs as a non-root user once the launcher can drop to one. Until then the payload runs as
    root with a reduced capability set and the same controls (see Open questions).
+   On the gVisor tiers the amendment of 2026-11-26 (#1387) supersedes this: the payload must run as a
+   non-root user, or it does not start.
 6. Org isolation does not rely on the guest controls. The boundary between two orgs is the VM or
    sandbox boundary plus the actor identity and the rules of sections 1 and 2.
 7. The guest API is closed to agent code (decision of 2026-11-25, issue
@@ -405,7 +407,8 @@ spec needs a new ADR.
 - gVisor: Landlock, seccomp and capability drop have not run in the `hardened` guest. Phase 0 did only the
   microVM. Until it runs, the `hardened` tier's guest controls (section 4.2) are a requirement, not a proof. Tracked in [#1092](https://github.com/stateracloud/koinon/issues/1092).
 - The guest runs payloads as root without `CAP_SETUID` or `CAP_SETGID`, so the launcher cannot drop to
-  a non-root user ([#1087](https://github.com/stateracloud/koinon/issues/1087), an upstream request).
+  a non-root user ([#1087](https://github.com/stateracloud/koinon/issues/1087), an upstream request). Closed for the gVisor tiers by
+  the amendment of 2026-11-26 (#1387); open for the `vm` tier ([#1462](https://github.com/stateracloud/koinon/issues/1462)).
 - Snapshot expiry values and the retention of the digest record: set when the first snapshot feature
   lands. Tracked in [#1090](https://github.com/stateracloud/koinon/issues/1090).
 
@@ -715,3 +718,59 @@ The research of 2026-11-26 (the maintainer's research store, `2026-11-26-identit
 - **What does not fit.** A source IP is not an identity for a microVM behind a shared pod network. SPIRE with
   a Kata vsock proxy needs `hostPID` and `CAP_SYS_ADMIN`, gives only a pod-level identity and puts the SPIFFE
   socket in the guest. Istio ambient gives a pod identity, not an actor identity.
+
+## Amendment (2026-11-26, issue #1387): a non-root payload on the gVisor tiers
+
+Accepted (2026-11-26). The maintainer decided on 2026-11-26 to replace the root payload of 2026-11-18 with a
+required non-root payload in v0.1, on the gVisor tiers (`hardened` and `dev`). The `vm` tier follows in
+[#1462](https://github.com/stateracloud/koinon/issues/1462).
+
+**What it supersedes.** Section 4, item 5 ("Until then the payload runs as root with a reduced capability set")
+and the open question on `CAP_SETUID` and `CAP_SETGID` ([#1087](https://github.com/stateracloud/koinon/issues/1087))
+no longer apply to the gVisor tiers. They stay for the `vm` tier until #1462 closes.
+
+### Decision
+
+1. **The template gives the launcher what the drop needs, and nothing more.** On the gVisor tiers the actor
+   template of the Substrate driver drops every capability of the agent container (`drop: [ALL]`) and adds only
+   `SETUID`, `SETGID`, `SETPCAP` and `KILL`. The launcher uses `SETUID` and `SETGID` for the drop and `SETPCAP` to
+   shrink the bounding set before it. The guest front uses `KILL` to signal the processes that it starts. The set
+   is part of the template hash, so a sandbox of an older template gets a new template.
+2. **The payload runs as uid and gid 10001.** The launcher policy of the gVisor tiers (`policy-gvisor.json`) and
+   the built-in default policy set `user.mode` to `require` with uid and gid 10001. The capability allowlist of
+   the payload stays empty: after the drop the payload has no capability in any set, and `no_new_privs` is set.
+3. **No drop, no start.** When the drop fails, the launcher exits 70 and does not start the payload. This is the
+   fail-closed rule of section 4.3, now for the user drop on the gVisor tiers too. A spec in
+   `internal/guestlaunch` proves it: the gVisor policy in a guest without `CAP_SETUID` exits 70 and starts no
+   payload.
+4. **The `vm` tier keeps its current set.** Its template keeps the Substrate default set and `policy-vm.json`
+   keeps `user.mode: best_effort`. Nobody has proved the drop or the front listener on the microVM guest with the
+   new set. #1462 does that and then changes the `vm` tier to `require`.
+
+This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): it removes the
+root payload from two tiers and leaves the third as it was.
+
+### Proof
+
+- **Lab, 2026-11-26 01:50Z (koinon-lab, gVisor worker).** With the template set above and `user.mode=require`,
+  the launcher drops the payload to uid 10001. `CapEff` is 0. `NoNewPrivs` is 1. `setuid(0)` returns `EPERM`, also
+  in child processes.
+- **The guest front on port 80.** The front keeps its listener on port 80 without `NET_BIND_SERVICE`. The gVisor
+  netstack has no privileged-port check (gVisor commit `84708bc9b0a3ceeee1357c3621ae25f9d9ba3c5f`, read on
+  2026-11-26: `pkg/sentry/socket/netstack` and `pkg/tcpip/stack` do not test the capability or
+  `ip_unprivileged_port_start`). The lab run above started the front with this set.
+- **Before #1387 closes.** A proof run with the real front image and the escape suite on the lab. The maintainer
+  runs it.
+
+### Prior art
+
+- **Kubernetes `runAsNonRoot`.** The kubelet refuses to start a container whose user resolves to uid 0, and it
+  refuses a non-numeric image user that it cannot check. We take the same rule: a payload that would run as root
+  does not start. We differ in where the check runs: the launcher in the guest does the drop and the check,
+  because Substrate has no field for the payload user.
+- **Docker and the Kubernetes "restricted" Pod Security Standard.** Both use `drop: [ALL]` and then add back a
+  small list. The restricted profile allows only `NET_BIND_SERVICE` to be added. We add `SETUID`, `SETGID` and
+  `SETPCAP` because the drop happens inside the container, after the start, and not in the runtime.
+- **gVisor (runsc).** runsc runs the container process with the user and capabilities of the OCI spec, and the
+  sentry checks capabilities against its own user namespace. A drop inside the sandbox through `setresuid` is the
+  normal Linux behaviour in the sentry.

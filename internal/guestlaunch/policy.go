@@ -77,9 +77,12 @@ var DefaultDevices = []string{
 
 // UserPolicy drops the payload to a non-root user.
 //
-// Phase 0 (issue #1087 comment, Substrate v1.0.1 microVM) found that the guest gives payloads no
-// CAP_SETUID or CAP_SETGID, so the drop fails there. ModeBestEffort (the default) logs that and
-// continues as the current user with every other control applied; ModeRequire refuses to start.
+// ModeRequire (the default, issue #1387) refuses to start the payload when the drop fails. The
+// gVisor tiers give the agent container CAP_SETUID, CAP_SETGID and CAP_SETPCAP for the drop (the
+// actor template, substrate.GVisorCapAdd). ModeBestEffort logs a failed drop and continues as the
+// current user with every other control applied: only the vm tier keeps it, because phase 0 (issue
+// #1087, Substrate v1.0.1 microVM) found no CAP_SETUID or CAP_SETGID there and the drop is not yet
+// proven on it (issue #1462).
 type UserPolicy struct {
 	Mode Mode   `json:"mode"`
 	UID  uint32 `json:"uid"`
@@ -110,6 +113,9 @@ var DefaultSeccompDeny = []string{
 	"fanotify_init", "move_pages", "mbind", "set_mempolicy", "migrate_pages",
 }
 
+// DefaultUID is the uid and the gid of the sandbox user that the payload runs as.
+const DefaultUID = 10001
+
 // DefaultPolicy is the policy used when no file is given.
 func DefaultPolicy() Policy {
 	return Policy{
@@ -121,7 +127,8 @@ func DefaultPolicy() Policy {
 			ListDirs:  []string{"/dev"},
 		},
 		Seccomp: SeccompPolicy{Mode: ModeRequire},
-		User:    UserPolicy{Mode: ModeBestEffort},
+		// Uid and gid 10001 are the sandbox user of the harness images (docs/dev/images.md).
+		User: UserPolicy{Mode: ModeRequire, UID: DefaultUID, GID: DefaultUID},
 	}
 }
 
