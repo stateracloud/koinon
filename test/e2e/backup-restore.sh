@@ -130,7 +130,7 @@ if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   gwon=1
   gwfile=$work/koinon-gateway-key-backup.yaml
   [[ -s $gwfile ]] || fail "the install has a gateway key Secret and backup-gateway-key wrote no file"
-  gwmode=$(file_mode "$gwfile")
+  gwmode=$(file_mode "$gwfile") || gwmode=
   [[ $gwmode == 600 ]] || fail "the gateway key backup is readable by others: ${gwmode:-unknown mode}"
   gw_before=$(gwdigest)
   backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template="$gwdata" | sha256sum)
