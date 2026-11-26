@@ -115,8 +115,10 @@ var _ = Describe("Execution", func() {
 		Expect(err).NotTo(HaveOccurred())
 		for class, policy := range map[string]string{"kata": "policy-vm.json", "gvisor": "policy-gvisor.json", "": "policy-gvisor.json"} {
 			name := "sb-" + class
-			_, err = d.CreateSandbox(ctx, "ws", execution.SandboxSpec{Name: name, Image: "img@sha256:" + strings.Repeat("0", 64), RuntimeClassName: class,
-				CPULimit: "500m", MemoryLimit: "512Mi"})
+			_, err = d.CreateSandbox(ctx, "ws", execution.SandboxSpec{
+				Name: name, Image: "img@sha256:" + strings.Repeat("0", 64), RuntimeClassName: class,
+				CPULimit: "500m", MemoryLimit: "512Mi",
+			})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() execution.Phase {
 				sb, _ := d.GetSandbox(ctx, "ws", name)

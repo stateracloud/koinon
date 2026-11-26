@@ -221,7 +221,8 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 		meta:     &ateapiv1.ResourceMetadata{Atespace: k.atespace, Name: k.name, Uid: c.newUID("act"), CreateTime: timestamppb.Now()},
 		template: tk.name,
 		// Substrate v1.0.0 starts a new actor suspended; ResumeActor boots it (lab, 2026-11-26,
-		// issue #1092). An actor seeded from a tag boots at once.
+		// issue #1092). A tag-seeded actor is suspended too: UNVERIFIED, the lab has not shown it;
+		// the driver resumes either way.
 		state: ateapiv1.ActorState_ACTOR_STATE_SUSPENDED,
 		procs: map[string]*fproc{},
 		files: map[string][]byte{},
@@ -244,13 +245,7 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 	if a.auth == nil {
 		a.auth = verifierOf(tmpl)
 	}
-	if a.sourceTag != "" {
-		a.state = ateapiv1.ActorState_ACTOR_STATE_RESUMING
-	}
 	c.actors[k] = a
-	if a.sourceTag != "" {
-		c.bootLocked(k, a)
-	}
 	return a.pb(), nil
 }
 

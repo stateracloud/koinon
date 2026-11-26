@@ -637,6 +637,18 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(c.TemplateOf(ws, "copy")).To(Equal(c.TemplateOf(ws, "src")))
 		})
 
+		It("brings a restored sandbox to ready although Substrate creates the actor suspended", func(ctx SpecContext) {
+			dd, _ := newDriver()
+			ready(ctx, dd, "src")
+			snap, err := dd.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = dd.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("copy"))
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := dd.WaitPhase(ctx, ws, "copy", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
+		})
+
 		It("refuses a restore after the stored snapshot changed", func(ctx SpecContext) {
 			dd, c := newDriver()
 			ready(ctx, dd, "src")
