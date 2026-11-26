@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -413,24 +414,36 @@ func (c *call) response(resp *http.Response, rt route, format modelformat.Format
 	return nil
 }
 
-// watchEcho wraps the body so that a provider key the upstream echoes back is counted and logged (#1332, ADR
-// 0097 section 15). It detects only: the bytes reach the agent unchanged (an accepted risk for v0.2). The
-// watch streams with the body and never buffers it.
+// watchEcho counts and logs a provider key that the upstream echoes back in a response header or body (#1332,
+// ADR 0097 section 15), once per response. It detects only: the bytes reach the agent unchanged (an accepted
+// risk for v0.2). The body watch streams with the body and never buffers it. A 1xx answer is not wrapped: a 101
+// upgrade needs its body to stay an io.ReadWriteCloser.
 func (c *call) watchEcho(resp *http.Response, rt route, secret string) {
 	w := newEchoWatch(secret)
-	if w == nil {
+	if w == nil || resp.StatusCode < 200 {
 		return
 	}
-	body := bodyError
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		body = bodySuccess
+	answer := answerError
+	if resp.StatusCode < 300 {
+		answer = answerSuccess
 	}
 	status := resp.StatusCode
-	resp.Body = &echoBody{ReadCloser: resp.Body, watch: w, seen: func() {
-		c.g.o.Metrics.keyEcho(body)
-		// Never the key, the body or a part of it: the provider name and the status only.
-		c.g.o.Logger.Warn("provider key echoed in a model response body", "provider", rt.p.Name, "status", status)
-	}}
+	var once sync.Once
+	report := func(where string) {
+		once.Do(func() {
+			c.g.o.Metrics.keyEcho(answer)
+			// Never the key, the body or a part of them: the provider name, the status and where only.
+			c.g.o.Logger.Warn("provider key echoed in a model response", "provider", rt.p.Name, "status", status,
+				"in", where)
+		})
+	}
+	for _, vs := range resp.Header {
+		if slices.ContainsFunc(vs, func(v string) bool { return strings.Contains(v, secret) }) {
+			report("header")
+			break
+		}
+	}
+	resp.Body = &echoBody{ReadCloser: resp.Body, watch: w, seen: func() { report("body") }}
 }
 
 func (c *call) finishBody(ctx context.Context, cn counts, complete bool, readErr error, n int64) {

@@ -122,8 +122,8 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 			return resp.StatusCode, string(out)
 		}
 
-		// echoes reads koinon_gateway_model_key_echo_total{body=...}, the counter the alert KoinonModelKeyEcho reads.
-		echoes := func(body string) float64 { return testutil.ToFloat64(met.KeyEcho.WithLabelValues(body)) }
+		// echoes reads koinon_gateway_model_key_echo_total{answer=...}, the counter the alert KoinonModelKeyEcho reads.
+		echoes := func(answer string) float64 { return testutil.ToFloat64(met.KeyEcho.WithLabelValues(answer)) }
 
 		fake := func(sc fakemodel.Script) http.Handler {
 			s, err := fakemodel.New(sc)
@@ -138,7 +138,7 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 			Expect(out).To(ContainSubstring(echoKey), "detect only: the body reaches the agent unchanged in v0.2")
 			Expect(echoes("success")).To(Equal(1.0))
 			Expect(echoes("error")).To(BeZero())
-			Expect(logs.String()).To(ContainSubstring("provider key echoed in a model response body"))
+			Expect(logs.String()).To(ContainSubstring("provider key echoed in a model response"))
 			Expect(logs.String()).NotTo(ContainSubstring(echoKey), "the log line never carries the key")
 		})
 
@@ -167,6 +167,20 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 			Expect(status).To(Equal(http.StatusUnauthorized))
 			Expect(echoes("error")).To(Equal(1.0))
 			Expect(echoes("success")).To(BeZero())
+		})
+
+		It("counts a key echoed in a response header and in the body once per response", func(ctx SpecContext) {
+			url, material := serve(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Debug-Auth", r.Header.Get("Authorization"))
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, `{"error":{"message":"no access for `+echoKey+`"}}`)
+			}))
+			status, _ := call(ctx, url, material, `{"model":"m","messages":[]}`)
+			Expect(status).To(Equal(http.StatusForbidden))
+			Expect(echoes("error")).To(Equal(1.0))
+			Expect(logs.String()).To(ContainSubstring("in=header"))
+			Expect(logs.String()).NotTo(ContainSubstring(echoKey))
 		})
 
 		It("passes an answer with no key through with the same bytes and counts nothing", func(ctx SpecContext) {

@@ -1254,8 +1254,9 @@ An upstream provider can echo its provider key in a response body, most often in
 ..."). On the model path, that body goes to the agent. Section 12 lists this limit. The maintainer decided on
 2026-11-26: accept the risk for v0.2, detect the echo and alert on it. There is no scrubber in v0.2.
 
-- **Where.** koinon-gateway checks the body on the model path (`gateway.model.driver=koinon`). It wraps the
-  response body of each upstream answer, 2xx and error, before the usage tap. The agentgateway driver does not
+- **Where.** koinon-gateway checks the response on the model path (`gateway.model.driver=koinon`). It checks
+  the header values of each upstream answer of status 200 or more (2xx and error) and wraps its body before the
+  usage tap. A 1xx answer is not wrapped. The agentgateway driver does not
   check it: its log and tracer fields never read `response.body` or `bodyPrefix`, because that makes the gateway
   buffer every response (section 4). Step 3 deletes that driver.
 - **How.** The check streams with the body. It looks for the exact bytes of the provider key that the gateway
@@ -1263,10 +1264,10 @@ An upstream provider can echo its provider key in a response body, most often in
   is split across two reads, and its memory is bounded by the key length. It never holds back, changes or
   reorders a byte: the agent gets the same bytes, at the same time. A key shorter than 16 bytes is not checked,
   because it would match ordinary text.
-- **Signal.** At the first match in a body, the gateway counts
-  `koinon_gateway_model_key_echo_total{body="success"|"error"}` (a fixed label set, ADR 0023; `success` is a
-  2xx answer) and logs one warning, `provider key echoed in a model response body`, with the provider name and
-  the status. The log line never has the key, the body or a part of the body. The chart alert
+- **Signal.** At the first match in a response (a header value or the body), the gateway counts
+  `koinon_gateway_model_key_echo_total{answer="success"|"error"}` once (a fixed label set, ADR 0023; `success`
+  is a 2xx answer) and logs one warning, `provider key echoed in a model response`, with the provider name, the
+  status and where (`header` or `body`). The log line never has the key, the body or a part of them. The chart alert
   `KoinonModelKeyEcho` (severity critical, group `koinon-gateway`, rendered with the koinon model driver) fires
   when the counter rises in one hour, so it stays on for an hour after one echo. The chart's ServiceMonitor
   scrapes the `stats` port of the model-gateway Service for this counter. The operator rotates the provider key.
