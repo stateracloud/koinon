@@ -6,6 +6,10 @@
 
 -- +goose Up
 
+-- agents.template_id stays a single-column foreign key to templates (id): a composite key cannot cover
+-- the platform rows, which have no org. The service checks the org when it reads a template by an ID from
+-- a request (GetTemplateForOrg, internal/services/templates.go).
+
 ALTER TABLE templates
     ADD COLUMN org_id uuid REFERENCES orgs (id),
     -- The agent an org template was saved from, and the member who saved it. Both NULL on a

@@ -15,6 +15,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -193,7 +194,15 @@ func (s *Server) CreateTemplateFromAgent(ctx context.Context, req *templatev1alp
 	if err != nil {
 		return nil, s.dbError(err, "agent")
 	}
-	t := templateFromConfig(cfg, a.Harness, slug, name, description)
+	platform, err := s.q.ListCurrentTemplates(ctx)
+	if err != nil {
+		return nil, s.dbError(err, "templates")
+	}
+	// An org template never takes the slug of a platform template: clients read a slug as one template.
+	if slices.ContainsFunc(platform, func(p store.Template) bool { return p.Slug == slug }) {
+		return nil, connect.NewError(connect.CodeAlreadyExists, "a platform template has the slug "+slug)
+	}
+	t := templateFromConfig(cfg, a, slug, name, description)
 	spec, err := json.Marshal(t)
 	if err != nil {
 		return nil, s.dbError(err, "template")
@@ -230,8 +239,36 @@ func (s *Server) CreateTemplateFromAgent(ctx context.Context, req *templatev1alp
 // templateFromConfig is the template an agent version makes. The grants are proposals again: the
 // bindings stay with the agent, so an agent made from the template picks its own connections and
 // repositories.
-func templateFromConfig(cfg agentconfig.Config, harness, slug, name, description string) *templates.Template {
-	h := templates.HarnessName(harness)
+//
+// The agent's own settings (model, thinking, sandbox resources) are columns of the agent that win over
+// its version, so the template takes them. A trigger's notify target that names a person or a channel
+// is dropped (the org's default applies): a template cannot name a person.
+func templateFromConfig(cfg agentconfig.Config, a store.Agent, slug, name, description string) *templates.Template {
+	h := templates.HarnessName(a.Harness)
+	model, thinking, res := cfg.Model, cfg.Thinking, cfg.Resources
+	if a.Model.Valid && a.Model.String != "" {
+		model = a.Model.String
+	}
+	if a.Thinking.Valid && a.Thinking.String != "" {
+		thinking = a.Thinking.String
+	}
+	for _, o := range []struct {
+		dst *string
+		src pgtype.Text
+	}{
+		{&res.CPU.Request, a.SandboxCpuRequest}, {&res.CPU.Limit, a.SandboxCpuLimit},
+		{&res.Memory.Request, a.SandboxMemoryRequest}, {&res.Memory.Limit, a.SandboxMemoryLimit},
+	} {
+		if o.src.Valid && o.src.String != "" {
+			*o.dst = o.src.String
+		}
+	}
+	triggers := slices.Clone(cfg.Triggers)
+	for i := range triggers {
+		if n := triggers[i].Notify; n != nil && n.Kind != templates.NotifyRole {
+			triggers[i].Notify = nil
+		}
+	}
 	return &templates.Template{
 		APIVersion: "templates.koinon.dev/v1alpha1",
 		Kind:       "Template",
@@ -239,13 +276,13 @@ func templateFromConfig(cfg agentconfig.Config, harness, slug, name, description
 		Spec: templates.Spec{
 			Harness:      templates.Harness{Allowed: []templates.HarnessName{h}, Default: h, HarnessSettings: cfg.Harness},
 			Ephemeral:    cfg.Ephemeral,
-			Model:        templates.Model{Name: cfg.Model, Thinking: cfg.Thinking},
+			Model:        templates.Model{Name: model, Thinking: thinking},
 			Instructions: cfg.Instructions,
 			Grants:       cfg.Grants,
 			Limits:       cfg.Limits,
-			Triggers:     cfg.Triggers,
+			Triggers:     triggers,
 			Questions:    cfg.Questions,
-			Resources:    cfg.Resources,
+			Resources:    res,
 		},
 	}
 }

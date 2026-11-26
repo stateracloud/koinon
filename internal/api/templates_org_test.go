@@ -115,6 +115,11 @@ var _ = Describe("org templates", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeAlreadyExists))
 	})
 
+	It("refuses the slug of a platform template", func(ctx SpecContext) {
+		_, err := save(ctx, a.owner, a, "Repo Helper")
+		Expect(codeOf(err)).To(Equal(connect.CodeAlreadyExists))
+	})
+
 	It("keeps the shipped templates platform data", func(ctx SpecContext) {
 		res, err := a.owner.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
 		Expect(err).NotTo(HaveOccurred())
