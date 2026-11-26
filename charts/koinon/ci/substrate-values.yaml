@@ -6,7 +6,7 @@
 execution:
   driver: substrate
   substrate:
-    controlAddress: api.ate-system.svc.cluster.local:443
+    controlAddress: api.ate-system.svc:443
     routerAddress: atenet-router.ate-system.svc.cluster.local:80
     tokenAudience: ateapi
     allowUnhardened: true

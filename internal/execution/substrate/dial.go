@@ -21,7 +21,8 @@ import (
 // atenet router (plain HTTP/2 inside the cluster; the install allows the router's ingress by SPIFFE
 // ID, ADR 0119 proof findings).
 type Endpoint struct {
-	// ControlAddr is ateapi's host:port, for example api.ate-system.svc.cluster.local:443.
+	// ControlAddr is ateapi's host:port, for example api.ate-system.svc:443 (the
+	// ateapi certificate names that host only).
 	ControlAddr string
 	// RouterAddr is the router's host:port, for example atenet-router.ate-system.svc.cluster.local:80.
 	RouterAddr string

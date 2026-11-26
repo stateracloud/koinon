@@ -832,7 +832,8 @@ execution:
   # checks (Kubernetes 1.37, the CRDs, the pinned api server, the router) without the Substrate probe pods.
   driver: openshell
   substrate:
-    # ateapi's host:port, for example api.ate-system.svc.cluster.local:443. Required with substrate.
+    # ateapi's host:port, for example api.ate-system.svc:443. Required with substrate. Use that exact name: the
+    # ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the TLS handshake.
     controlAddress: ""
     # The atenet router's host:port, for example atenet-router.ate-system.svc.cluster.local:80.
     routerAddress: ""

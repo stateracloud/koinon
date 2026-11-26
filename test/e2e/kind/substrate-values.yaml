@@ -42,7 +42,8 @@ github:
 execution:
   driver: substrate
   substrate:
-    controlAddress: api.ate-system.svc.cluster.local:443
+    # The ateapi certificate names api.ate-system.svc only: a name with .cluster.local fails the TLS handshake.
+    controlAddress: api.ate-system.svc:443
     routerAddress: atenet-router.ate-system.svc.cluster.local:80
     tokenAudience: ateapi
     # The substrate overlay of the harness image has not run in a real actor with recorded probe results yet (#1087).
