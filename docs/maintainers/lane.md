@@ -26,9 +26,9 @@ rules for the lane agent are in [the subagent brief](../agents/subagent-brief.md
    issue's "done when" names. Commit with `git commit -s` in Conventional Commits, with
    `Closes #N` in the body of the main commit.
 3. **Gates.** Run the gates once with `hack/lane-gates.sh --start origin/main`. It detaches the run
-   and prints a verdict file at once. Then call `hack/lane-gates.sh --wait <file>`: it blocks for
-   at most 600 seconds and exits 75 while the run continues, so call it again after a 75. A tool time
-   limit then does not lose the verdict. The run picks the gates the change touches and prints one
+   and prints a verdict file at once. Then call `hack/lane-gates.sh --wait <file> --max 540`: it
+   blocks for at most 540 seconds (less than the 600 s tool limit) and exits 75 while the run
+   continues, so call it again after a 75. A tool time limit then does not lose the verdict. The run picks the gates the change touches and prints one
    `gate=... verdict=pass|fail|notrun` line each. `notrun` is not green. The gates write their tool
    state only where the sandbox allows it ([docs/dev/ci.md](../dev/ci.md), "Tool state in the
    sandbox"), so run them with the sandbox on. Also run directly any test that names a file or

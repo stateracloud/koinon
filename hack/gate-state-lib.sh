@@ -12,12 +12,15 @@
 # A value that is already set wins: CI and a person who exports one keep their own.
 #
 #   BUILDX_CONFIG       <gate log dir>/state/buildx, a per-worktree copy of the builder selection
-#                       (current, instances, defaults) of ${DOCKER_CONFIG:-~/.docker}/buildx. Only
+#                       (current, instances, defaults, certs) of ${DOCKER_CONFIG:-~/.docker}/buildx. Only
 #                       client state lives there; the build cache stays in the builder, so nothing is
 #                       rebuilt. The copy is made again each run, so `docker buildx use` still counts.
 #   KOINON_PNPM_STORE   $TMPDIR/koinon-pnpm-store, the store of `make test-opencode-plugin`. It is
 #                       shared by the lanes of one machine. The web gate keeps the default store: its
-#                       node_modules were linked from it and it installs offline from it.
+#                       node_modules were linked from it and it installs offline from it. pnpm
+#                       relinks node_modules when the store changes, so the first gate run in a
+#                       worktree (and a later plain `make test-opencode-plugin`) installs again from
+#                       the registry: slower, not wrong.
 #
 # Not moved here, on purpose:
 #   - the envtest port locks (controller-runtime's os.UserCacheDir()/kubebuilder-envtest). They
@@ -37,10 +40,14 @@ gate_state_env() {
 	if [[ -z ${BUILDX_CONFIG:-} ]]; then
 		src=${DOCKER_CONFIG:-$HOME/.docker}/buildx
 		mkdir -p "$state/buildx" || return 1
-		for f in current instances defaults; do
+		for f in current instances defaults certs; do
 			# Replace, not merge: a builder removed with `docker buildx rm` must go from the copy too.
 			rm -rf "${state:?}/buildx/$f"
-			if [[ -e $src/$f ]]; then cp -R "$src/$f" "$state/buildx/$f" || return 1; fi
+			# A copy that fails is not fatal: buildx then uses the default builder of the Docker context,
+			# and a gate that needs another builder fails or is notrun on its own.
+			if [[ -e $src/$f ]] && ! cp -R "$src/$f" "$state/buildx/$f" 2>/dev/null; then
+				echo "lane-gates: warning: cannot copy $src/$f; buildx uses the default builder" >&2
+			fi
 		done
 		export BUILDX_CONFIG=$state/buildx
 	fi

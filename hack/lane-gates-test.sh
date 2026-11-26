@@ -371,14 +371,16 @@ expect "wait maps a non-verdict exit code to 1" 1 'exited 127 before it had a ve
 # Tool state (#1296). A stub make that prints the state each gate sees, and the envtest assets.
 cat >"$tmp/make-state" <<'EOF2'
 #!/usr/bin/env bash
-case $1 in
+target=${!#} # lane-gates passes flags (-s --no-print-directory) before the target
+case $target in
 envtest-assets)
+	[[ -z ${STUB_ASSETS_MARK:-} ]] || : >"$STUB_ASSETS_MARK"
 	case ${STUB_ASSETS:-ok} in
 	ok) echo "$STUB_ASSETS_DIR" ;;
 	sandbox) echo "mkdir /home/x/.local/share/kubebuilder-envtest: operation not permitted" >&2; exit 1 ;;
 	broken) echo "make: *** No rule to make target" >&2; exit 2 ;;
 	esac ;;
-*) echo "target=$1 buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
+*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
 esac
 EOF2
 chmod +x "$tmp/make-state"
@@ -429,8 +431,14 @@ echo x >"$tmp/lockfile"
 staterun STUB_JOBS="escape harnesses" LANE_GATES_ENVTEST_LOCKDIR="$tmp/lockfile"
 expect "state: unwritable port locks are notrun" 3 '^gate=escape rc=0 .*verdict=notrun reason="sandbox denial: the envtest port locks in .* are not writable' '^gate=harnesses .*verdict=pass'
 # No envtest gate selected: envtest-assets is not called.
-staterun STUB_JOBS="harnesses" STUB_ASSETS=sandbox
+staterun STUB_JOBS="harnesses" STUB_ASSETS_MARK="$tmp/assets-called"
 expect "state: no envtest gate, no envtest-assets call" 0 '^gate=harnesses .*verdict=pass'
+total=$((total + 1))
+[[ ! -e $tmp/assets-called ]] || { echo "FAIL: state: envtest-assets ran without an envtest gate"; fails=$((fails + 1)); }
+# The control: with an envtest gate it is called.
+staterun STUB_JOBS="escape" STUB_ASSETS_MARK="$tmp/assets-called"
+total=$((total + 1))
+[[ -e $tmp/assets-called ]] || { echo "FAIL: state: envtest-assets did not run for the escape gate"; fails=$((fails + 1)); }
 
 # Usage errors.
 out=$(cd "$repo" && bash "$script" --nope 2>&1); rc=$?

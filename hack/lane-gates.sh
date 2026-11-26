@@ -375,7 +375,7 @@ if [[ $needs_envtest == 1 ]]; then
 	if [[ -n $envtest_reason ]]; then
 		echo "$envtest_reason" >"$logdir/envtest-assets.log"
 	elif [[ -z ${KOINON_ENVTEST_ASSETS:-} ]]; then
-		assets=$("$make_cmd" envtest-assets 2>"$logdir/envtest-assets.log" | tail -n 1)
+		assets=$("$make_cmd" -s --no-print-directory envtest-assets 2>"$logdir/envtest-assets.log" | tail -n 1)
 		if [[ -n $assets && -d $assets ]]; then
 			export KOINON_ENVTEST_ASSETS=$assets
 		else

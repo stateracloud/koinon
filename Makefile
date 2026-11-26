@@ -244,7 +244,7 @@ envtest-assets: ## Download (or find) the envtest API server binaries and print 
 
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
-	assets="$(envtest_assets)" &&test -n "$$assets" && \
+	assets="$(envtest_assets)" && test -n "$$assets" && \
 		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest,substrate-policy} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
 # The install modes run in shards (issue #1303): CI runs one process per shard, each with the 15 minute
@@ -264,7 +264,7 @@ endif
 
 .PHONY: test-chart-smoke
 test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go). One shard of the install modes: CHART_SMOKE_SHARD=core|external|kms (default: all, serial)
-	assets="$(envtest_assets)" &&test -n "$$assets" && \
+	assets="$(envtest_assets)" && test -n "$$assets" && \
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
 		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \

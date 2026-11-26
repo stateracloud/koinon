@@ -555,10 +555,12 @@ in place of a verdict. `hack/gate-state-lib.sh` now gives each tool a path the s
 value that is already set (CI, your shell) wins:
 
 - `BUILDX_CONFIG` is `<gate log directory>/state/buildx`: a copy, made again each run, of the builder
-  selection in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
+  selection and client certificates in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
   client state moves; the build cache stays in the builder.
 - `KOINON_PNPM_STORE` is `$TMPDIR/koinon-pnpm-store`, the store of `make test-opencode-plugin`. The web
   gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
+  pnpm links the plugin `node_modules` again when the store changes, so the first gate run in a
+  worktree (and a later plain `make test-opencode-plugin`) downloads from the registry again.
 - The envtest binaries: lane-gates runs `make envtest-assets` once, before the gates start, and passes
   the directory to `make test-chart-smoke` and `make test-admission` as `KOINON_ENVTEST_ASSETS`.
   setup-envtest only reads a store that has the version, so run `make envtest-assets` once outside the
