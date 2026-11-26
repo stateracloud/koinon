@@ -46,8 +46,11 @@ harness() {
   step "guest front and launcher (linux/$arch)"
   (cd "$root" && make guest-launcher >&2)
   step "substrate overlay of the harness image: $REPO/sandbox:e2e-substrate"
+  # The flavor image goes in as an OCI layout: the buildx builder is a container and cannot pull from localhost:5001.
+  local flavor_dir
+  flavor_dir=$(mktemp -d "$OUT/flavor-oci.XXXXXX")
   docker buildx build --load --platform "linux/$arch" \
-    --build-arg "FLAVOR_IMAGE=$src" \
+    --build-context "flavor=$("$root/hack/harness-flavor-context.sh" "$src" "$flavor_dir")" \
     --build-context "launcher=$root/build/guest-launcher" \
     --tag "$REPO/sandbox:e2e-substrate" "$root/cmd/koinon-guest-launcher" >&2
   docker push -q "$REPO/sandbox:e2e-substrate" >/dev/null
