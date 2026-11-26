@@ -68,6 +68,9 @@ type config struct {
 	mcpKeysDir    string
 	// mcpSealed: koinon-gateway serves every MCP path, so the reconciler may serve sealed credentials.
 	mcpSealed bool
+	// egressURL is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it the
+	// sandbox of an agent with a code-host grant may reach the forge routes there; empty: no such rule.
+	egressURL string
 	kekDir    string
 	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
 	kekWrapping     wrapping.Config
@@ -124,6 +127,18 @@ func (c *config) mcpGatewayEndpoint() (reconciler.Endpoint, error) {
 		return reconciler.Endpoint{}, nil
 	}
 	return endpointOf("--gateway-mcp-url", c.gatewayMCPURL)
+}
+
+// egressEndpoint is the gateway's egress listener, nil without --gateway-egress-url.
+func (c *config) egressEndpoint() (*reconciler.Endpoint, error) {
+	if c.egressURL == "" {
+		return nil, nil
+	}
+	e, err := endpointOf("--gateway-egress-url", c.egressURL)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // endpointOf parses an http(s)://host[:port] URL, named flag in errors, into a host and a port.

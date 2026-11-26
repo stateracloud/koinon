@@ -103,6 +103,15 @@ type files struct {
 	saveworkRuns int
 	// tar answers the home checkpoint's tar execs (checkpoint_test.go); nil: no tar.
 	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
+	// gitHistory is every write (the content) and removal (nil) of a git file, by path.
+	gitHistory map[string][][]byte
+}
+
+// history returns the writes and removals (nil) of the git file at path, in order.
+func (f *files) history(path string) [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]byte(nil), f.gitHistory[path]...)
 }
 
 // sweepCount is how many times agentd ran the sweep script.
@@ -197,11 +206,16 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		// The rendered git configuration and CA file (gitconfig.go); the file is kept by path.
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.gitHistory == nil {
+			f.gitHistory = map[string][][]byte{}
+		}
 		switch {
 		case strings.Contains(args[1], "mktemp"):
 			f.data[args[4]] = in
+			f.gitHistory[args[4]] = append(f.gitHistory[args[4]], in)
 		case len(args) == 5:
 			delete(f.data, args[4])
+			f.gitHistory[args[4]] = append(f.gitHistory[args[4]], nil)
 		}
 		return 0
 	}

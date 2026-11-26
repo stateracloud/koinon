@@ -2060,6 +2060,15 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type GatewayAgentForge struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	StateRevision pgtype.Int8
+	ServedAt      pgtype.Timestamptz
+	Failure       string
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type GatewayProviderFailure struct {
 	OrgID      pgtype.UUID
 	ProviderID pgtype.UUID

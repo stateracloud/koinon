@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { create } from '@bufbuild/protobuf'
+import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor } from '@testing-library/react'
@@ -11,6 +11,7 @@ import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, TaskEventSchema, TaskSchema, TaskService, TaskState, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { TimelineEventSchema } from '@/gen/koinon/task/v1alpha1/timeline_pb'
 import { agent, orgId, renderApp, task, whoAmI } from '@/test-utils'
 
 const t0 = Date.now() - 60_000
@@ -25,8 +26,9 @@ function chunk(seq: number, text: string) {
   })
 }
 
-function taskEvent(seq: number, kind: string, payload: Record<string, string>, actor = ActorKind.USER) {
-  return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
+// A task event as the API sends it: its kind and its typed body (#735).
+function taskEvent(seq: number, kind: string, body: MessageInitShape<typeof TimelineEventSchema>['event'], actor = ActorKind.USER) {
+  return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, event: { event: body }, createdAt: timestampFromMs(t0 + seq) })
 }
 
 describe('TaskPage message authors', () => {
@@ -48,7 +50,7 @@ describe('TaskPage message authors', () => {
               actorKind: ActorKind.USER,
               actorUserId: 'u-2',
               actorDisplayName: 'Sam Example',
-              payload: { text: 'hello from Sam' },
+              event: { event: { case: 'message', value: { text: 'hello from Sam' } } },
               createdAt: timestampFromMs(t0),
             }),
           ],
@@ -92,8 +94,8 @@ describe('TaskPage', () => {
     const watchCalls: WatchRunRequest[] = []
     const run = (state: RunState) => create(RunSchema, { id: 'r-1', orgId, ticketId: 't-1', state })
     const events: TaskEvent[] = [
-      taskEvent(1, 'task.created', { title: 'Say hello' }, ActorKind.SYSTEM),
-      taskEvent(2, 'message', { text: 'Please say hello' }),
+      taskEvent(1, 'task.created', { case: 'taskCreated', value: { title: 'Say hello' } }, ActorKind.SYSTEM),
+      taskEvent(2, 'message', { case: 'message', value: { text: 'Please say hello' } }),
     ]
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
@@ -101,7 +103,7 @@ describe('TaskPage', () => {
       service(TaskService, {
         getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events, runs: [run(RunState.RUNNING)] }),
         appendMessage: (req) => {
-          const ev = taskEvent(events.length + 1, 'message', { text: req.text })
+          const ev = taskEvent(events.length + 1, 'message', { case: 'message', value: { text: req.text } })
           events.push(ev)
           return { event: ev }
         },
@@ -157,7 +159,7 @@ describe('TaskPage', () => {
       service(TaskService, {
         getTask: () => ({
           task: { ...task('t-1', 'Say hello', TaskState.COMPLETED), cost: cost('1234.5021', false) },
-          events: [taskEvent(1, 'task.created', { title: 'Say hello' }, ActorKind.SYSTEM)],
+          events: [taskEvent(1, 'task.created', { case: 'taskCreated', value: { title: 'Say hello' } }, ActorKind.SYSTEM)],
           runs,
         }),
       })

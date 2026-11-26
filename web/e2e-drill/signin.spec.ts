@@ -18,11 +18,11 @@ test('sign in through the browser on the restored copy', async ({ page }) => {
   await page.getByLabel('Password').fill(password!)
   await page.getByRole('button', { name: 'Sign in' }).click()
 
-  // The restored admin has already chosen a password: no "Choose a new password" step, the inbox is home.
-  await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
+  // The restored admin has already chosen a password: no "Choose a new password" step, the overview is home.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Choose a new password' })).toHaveCount(0)
   // The session holds after a reload: the cookie the restored API set is accepted by the restored API.
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Sign in to Koinon' })).toHaveCount(0)
 })

@@ -107,6 +107,8 @@ has "gateway key guard policy" 'name: koinon-koinon-gateway-key-guard$' --show-o
 has "gateway key guard names the Secret" 'resourceNames: \["koinon-gateway-recipient-key"\]' --show-only "$gkeyg" "${gk[@]}"
 has "gateway key guard covers CREATE UPDATE DELETE" 'operations: \[CREATE, UPDATE, DELETE\]' --show-only "$gkeyg" "${gk[@]}"
 has "gateway key guard lets only the key-admin write" 'system:serviceaccount:koinon:koinon-gateway-key-admin' --show-only "$gkeyg" "${gk[@]}"
+# The writer is a CEL string literal. A bare name is not valid CEL, and the apiserver refuses the policy.
+has "gateway key guard writer is a CEL string" 'expression: "\\"system:serviceaccount:koinon:koinon-gateway-key-admin\\""$' --show-only "$gkeyg" "${gk[@]}"
 has "gateway key guard follows secretName" 'resourceNames: \["mine"\]' --show-only "$gkeyg" "${gk[@]}" \
 	--set gateway.mcp.koinon.recipientKey.secretName=mine
 lacks "gateway key guard has its own switch" 'gateway-key-guard' "${gk[@]}" --set gateway.mcp.koinon.recipientKey.guard.enabled=false
