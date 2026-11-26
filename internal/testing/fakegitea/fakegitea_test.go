@@ -506,10 +506,9 @@ var _ = Describe("fake Gitea", func() {
 				"files": []map[string]any{{"operation": "create", "path": "up.txt", "content": base64.StdEncoding.EncodeToString([]byte("up\n"))}},
 			}, "token "+fakegitea.DefaultToken)
 			Expect(ch.Status).To(Equal(201), string(ch.Body))
-			cmd := exec.CommandContext(context.Background(), "git", "-c", "protocol.version=0", "fetch", "origin", "main")
+			cmd := exec.CommandContext(context.Background(), "git", "-c", "maintenance.auto=false", "-c", "protocol.version=0", "fetch", "origin", "main")
 			cmd.Dir = one
 			cmd.Env = append(os.Environ(), "GIT_TRACE_CURL=1", "GIT_TRACE_CURL_NO_DATA=1", "GIT_TERMINAL_PROMPT=0")
-			cmd.Env = append(cmd.Env, noMaintenanceEnv...)
 			out, err = cmd.CombinedOutput()
 			Expect(err).NotTo(HaveOccurred(), string(out))
 			Expect(string(out)).To(ContainSubstring("Content-Encoding: gzip"), "the fetch sent a gzip body")
@@ -699,7 +698,7 @@ var _ = Describe("fake Gitea permissions", func() {
 				"clone", "-q", f.URL()+"/acme/"+name+".git", dir).CombinedOutput(); err != nil {
 				return string(out), err
 			}
-			if out, err := run("-c", "user.email=a@b.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"); err != nil {
+			if out, err := run("-c", "maintenance.auto=false", "-c", "user.email=a@b.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"); err != nil {
 				return out, err
 			}
 			return run("-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok, "push", "-q", "origin", "HEAD:refs/heads/new")
