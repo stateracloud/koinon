@@ -3988,6 +3988,38 @@ QuestionState is where a question stands.
 | QUESTION_STATE_EXPIRED | 5 | Nobody answered in time; the default was applied. |
 | QUESTION_STATE_CANCELED | 6 | The run ended (canceled, failed or finished) before anyone answered; nothing was applied. |
 
+## koinon.refusal.v1
+
+Files: `koinon/refusal/v1/refusal.proto`
+
+### Enum Reason
+
+Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a
+value as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the
+same string in `error.reason`. The value names are the wire strings, so they have no enum prefix.
+A spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.
+
+Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
+rename or remove one. A client that does not know a reason shows the message of the error.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| REASON_UNSPECIFIED | 0 | The error has no reason. A server never sends this value. |
+| INVALID | 1 | The request is not valid. The message says why. |
+| NOT_FOUND | 2 | The thing does not exist, or the caller may not see it. |
+| INSTALL_HELD | 3 | The install is held (ADR 0107) and the call reaches outward. |
+| ROLE_TOO_LOW | 4 | The caller's Role is too low for the field rule of the call (ADR 0116 decision 4). |
+| ADMIN_REQUIRED | 5 | Only an org admin or owner may do this. |
+| PLATFORM_ADMIN_REQUIRED | 6 | Only a platform admin may do this. |
+| CHANGED | 7 | The destination changed since the caller loaded it. |
+| OWNER_ONLY | 8 | Only an org owner may choose content level full. |
+| OWNER_AT_FULL | 9 | The org sends full content, so only an owner may add a destination or change its connection. |
+| NOT_MEMBER | 10 | The caller is not a member of the org, so may only lower its settings. |
+| ABOVE_CEILING | 11 | The level is above the platform ceiling. |
+| TEST_FAILED | 12 | The test trace was not accepted, so nothing was saved. |
+| PRICE_REFRESH_OFF | 13 | The price refresh is off on this install. |
+| CREDENTIAL_TOO_SHORT | 14 | The credential of an MCP server is too short. |
+
 ## koinon.remoteagent.v1alpha1
 
 Files: `koinon/remoteagent/v1alpha1/remoteagent.proto`
