@@ -606,8 +606,8 @@ OpenShell has no `actor_jwt`. Two ways meet the rule. The maintainer chooses one
   It does not write the token into the guest. It writes a new token every 5 minutes (`UpdateProvider`). The
   supervisor replaces the placeholder on the `koinon_egress` endpoint. Section 7 already counts the
   supervisor as the egress layer of OpenShell. The kind e2e runs OpenShell, so it keeps its clone through
-  the gateway. Cost: a refresh loop through the OpenShell API, and code that #1094 deletes. The token is in the memory of the supervisor, as
-  every OpenShell credential is during the window.
+  the gateway. Cost: a refresh loop through the OpenShell API, and code that #1094 deletes. The token is in
+  the memory of the supervisor, as every OpenShell credential is during the window.
 - **(b) #1386 ships after #1094.** Then only the Substrate driver exists, and no OpenShell code is written.
   Cost: #1386 waits for #1094, and the kind e2e must run the Substrate driver to keep the gateway clone spec.
 
@@ -631,7 +631,8 @@ call the gateway.
   until #1094. They then serve the provider record. `Config.ActorTokens` and `EgressURL` stay coupled.
 - With (b), they have no user. #1386 removes `Config.ActorTokens`, the coupling check in
   `actortoken.go`, the koinon-agentd seed in the `actor-token-key` Secret (`_helpers.tpl`) and the Ed25519
-  verifier of the gateway. The Substrate verifier is then the only one.
+  verifier of the gateway. The Substrate verifier is then the only one. The check in `egressGit`
+  (`actortoken.go`) then uses `EgressURL`, not `ActorTokens`.
 
 ### Proof
 
