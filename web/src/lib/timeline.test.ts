@@ -376,9 +376,28 @@ describe('a spend limit', () => {
     expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual(['Moved from Submitted to Input required', 'Moved from Unknown to Completed', 'Task created: New'])
   })
 
-  it('shows the kind of an event that the server cannot type', () => {
-    const items = buildTimeline([create(TaskEventSchema, { seq: 1n, kind: 'future.kind', payload: { text: 'x' }, createdAt: timestampFromMs(100) })], {})
-    expect(items).toEqual([{ key: 't:1', at: 100, type: 'note', text: 'future.kind' }])
+  it('shows the kind of an event that the server cannot type, and not its payload', () => {
+    // The server leaves event unset for a kind that it does not know, or for a payload that it cannot read.
+    const items = buildTimeline(
+      [
+        create(TaskEventSchema, { seq: 1n, kind: 'future.kind', payload: { text: 'x' }, createdAt: timestampFromMs(100) }),
+        create(TaskEventSchema, { seq: 2n, kind: 'approval.requested', payload: { approval_id: 7 }, createdAt: timestampFromMs(200) }),
+      ],
+      {},
+    )
+    expect(items).toEqual([
+      { key: 't:1', at: 100, type: 'note', text: 'future.kind' },
+      { key: 't:2', at: 200, type: 'note', text: 'approval.requested' },
+    ])
+  })
+
+  it('shows what a person wrote in a direct message, not the instruction before it', () => {
+    const items = buildTimeline([taskEvent(1, 100, { case: 'message', value: { text: 'Instruction.\n\nhello', display: 'hello', source: 'direct_message' } }, ActorKind.USER)], {})
+    expect(items[0]).toMatchObject({ type: 'message', text: 'hello' })
+  })
+
+  it('shows a queued run', () => {
+    expect(buildTimeline([taskEvent(1, 100, { case: 'runQueued', value: { maxWallClockSeconds: 1800 } })], {})[0]).toMatchObject({ type: 'note', text: 'Run r-123456 queued' })
   })
 
   describe('time limit, sandbox cap and question notes', () => {
@@ -404,6 +423,11 @@ describe('a spend limit', () => {
       expect(req).toContain('Last summary:\nS')
       const [spend] = noteText(taskEvent(1, 100, runCanceled({ reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' })))
       expect(spend).toContain('stopped at its spend limit: run spend limit reached ($2.01 of $2.00)')
+    })
+
+    it('says a limit was reached when the note has no message or no limit', () => {
+      expect(noteText(taskEvent(1, 100, runCanceled({ reason: 'request_cap' })))).toEqual(['Run r-123456 stopped at its model request limit: the limit was reached.'])
+      expect(noteText(taskEvent(1, 100, runCanceled({ reason: 'wall_clock_cap' })))).toEqual(['Run r-123456 stopped at the time limit.'])
     })
 
     it('names why a sandbox never became ready', () => {
