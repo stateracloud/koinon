@@ -21,6 +21,7 @@ import { OrgProvider } from '@/lib/org'
 import { OrgContext, orgName, teamMemberships, useOrg, useOrgSession, type OrgContextValue } from '@/lib/org-context'
 import { navActive, navGroup, navGroupHeading, navLink, sidebar, skipLink } from '@/lib/shell-styles'
 import { useSignOut } from '@/hooks/use-sign-out'
+import { cn } from '@/lib/utils'
 import { ChangePasswordPage } from '@/pages/change-password-page'
 import { FirstLoginPage } from '@/pages/first-login-page'
 
@@ -148,6 +149,9 @@ function Shell() {
   const { org, acting } = useOrg()
   const { signOut, signingOut } = useSignOut()
   const admin = isApprover(org.role)
+  // The agents live on the overview (its Agents and Chart tabs), so an agent page and the new-agent flow are in the
+  // Overview section: the item shows as current with aria-current="true", not "page" (issue #1274).
+  const inAgents = useLocation().pathname.startsWith('/agents/')
   // The same polled queries the inbox page uses: one request serves both.
   const waiting = useInbox().items.length
   useDocumentTitle(waiting)
@@ -163,7 +167,7 @@ function Shell() {
         </Link>
         <OrgSwitcher platformAdmin={who.platformAdmin} />
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
-          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={navActive}>
+          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={navActive} {...(inAgents ? section : {})}>
             Overview
           </Link>
           <Link to="/inbox" className={navLink} activeProps={navActive}>
@@ -236,6 +240,9 @@ function ActingBanner({ name }: { name: string }) {
     </section>
   )
 }
+
+/** A section item: the current page is under it (an agent page under Overview). It looks like `navActive`. */
+const section = { 'aria-current': true as const, className: cn(navLink, 'bg-accent font-medium') }
 
 /** The Settings group of the org sidebar, in the order of ADR 0126 section 4. Only org admins and owners see it. */
 const settingsItems = [

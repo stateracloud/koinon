@@ -2,7 +2,7 @@
 
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockApi, type Handlers } from './mock-api.ts'
+import { agentSummaries, mockApi, type Handlers } from './mock-api.ts'
 
 // The app shell of ADR 0126 section 4 (issue #1273): the org sidebar, the open org switcher, the open user menu and
 // the first-login screen pass axe in the dark and the light theme, and a keyboard-only walk reaches every control.
@@ -19,6 +19,8 @@ async function expectAccessible(page: Page, include?: string) {
 
 const team = (orgId: string, name: string, role: string): Json => ({ orgId, orgSlug: name.toLowerCase(), orgDisplayName: name, role })
 
+const agents: Json[] = [{ id: 'a-1', orgId: 'org-1', displayName: 'Repo helper', harness: 'opencode', status: 'AGENT_STATUS_ACTIVE' }]
+
 function handlers(memberships: Json[], platformAdmin = true): Handlers {
   return {
     unary: {
@@ -27,7 +29,8 @@ function handlers(memberships: Json[], platformAdmin = true): Handlers {
         platformAdmin,
         memberships,
       }),
-      'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [{ id: 'a-1', orgId: 'org-1', displayName: 'Repo helper', harness: 'opencode', status: 'AGENT_STATUS_ACTIVE' }] }),
+      'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents }),
+      'koinon.agent.v1alpha1.AgentService/ListAgentSummaries': agentSummaries(agents),
       'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: [] }),
       'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: [] }),
       'koinon.question.v1alpha1.QuestionService/ListQuestions': () => ({ questions: [] }),
