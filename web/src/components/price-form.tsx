@@ -28,6 +28,8 @@ const rateFields: { key: keyof RateFields; label: string }[] = [
 export function PriceForm({
   orgId,
   existing,
+  initial,
+  title: givenTitle,
   actions,
   onDone,
   onSaved,
@@ -35,12 +37,16 @@ export function PriceForm({
   orgId: string
   /** The current version, when adding a new version of a price. */
   existing?: PriceVersion
+  /** Values to start a new price from, such as the price an override replaces. */
+  initial?: PriceFormValues
+  /** The form's heading and accessible name, for a new price. */
+  title?: string
   actions: Actions
   onDone: () => void
   onSaved: (name: string, warnings: string[]) => void
 }) {
   const editing = !!existing
-  const [f, setF] = useState<PriceFormValues>(() => (existing ? formFromVersion(existing) : emptyPriceForm()))
+  const [f, setF] = useState<PriceFormValues>(() => (existing ? formFromVersion(existing) : (initial ?? emptyPriceForm())))
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -66,7 +72,7 @@ export function PriceForm({
     }
   }
 
-  const title = editing ? `New version of ${f.name}` : 'Add a price'
+  const title = editing ? `New version of ${f.name}` : (givenTitle ?? 'Add a price')
   return (
     <form onSubmit={(e) => void submit(e)} aria-label={title} className="bg-background grid gap-4 rounded-md border p-4" noValidate>
       <h3 className="text-base font-semibold">{title}</h3>

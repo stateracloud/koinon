@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Code } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
+import { PriceLegend, PriceTable } from '@/components/price-table'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { SkeletonRows } from '@/components/ui/skeleton'
 import { PriceService, type PlatformPriceVersion, type PriceProposal, type PriceProvenance } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePlatformPriceActions } from '@/hooks/use-spend-actions'
 import { describeError } from '@/lib/api-error'
+import { rowFromPlatformEntry } from '@/lib/price-table'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
@@ -21,7 +25,7 @@ import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHas
  */
 export function PlatformPricesPage() {
   return (
-    <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)] gap-6">
+    <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-6">
       <PlatformPrices />
     </div>
   )
@@ -83,11 +87,42 @@ function PlatformPrices() {
           <AlertDescription>{refused}</AlertDescription>
         </Alert>
       )}
+      <PlatformPricesInUse />
       <Proposals say={say} refuse={refuse} actions={actions} />
       <Versions say={say} refuse={refuse} actions={actions} />
       <Explain />
       <FetchLog />
     </>
+  )
+}
+
+/**
+ * PlatformPricesInUse is the model prices table (ADR 0126 section 6, issue #1277) for the newest platform version: one
+ * row per platform entry. Models that no platform entry matches use the default list; an org's own price wins over
+ * both. A platform price changes through proposals and versions below, so the table has no "Override".
+ */
+function PlatformPricesInUse() {
+  const current = useQuery(PriceService.method.getPlatformPriceVersion, { version: 0n })
+  const none = current.error && describeError(current.error).code === Code.NotFound
+  const rows = useMemo(() => (current.data?.version?.entries ?? []).map(rowFromPlatformEntry), [current.data])
+  return (
+    <section aria-labelledby="platform-in-use" className="grid gap-3">
+      <h2 id="platform-in-use" className="text-lg font-semibold">
+        Platform prices in use
+      </h2>
+      <PriceLegend sources={['platform', 'default']} />
+      {current.data?.version && <p className="text-muted-foreground text-sm">Version {String(current.data.version.version)}. Models that no entry here matches use the default list.</p>}
+      {current.error && !none && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{describeError(current.error).message}</AlertDescription>
+        </Alert>
+      )}
+      {current.isPending ? (
+        <SkeletonRows label="Loading platform prices…" />
+      ) : current.error && !none ? null : (
+        <PriceTable caption="Platform prices in use" searchId="platform-price-search" rows={rows} emptyTitle="No platform prices yet. Every model uses the default list." />
+      )}
+    </section>
   )
 }
 

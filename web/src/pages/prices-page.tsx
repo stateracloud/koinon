@@ -6,6 +6,7 @@ import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { ConfirmAction } from '@/components/confirm-action'
 import { PriceForm } from '@/components/price-form'
+import { PriceLegend, PriceTable } from '@/components/price-table'
 import { RequireAdmin } from '@/components/require-admin'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { SkeletonRows } from '@/components/ui/skeleton'
 import { PriceService, type PriceEntry, type PriceVersion } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePriceActions } from '@/hooks/use-spend-actions'
 import { useOrg } from '@/lib/org-context'
@@ -32,11 +34,12 @@ import {
   type FlagReason,
 } from '@/lib/prices'
 import { formatUSD } from '@/lib/cost'
+import { overrideForm, rowFromModel, type PriceRow } from '@/lib/price-table'
 
 /** PricesPage is where org admins and owners see the default prices and manage their own (ADR 0056, plan item PV2). */
 export function PricesPage() {
   return (
-    <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-6">
+    <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-6">
       <RequireAdmin what="prices">
         <PricesContent />
       </RequireAdmin>
@@ -70,7 +73,7 @@ function PricesContent() {
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">
-        Koinon prices every model request itself, from the tokens the provider reports and the price valid at that time. The prices you add win over the default list that ships with Koinon. Nothing you change here alters
+        Koinon prices every model request itself, from the tokens the provider reports and the price valid at that time. The prices you add win over the platform prices and the default list that ships with Koinon. Nothing you change here alters
         a request that was already charged.
       </p>
       {notice && (
@@ -92,6 +95,8 @@ function PricesContent() {
           <AlertDescription>{refused}</AlertDescription>
         </Alert>
       )}
+
+      <PricesInUse orgId={orgId} actions={actions} onSaved={saved} />
 
       <section aria-labelledby="org-prices" className="grid gap-3">
         <h2 id="org-prices" className="text-lg font-semibold">
@@ -179,6 +184,47 @@ function PricesContent() {
       <DefaultPrices orgId={orgId} />
       <FlaggedPrices orgId={orgId} />
     </>
+  )
+}
+
+/**
+ * PricesInUse is the model prices table of the org (ADR 0126 section 6, issue #1277): one row per enabled model with
+ * the layer that prices it now (ExplainOrgPrices). "Override" adds an org price for the model, filled from the price
+ * in use. Edit and Remove of an override in the table wait for a decision (ADR 0126 section 7); "Your prices" below
+ * has them.
+ */
+function PricesInUse({ orgId, actions, onSaved }: { orgId: string; actions: ReturnType<typeof usePriceActions>; onSaved: (name: string, warnings: string[]) => void }) {
+  const explained = useQuery(PriceService.method.explainOrgPrices, { orgId })
+  const rows = useMemo(() => (explained.data?.models ?? []).map(rowFromModel), [explained.data])
+  const [overriding, setOverriding] = useState<PriceRow>()
+  return (
+    <section aria-labelledby="prices-in-use" className="grid gap-3">
+      <h2 id="prices-in-use" className="text-lg font-semibold">
+        Prices in use
+      </h2>
+      <PriceLegend />
+      {explained.error && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{describeError(explained.error).message}</AlertDescription>
+        </Alert>
+      )}
+      {overriding && (
+        <PriceForm
+          key={overriding.id}
+          orgId={orgId}
+          initial={overrideForm(overriding)}
+          title={`Override the price of ${overriding.model}`}
+          actions={actions}
+          onDone={() => setOverriding(undefined)}
+          onSaved={onSaved}
+        />
+      )}
+      {explained.isPending ? (
+        <SkeletonRows label="Loading prices in use…" />
+      ) : explained.error ? null : (
+        <PriceTable caption="Prices in use" searchId="price-search" rows={rows} onOverride={setOverriding} emptyTitle="No enabled models. Enable a model on a provider to see its price." />
+      )}
+    </section>
   )
 }
 
