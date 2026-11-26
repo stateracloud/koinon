@@ -153,7 +153,6 @@ var _ = Describe("Backend ownership", func() {
 		Expect(gw.Calls("DeleteProvider")).To(BeZero())
 		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
-
 	})
 
 	It("refuses a provider another install made", func(ctx SpecContext) {
