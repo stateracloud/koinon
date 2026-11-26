@@ -519,3 +519,124 @@ Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is it
   the command line of a process. The spec runs only the write command, not git or a harness.
 - **Exit (#1386).** A hop outside the guest adds the identity header, and the guest holds no token. Then the
   token file, its command and this amendment are removed, and the escape spec expects to find no token.
+
+## Amendment (2026-11-26, issue #1386): the egress layer adds the actor identity, the guest holds no token
+
+PROPOSED. The maintainer decided on 2026-11-26 that #1386 ships before the v0.1.0 final tag, and that this
+amendment gets a maintainer review before the code. When the code of #1386 merges, this amendment is
+accepted and the interim amendment above (#1086 part C2) is removed.
+
+### What section 1.2 means
+
+"Minted and injected outside the guest" means this: a component outside the guest adds the actor identity
+header to each request that leaves the guest for the gateway. No process in the guest can read the token. The
+guest has no file, environment variable, command argument or memory that holds it. The guest sends only a
+fixed placeholder in the `Koinon-Actor-Token` header. The placeholder is not a secret and it is the same in
+every sandbox. The egress layer replaces it. A request without the header is not changed, and the gateway
+refuses it (`no_token`).
+
+### The Substrate driver (the golden path)
+
+1. **The driver writes the actor's egress policy.** Before the first resume of an actor, the Substrate driver
+   creates the actor's `EgressPolicy` (`CreateActorEgressPolicy`). It updates the policy when the gateway
+   endpoint changes. The policy has one `HttpRule` for the host and port of the gateway's egress listener. Its
+   effect is `replace_headers`: the header `Koinon-Actor-Token`, from `actor_jwt` with the gateway audience
+   and `expiration_seconds: 900`. The policy holds only gateway rules: no org host and no credential. So the
+   rule "the driver has no egress half" stays true: the gateway still owns L7 rules and credentials.
+2. **A finding: this is also the first gateway route of a Substrate guest.** Today no Koinon code writes an
+   actor egress policy. Substrate v1.0.1 refuses all egress of an actor that has no policy
+   (`cmd/atenet/internal/router/egress/egress.go:260`). So, without an operator's policy, a Substrate guest
+   cannot reach the gateway now. The policy of item 1 closes this gap for the gateway. The org's L4-only
+   grants of section 2.1 are not part of #1386.
+3. **atenet-egress mints and adds the token.** atenet-egress runs outside the guest, in Substrate's
+   control-plane namespace. For a request that carries the header, it gets a token from ateapi
+   (`MintActorJwt`) and writes it over the value of the guest (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each
+   token until a third of its lifetime remains. A guest value never reaches the gateway. A failed mint refuses
+   the request (403 or 503). Source: `cmd/atenet/internal/router/egress/credentials.go` (`applyEffects`,
+   `actorJWT`) and `actorjwt/actorjwt.go`. The token is never stored. A memory snapshot cannot hold it, which
+   is what D5 of ADR 0119 asks for.
+4. **The gateway verifies the Substrate token.** The gateway gets a second verifier for the actor token:
+   - It trusts exactly one issuer: the `--actor-jwt-issuer` of the Substrate install (the installer default is
+     `https://idp.<substrate namespace>.svc`). The value comes from the chart values, never from the `iss` of a
+     token. The gateway reads `<issuer>/.well-known/openid-configuration`. The `issuer` of that document must
+     be equal to the configured issuer. Then the gateway reads the `jwks_uri` and keeps the keys in a cache. If
+     the gateway cannot read the keys, it refuses the request. It never allows a request on an error.
+   - The token must have the gateway audience in `aud`, a valid `exp` and `nbf`, and a lifetime of 300 to 3600
+     seconds (section 1.2). Its `sub` must be `actor/<atespace>/<name>`, and the claim `actor.ate.dev` must
+     name the same actor. The gateway refuses a `worker-for-actor` token.
+   - **The actor names an agent.** The driver creates the actor in the org's workspace (the atespace, ADR 0002)
+     with the sandbox name. The reconciler records both in `agent_sandboxes` (`workspace`, `sandbox_name`),
+     next to the org and the agent. So the pair (atespace, actor name) gives the org and the agent. The
+     gateway gets this map through the State stream, as it gets the routes. An actor that is not in the map
+     is refused. The route check (`route.inScope`) does not change.
+   - The Substrate token has no run. The gateway log names the org and the agent. The run claim stays empty,
+     as `actortoken.Actor` already allows.
+   - atenet-egress keys its token cache by actor name. A new actor with the name of an old one can get the old
+     token for a short time. The name comes from the org and the agent, so the token names the same agent.
+     This is accepted.
+5. **Network and install.** The gateway needs a route to the issuer and to its `jwks_uri`. The chart adds
+   one NetworkPolicy egress rule for this route, and a chart check asserts it. The preflight checks that the
+   gateway can read the discovery document. The gateway does not get a route to ateapi.
+
+### The OpenShell driver (until #1094 removes it)
+
+OpenShell has no `actor_jwt`. Two ways meet the rule. The maintainer chooses one:
+
+- **(a) A provider record with a stable placeholder (recommended).** koinon-agentd mints the Koinon actor
+  token as today. It writes the token into an OpenShell provider record with `stable_placeholder: true`, not
+  into the guest. It writes a new token every 5 minutes (`UpdateProvider`). The supervisor replaces the
+  placeholder on the `koinon_egress` endpoint. Section 7 already counts the supervisor as the egress layer of
+  OpenShell. The kind e2e (which runs OpenShell) keeps its clone through the gateway. Cost: a refresh loop
+  through the OpenShell API, and code that #1094 deletes. The token is in the memory of the supervisor, as
+  every OpenShell credential is during the window.
+- **(b) #1386 ships after #1094.** Then only the Substrate driver exists, and no OpenShell code is written.
+  Cost: #1386 waits for #1094, and the kind e2e must run the Substrate driver to keep the gateway clone spec.
+
+### What is removed
+
+- The guest token file `/tmp/.koinon-egress/token.gitconfig`, `codehost.WriteEgressTokenCommand`,
+  `codehost.RemoveEgressTokenCommand`, the refresh loop in koinon-agentd that writes into the guest, and the
+  interim amendment above.
+- The git configuration of the guest keeps the `insteadOf` prefix and gets the placeholder header. It holds no
+  secret.
+- koinon-agentd keeps its own minter for its forge-wait probe (`forgewait.go`). That probe runs outside the
+  guest, so the gateway keeps the Koinon Ed25519 verifier for it.
+
+### Proof
+
+- The escape spec `holds the actor token only in the egress token file that koinon-agentd writes` becomes:
+  the guest holds no actor identity token. It scans the same places (the roots, `/dev/shm`, the environment
+  and command line of each process) and finds no JWT-shaped value, with no exception.
+- A control spec: a request from the guest with the placeholder reaches a route of its own agent (the gateway
+  accepts the added token). The same request with a token that the guest made itself is refused, because the
+  egress layer writes over it. On Substrate, a guest of another org with the same request is refused.
+- Section 5.1 holds as written: no credential and no token are in the guest, so no home checkpoint and no
+  snapshot can hold one.
+
+### Threat model
+
+- **Who attacks:** code in the guest (a hostile agent or a prompt injection), and a reader of a home
+  checkpoint or a snapshot.
+- **What changes:** the guest can still send requests as its own agent through the egress layer. That is the
+  identity's purpose, and the routes limit what it can do (section 2). But the guest cannot read the token. So
+  it cannot copy the token out of the sandbox, put it in the home, or use it after the sandbox stops.
+- **New trust:** the gateway trusts the Substrate issuer. A holder of the issuer's signing key can act as any
+  actor. Substrate's control plane is already trusted with the guest itself (ADR 0119), so this adds no new
+  party. The gateway maps an actor only through the `agent_sandboxes` record and the org's atespace.
+- **What is left:** the leg from atenet-egress to the gateway is HTTP inside the cluster, as the leg from the
+  guest is today. A reader of the pod network can see the token while it is valid (15 minutes). TLS to the
+  gateway is not proven yet (Verification). It stays an open question.
+
+### Prior art
+
+A quick check, not the full research workflow.
+
+- Agent Substrate v1.0.1 (commit `20778a6dbb01f13024642851bb592bf67c9fec05`): `HttpRuleEffects.replace_headers`
+  with `actor_jwt` in `api/ateapi/v1/ateapi.proto`, and the code in `cmd/atenet/internal/router/egress`. We use
+  it as it is. It is the feature that ADR 0119 D1 calls "out-of-guest credential injection".
+- Fly.io Tokenizer (ADR 0097 already cites it): a proxy outside the workload adds the secret to the request,
+  and the workload holds only a sealed or placeholder value. We borrow the placeholder that a hop outside
+  the guest replaces.
+- Kubernetes projected ServiceAccount tokens and SPIFFE JWT-SVIDs: short-lived, audience-bound JWTs that a
+  relying party verifies with OIDC discovery. We borrow the verification. We differ: the token never enters
+  the workload.
