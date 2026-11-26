@@ -522,9 +522,9 @@ Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is it
 
 ## Amendment (2026-11-26, issue #1386): the egress layer adds the actor identity, the guest holds no token
 
-PROPOSED. The maintainer decided on 2026-11-26 that #1386 ships before the v0.1.0 final tag, and that this
-amendment gets a maintainer review before the code. When the code of #1386 merges, this amendment is
-accepted and the interim amendment above (#1086 part C2) is removed.
+Accepted (2026-11-26). The maintainer decided on 2026-11-26 that #1386 ships before the v0.1.0 final tag.
+The maintainer reviewed this amendment before the code and accepted it on 2026-11-26, with items 5 and 6.
+The interim amendment above (#1086 part C2) stays until the code of #1386 merges. That code removes it.
 
 **Scope and order.** This amendment covers the Substrate driver only. The code of #1386 comes after three
 other issues:
