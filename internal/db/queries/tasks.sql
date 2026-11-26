@@ -76,9 +76,10 @@ WITH task AS (
     RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
 )
 INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
-                           actor_agent_id, run_id, payload)
+                           actor_agent_id, run_id, payload, payload_version, prompt)
 SELECT task.org_id, task.id, task.last_event_seq, @kind, @actor_kind,
-       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(run_id), @payload
+       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(run_id), @payload,
+       @payload_version::smallint, @prompt::boolean
 FROM task
 RETURNING *;
 
@@ -99,13 +100,12 @@ WHERE u.id = ANY(@user_ids::uuid[]) AND u.deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = @org_id);
 
 -- name: ListTaskMessagesAfter :many
--- The users' messages on the task after a timeline seq, in order: what
--- agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
--- payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
+-- The events on the task after a timeline seq that are part of a run's prompt, in order: what
+-- agentd sends the harness. The writer marks them (task_events.prompt): the users' messages, and a
+-- system message with a source, such as a trigger's instruction, so a scheduled run sees what it
+-- was scheduled to do.
 SELECT * FROM task_events
-WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
-  AND kind = 'message'
-  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
+WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq AND prompt
 ORDER BY seq;
 
 -- name: LatestUserMessageActor :one

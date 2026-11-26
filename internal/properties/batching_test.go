@@ -62,7 +62,7 @@ func (w *taskWorld) sendTx() (queued bool, err error) {
 	err = pgx.BeginFunc(w.ctx, pool, func(tx pgx.Tx) error {
 		tq := store.New(tx)
 		if _, err := tq.AppendTaskEvent(w.ctx, store.AppendTaskEventParams{
-			OrgID: w.org, TaskID: w.task.ID, Kind: "message", ActorKind: store.TaskActorKindUser, ActorUserID: w.user, Payload: payload,
+			OrgID: w.org, TaskID: w.task.ID, Kind: "message", ActorKind: store.TaskActorKindUser, ActorUserID: w.user, Payload: payload, Prompt: true,
 		}); err != nil {
 			return err
 		}

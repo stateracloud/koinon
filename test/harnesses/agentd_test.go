@@ -125,7 +125,7 @@ func describeAgentd(f definition) bool {
 		runTask := func(ctx context.Context, text string) store.Run {
 			_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 				OrgID: org, TaskID: task.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
-				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
+				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)), Prompt: true,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300})
