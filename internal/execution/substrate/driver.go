@@ -35,6 +35,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -154,9 +155,12 @@ type Driver struct {
 	// routerState reports the state of the router connection, or is nil when the connection has none to
 	// report (a test double). routerDown reads it.
 	routerState func() connectivity.State
-	cfg         Config
-	closers     []io.Closer
-	lineage     lineages
+	// routerSeen is set once the router connection was READY in this process. After that, a connection
+	// failure is an outage that may pass, not an install error.
+	routerSeen atomic.Bool
+	cfg        Config
+	closers    []io.Closer
+	lineage    lineages
 
 	mu    sync.Mutex
 	gates map[key]*gate
@@ -576,14 +580,22 @@ func fail(op string, kind error, format string, args ...any) error {
 	return &execution.Error{Op: op, Kind: kind, Err: fmt.Errorf(format, args...)}
 }
 
+// noteRouter records that the router connection is READY. signedConn calls it before and after every call.
+func (d *Driver) noteRouter() {
+	if d.routerState != nil && d.routerState() == connectivity.Ready {
+		d.routerSeen.Store(true)
+	}
+}
+
 // routerDown maps an Unavailable error of a router call that never reached a guest to
 // [execution.ErrUnreachable]; it returns nil for any other error. A guest that does not listen yet answers through a
-// working connection, which is why the callers retry Unavailable; a connection that cannot be made (a
-// wrong address, a failed handshake, a client certificate the router refuses) is in TRANSIENT_FAILURE
-// and no retry fixes it, so the caller fails with the dial error at once instead of waiting out the
-// guest's start-up time (issue #1446).
+// working connection, which is why the callers retry Unavailable. A connection that has never been READY in
+// this process (a wrong address, a failed handshake, a client certificate the router refuses) is in
+// TRANSIENT_FAILURE and no retry fixes it, so the caller fails with the dial error at once instead of waiting
+// out the guest's start-up time (issue #1446). Once the connection has been READY, a failure is an outage
+// (a router rollout, an eviction, a node drain): it stays Unavailable and the callers retry and resume.
 func (d *Driver) routerDown(op string, err error) error {
-	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerState() != connectivity.TransientFailure {
+	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerState() != connectivity.TransientFailure || d.routerSeen.Load() {
 		return nil
 	}
 	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("cannot connect to the atenet router: %w", err)}

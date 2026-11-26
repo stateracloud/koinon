@@ -306,4 +306,15 @@ var _ = Describe("a router that cannot be reached", func() {
 		Expect(time.Since(started)).To(BeNumerically("<", 10*time.Second), "GuestReadyTimeout is 30 s")
 		Expect(cl.Started(ws, "sb")).To(BeEmpty())
 	})
+
+	It("keeps ErrUnavailable for a router that served a call and then went away", func(ctx SpecContext) {
+		d, cl := newDriver(testConfig(500 * time.Millisecond))
+		ready(ctx, d, "sb")
+		_, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
+		Expect(err).NotTo(HaveOccurred())
+		cl.StopRouter()
+		_, err = d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
+		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(MatchError(execution.ErrUnreachable))
+	})
 })
