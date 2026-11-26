@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { AgentStatusBadge, StatusBadge } from './status-badge'
+import { AgentStatusBadge, StatusBadge, TokenStatusBadge } from './status-badge'
 
 // ADR 0126 section 3: the six task states, each with its name as text and a dot.
 const cases: [TaskState, string, string][] = [
@@ -47,6 +47,19 @@ describe('AgentStatusBadge', () => {
     render(<AgentStatusBadge status={status} unhealthy={unhealthy} />)
     const badge = screen.getByTestId('status-badge')
     expect(badge).toHaveTextContent(name)
+    expect(badge).toHaveAttribute('data-tone', tone)
+  })
+})
+
+describe('TokenStatusBadge', () => {
+  it.each([
+    ['active', 'Active', 'completed'],
+    ['expired', 'Expired', 'neutral'],
+    ['revoked', 'Revoked', 'failed'],
+  ] as const)('shows %s as %s', (status, text, tone) => {
+    render(<TokenStatusBadge status={status} />)
+    const badge = screen.getByTestId('status-badge')
+    expect(badge).toHaveTextContent(text)
     expect(badge).toHaveAttribute('data-tone', tone)
   })
 })
