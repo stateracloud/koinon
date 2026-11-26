@@ -92,6 +92,20 @@ func TestRenameKEKSecret(t *testing.T) {
 	}
 }
 
+func TestRenameGatewayKeySecret(t *testing.T) {
+	m := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: koinon-drill-src-a1b2c3-gateway-recipient-key\n  labels:\n    a: \"b\"\ntype: Opaque\ndata:\n  gk-ae787ea8cef67540: AAAA\n"
+	got, err := drill.RenameGatewayKeySecret(m, "koinon-drill-src-a1b2c3-gateway-recipient-key", "koinon-drill-dst-a1b2c3-gateway-recipient-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "\n  name: koinon-drill-dst-a1b2c3-gateway-recipient-key\n") || strings.Contains(got, "src") || !strings.Contains(got, "gk-ae787ea8cef67540: AAAA") {
+		t.Errorf("not renamed:\n%s", got)
+	}
+	if _, err := drill.RenameGatewayKeySecret(m, "other", "x"); err == nil {
+		t.Error("a missing Secret name must be an error")
+	}
+}
+
 func TestGuideSourceEnvAddsTheSourceAndRefusesARealNamespace(t *testing.T) {
 	env, err := drill.GuideSourceEnv("koinon-drill-dst-a1b2c3", "koinon-drill-dst-a1b2c3", "koinon-drill-src-a1b2c3", "koinon-drill-src-a1b2c3")
 	if err != nil {

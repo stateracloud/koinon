@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -10,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { describeError } from '@/lib/api-error'
 import { whoAmIKey } from '@/lib/query'
 
 const minLength = 12
@@ -23,7 +23,7 @@ export function ChangePasswordPage() {
   const [problem, setProblem] = useState<string | null>(null)
   const change = useMutation(AuthService.method.changePassword, {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: whoAmIKey }),
-    onError: (err) => setProblem(ConnectError.from(err).rawMessage),
+    onError: (err) => setProblem(describeError(err).message),
   })
 
   function onSubmit(e: FormEvent) {

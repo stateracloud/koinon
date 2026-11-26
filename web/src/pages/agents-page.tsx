@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { useAllAgents } from '@/hooks/use-all-agents'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { describeError } from '@/lib/api-error'
 import { harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
@@ -26,7 +26,7 @@ export function AgentsPage() {
       </div>
       {list.isError && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       )}
       {list.isPending ? (

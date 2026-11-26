@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useState, type Dispatch, type SetStateAction } from 'react'
@@ -17,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { useOrg } from '@/lib/org-context'
 import { servingPollInterval, savedNotice, servingBadge, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
@@ -89,7 +89,7 @@ function ProvidersContent() {
       )}
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {providers.isPending || models.isPending ? (
