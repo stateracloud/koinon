@@ -326,9 +326,13 @@ func usageSpec(env Env) {
 				}
 				expect()
 			}
-			if c.format == modelformat.Anthropic {
+			_, gap78 := env.KnownGaps["#78"]
+			switch {
+			case c.format == modelformat.Anthropic && gap78:
 				It("records the thinking split of "+c.name+" (expected failure, #78)", check, SpecTimeout(time.Minute))
-			} else {
+			case c.format == modelformat.Anthropic:
+				It("records the thinking split of "+c.name, check, SpecTimeout(time.Minute))
+			default:
 				It("records the reasoning split of "+c.name, check, SpecTimeout(time.Minute))
 			}
 		}
