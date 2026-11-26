@@ -141,7 +141,7 @@ type Options struct {
 	// which reads the rule of the kind from the one list (credkind, #1221).
 	Scrub func(kind credkind.Kind, org string, values ...string)
 	// Held refuses every request with ReasonHeld, whatever routes are applied (ADR 0107, issue #1390).
-	// It is read at start, as --restore-hold: a release is a rollout.
+	// It is read at start, as --restore-hold: a release is a rollout. It must not change after New.
 	Held bool
 }
 

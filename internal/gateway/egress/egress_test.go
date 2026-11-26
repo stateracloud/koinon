@@ -433,7 +433,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(logs.String()).NotTo(ContainSubstring("held-path-marker"))
 			Expect(logs.String()).NotTo(ContainSubstring(forgeHost))
 
-			// The same table on a gateway that is not held serves the allowed request.
+			// The suite's gateway, which is not held, serves the same allowed request with the same table.
 			resp := do("GET", "/egress/"+authority(regHost)+"/pkg", token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			Expect(upstreamCalls()).To(HaveLen(1))

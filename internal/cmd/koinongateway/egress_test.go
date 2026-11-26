@@ -145,8 +145,9 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 	// hold is read at start, so the release is a start without --restore-hold.
 	It("refuses every egress request while held, also with --egress-routes-file, and serves again after the release", func(specCtx SpecContext) {
 		minter := writeActorKey(keysDir, "k1")
+		// A reserved host: a regression that serves while held fails to dial and never reaches the internet.
 		routes := filepath.Join(GinkgoT().TempDir(), "routes.json")
-		Expect(os.WriteFile(routes, []byte(`{"routes":[{"name":"npm","class":"registry","host":"registry.npmjs.org","methods":["GET"],"pathPrefixes":["/"]}]}`), 0o600)).To(Succeed())
+		Expect(os.WriteFile(routes, []byte(`{"routes":[{"name":"reg","class":"registry","host":"registry.example.test","methods":["GET"],"pathPrefixes":["/"]}]}`), 0o600)).To(Succeed())
 		token, err := minter.Mint(actortoken.Actor{Org: "acme", Agent: "repo-helper"}, 5*time.Minute)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -181,7 +182,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 			b, _ := io.ReadAll(resp.Body)
 			return resp.StatusCode, resp.Header.Get(egress.RefusalHeader), string(b)
 		}
-		allowed := "/egress/registry.npmjs.org/left-pad"
+		allowed := "/egress/registry.example.test/left-pad"
 
 		for _, routesFile := range []string{routes, ""} {
 			By("held, routes file " + strconv.Quote(routesFile))
@@ -200,8 +201,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 
 		By("released: the same config without --restore-hold serves the routes again")
 		addr, stop := start(false, routes)
-		// The spec never sends a request that a route allows: that would dial the real registry. The
-		// gate answers with its own reasons, so the request passed the hold.
+		// The gate answers with its own reasons, so the request passed the hold.
 		Eventually(func() string { _, r, _ := get(addr, allowed, ""); return r }, racescale.D(10*time.Second), 50*time.Millisecond).
 			Should(Equal(string(route.ReasonNoToken)))
 		_, reason, _ := get(addr, "/egress/evil.example.test/x", token)

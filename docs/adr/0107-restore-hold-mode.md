@@ -116,6 +116,9 @@ with `gateway.model.driver=koinon`.
 - While `restoreHold` is true, the chart passes `--restore-hold` to both koinon-gateway Deployments. With the flag,
   `/readyz` answers 200 before the first revision, and the MCP and model paths refuse every request (503 with the
   hold message), whatever config the pod holds. The held reconciler still publishes nothing.
+- The egress listener of a held koinon-gateway refuses every request too (issue #1390): 503, reason `held` in the
+  `Koinon-Egress-Refusal` header, before the actor token check and the route match, whatever routes the pod holds
+  (also the platform routes of `--egress-routes-file`). The log line holds no body, path or host.
 - The release is the same rollout: the chart stops rendering the flag. Checks: `hack/chart-check.d/99-restore-hold.sh`,
   the chart smoke test (a held gateway is ready) and the `koinongateway` restore-hold spec.
 
