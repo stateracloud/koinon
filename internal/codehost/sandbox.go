@@ -50,16 +50,20 @@ func GitConfig(loc connectors.Location, hasCA bool) []byte {
 // The egress prefix of the Koinon gateway (ADR 0097, #1086 part C2). When the gateway serves the
 // forge routes, git in the sandbox reaches the code host through <gateway>/egress/<host>/ and sends
 // the actor identity token there. koinon-agentd mints the token outside the guest and writes it to
-// SandboxEgressToken, which is outside the home: the home is checkpointed, and the token must never
-// be in a home checkpoint (ADR 0120 sections 1 and 5). agentd refuses a token directory that is a
-// symbolic link, so the guest cannot send the file into the home. A memory snapshot of the whole
-// guest would hold the token; no production path takes one today. The token lives 300 to 3600
-// seconds, and agentd writes a new one before the old one ends.
+// SandboxEgressToken, which is outside the home: the home is checkpointed, and koinon-agentd never
+// writes the token into it (ADR 0120 sections 1 and 5). The write command refuses a token directory
+// that is a symbolic link, is not a directory, or is not the writer's own with mode 0700, so an
+// accident cannot send the file into the home. These checks do not stop a hostile agent: it can read
+// the file and copy the token into the home, and the token's short lifetime limits that. A memory
+// snapshot of the whole guest would hold the token; no production path takes one today. The token
+// lives 300 to 3600 seconds, and agentd writes a new one before the old one ends.
 //
 // INTERIM (ADR 0120, amendment of 2026-11-26): the agent user can read SandboxEgressToken while the
-// run is live, because git reads it in the guest. It is the only place in the guest that holds the
-// token; the escape suite fails if the token is in any other place. Exit: issue #1386, where a hop
-// outside the guest adds the header and no token is in the guest. Then remove the file and this text.
+// run is live, because git reads it in the guest. The gateway accepts the token on every egress route
+// in scope for its org and agent. koinon-agentd writes the token to no other place; after the write
+// command, the escape suite fails if the token is in any other place that it scans. Exit: issue #1386,
+// where a hop outside the guest adds the header and no token is in the guest. Then remove the file and
+// this text.
 const (
 	// SandboxEgressDir holds the token file. It is not under /sandbox.
 	SandboxEgressDir = "/tmp/.koinon-egress"
@@ -75,13 +79,19 @@ const (
 // sandbox, for logs and for tests that fake the sandbox.
 const GitScriptMarker = "koinon-gitconfig"
 
-// writeEgressTokenScript replaces $2 with stdin in one rename, in the directory $1, which is outside
-// the home. The guest can write to /tmp, so the script refuses a $1 that is a symbolic link or not a
-// directory: a link planted before the run could otherwise send each token into the checkpointed home.
+// writeEgressTokenScript replaces $2 (a file directly in $1) with stdin in one rename, in the
+// directory $1, which is outside the home. The guest can write to /tmp, so the script refuses a $1
+// that is a symbolic link, is not a directory, or is not this user's own with mode 0700: a link or a
+// directory planted before the run could otherwise send each token into the checkpointed home. After
+// the checks it works in the directory itself (cd -P, then relative names), so a later rename of the
+// path does not move the write, and mv -T never moves the file into a directory planted at $2.
 const writeEgressTokenScript = `# ` + GitScriptMarker + `
 umask 077
 if [ -L "$1" ] || { [ -e "$1" ] && [ ! -d "$1" ]; }; then echo "$1 is not a plain directory" >&2; exit 1; fi
-mkdir -p -- "$1" && [ ! -L "$1" ] && t=$(mktemp "$1/.git.XXXXXX") && cat > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
+mkdir -p -- "$1" && cd -P -- "$1" || exit 1
+if [ "$(pwd -P)" != "$1" ] || [ "$(stat -c %u:%a .)" != "$(id -u):700" ]; then echo "$1 is not a plain directory of this user with mode 0700" >&2; exit 1; fi
+f=${2##*/}
+t=$(mktemp .git.XXXXXX) && cat > "$t" && rm -rf -- "$f" && mv -fT -- "$t" "$f"`
 
 // removeEgressTokenScript removes the token file.
 const removeEgressTokenScript = `# ` + GitScriptMarker + `

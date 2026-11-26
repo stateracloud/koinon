@@ -5,6 +5,7 @@ package ensuresecrets_test
 import (
 	"bytes"
 	"crypto/ed25519"
+	"errors"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -146,6 +147,7 @@ var _ = Describe("Ensure with an Ed25519 key and its public key (#1086 part C2)"
 		Entry("a failed test op", testFailed, "it changed while the public key was added"),
 		Entry("a conflict", apierrors.NewConflict(schema.GroupResource{Resource: "secrets"}, "actor", nil),
 			"it changed while the public key was added"),
+		Entry("a transport error, unchanged", errors.New("dial tcp: i/o timeout"), "dial tcp: i/o timeout"),
 		Entry("another 422, whose message quotes a value",
 			apierrors.NewInvalid(schema.GroupKind{Kind: "Secret"}, "actor", field.ErrorList{
 				field.Invalid(field.NewPath("data"), "koinon_test_not-a-real-value", "bad"),

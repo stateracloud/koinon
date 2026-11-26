@@ -262,6 +262,9 @@ func addEd25519Public(ctx context.Context, secrets typedcorev1.SecretInterface, 
 		return nil
 	case apierrors.IsConflict(err) || jsonPatchApplyFailed(err):
 		return errSeedChanged
+	case !isAPIStatus(err):
+		// A transport or context error holds no value of the Secret.
+		return err
 	default:
 		// The reason and the code only: an apiserver message can quote a value of the Secret.
 		return fmt.Errorf("the apiserver refused the patch: %s (%d)",
@@ -283,6 +286,12 @@ func jsonPatchApplyFailed(err error) bool {
 		return false
 	}
 	return st.Details == nil || (st.Details.Kind == "" && st.Details.Name == "" && len(st.Details.Causes) == 0)
+}
+
+// isAPIStatus reports an error that the apiserver returned.
+func isAPIStatus(err error) bool {
+	var s apierrors.APIStatus
+	return errors.As(err, &s)
 }
 
 // statusCode is the HTTP code of an apiserver error, or 0.

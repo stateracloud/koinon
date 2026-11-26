@@ -141,7 +141,7 @@ func scanRootsGuest() []string {
 	if l := splitList(os.Getenv("KOINON_ESCAPE_SCAN_ROOTS")); len(l) > 0 {
 		return l
 	}
-	return []string{"/etc", "/home", "/root", "/run", "/var", "/srv", "/mnt", "/opt", "/tmp", "/sandbox", "/workspace"}
+	return []string{"/etc", "/home", "/root", "/run", "/var", "/srv", "/mnt", "/opt", "/tmp", "/dev/shm", "/sandbox", "/workspace"}
 }
 
 // denial names are the results of a connect that the sandbox or the network refused. "open" is the

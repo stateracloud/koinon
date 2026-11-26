@@ -497,18 +497,25 @@ Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is it
   - The agent user can read the token while the run is live. Other processes of the guest can read it too.
   - Its lifetime is 15 minutes (inside the 300 to 3600 seconds of section 1.2). koinon-agentd writes a new
     token every 5 minutes and removes the file when the run ends.
-  - Its audience is the Koinon gateway. It names the org, the agent and the run, and the gateway accepts it
-    only on the forge routes of that agent. A token that leaks out of the guest therefore reaches only what
-    that agent's git could reach, and only until it expires.
+  - Its audience is the Koinon gateway. It names the org, the agent and the run. The gateway accepts it on
+    every egress route in scope for that org and that agent (`route.inScope`): the agent's own routes, the
+    routes of its org and the platform routes, for forge and registry hosts. A token that leaks out of the
+    guest therefore reaches what any egress of that agent could reach, and only until it expires. This PR
+    does not narrow the routes.
   - The token is not a credential: it holds no forge, registry, provider or MCP credential. Section 1.1
     does not change.
-- **Section 5.1 until #1386.** It reads: credentials stay out of the guest, and the actor token stays out of
-  the home and of every snapshot. The token file is outside the home, so a home checkpoint does not hold
-  it. A memory snapshot of the whole guest would hold it, so section 5 must handle the file before a driver
-  enables the `MEMORY` fidelity. A restore always gets a fresh token.
+- **Section 5.1 until #1386.** It reads: credentials stay out of the guest, and koinon-agentd never writes
+  the actor token into the home. The token file is outside the home, so a home checkpoint does not hold it
+  by itself. But the agent can read the file, so a hostile agent can copy the token into the home, and the
+  next home checkpoint then holds it. The 15-minute lifetime limits this, and #1386 removes it. The write
+  command refuses a token directory that is a symbolic link, is not a directory, or is not owned by the
+  writer with mode 0700, and it renames the file into place with `mv -T`. These checks stop accidents. They
+  do not stop a hostile agent. A memory snapshot of the whole guest would hold the token, so section 5 must
+  handle the file before a driver enables the `MEMORY` fidelity.
 - **The escape suite checks it.** The Substrate spec `holds the actor token only in the egress token file that
   koinon-agentd writes` writes a real token with koinon-agentd's command (`codehost.WriteEgressTokenCommand`).
-  It fails if the token or another JWT-shaped value is in any other place that the agent can read: another
-  file, the environment or the command line of a process.
+  After koinon-agentd's write command, it fails if the token or another JWT-shaped value is in any other
+  place that the scan reads: another file under the scanned roots (`/dev/shm` included), the environment or
+  the command line of a process. The spec runs only the write command, not git or a harness.
 - **Exit (#1386).** A hop outside the guest adds the identity header, and the guest holds no token. Then the
   token file, its command and this amendment are removed, and the escape spec expects to find no token.

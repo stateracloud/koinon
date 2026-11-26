@@ -82,7 +82,9 @@ On the gVisor tier, every spec passes, except two that report **not applicable**
 
 `holds the actor token only in the egress token file that koinon-agentd writes` runs on every tier. It
 writes a real actor token with koinon-agentd's command, checks that the gateway's verifier accepts it, and
-fails if the token or another JWT-shaped value is in any place other than that file. The agent user can
+fails if the token or another JWT-shaped value is in any other place that it scans: a file under the
+guest roots (`/dev/shm` included), or the environment or command line of a process. It runs only the
+write command, not git or a harness. The agent user can
 read the file: this is the interim of the ADR 0120 amendment of 2026-11-26, and issue #1386 is its exit.
 
 The final line reads `0 Failed`, with these two among the skipped. Any other skip is a fault of the run.

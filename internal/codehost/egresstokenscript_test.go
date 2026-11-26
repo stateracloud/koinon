@@ -56,6 +56,36 @@ var _ = Describe("the actor token write script", func() {
 		Expect(entries).To(BeEmpty(), "the home holds no token")
 	})
 
+	It("refuses a token directory that is not private, and writes nothing in it", func() {
+		dir := filepath.Join(GinkgoT().TempDir(), ".koinon-egress")
+		Expect(os.Mkdir(dir, 0o700)).To(Succeed())
+		Expect(os.Chmod(dir, 0o755)).To(Succeed())
+		out, err := run(dir, filepath.Join(dir, "token.gitconfig"), "koinon_test_not-a-real-token")
+		Expect(err).To(HaveOccurred())
+		Expect(out).To(ContainSubstring("is not a plain directory of this user with mode 0700"))
+		entries, err := os.ReadDir(dir)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(entries).To(BeEmpty())
+	})
+
+	It("replaces a symbolic link to a directory at the file path, and writes nothing through it", func() {
+		root := GinkgoT().TempDir()
+		home := filepath.Join(root, "sandbox")
+		Expect(os.Mkdir(home, 0o700)).To(Succeed())
+		dir := filepath.Join(root, ".koinon-egress")
+		Expect(os.Mkdir(dir, 0o700)).To(Succeed())
+		file := filepath.Join(dir, "token.gitconfig")
+		Expect(os.Symlink(home, file)).To(Succeed())
+		out, err := run(dir, file, "koinon_test_not-a-real-token")
+		Expect(err).NotTo(HaveOccurred(), out)
+		st, err := os.Lstat(file)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Mode().IsRegular()).To(BeTrue())
+		entries, err := os.ReadDir(home)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(entries).To(BeEmpty(), "the home holds no token")
+	})
+
 	It("refuses a token directory that is a file", func() {
 		dir := filepath.Join(GinkgoT().TempDir(), ".koinon-egress")
 		Expect(os.WriteFile(dir, nil, 0o600)).To(Succeed())

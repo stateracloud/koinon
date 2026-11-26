@@ -25,8 +25,8 @@ import (
 // driver's exec, which both drivers serve the same way. The token names the org (its slug, as the
 // gateway routes do), the agent (its ID, the gateway agent name) and the run. It lives
 // actorTokenTTL and is written again every Config.ActorTokenRefresh, so it never ends while the run
-// is live. It is written outside the home (codehost.SandboxEgressToken), so no home checkpoint holds it,
-// and it is removed when the run ends. It is never logged. The agent user can read the file while the
+// is live. It is written outside the home (codehost.SandboxEgressToken), never into it, and it is
+// removed when the run ends. It is never logged. The agent user can read the file while the
 // run is live: an interim of ADR 0120 (amendment of 2026-11-26) whose exit is issue #1386.
 
 // actorTokenTTL is the lifetime of each token: well inside 300 to 3600 seconds (ADR 0120 1.2), and
