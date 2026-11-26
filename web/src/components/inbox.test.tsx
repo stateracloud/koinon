@@ -32,13 +32,15 @@ const qrow = (id: string): InboxItem => ({
   key: `question:${id}`,
   taskId: id,
   taskTitle: `Task ${id}`,
+  agentId: '',
   at: 0,
   question: create(QuestionSchema, { id, question: `Question ${id}`, defaultAnswer: 'go on' }),
 })
-const row = (id: string, at = 0): InboxItem => ({ kind: 'task-input', key: `task-input:${id}`, taskId: id, taskTitle: `Task ${id}`, at })
+const row = (id: string, at = 0): InboxItem => ({ kind: 'task-input', key: `task-input:${id}`, taskId: id, taskTitle: `Task ${id}`, agentId: '', at })
 const noop = () => {}
 const actions: { onApprove: () => void; onDeny: () => void; onAnswer: () => void; onDismiss: (item: InboxItem) => void } = { onApprove: noop, onDeny: noop, onAnswer: noop, onDismiss: noop }
-const titles = () => screen.getAllByTestId('inbox-item').map((r) => r.textContent?.replace(' needs your reply', ''))
+// The row's link names the task; the row head (badge, age) is not part of the title.
+const titles = () => screen.getAllByTestId('inbox-item').map((r) => r.querySelector('a')?.textContent?.replace(' needs your reply', ''))
 
 describe('stableOrder', () => {
   it('keeps shown rows in place, drops gone rows and appends new ones', () => {

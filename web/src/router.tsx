@@ -9,6 +9,7 @@ import { ApprovalPage } from '@/pages/approval-page'
 import { InboxPage } from '@/pages/inbox-page'
 import { OrgSettingsPage } from '@/pages/org-settings-page'
 import { OverviewPage } from '@/pages/overview-page'
+import { parseInboxTab, type InboxTab } from '@/lib/inbox'
 import { parseOverviewTab, type OverviewTab } from '@/lib/overview'
 import { PlatformConsolePage } from '@/pages/platform-console-page'
 import { PlatformLayout } from '@/pages/platform-layout'
@@ -64,7 +65,15 @@ export const overviewRoute = createRoute({
   component: OverviewPage,
 })
 
-export const inboxRoute = createRoute({ getParentRoute: () => orgRoute, path: '/inbox', component: InboxPage })
+export const inboxRoute = createRoute({
+  getParentRoute: () => orgRoute,
+  path: '/inbox',
+  validateSearch: (s: Record<string, unknown>): { tab?: InboxTab } => {
+    const tab = parseInboxTab(s.tab)
+    return tab && tab !== 'blocked' ? { tab } : {}
+  },
+  component: InboxPage,
+})
 
 // The board became the Board tab of the overview (ADR 0126 section 4).
 export const boardRedirectRoute = createRoute({

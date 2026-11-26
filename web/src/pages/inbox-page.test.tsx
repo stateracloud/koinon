@@ -8,7 +8,7 @@ import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalService, type ApproveRequest, type DenyRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionService, QuestionState, type AnswerQuestionRequest, type DismissQuestionRequest } from '@/gen/koinon/question/v1alpha1/question_pb'
-import { TaskService, TaskState, type AppendMessageRequest, type CreateTaskRequest } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { TaskService, TaskState, type AppendMessageRequest, type CreateTaskRequest, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { agent, approval, question, renderApp, task, whoAmI } from '@/test-utils'
 
 type Opts = {
@@ -18,6 +18,7 @@ type Opts = {
   creates?: CreateTaskRequest[]
   messages?: AppendMessageRequest[]
   approveError?: ConnectError
+  extraTasks?: Task[]
 }
 
 function transport(opts: Opts = {}) {
@@ -29,6 +30,7 @@ function transport(opts: Opts = {}) {
     task('t-5', 'Stale idea', TaskState.CANCELED),
     task('t-6', 'Broken job', TaskState.FAILED),
     task('t-7', 'Which branch?', TaskState.INPUT_REQUIRED, 'a-3'),
+    ...(opts.extraTasks ?? []),
   ]
   let approvals = [approval('ap-1', 't-1')]
   return createRouterTransport(({ service }) => {
@@ -80,7 +82,13 @@ describe('Inbox home', () => {
     expect(rows.map((r) => r.dataset.kind).sort()).toEqual(['approval', 'task-input'])
     expect(within(list).getByRole('link', { name: 'Review create_pull_request on acme/widgets' })).toHaveAttribute('href', '/approvals/ap-1')
     expect(within(list).getByRole('link', { name: 'Which branch? needs your reply' })).toHaveAttribute('href', '/tasks/t-7')
-    expect(screen.getByRole('heading', { level: 2, name: /Waiting on you/ })).toHaveTextContent('2')
+    expect(screen.getByRole('tab', { name: 'Blocked on you 2' })).toHaveAttribute('aria-selected', 'true')
+    // Each blocked row has the state badge, the agent's avatar and name, and its age.
+    for (const r of rows) {
+      expect(within(r).getByTestId('status-badge')).toHaveTextContent('Blocked on you')
+      expect(within(r).getByTestId('agent-avatar')).toHaveAttribute('aria-hidden', 'true')
+      expect(within(r).getByText(/^waiting /)).toBeInTheDocument()
+    }
   })
 
   it('approves inline with the hash the list showed and drops the item', async () => {
@@ -164,6 +172,92 @@ describe('Inbox home', () => {
     renderApp(t, '/inbox')
     expect(await screen.findByText('Nothing is waiting on you.')).toBeInTheDocument()
     expect(screen.queryByTestId('inbox-badge')).not.toBeInTheDocument()
+  })
+})
+
+describe('Inbox tabs', () => {
+  const titlesIn = (name: string) => within(screen.getByRole('list', { name })).getAllByTestId('task-row').map((r) => within(r).getByRole('link').getAttribute('aria-label'))
+
+  it('shows each tab with its count', async () => {
+    renderApp(transport(), '/inbox')
+    await screen.findByRole('list', { name: 'Waiting on you' })
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Blocked on you 2', 'Open 4', 'Done 3', 'All 7'])
+  })
+
+  it('Open lists the submitted, working and input-required tasks with badge, avatar, agent and a Review link', async () => {
+    renderApp(transport(), '/inbox')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Open 4' }))
+    const list = screen.getByRole('list', { name: 'Open tasks' })
+    const rows = within(list).getAllByTestId('task-row')
+    expect(rows.map((r) => r.dataset.state).sort()).toEqual(['INPUT_REQUIRED', 'INPUT_REQUIRED', 'SUBMITTED', 'WORKING'])
+    expect(titlesIn('Open tasks').sort()).toEqual(['Review Fix the login bug', 'Review Triage issues', 'Review Which branch?', 'Review Write release notes'])
+    const triage = rows.find((r) => r.dataset.state === 'SUBMITTED')!
+    expect(within(triage).getByTestId('status-badge')).toHaveTextContent('Submitted')
+    expect(within(triage).getByTestId('agent-avatar')).toHaveTextContent('D')
+    expect(within(triage).getByText(/^Docs writer/)).toBeInTheDocument()
+    expect(within(triage).getByRole('link', { name: 'Review Triage issues' })).toHaveAttribute('href', '/tasks/t-3')
+  })
+
+  it('Open shows Blocked on you only for the viewer\'s own items; another person\'s input-required task shows Input required', async () => {
+    const other = task('t-8', 'Waits on Sam', TaskState.INPUT_REQUIRED)
+    other.waitingOnUserIds = ['u-9']
+    renderApp(transport({ extraTasks: [other] }), '/inbox')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Open 5' }))
+    const rows = within(screen.getByRole('list', { name: 'Open tasks' })).getAllByTestId('task-row')
+    const badge = (title: string) => within(rows.find((r) => within(r).queryByText(title))!).getByTestId('status-badge')
+    expect(badge('Waits on Sam')).toHaveTextContent('Input required')
+    expect(badge('Waits on Sam')).toHaveAttribute('data-tone', 'attention')
+    expect(badge('Fix the login bug')).toHaveTextContent('Blocked on you')
+    expect(badge('Which branch?')).toHaveTextContent('Blocked on you')
+  })
+
+  it('writes the tab to the URL and removes it for Blocked on you', async () => {
+    const { history } = renderApp(transport(), '/inbox')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Open 4' }))
+    await waitFor(() => expect(history.location.search).toContain('tab=open'))
+    await userEvent.click(screen.getByRole('tab', { name: 'Blocked on you 2' }))
+    await waitFor(() => expect(history.location.search).not.toContain('tab'))
+  })
+
+  it('Done lists the completed, failed and canceled tasks; a failed row shows only its state (the API gives no reason)', async () => {
+    renderApp(transport(), '/inbox')
+    await userEvent.click(await screen.findByRole('tab', { name: 'Done 3' }))
+    const rows = within(screen.getByRole('list', { name: 'Done tasks' })).getAllByTestId('task-row')
+    expect(rows.map((r) => r.dataset.state).sort()).toEqual(['CANCELED', 'COMPLETED', 'FAILED'])
+    const failed = rows.find((r) => r.dataset.state === 'FAILED')!
+    expect(within(failed).getByTestId('status-badge')).toHaveTextContent('Failed')
+    expect(within(failed).getByText('Broken job')).toBeInTheDocument()
+    expect(within(failed).getByText(/^Repo helper · /)).toBeInTheDocument()
+  })
+
+  it('All lists every task, and the URL opens a tab directly', async () => {
+    renderApp(transport(), '/inbox?tab=all')
+    const rows = within(await screen.findByRole('list', { name: 'All tasks' })).getAllByTestId('task-row')
+    expect(rows).toHaveLength(7)
+    expect(screen.getByRole('tab', { name: 'All 7' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('an unknown tab in the URL falls back to Blocked on you', async () => {
+    renderApp(transport(), '/inbox?tab=nope')
+    await screen.findByRole('list', { name: 'Waiting on you' })
+    expect(screen.getByRole('tab', { name: 'Blocked on you 2' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('has a legend with every task state as text', async () => {
+    renderApp(transport(), '/inbox')
+    const legend = await screen.findByRole('list', { name: 'State legend' })
+    expect(within(legend).getAllByTestId('status-badge').map((b) => b.textContent)).toEqual(['Submitted', 'Working', 'Blocked on you', 'Completed', 'Failed', 'Canceled'])
+  })
+
+  it('says so when a task tab is empty', async () => {
+    const t = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, { listAgents: () => ({ agents: [] }) })
+      service(TaskService, { listTasks: () => ({ tasks: [task('t-2', 'Write notes', TaskState.WORKING)] }) })
+      service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+    })
+    renderApp(t, '/inbox?tab=done')
+    expect(await screen.findByText('No task is done yet.')).toBeInTheDocument()
   })
 })
 
@@ -300,7 +394,10 @@ describe('Inbox questions (ask_user)', () => {
 
   it('shows who the question waits on and for how long', async () => {
     renderApp(qTransport({ admins: true }), '/inbox')
-    expect(await screen.findByText("Asked to the org's admins (2 people; the first answer counts) · waiting 3 hours")).toBeInTheDocument()
+    const row = within(await screen.findByRole('list', { name: 'Waiting on you' })).getByTestId('inbox-item')
+    expect(within(row).getByText("Asked to the org's admins (2 people; the first answer counts)")).toBeInTheDocument()
+    // The row head counts from waitingSince (3 hours ago), not from when the question opened.
+    expect(within(row).getByText('waiting 3 hours')).toBeInTheDocument()
   })
 
   it('gives an admin an item for an unhealthy agent', async () => {
