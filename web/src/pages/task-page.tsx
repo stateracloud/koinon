@@ -55,7 +55,7 @@ export function TaskPage() {
       <Alert variant="destructive" role="alert">
         <AlertDescription>
           {sentence(describeError(taskQuery.error).message)}{' '}
-          <Link to="/" className="underline">
+          <Link to="/inbox" className="underline">
             Back to the inbox
           </Link>
         </AlertDescription>
@@ -75,7 +75,7 @@ export function TaskPage() {
     <div className="mx-auto grid max-w-3xl gap-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="grid gap-1">
-          <Link to="/" className="text-muted-foreground text-sm hover:underline">
+          <Link to="/inbox" className="text-muted-foreground text-sm hover:underline">
             ← Inbox
           </Link>
           <h1 className="text-xl font-semibold">{t?.title}</h1>

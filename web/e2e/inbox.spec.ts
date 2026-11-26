@@ -85,7 +85,7 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
     stream: { 'koinon.run.v1alpha1.RunService/WatchRun': (): Stream => ({ messages: [] }) },
   })
 
-  await page.goto('/')
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
 
   // Waiting on you: an approval and a question-shaped task, with a badge in the navigation.
@@ -123,7 +123,8 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
   expect(approved).toEqual([expect.objectContaining({ approvalId: 'ap-1', argsSha256: sha })])
 
   // The board is a secondary view with the task states.
-  await nav.getByRole('link', { name: 'Board' }).click()
+  await nav.getByRole('link', { name: 'Overview' }).click()
+  await page.getByRole('tab', { name: 'Board' }).click()
   for (const [state, title] of [
     ['Submitted', 'Triage new issues'],
     ['Working', 'Fix the README typo'],

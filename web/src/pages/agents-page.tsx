@@ -43,17 +43,32 @@ const columns: DataTableColumn<Agent>[] = [
 
 /** AgentsPage lists the org's agents. */
 export function AgentsPage() {
+  return (
+    <div className="mx-auto grid max-w-3xl gap-4">
+      <PageHeader title="Agents" actions={<NewAgentButton />} />
+      <AgentsList />
+    </div>
+  )
+}
+
+/** NewAgentButton opens the new agent form; it does not show for a role that cannot create an agent. */
+export function NewAgentButton() {
   const { org } = useOrg()
-  const list = useAllAgents(org.orgId)
-  const canCreate = org.role >= OrgRole.MEMBER
-  const newAgent = canCreate && (
+  if (org.role < OrgRole.MEMBER) return null
+  return (
     <Button asChild size="sm">
       <Link to="/agents/new">New agent</Link>
     </Button>
   )
+}
+
+/** AgentsList is the table of the org's agents, on the Agents page and the Agents tab of the overview. */
+export function AgentsList() {
+  const { org } = useOrg()
+  const list = useAllAgents(org.orgId)
+  const canCreate = org.role >= OrgRole.MEMBER
   return (
-    <div className="mx-auto grid max-w-3xl gap-4">
-      <PageHeader title="Agents" actions={newAgent} />
+    <div className="grid gap-4">
       <QueryError error={list.isError ? list.error : undefined} />
       {list.isPending ? (
         <SkeletonRows label="Loading agents…" />

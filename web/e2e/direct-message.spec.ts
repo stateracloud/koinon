@@ -73,7 +73,7 @@ test('direct messages: start a thread, reply in it, reopen a completed one, and 
     stream: { 'koinon.run.v1alpha1.RunService/WatchRun': (): Stream => ({ messages: [] }) },
   })
 
-  await page.goto('/')
+  await page.goto('/inbox')
   const chat = page.getByRole('region', { name: 'Thread: What changed in the repos today?' })
   await expect(chat.getByText('What changed in the repos today?', { exact: true }).first()).toBeVisible()
   await expect(chat.getByText('Answer briefly.')).toHaveCount(0)

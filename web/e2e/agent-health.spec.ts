@@ -222,7 +222,7 @@ for (const vp of viewports) {
       handlers.unary['koinon.approval.v1alpha1.ApprovalService/ListApprovals'] = () => ({ approvals: [] })
       handlers.unary['koinon.question.v1alpha1.QuestionService/ListQuestions'] = () => ({ questions: [] })
       await mockApi(page, handlers)
-      await page.goto('/')
+      await page.goto('/inbox')
       const item = page.getByRole('list', { name: 'Waiting on you' }).getByTestId('inbox-item')
       await expect(item).toContainText('Repo helper is unhealthy and takes no runs.')
       await expect(item).toContainText('its sandbox was recreated three times in a row')

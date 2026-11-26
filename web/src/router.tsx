@@ -6,8 +6,11 @@ import { AgentPage } from '@/pages/agent-page'
 import { AgentsPage } from '@/pages/agents-page'
 import { AppLayout } from '@/pages/app-layout'
 import { ApprovalPage } from '@/pages/approval-page'
-import { BoardPage } from '@/pages/board-page'
 import { InboxPage } from '@/pages/inbox-page'
+import { OrgSettingsPage } from '@/pages/org-settings-page'
+import { OverviewPage } from '@/pages/overview-page'
+import { parseOverviewTab, type OverviewTab } from '@/lib/overview'
+import { PlatformConsolePage } from '@/pages/platform-console-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
 import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
@@ -45,9 +48,27 @@ export const loginRoute = createRoute({
 // The pathless app route requires a session: AppLayout checks WhoAmI.
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', component: AppLayout })
 
-export const inboxRoute = createRoute({ getParentRoute: () => appRoute, path: '/', component: InboxPage })
+// The org home (ADR 0126 section 4). The inbox was the home until then: its link is on the overview and in the sidebar.
+export const overviewRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/',
+  validateSearch: (s: Record<string, unknown>): { tab?: OverviewTab } => {
+    const tab = parseOverviewTab(s.tab)
+    return tab ? { tab } : {}
+  },
+  component: OverviewPage,
+})
 
-export const boardRoute = createRoute({ getParentRoute: () => appRoute, path: '/board', component: BoardPage })
+export const inboxRoute = createRoute({ getParentRoute: () => appRoute, path: '/inbox', component: InboxPage })
+
+// The board became the Board tab of the overview (ADR 0126 section 4).
+export const boardRedirectRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/board',
+  beforeLoad: () => {
+    throw redirect({ to: '/', search: { tab: 'board' }, replace: true })
+  },
+})
 
 export const taskRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -112,7 +133,17 @@ export const newGiteaConnectionRoute = createRoute({
 export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
 export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
-export const serversRoute = createRoute({ getParentRoute: () => appRoute, path: '/servers', component: ServersPage })
+export const orgSettingsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/org', component: OrgSettingsPage })
+export const mcpServersRoute = createRoute({ getParentRoute: () => appRoute, path: '/mcp-servers', component: ServersPage })
+// The org MCP servers page moved under Settings (ADR 0126 section 6).
+export const serversRedirectRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/servers',
+  beforeLoad: () => {
+    throw redirect({ to: '/mcp-servers', replace: true })
+  },
+})
+export const platformConsoleRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform', component: PlatformConsolePage })
 export const pricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/prices', component: PricesPage })
 export const budgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/budgets', component: BudgetsPage })
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/budgets', component: PlatformBudgetsPage })
@@ -124,8 +155,9 @@ export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
+    overviewRoute,
     inboxRoute,
-    boardRoute,
+    boardRedirectRoute,
     taskRoute,
     ticketRedirectRoute,
     approvalRoute,
@@ -139,7 +171,10 @@ const routeTree = rootRoute.addChildren([
     newGiteaConnectionRoute,
     connectionRoute,
     providersRoute,
-    serversRoute,
+    orgSettingsRoute,
+    mcpServersRoute,
+    serversRedirectRoute,
+    platformConsoleRoute,
     pricesRoute,
     budgetsRoute,
     platformBudgetsRoute,
