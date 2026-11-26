@@ -27,7 +27,9 @@ The run does not need `KUBECONFIG`. Set `KUBECONFIG=/dev/null`.
 The full list, with defaults, is in the header of `test/escape/substrate_harness_test.go`. The required ones:
 
 - `KOINON_ESCAPE_SUBSTRATE_CONTROL`: ateapi `host:port`.
-- `KOINON_ESCAPE_SUBSTRATE_ROUTER`: atenet router `host:port`.
+- `KOINON_ESCAPE_SUBSTRATE_ROUTER`: atenet router `host:port`. The router serves TLS on 443 only and wants a client
+  certificate whose SPIFFE ID is on its allow-list: also set `KOINON_ESCAPE_SUBSTRATE_ROUTER_CERT` (key and chain in
+  one PEM file) and, when the CA differs from the ateapi CA, `KOINON_ESCAPE_SUBSTRATE_ROUTER_CA` (issue #1446).
 - `KOINON_ESCAPE_SUBSTRATE_IMAGE`: the actor image.
 - `KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS`: the runtime class of the tier.
 

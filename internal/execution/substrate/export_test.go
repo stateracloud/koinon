@@ -38,3 +38,6 @@ var (
 
 // RenderTemplateForTest renders the ActorTemplate of a spec.
 var RenderTemplateForTest = renderTemplate
+
+// RouterCredentials builds the TLS credentials of the router connection.
+var RouterCredentials = routerCredentials

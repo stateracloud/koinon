@@ -33,7 +33,7 @@
 #              window, and a by-hand re-run of a draft run is ignored too. A non-draft run is never dropped: red
 #              or cancelled it still fails. It prints `waiting for the ready run` until the ready run's checks
 #              exist (between `gh pr ready` and that run the draft run is the only `ci` run on the head, and its
-#              vacuous green must never decide). dco, gitleaks, claim and commit statuses keep their result. When gh cannot list
+#              vacuous green must never decide). gitleaks, claim and commit statuses keep their result. When gh cannot list
 #              the runs, nothing is dropped.
 #              A stale PR head (old issue 661): with --checks, when `git ls-remote origin refs/heads/<branch>` names
 #              another commit than the PR's headRefOid for PR_WAIT_STALE_GRACE seconds (default 120; GitHub

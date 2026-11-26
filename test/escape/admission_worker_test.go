@@ -859,7 +859,7 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 	cmd := exec.CommandContext(ctx, helm, "template", "koinon", "../../charts/koinon", "--namespace", "koinon",
 		"--set", "execution.driver=substrate",
 		"--set", "execution.substrate.controlAddress=api.ate-system.svc:443",
-		"--set", "execution.substrate.routerAddress=atenet-router.ate-system.svc:80",
+		"--set", "execution.substrate.routerAddress=atenet-router.ate-system.svc:443",
 		"--set", "execution.substrate.tokenAudience=ateapi",
 		"--set", "execution.substrate.allowUnhardened=true",
 		"--set", "execution.substrate.workerNetworkPolicy.enabled=false",

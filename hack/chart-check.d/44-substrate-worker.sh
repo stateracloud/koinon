@@ -7,7 +7,7 @@
 # hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
 wsub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false
 	# The operator image source paths below; the default in-cluster cache has its own file (45-substrate-imagecache.sh).
@@ -302,6 +302,15 @@ for a in atelet ate-controller ate-api-server atenet-router; do
 done
 if grep -Eq -- "- atenet-egress\$" <<<"$apisrv"; then fail "the API server policy must not select atenet-egress (no API server client; no TCP route to any address)"; fi
 grep -Fq 'kubernetes.io/metadata.name: "ate-workers"' <<<"$control" || fail "the control-plane policy must reach the worker namespace"
+# Koinon's namespace reaches ateapi (443) and the router's TLS port (8443) in the control-plane namespace, and no other port (#1446).
+koinon_in=$(awk '/^  ingress:/{f=1;next} /^  egress:/{f=0} f' <<<"$control" | nocomment | awk '/kubernetes.io\/metadata.name: "koinon"/{k=1} k')
+for p in 443 8443; do
+	grep -Eq -- "^ +- port: $p\$" <<<"$koinon_in" || fail "the control-plane ingress for Koinon's namespace must open port $p"
+done
+[[ $(grep -Ec -- '^ +- port: ' <<<"$koinon_in") == 2 ]] || fail "the control-plane ingress for Koinon's namespace must open exactly ports 443 and 8443"
+has "the Koinon ingress ports are configurable" '- port: 9443$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.koinonIngressPorts={9443}' "${np[@]}"
+if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.koinonIngressPorts=null' >/dev/null 2>"$out/sub.err"; then fail "an empty koinonIngressPorts must not render"; fi
+grep -q 'koinonIngressPorts' "$out/sub.err" || fail "the empty-ports error must name koinonIngressPorts"
 has "the app list is configurable" '- app-x$' "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps={app-x}' "${np[@]}"
 if render "${wsub[@]}" --set 'execution.substrate.workerNetworkPolicy.controlPlaneApps=null' >/dev/null 2>"$out/sub.err"; then fail "an empty controlPlaneApps must not render"; fi
 grep -q 'controlPlaneApps' "$out/sub.err" || fail "the empty-list error must name controlPlaneApps"

@@ -30,11 +30,18 @@ const (
 // Substrate is how a binary reaches Agent Substrate: ateapi for the control calls and the atenet
 // router for the guest calls (see [substrate.Endpoint]).
 type Substrate struct {
-	ControlAddress  string
-	RouterAddress   string
-	CAFile          string
-	ServerName      string
-	BearerTokenFile string
+	ControlAddress string
+	RouterAddress  string
+	// RouterCAFile is the CA of the router's serving certificate; empty uses CAFile. RouterServerName is the name
+	// checked against it; empty uses the host of RouterAddress. RouterCertFile is the router client certificate
+	// (key and chain in one PEM file, a podCertificate projection); a binary that makes no router call leaves it
+	// empty (issue #1446).
+	RouterCAFile     string
+	RouterServerName string
+	RouterCertFile   string
+	CAFile           string
+	ServerName       string
+	BearerTokenFile  string
 	// RuntimeClassTiers maps a runtime class to its isolation tier, as "class=tier" entries (ADR 0075;
 	// tiers are vm, hardened and dev). The driver puts the launcher policy of the tier in front of
 	// every command, so a sandbox whose class is not here cannot run one.
@@ -211,6 +218,9 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Driver, "execution-driver", DriverOpenShell, "execution.driver: openshell or substrate (ADR 0119)")
 	fs.StringVar(&e.Substrate.ControlAddress, "substrate-control-address", "", "Agent Substrate's control API (ateapi) host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.RouterCAFile, "substrate-router-ca-file", "", "CA file of the atenet router's serving certificate (the servicedns signer's trust bundle); empty uses --substrate-ca-file. Read again when it changes")
+	fs.StringVar(&e.Substrate.RouterServerName, "substrate-router-server-name", "", "name checked against the router's certificate; empty uses the host of --substrate-router-address")
+	fs.StringVar(&e.Substrate.RouterCertFile, "substrate-router-cert-file", "", "client certificate of the router connection: one PEM file with the key and the chain (the credential bundle of a podCertificate volume). Read again when it changes; the router refuses a client without one")
 	fs.StringVar(&e.Substrate.CAFile, "substrate-ca-file", "", "CA file that signed ateapi's certificate; empty uses the system roots")
 	fs.StringVar(&e.Substrate.ServerName, "substrate-server-name", "", "name checked against ateapi's certificate")
 	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path may run the harness without the guest launcher until the overlay image of issue #1087 has run in a real actor (the gVisor tiers keep a writable root, issue #1150); required with --execution-driver=substrate")
@@ -286,6 +296,7 @@ func (e Execution) Dial() (*Connection, error) {
 		d, err := substrate.Dial(substrate.Endpoint{
 			ControlAddr: e.Substrate.ControlAddress, RouterAddr: e.Substrate.RouterAddress,
 			CAFile: e.Substrate.CAFile, ServerName: e.Substrate.ServerName, BearerTokenFile: e.Substrate.BearerTokenFile,
+			RouterCAFile: e.Substrate.RouterCAFile, RouterServerName: e.Substrate.RouterServerName, RouterCertFile: e.Substrate.RouterCertFile,
 		}, cfg)
 		if err != nil {
 			return nil, err

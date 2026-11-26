@@ -35,7 +35,6 @@ repos/o/r/pulls/*) f=$FAKE_DIR/pull.json ;;
 repos/o/r/actions/workflows/ci.yml/runs*) [[ ${FAKE_FAIL_RUNS:-0} == 0 ]] || { echo "gh: HTTP 500" >&2; exit 1; }; f=$FAKE_DIR/mq-runs.json ;;
 repos/o/r/git/commits/*) f=$FAKE_DIR/commit-${path##*/}.json; [[ -f $f ]] || { echo "gh: HTTP 404" >&2; exit 1; } ;;
 repos/o/r/commits/*/check-runs*) f=$FAKE_DIR/checks.json ;;
-repos/o/r/commits/*/statuses*) [[ ${FAKE_FAIL_STATUSES:-0} == 0 ]] || { echo "gh: HTTP 403" >&2; exit 1; }; f=$FAKE_DIR/statuses.json ;;
 *) echo "fake gh: unknown $path" >&2; exit 1 ;;
 esac
 jq -r "$jq_expr" "$f"
@@ -198,47 +197,6 @@ checks harnesses:success
 expect "a one-parent commit with a queue run on its tree: skip" true "merge_group" $(push "$plain")
 : "$feat_head"
 
-statuses() { # statuses CONTEXT:STATE ... (newest first) -> statuses.json
-	local first=1 c st
-	printf '[' >"$tmp/statuses.json"
-	for spec in "$@"; do
-		IFS=: read -r c st <<<"$spec"
-		[[ $first == 1 ]] || printf ',' >>"$tmp/statuses.json"
-		first=0
-		printf '{"context":"%s","state":"%s"}' "$c" "$st" >>"$tmp/statuses.json"
-	done
-	printf ']' >>"$tmp/statuses.json"
-}
-
-# --- lab (old issue 610) -----------------------------------------------------------------------------------
-cd "$tmp"
-head_sha=0123456789abcdef0123456789abcdef01234567
-expect_lab() { # expect_lab NAME WANT [env...]: runs `lab`
-	local name=$1 want=$2 out
-	shift 2
-	out=$(env "$@" "$script" lab 2>&1) || true
-	if grep -qx "go_test_lab=$want" <<<"$out" && grep -q '^go_test_lab_reason=' <<<"$out"; then
-		echo "ok: $name"
-	else
-		echo "FAIL: $name (want go_test_lab=$want)"
-		printf '    %s\n' "${out//$'\n'/$'\n    '}"
-		fails=1
-	fi
-}
-statuses go-test-lab:success
-expect_lab "lab: a green go-test-lab on the head satisfies go-test" true EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=false
-statuses go-test-lab:failure
-expect_lab "lab: a red go-test-lab does not" false EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=false
-statuses
-expect_lab "lab: no status does not" false EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=false
-statuses e2e-lab:success
-expect_lab "lab: e2e-lab is another context" false EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=false
-statuses go-test-lab:success
-expect_lab "lab: a draft (skip=true) never counts" false EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=true
-expect_lab "lab: a push never counts" false EVENT_NAME=push HEAD_SHA=$head_sha SKIP=false
-expect_lab "lab: no head sha does not" false EVENT_NAME=pull_request HEAD_SHA= SKIP=false
-expect_lab "lab: an API error means go-test runs" false EVENT_NAME=pull_request HEAD_SHA=$head_sha SKIP=false FAKE_FAIL_STATUSES=1
-
 # --- apply -----------------------------------------------------------------------------------------
 cd "$tmp"
 input=$'go=true\nweb=true\ngenerate=true\nchart=false\nchartsmoke=true\nescape=true\nharnesses=true\ntidy=true\nvuln=true\nfuzz=true\nshell=true\nscripts=true'
@@ -292,6 +250,16 @@ if [[ -z $bad ]] && grep -q 'name: proto (buf lint)' <<<"$b"; then
 	echo "ok: every quick-checks step after buf lint has !cancelled()"
 else
 	echo "FAIL: quick-checks steps without !cancelled(): ${bad:-(buf lint step missing)}"
+	fails=1
+fi
+
+# The lab mode is gone since #682: it is a usage error now.
+rc=0
+"$script" lab >/dev/null 2>&1 || rc=$?
+if [[ $rc == 2 ]]; then
+	echo "ok: the lab mode is gone (usage error)"
+else
+	echo "FAIL: hack/ci-skip-heavy.sh lab must exit 2 (usage), got $rc"
 	fails=1
 fi
 

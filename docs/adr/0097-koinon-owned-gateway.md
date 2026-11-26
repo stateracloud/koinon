@@ -715,7 +715,8 @@ Note (maintainer decision 2026-11-08, #374): the agentgateway config helpers dup
   Koinon's in step 2. Moves to v0.2.
 - **#78** (thinking-token split): an expected failure in the suite from step 1; fixed by an upstream
   release that passes the case, or in step 2 by Koinon's parser. Moves to v0.2 unless upstream fixes it
-  first.
+  first. Built (#78): Koinon's model path records the split in the ledger; the agentgateway driver keeps
+  the gap.
 - **#238** (upstream registry outage): step 1, as above; unchanged by the later steps while the
   agentgateway driver lives.
 - **#40** (passport delivery spike on agentgateway): re-scoped in step 2 to passport delivery in

@@ -37,9 +37,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 # Required contexts that are not reported by a push to main, read instead from the queue build (the
 # merge_group run on the same tree), else from the head commit of the pull request that merged the
 # tagged commit (the newest run that started before the merge; an admin merge has no queue build):
-#   dco                  its workflow runs on pull_request only.
+#   dco                  its workflow ran on pull_request only; #682 removed it (the sign-off is now in
+#                        `quick checks`). Listed for a tag whose own ci-required.txt still requires it.
 #   claim                runs on pull_request (hack/claim.sh check-pr, about the PR and its
-#                        claim); on a push to main it is skipped.
+#                        claim); on a push to main it is skipped. Not required since #682; listed for
+#                        a tag whose own ci-required.txt still requires it.
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
 #                        batched e2e was skipped; the real subject is the `quickstart` rule below,
 #                        which demands success on the very commit.
@@ -293,10 +295,23 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
-# go-test: skipped on the tagged commit means the merge queue ran it (a merge_group run never skips it for a
-# lab status, only for a change with no Go in it). It is checked once more: on the queue build it must have
-# succeeded, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is the
-# business of `go` above.
+# go-test: skipped on the tagged commit means the merge queue ran it (a merge_group run skips it only for a
+# change with no Go in it). It is checked once more: on the queue build it must have succeeded, or the change
+# must touch nothing the go-* jobs run for. A go-test with no run at all is the business of `go` above.
+# touches_go <base> <head>: exit 0 when base..head is a change the go-* jobs run for (hack/ci-changes.sh
+# go=true), 1 when it is not (documentation, web), 2 when that cannot be told.
+touches_go() {
+	local changed line
+	changed=$(git diff --name-only --no-renames "$1" "$2" 2>/dev/null) || return 2
+	[[ -n $changed ]] || return 2
+	# Only go= is read: the directories of the harnesses suite (a `go list`) are not needed.
+	line=$(CI_CHANGES_HARNESSES_DIRS=${CI_CHANGES_HARNESSES_DIRS:-none} "$here/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || return 2
+	case $line in
+	go=true) return 0 ;;
+	go=false) return 1 ;;
+	*) return 2 ;;
+	esac
+}
 got=$(conclusion_of "$SHA" go-test)
 if [[ $got == skipped ]]; then
 	queue_ci_head
@@ -306,7 +321,7 @@ if [[ $got == skipped ]]; then
 	case $got in
 	success) echo "ok: go-test (in the merge queue run $qci_head)" ;;
 	skipped | "")
-		"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
+		touches_go "$SHA^1" "$SHA" || tg=$?
 		if [[ $tg == 1 ]]; then
 			echo "ok: go-test (skipped: the change touches no Go)"
 		else

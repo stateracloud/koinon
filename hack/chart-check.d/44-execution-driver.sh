@@ -5,7 +5,7 @@
 # uses that script's helpers (render, has, lacks, ...).
 
 sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
@@ -20,12 +20,38 @@ has "substrate driver in the reconciler config" 'driver: substrate' "${sub[@]}" 
 has "substrate control address in the reconciler config" 'controlAddress: "api.ate-system.svc:443"' "${sub[@]}" --show-only templates/config.yaml
 has "substrate token file in the reconciler config" 'tokenFile: "/var/run/koinon/substrate/token"' "${sub[@]}" --show-only templates/config.yaml
 env_is KOINON_EXECUTION_DRIVER substrate "${sub[@]}"
-env_is KOINON_SUBSTRATE_ROUTER_ADDRESS '"atenet-router.ate-system.svc:80"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_ADDRESS '"atenet-router.ate-system.svc:443"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_CERT_FILE '"/etc/koinon/substrate-router/credential-bundle.pem"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_CA_FILE '"/etc/koinon/substrate-router/router-ca.pem"' "${sub[@]}"
 env_is KOINON_SUBSTRATE_TOKEN_FILE '"/var/run/koinon/substrate/token"' "${sub[@]}"
 has "the ateapi token is a projected ServiceAccount token with the configured audience" 'audience: "ateapi"' "${sub[@]}" --show-only templates/deployments.yaml
 lacks "agentd does not get the OpenShell address with substrate" 'KOINON_OPENSHELL_ADDRESS' "${sub[@]}" --show-only templates/deployments.yaml
 has "the install preflight Job runs the Substrate checks with substrate (#1089; details in 95-preflight.sh)" '- --driver=substrate' "${sub[@]}" --show-only templates/preflight.yaml
 has "the install preflight Job stays with openshell" 'component: preflight' 
+# The router leg (#1446): the router serves TLS on 443 and wants a client certificate with an allowed SPIFFE ID. Only
+# koinon-agentd gets the pod certificate and the router CA: the allow-list holds the agentd ServiceAccount and no other
+# Koinon pod, because any allowed ID can reach any actor. The reconciler makes no router call and gets none.
+deployment_doc() { # <name> <helm args...>: the rendered Deployment of one component
+	local want=$1
+	shift
+	render --show-only templates/deployments.yaml "$@" | awk -v want="$want" '
+		/^---$/ { if (buf ~ ("\n  name: " want "\n")) printf "%s", buf; buf = "" }
+		{ buf = buf $0 "\n" }
+		END { if (buf ~ ("\n  name: " want "\n")) printf "%s", buf }'
+}
+agentd_doc=$(deployment_doc koinon-agentd "${sub[@]}")
+for want in 'podidentity.podcert.ate.dev/identity' 'keyType: ECDSAP256' 'credentialBundlePath: credential-bundle.pem' \
+	'servicedns.podcert.ate.dev/identity' 'podcert.ate.dev/canarying: live' 'path: router-ca.pem' 'mountPath: /etc/koinon/substrate-router'; do
+	grep -Fq -- "$want" <<<"$agentd_doc" || fail "koinon-agentd must project the router identity with substrate: missing $want"
+done
+for other in koinon-reconciler koinon-api; do
+	doc=$(deployment_doc "$other" "${sub[@]}")
+	[ -n "$doc" ] || fail "the $other Deployment must render"
+	if grep -Eq 'podCertificate|substrate-router|ROUTER_CERT_FILE' <<<"$doc"; then fail "$other must not get the router identity: only agentd is on the router allow-list"; fi
+done
+lacks "no router identity with the default driver" 'podCertificate' --show-only templates/deployments.yaml
+has "a router server name is passed to agentd" 'KOINON_SUBSTRATE_ROUTER_SERVER_NAME' "${sub[@]}" --set execution.substrate.routerServerName=atenet-router.ate-system.svc --show-only templates/deployments.yaml
+lacks "no router server name by default" 'KOINON_SUBSTRATE_ROUTER_SERVER_NAME' "${sub[@]}" --show-only templates/deployments.yaml
 # The guest API signing key (#1309): the ensure-secrets Job makes it once, the reconciler config and
 # agentd's env name the file, and both components mount the Secret. No sandbox template sees it.
 has "the guest key file is in the reconciler config" 'guestKeyFile: "/secrets/substrate-guest-key/key"' "${sub[@]}" --show-only templates/config.yaml

@@ -46,7 +46,7 @@ jobs:
       contents: read
       checks: read
       actions: read # the merge queue's ci runs (the queue build is the evidence for what main's push skipped)
-      pull-requests: read # the merged pull request's head commit, for the pull-request-only dco check
+      pull-requests: read # the merged pull request's head commit, for the pull-request-only checks (quick checks, e2e result)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

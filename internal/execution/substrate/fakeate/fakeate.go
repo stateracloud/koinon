@@ -138,6 +138,13 @@ func (c *Cluster) Stop() {
 	}
 }
 
+// StopRouter stops the router server only: the control API keeps running. It models a router outage.
+func (c *Cluster) StopRouter() {
+	if c.rtr != nil {
+		c.rtr.Stop()
+	}
+}
+
 func (c *Cluster) latency() time.Duration {
 	if c.Latency > 0 {
 		return c.Latency
