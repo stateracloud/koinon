@@ -25,31 +25,52 @@ export function templateSlugOf(name: string): string {
   return s.length > 64 ? trim(s.slice(0, 64)) : s
 }
 
-const platformNameTaken = 'A platform template has this name. Choose another name.'
-
 /**
- * templateChoiceError is the problem with a choice, or undefined. platformSlugs are the slugs of the
- * platform templates: the server refuses an org template that takes one of them.
+ * TakenSlugs is what the server refuses as the slug of a new org template: a platform template's
+ * slug, or one the org already has (CreateTemplateFromAgent). Until the list is loaded nothing can
+ * be checked, so a choice to save is refused then too: a refused save comes after the draft exists.
  */
-export function templateChoiceError(c: TemplateChoice, platformSlugs: readonly string[] = []): string | undefined {
+export type TakenSlugs = { state: 'loading' | 'failed' | 'ready'; platform: readonly string[]; org: readonly string[] }
+
+const nameTaken = 'A template with this name exists. Choose another name.'
+
+/** templateChoiceError is the problem with a choice, or undefined. */
+export function templateChoiceError(c: TemplateChoice, taken: TakenSlugs): string | undefined {
   if (!c.save) return undefined
   const n = c.displayName.trim().length
   if (n === 0) return 'Give the template a name.'
   if (n > 200) return 'The template name is longer than 200 characters.'
-  if (platformSlugs.includes(templateSlugOf(c.displayName))) return platformNameTaken
+  if (taken.state === 'loading') return 'Koinon is still loading the template names. Try again in a moment.'
+  if (taken.state === 'failed') return 'Koinon could not load the template names, so it cannot check this name. Turn off “Save as template”, or try again later.'
+  const slug = templateSlugOf(c.displayName)
+  if (taken.platform.includes(slug)) return 'A platform template has this name. Choose another name.'
+  if (taken.org.includes(slug)) return 'This org has a template with this name. Choose another name.'
   return undefined
 }
 
-/** usePlatformTemplateSlugs is the slugs of the platform templates (the gallery's own query, so it is cached). */
-export function usePlatformTemplateSlugs(orgId: string): readonly string[] {
+/** useTakenTemplateSlugs is the slugs a new org template cannot take (the gallery's own query, so it is cached). */
+export function useTakenTemplateSlugs(orgId: string): TakenSlugs {
   const list = useQuery(TemplateService.method.listTemplates, { orgId })
-  return useMemo(() => (list.data?.templates ?? []).filter((t) => t.scope !== TemplateScope.ORG).map((t) => t.slug), [list.data])
+  return useMemo(() => {
+    const all = list.data?.templates ?? []
+    return {
+      state: list.isError ? 'failed' : list.data ? 'ready' : 'loading',
+      platform: all.filter((t) => t.scope !== TemplateScope.ORG).map((t) => t.slug),
+      org: all.filter((t) => t.scope === TemplateScope.ORG).map((t) => t.slug),
+    }
+  }, [list.data, list.isError])
+}
+
+/** isTakenName says whether a name makes a slug that a template already has. */
+export function isTakenName(name: string, taken: TakenSlugs): boolean {
+  const slug = templateSlugOf(name)
+  return taken.platform.includes(slug) || taken.org.includes(slug)
 }
 
 /** templateSaveError is the sentence for a failed CreateTemplateFromAgent. */
 export function templateSaveError(e: unknown): string {
   const d = describeError(e)
-  return d.code === Code.AlreadyExists ? platformNameTaken : d.message
+  return d.code === Code.AlreadyExists ? nameTaken : d.message
 }
 
 /**

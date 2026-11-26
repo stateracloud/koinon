@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
-import { templateChoiceError, templateSaveError, templateSlugOf, usePlatformTemplateSlugs, type TemplateChoice } from '@/hooks/use-new-agent'
+import { isTakenName, templateChoiceError, templateSaveError, useTakenTemplateSlugs, type TakenSlugs, type TemplateChoice } from '@/hooks/use-new-agent'
 
 /**
  * SaveAsTemplateFields is "Save as template" on both new-agent paths (ADR 0126 section 5). When it
@@ -22,20 +22,20 @@ export function SaveAsTemplateFields({
   onChange,
   showErrors,
   defaultName = '',
-  platformSlugs = [],
+  taken,
 }: {
   value: TemplateChoice
   onChange: (v: TemplateChoice) => void
   showErrors?: boolean
   /** The template name to start from when the box is turned on with no name: the agent's name. */
   defaultName?: string
-  /** The slugs of the platform templates; a name that makes one of them is refused. */
-  platformSlugs?: readonly string[]
+  /** The slugs a new org template cannot take; a name that makes one of them is refused. */
+  taken: TakenSlugs
 }) {
   const id = useId()
-  const problem = showErrors ? templateChoiceError(value, platformSlugs) : undefined
-  // The agent name of a platform template's draft is that template's name, which the server refuses.
-  const startName = platformSlugs.includes(templateSlugOf(defaultName)) ? '' : defaultName.trim()
+  const problem = showErrors ? templateChoiceError(value, taken) : undefined
+  // The agent name of a template's draft is that template's name, which the server refuses.
+  const startName = isTakenName(defaultName, taken) ? '' : defaultName.trim()
   return (
     <fieldset className="grid gap-2 rounded-lg border p-4" aria-label="Save as template">
       <div className="flex items-start gap-2">
@@ -78,7 +78,7 @@ export function AgentSaveAsTemplate({ agent }: { agent: Agent }) {
   const queryClient = useQueryClient()
   const [choice, setChoice] = useState<TemplateChoice | undefined>()
   const [touched, setTouched] = useState(false)
-  const platformSlugs = usePlatformTemplateSlugs(agent.orgId)
+  const taken = useTakenTemplateSlugs(agent.orgId)
   const save = useMutation(TemplateService.method.createTemplateFromAgent, {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: TemplateService, cardinality: undefined }) })
@@ -94,11 +94,11 @@ export function AgentSaveAsTemplate({ agent }: { agent: Agent }) {
           onSubmit={(e) => {
             e.preventDefault()
             setTouched(true)
-            if (templateChoiceError(choice, platformSlugs)) return
+            if (templateChoiceError(choice, taken)) return
             save.mutate({ orgId: agent.orgId, agentId: agent.id, displayName: choice.displayName.trim(), description: choice.description.trim() })
           }}
         >
-          <SaveAsTemplateFields value={choice} onChange={(v) => setChoice(v.save ? v : undefined)} showErrors={touched} platformSlugs={platformSlugs} />
+          <SaveAsTemplateFields value={choice} onChange={(v) => setChoice(v.save ? v : undefined)} showErrors={touched} taken={taken} />
           {save.error && (
             <Alert variant="destructive" role="alert">
               <AlertDescription>Could not save the template: {templateSaveError(save.error)}</AlertDescription>
@@ -118,7 +118,7 @@ export function AgentSaveAsTemplate({ agent }: { agent: Agent }) {
             onClick={() => {
               save.reset()
               setTouched(false)
-              setChoice({ save: true, displayName: platformSlugs.includes(templateSlugOf(agent.displayName)) ? '' : agent.displayName, description: '' })
+              setChoice({ save: true, displayName: isTakenName(agent.displayName, taken) ? '' : agent.displayName, description: '' })
             }}
           >
             Save as template

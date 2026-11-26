@@ -250,6 +250,18 @@ describe('AgentWizard', () => {
     expect(saves).toEqual([])
   })
 
+  it('refuses a template name that an org template has, before the draft is created', async () => {
+    const orgTpl = create(TemplateSchema, { id: 'tpl-o', slug: 'our-triage', version: '1', displayName: 'Our triage', scope: TemplateScope.ORG })
+    const { creates, saves } = setup({ orgTemplates: [orgTpl] })
+    await toReview()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Save as template' }))
+    await userEvent.type(screen.getByLabelText('Template name'), 'our TRIAGE')
+    await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+    expect(await screen.findByText('This org has a template with this name. Choose another name.')).toBeInTheDocument()
+    expect(creates).toEqual([])
+    expect(saves).toEqual([])
+  })
+
   it('keeps the draft and says so when the template is not saved', async () => {
     const { creates } = setup({ failTemplate: true })
     await toReview()

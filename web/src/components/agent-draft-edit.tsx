@@ -92,7 +92,7 @@ function EditForm({ agent, onDone }: { agent: Agent; onDone: () => void }) {
         <Alert variant="destructive" role="alert">
           <AlertDescription>
             {describeError(update.error).code === Code.FailedPrecondition
-              ? 'Someone changed this draft after you opened the form. Cancel, read the new version, then edit again.'
+              ? 'Someone changed this draft after you opened the form, or it is no longer a draft. Cancel, read the current version, then edit again.'
               : `Could not save the draft: ${describeError(update.error).message}`}
           </AlertDescription>
         </Alert>
