@@ -96,7 +96,7 @@ function PricesContent() {
         </Alert>
       )}
 
-      <PricesInUse orgId={orgId} actions={actions} takenNames={groups.map((g) => g.name)} onSaved={saved} />
+      <PricesInUse orgId={orgId} actions={actions} takenNames={groups.map((g) => g.name)} namesLoaded={!!prices.data} onSaved={saved} />
 
       <section aria-labelledby="org-prices" className="grid gap-3">
         <h2 id="org-prices" className="text-lg font-semibold">
@@ -191,20 +191,33 @@ function PricesContent() {
  * PricesInUse is the model prices table of the org (ADR 0126 section 6, issue #1277): one row per enabled model with
  * the layer that prices it now (ExplainOrgPrices). "Override" adds an org price for the model, filled from the price
  * in use. Edit and Remove of an override in the table wait for a decision (ADR 0126 section 7); "Your prices" below
- * has them.
+ * has them. The Override buttons wait until the org prices have loaded: the name of an override must differ from the
+ * names the org has.
  */
-function PricesInUse({ orgId, actions, takenNames, onSaved }: { orgId: string; actions: ReturnType<typeof usePriceActions>; takenNames: string[]; onSaved: (name: string, warnings: string[]) => void }) {
+function PricesInUse({ orgId, actions, takenNames, namesLoaded, onSaved }: { orgId: string; actions: ReturnType<typeof usePriceActions>; takenNames: string[]; namesLoaded: boolean; onSaved: (name: string, warnings: string[]) => void }) {
   const explained = useQuery(PriceService.method.explainOrgPrices, { orgId })
   const rows = useMemo(() => (explained.data?.models ?? []).map(rowFromModel), [explained.data])
   const [overriding, setOverriding] = useState<PriceRow>()
   const formBox = useRef<HTMLDivElement>(null)
+  const section = useRef<HTMLElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const returnTo = useRef<string | undefined>(undefined)
   // The override form opens above the table: move focus into it, so a keyboard user does not stay on the row button.
+  // When it closes, focus goes back to the Override button of the row, or to the section heading if the row is gone.
   useEffect(() => {
-    if (overriding) formBox.current?.querySelector<HTMLElement>('input:not([disabled])')?.focus()
+    if (overriding) {
+      returnTo.current = `Override the price of ${overriding.model} (${overriding.provider})`
+      formBox.current?.querySelector<HTMLElement>('input:not([disabled])')?.focus()
+    } else if (returnTo.current) {
+      const label = returnTo.current
+      returnTo.current = undefined
+      const button = Array.from(section.current?.querySelectorAll<HTMLElement>('button[aria-label]') ?? []).find((b) => b.getAttribute('aria-label') === label)
+      ;(button ?? heading.current)?.focus()
+    }
   }, [overriding])
   return (
-    <section aria-labelledby="prices-in-use" className="grid gap-3">
-      <h2 id="prices-in-use" className="text-lg font-semibold">
+    <section ref={section} aria-labelledby="prices-in-use" className="grid gap-3">
+      <h2 ref={heading} id="prices-in-use" tabIndex={-1} className="text-lg font-semibold outline-none focus-visible:underline">
         Prices in use
       </h2>
       <PriceLegend />
@@ -229,7 +242,7 @@ function PricesInUse({ orgId, actions, takenNames, onSaved }: { orgId: string; a
       {explained.isPending ? (
         <SkeletonRows label="Loading prices in use…" />
       ) : explained.error ? null : (
-        <PriceTable caption="Prices in use" searchId="price-search" rows={rows} onOverride={setOverriding} emptyTitle="No enabled models. Enable a model on a provider to see its price." />
+        <PriceTable caption="Prices in use" searchId="price-search" rows={rows} onOverride={namesLoaded ? setOverriding : undefined} emptyTitle="No enabled models. Enable a model on a provider to see its price." />
       )}
     </section>
   )

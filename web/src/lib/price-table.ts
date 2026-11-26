@@ -163,22 +163,25 @@ export function overrideForm(r: PriceRow, takenNames: Iterable<string> = []): Pr
 }
 
 /**
- * platformVersionInUse picks, from the list of platform versions, the newest one that applies now (its start is not
- * in the future; a missing start counts as in use) and the newest one that starts later, if there is one. A version
- * can start in the future, so the newest written version is not always the one in use.
+ * platformVersionInUse picks the platform version like the server does: the version in use is the one with the
+ * latest start that is not in the future (a missing start counts as started, at 0), and a higher version number
+ * breaks a tie. The upcoming version is the one with the earliest start in the future (the highest version number
+ * breaks a tie). The version number alone does not say which one applies: a newer version can start earlier.
  */
 export function platformVersionInUse(
   versions: readonly PlatformPriceVersion[],
   now = new Date(),
 ): { inUse?: PlatformPriceVersion; upcoming?: PlatformPriceVersion } {
   const nowSec = BigInt(Math.floor(now.getTime() / 1000))
-  const started = (v: PlatformPriceVersion) => !v.validFrom || v.validFrom.seconds <= nowSec
-  const newest = (a?: PlatformPriceVersion, b?: PlatformPriceVersion) => (a && b ? (a.version >= b.version ? a : b) : (a ?? b))
+  const start = (v: PlatformPriceVersion) => v.validFrom?.seconds ?? 0n
   let inUse: PlatformPriceVersion | undefined
-  let later: PlatformPriceVersion | undefined
+  let upcoming: PlatformPriceVersion | undefined
   for (const v of versions) {
-    if (started(v)) inUse = newest(inUse, v)
-    else later = newest(later, v)
+    if (start(v) <= nowSec) {
+      if (!inUse || start(v) > start(inUse) || (start(v) === start(inUse) && v.version > inUse.version)) inUse = v
+    } else if (!upcoming || start(v) < start(upcoming) || (start(v) === start(upcoming) && v.version > upcoming.version)) {
+      upcoming = v
+    }
   }
-  return { inUse, upcoming: later && (!inUse || later.version > inUse.version) ? later : undefined }
+  return { inUse, upcoming }
 }

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
+import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
-import { ModelPriceSourceSchema, PlatformPriceEntrySchema } from '@/gen/koinon/budget/v1alpha1/price_pb'
+import { ModelPriceSourceSchema, PlatformPriceEntrySchema, PlatformPriceVersionSchema } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { validatePrice } from '@/lib/prices'
-import { matchesPriceSearch, overrideForm, overrideMatch, overrideName, uniqueOverrideName, rateSortValue, rateText, rowFromModel, rowFromPlatformEntry, unpricedText } from '@/lib/price-table'
+import { matchesPriceSearch, overrideForm, overrideMatch, overrideName, uniqueOverrideName, rateSortValue, rateText, rowFromModel, platformVersionInUse, rowFromPlatformEntry, unpricedText } from '@/lib/price-table'
 
 describe('price table rows', () => {
   it('takes the source and the replaced rates of an org model', () => {
@@ -96,5 +97,37 @@ describe('override', () => {
   it('starts from empty rates for a model with no price', () => {
     const f = overrideForm(rowFromModel(create(ModelPriceSourceSchema, { providerName: 'home', providerType: 'ollama', model: 'local/q', unpricedReason: 'no_price' })))
     expect(f).toMatchObject({ provider: 'ollama', rates: { input: '', output: '' }, tokenizer: 'bytes', ratio: '3.0', maxOutput: '' })
+  })
+})
+
+describe('platformVersionInUse', () => {
+  const ver = (version: number, from?: string) =>
+    create(PlatformPriceVersionSchema, { version: BigInt(version), validFrom: from ? timestampFromDate(new Date(from)) : undefined })
+  const now = new Date('2026-11-26T12:00:00Z')
+
+  it('takes a future version as upcoming and the older started one as in use', () => {
+    const r = platformVersionInUse([ver(1, '2026-01-01T00:00:00Z'), ver(2, '2026-12-01T00:00:00Z')], now)
+    expect(r.inUse?.version).toBe(1n)
+    expect(r.upcoming?.version).toBe(2n)
+  })
+
+  it('counts a missing start as started', () => {
+    const r = platformVersionInUse([ver(1), ver(2, '2026-12-01T00:00:00Z')], now)
+    expect(r.inUse?.version).toBe(1n)
+    expect(r.upcoming?.version).toBe(2n)
+  })
+
+  it('orders by start before the version number, like the server', () => {
+    const list = [ver(5, '2026-12-01T00:00:00Z'), ver(6, '2026-11-20T00:00:00Z')]
+    const before = platformVersionInUse(list, now)
+    expect(before.inUse?.version).toBe(6n)
+    expect(before.upcoming?.version).toBe(5n)
+    const after = platformVersionInUse(list, new Date('2026-12-02T00:00:00Z'))
+    expect(after.inUse?.version).toBe(5n)
+    expect(after.upcoming).toBeUndefined()
+  })
+
+  it('returns nothing for an empty list', () => {
+    expect(platformVersionInUse([], now)).toEqual({ inUse: undefined, upcoming: undefined })
   })
 })

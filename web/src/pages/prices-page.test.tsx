@@ -115,7 +115,7 @@ describe('Prices page', () => {
     const platform = rowOf(table, 'openai/gpt-6')
     expect(within(platform).getByText('Platform')).toBeInTheDocument()
     expect(platform.querySelector('del')).toBeNull()
-    expect(within(platform).getByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toBeInTheDocument()
+    expect(await within(platform).findByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toBeInTheDocument()
 
     const def = rowOf(table, 'gpt-5')
     expect(within(def).getByText('Default')).toBeInTheDocument()
@@ -155,7 +155,7 @@ describe('Prices page', () => {
   it('overrides a platform price with an org price filled from the price in use', async () => {
     const calls = setup()
     const table = await screen.findByRole('table', { name: 'Prices in use' })
-    await userEvent.click(within(rowOf(table, 'openai/gpt-6')).getByRole('button', { name: /Override/ }))
+    await userEvent.click(await within(rowOf(table, 'openai/gpt-6')).findByRole('button', { name: /Override/ }))
     const form = screen.getByRole('form', { name: 'Override the price of openai/gpt-6' })
     expect(form.contains(document.activeElement)).toBe(true)
     expect(within(form).getByLabelText('Name')).toHaveValue('openrouter-openai-gpt-6')
@@ -171,6 +171,27 @@ describe('Prices page', () => {
     expect(await screen.findByText(/Saved openrouter-openai-gpt-6/)).toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Override the price of openai/gpt-6' })).not.toBeInTheDocument()
     await waitFor(() => expect(calls.explained).toBeGreaterThanOrEqual(2))
+  })
+
+  it('shows no Override button until the org prices have loaded, so a name cannot be reused', async () => {
+    let release: () => void = () => undefined
+    const calls = setup()
+    calls.gate = new Promise<void>((r) => (release = r))
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    expect(within(table).queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+    release()
+    expect(await within(table).findByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toBeInTheDocument()
+  })
+
+  it('returns focus to the Override button of the row when the override form is cancelled', async () => {
+    setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    const button = await within(rowOf(table, 'openai/gpt-6')).findByRole('button', { name: /Override/ })
+    await userEvent.click(button)
+    const form = screen.getByRole('form', { name: 'Override the price of openai/gpt-6' })
+    await userEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form', { name: 'Override the price of openai/gpt-6' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toHaveFocus()
   })
 
   it('lists the org prices, the default list with source links and change markers, and flagged requests', async () => {
