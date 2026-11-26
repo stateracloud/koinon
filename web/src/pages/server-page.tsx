@@ -25,7 +25,7 @@ import { useOrg } from '@/lib/org-context'
 import { availabilityMinutes, formatTime } from '@/lib/providers'
 import { toast } from '@/lib/toast'
 
-const route = getRouteApi('/app/mcp-servers/$serverId')
+const route = getRouteApi('/app/org/mcp-servers/$serverId')
 
 /** ServerPage is one remote MCP server: its settings, its outward switch, and its tools with their tiers and reviews (ADR 0057, ADR 0125). */
 export function ServerPage() {

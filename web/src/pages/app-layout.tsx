@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { create } from '@bufbuild/protobuf'
 import { Code, ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link, Navigate, Outlet, useLocation } from '@tanstack/react-router'
+import { ShieldIcon } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { Logo } from '@/components/logo'
 import { NoticeBanner } from '@/components/notice-banner'
@@ -10,11 +12,14 @@ import { OrgSwitcher } from '@/components/org-switcher'
 import { UserMenu } from '@/components/user-menu'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { AuthService, type WhoAmIResponse } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { QueryError } from '@/components/ui/inline-error'
+import { AuthService, MembershipSchema, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { PlatformService } from '@/gen/koinon/platform/v1alpha1/platform_pb'
 import { useInbox } from '@/hooks/use-inbox'
 import { isApprover } from '@/lib/approvals'
 import { OrgProvider } from '@/lib/org'
-import { teamMemberships, useOrg } from '@/lib/org-context'
+import { OrgContext, orgName, teamMemberships, useOrg, useOrgSession, type OrgContextValue } from '@/lib/org-context'
+import { navActive, navGroup, navGroupHeading, navLink, sidebar, skipLink } from '@/lib/shell-styles'
 import { useSignOut } from '@/hooks/use-sign-out'
 import { cn } from '@/lib/utils'
 import { ChangePasswordPage } from '@/pages/change-password-page'
@@ -23,6 +28,10 @@ import { FirstLoginPage } from '@/pages/first-login-page'
 /**
  * AppLayout gates every signed-in page on WhoAmI: no session goes to the
  * login page, a pending bootstrap password change shows only that form.
+ * A user with no team org gets the first-login screen, except a platform
+ * admin (the bootstrap admin of a fresh install), whose way in is the
+ * platform console. The org area and the platform console are the two
+ * areas under this layout (ADR 0126 section 4).
  */
 export function AppLayout() {
   const location = useLocation()
@@ -57,65 +66,87 @@ export function AppLayout() {
     )
   }
   if (who.data.passwordChangeRequired) return <ChangePasswordPage />
-  return <SignedIn who={who.data} />
-}
-
-/**
- * SignedIn shows the org shell to a user with a team org. A user with no team org gets the first-login screen, and a
- * platform admin with no team org (the bootstrap admin of a fresh install) gets the platform console, its way in.
- */
-function SignedIn({ who }: { who: WhoAmIResponse }) {
-  const teams = useMemo(() => teamMemberships(who.memberships, who.user?.personalOrgId), [who.memberships, who.user?.personalOrgId])
-  if (teams.length === 0) {
-    if (who.platformAdmin) return <PlatformShell who={who} />
-    return <FirstLoginPage name={who.user?.displayName || who.user?.email || ''} />
+  if (!who.data.platformAdmin && teamMemberships(who.data.memberships, who.data.user?.personalOrgId).length === 0) {
+    return <FirstLoginPage name={who.data.user?.displayName || who.data.user?.email || ''} />
   }
   return (
-    <OrgProvider memberships={teams}>
-      <Shell who={who} />
+    <OrgProvider who={who.data}>
+      <Outlet />
     </OrgProvider>
   )
 }
 
 /**
- * PlatformShell is the shell of a platform admin with no team org: the platform pages need no org, the org pages do,
- * so every other URL goes to the platform console.
+ * OrgArea is the org area: the org sidebar and the org pages, for one org at a time. A platform admin who opened an
+ * org from the console without being a member of it works in that org; a platform admin with no team org and no such
+ * org goes to the console.
  */
-function PlatformShell({ who }: { who: WhoAmIResponse }) {
-  const location = useLocation()
-  const { signOut, signingOut } = useSignOut()
-  if (location.pathname !== '/platform' && !location.pathname.startsWith('/platform/')) return <Navigate to="/platform" replace />
-  const name = who.user?.displayName || who.user?.email || 'You'
+export function OrgArea() {
+  const s = useOrgSession()
+  const member = useMemo<OrgContextValue | undefined>(
+    () => (s.lastOrg ? { org: s.lastOrg, memberships: s.memberships, setOrgId: s.openOrg, acting: false } : undefined),
+    [s.lastOrg, s.memberships, s.openOrg],
+  )
+  if (s.actingOrgId) return <ActingOrgArea key={s.actingOrgId} orgId={s.actingOrgId} />
+  if (!member) return <Navigate to="/platform" replace />
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
-      <a href="#main" className={skipLink}>
-        Skip to content
-      </a>
-      <aside className={sidebar}>
-        <Link to="/platform" aria-label="Koinon" className="block px-3">
-          <Logo />
-        </Link>
-        <nav aria-label="Platform">
-          <Link to="/platform" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
-            Platform console
-          </Link>
-        </nav>
-        <div className="grid gap-1 md:mt-auto">
-          <UserMenu name={name} email={who.user?.email ?? ''} onSignOut={signOut} signingOut={signingOut} />
-        </div>
-      </aside>
-      <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
-        <p role="note" className="text-muted-foreground mx-auto mb-4 max-w-3xl text-sm">
-          You are not a member of an org yet. An org admin must add you to their org to use the org pages.
-        </p>
-        <Outlet />
-      </main>
-    </div>
+    <OrgContext.Provider value={member}>
+      <Shell />
+    </OrgContext.Provider>
   )
 }
 
-function Shell({ who }: { who: WhoAmIResponse }) {
-  const { org } = useOrg()
+/**
+ * ActingOrgArea is the org area of an org that a platform admin opened without being a member of it. A platform admin
+ * holds every role in every org (auth.Principal.HasRole), so the UI shows the org as to an owner.
+ */
+function ActingOrgArea({ orgId }: { orgId: string }) {
+  const s = useOrgSession()
+  const got = useQuery(PlatformService.method.getOrg, { orgId })
+  const summary = got.data?.org
+  const value = useMemo<OrgContextValue | undefined>(
+    () =>
+      summary && {
+        org: create(MembershipSchema, { orgId: summary.orgId, orgSlug: summary.slug, orgDisplayName: summary.displayName, role: OrgRole.OWNER }),
+        memberships: s.memberships,
+        setOrgId: s.openOrg,
+        acting: true,
+      },
+    [summary, s.memberships, s.openOrg],
+  )
+  if (got.isPending) {
+    return (
+      <main id="main" className="p-6">
+        <p role="status">Loading…</p>
+      </main>
+    )
+  }
+  if (!value) {
+    return (
+      <main id="main" className="mx-auto grid max-w-xl gap-3 p-6">
+        <h1 className="text-xl font-semibold">Could not open the org</h1>
+        <QueryError error={got.error} />
+        <p className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => void got.refetch()}>
+            Try again
+          </Button>
+          <Link to="/platform/orgs" className="text-link font-medium hover:underline">
+            Back to platform console
+          </Link>
+        </p>
+      </main>
+    )
+  }
+  return (
+    <OrgContext.Provider value={value}>
+      <Shell />
+    </OrgContext.Provider>
+  )
+}
+
+function Shell() {
+  const { who } = useOrgSession()
+  const { org, acting } = useOrg()
   const { signOut, signingOut } = useSignOut()
   const admin = isApprover(org.role)
   // The agents live on the overview (its Agents and Chart tabs), so an agent page and the new-agent flow are in the
@@ -136,10 +167,10 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         </Link>
         <OrgSwitcher platformAdmin={who.platformAdmin} />
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
-          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={active} {...(inAgents ? section : {})}>
+          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={navActive} {...(inAgents ? section : {})}>
             Overview
           </Link>
-          <Link to="/inbox" className={navLink} activeProps={active}>
+          <Link to="/inbox" className={navLink} activeProps={navActive}>
             Inbox
             {waiting > 0 && (
               <span data-testid="inbox-badge" aria-label={`${waiting} waiting on you`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-attention text-attention-foreground px-1.5 text-xs font-semibold">
@@ -147,17 +178,17 @@ function Shell({ who }: { who: WhoAmIResponse }) {
               </span>
             )}
           </Link>
-          <Link to="/connections" className={navLink} activeProps={active}>
+          <Link to="/connections" className={navLink} activeProps={navActive}>
             Connections
           </Link>
         </nav>
         {admin && (
-          <nav aria-labelledby="settings-nav" className="flex flex-wrap items-center gap-1 md:mt-3 md:grid">
-            <h2 id="settings-nav" className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase md:pb-1">
+          <nav aria-labelledby="settings-nav" className={navGroup}>
+            <h2 id="settings-nav" className={navGroupHeading}>
               Settings
             </h2>
             {settingsItems.map((i) => (
-              <Link key={i.to} to={i.to} className={navLink} activeProps={active}>
+              <Link key={i.to} to={i.to} className={navLink} activeProps={navActive}>
                 {i.label}
               </Link>
             ))}
@@ -166,7 +197,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         <div className="grid gap-1 md:mt-auto">
           {who.platformAdmin && (
             <nav aria-label="Platform">
-              <Link to="/platform" className={navLink} activeProps={active}>
+              <Link to="/platform" className={navLink} activeProps={navActive}>
                 Platform console
               </Link>
             </nav>
@@ -175,6 +206,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
+        {acting && <ActingBanner name={orgName(org)} />}
         {admin && <NoticeBanner key={org.orgId} orgId={org.orgId} platformAdmin={who.platformAdmin} />}
         <div className="flex min-w-0 flex-1">
           <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
@@ -190,11 +222,26 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   )
 }
 
-const skipLink = 'bg-raised sr-only z-50 rounded-md px-3 py-1.5 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2'
-const sidebar = 'bg-card flex w-full shrink-0 flex-col gap-3 border-b p-3 md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto md:border-r md:border-b-0'
-const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
-const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
-/** A section item: the current page is under it (an agent page under Overview). It looks like `active`. */
+/**
+ * ActingBanner shows on every page of an org that a platform admin opened without being a member of it, until the
+ * admin goes back to the platform console (ADR 0126 section 4; board "Org opened from the console: acting as platform
+ * admin").
+ */
+function ActingBanner({ name }: { name: string }) {
+  return (
+    <section aria-label="Acting as platform admin" data-testid="acting-banner" className="bg-attention text-attention-foreground flex flex-wrap items-center gap-3 px-4 py-2 text-sm font-medium md:px-6">
+      <ShieldIcon aria-hidden className="size-4 shrink-0" />
+      <p className="min-w-0 flex-1">
+        You act as platform admin in <strong>{name}</strong>. You are not a member of this org.
+      </p>
+      <Link to="/platform/orgs" className="rounded-md border border-current px-3 py-1 font-semibold underline-offset-4 hover:underline">
+        Back to platform console
+      </Link>
+    </section>
+  )
+}
+
+/** A section item: the current page is under it (an agent page under Overview). It looks like `navActive`. */
 const section = { 'aria-current': true as const, className: cn(navLink, 'bg-accent font-medium') }
 
 /** The Settings group of the org sidebar, in the order of ADR 0126 section 4. Only org admins and owners see it. */

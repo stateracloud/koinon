@@ -1356,7 +1356,7 @@ oidc:
   # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
   # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
   # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
-  # platform budget ceilings (/platform/budgets).
+  # platform budget ceilings (/platform/usage/budgets).
   platformAdminGroups: []
   # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
   # or hybrid (both).
