@@ -9,6 +9,6 @@
 # The digest must be at least 3 days old, or carry the security exception (ADR 0079, hack/dep-age-check.sh).
 
 # ko default base (.ko.yaml defaultBaseImage)
-FROM cgr.dev/chainguard/static:latest@sha256:8658e9eaeb2294fa0e49b0667f7d66b4e21fa7690b8d2a4c30cd1d013ceb9eb7 AS ko-default
+FROM cgr.dev/chainguard/static:latest@sha256:599c3cd7597b84aa149c4282beecc8c6d4e1cb5c95dc8d982e70cd0a2a9147a2 AS ko-default
 # goreleaser kos base (.goreleaser.yaml base_image)
 FROM gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS goreleaser-kos
