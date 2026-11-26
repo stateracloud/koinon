@@ -39,6 +39,15 @@ function handlers(platformAdmin: boolean, seen: { agentOrgs: string[] } = { agen
       'koinon.question.v1alpha1.QuestionService/ListQuestions': () => ({ questions: [] }),
       'koinon.budget.v1alpha1.BudgetService/ListNotifications': () => ({ notifications: [] }),
       'koinon.connection.v1alpha1.ConnectionService/ListConnections': () => ({ connections: [] }),
+      // The console home lists the orgs with the highest spend this month (issue #1281).
+      'koinon.usage.v1alpha1.UsageService/GetPlatformUsage': () => ({
+        rows: [
+          { day: '2026-11-02', orgId: 'org-9', orgSlug: 'acme-research', orgName: 'Acme Research', model: 'claude-sonnet', usage: { requests: '9', costUsd: '40.00' } },
+          { day: '2026-11-02', orgId: 'org-1', orgSlug: 'default', orgName: 'Default', model: 'claude-sonnet', usage: { requests: '3', costUsd: '12.50' } },
+        ],
+        totals: { requests: '12', costUsd: '52.50', estimatedUsd: '0.00' },
+        runs: { runsToday: '4', failedRunsToday: '0' },
+      }),
     },
     stream: {},
   }
@@ -52,7 +61,7 @@ for (const scheme of ['dark', 'light'] as const) {
     await page.goto('/')
     await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Platform console' })).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Orgs' }).getByRole('listitem')).toHaveCount(2)
+    await expect(page.getByRole('list', { name: 'Orgs with the highest spend' }).getByRole('listitem')).toHaveCount(2)
     await expectAccessible(page)
 
     await page.getByRole('navigation', { name: 'Platform console' }).getByRole('link', { name: 'Orgs' }).click()
