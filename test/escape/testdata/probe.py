@@ -45,21 +45,36 @@ def tcp(c):
 
 
 def http_status(c):
-    """GET http://host:port/ and return "status NNN", or the error name. The name goes through the
-    actor's own resolver and the egress gateway, so it is the path an egress rule decides on."""
+    """GET / with `Host: host:port` through the egress gateway. The TCP connection goes to the address
+    of "via" (a name the `*` rule lets through, resolved here), so it leaves the guest and the gateway
+    resolves "host" itself; a name that the guest resolves to its own loopback is never connected to.
+    Returns "status NNN server=<Server header or ->  envoy=<0|1>", or the error name. A via address
+    that is loopback or unspecified is reported as "badvia", so a check cannot pass without a gateway."""
     try:
-        infos = socket.getaddrinfo(c["host"], c["port"], type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(c["via"], c["port"], type=socket.SOCK_STREAM)
     except OSError as e:
         return err_name(e)
     family, kind, proto, _, addr = infos[0]
+    if addr[0].startswith("127.") or addr[0] in ("0.0.0.0", "::1", "::"):
+        return "badvia"
     s = socket.socket(family, kind, proto)
     s.settimeout(8)
     try:
         s.connect(addr)
         s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
-        line = s.recv(256).split(b"\r\n", 1)[0].decode("latin-1")
-        parts = line.split(" ")
-        return "status " + parts[1] if len(parts) > 1 and parts[0].startswith("HTTP/") else "noresponse"
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 8192:
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "noresponse"
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
+        return "status %s server=%s envoy=%d" % (parts[1], headers.get("server", "-"), envoy)
     except OSError as e:
         return err_name(e)
     finally:

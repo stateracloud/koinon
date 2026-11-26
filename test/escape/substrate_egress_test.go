@@ -60,10 +60,22 @@ func dialControl(get func(string) string) (ateapiv1.ControlClient, func()) {
 // v1.0.0 an actor with a `*` rule could reach the cloud metadata server and the Envoy admin port of
 // the egress pod (127.0.0.1:15000, atenet-egress.yaml) through a public name that resolves there.
 //
-// Koinon's own NetworkPolicies do not stand in for this: the egress pod is a Substrate pod, and a
-// NetworkPolicy does not see its loopback traffic at all. The first line for the metadata address is
-// the fence on the worker (charts/koinon/templates/substrate-networkpolicy.yaml, ADR 0120); this spec
-// is the second line, the one the pinned release owns.
+// What Koinon's own NetworkPolicies cover. The control-plane fence
+// (charts/koinon/templates/substrate-networkpolicy.yaml, the `-substrate-control` policy and the
+// default-deny egress policy) gives atenet-egress no route to any external address, 169.254.169.254
+// included, on a CNI that enforces NetworkPolicy. So the metadata address is already blocked there;
+// this spec is the second line, the one the pinned release owns. The egress pod's own loopback and
+// the Envoy admin port are not covered by any NetworkPolicy (loopback traffic is not seen by one),
+// so only the v1.0.1 fix stops those.
+//
+// Precondition. The control spec needs atenet-egress to reach KOINON_ESCAPE_EGRESS_CONTROL. On a rig
+// with the chart policies on, add that destination to workerNetworkPolicy.extraEgress or run the
+// rig with the chart policies off; without it the control fails and the specs below prove nothing.
+//
+// How the probe reaches the gateway. The probe connects to the address of the control name (an
+// address that leaves the guest and that the `*` rule sends through atenet-egress) and puts the
+// refused name in the Host header, so the gateway does the resolution. A name the guest would
+// resolve to its own loopback is never connected to from the guest.
 var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"), Ordered, ContinueOnFailure, func() {
 	var (
 		name    string
@@ -72,6 +84,7 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 
 	// Names that resolve to the refused addresses. A public wildcard DNS service answers them; set
 	// KOINON_ESCAPE_EGRESS_REBIND to host:port names of your own when the cluster has no route to it.
+	const defaultControl = "example.com:80"
 	const defaultRebind = "169-254-169-254.sslip.io:80,127-0-0-1.sslip.io:80,127-0-0-1.sslip.io:15000,0-0-0-0.sslip.io:80"
 
 	BeforeAll(func(ctx SpecContext) {
@@ -103,25 +116,27 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 	}, NodeTimeout(8*time.Minute))
 
 	It("lets the actor reach an ordinary name under the allow-all rule (the control of the specs below)", func(ctx SpecContext) {
-		t := targets(envOr("KOINON_ESCAPE_EGRESS_CONTROL", "example.com:80"))[0]
-		res := rig.probeIn(ctx, rig.workspace, name, check{"id": "control", "op": "http_status", "host": t.host, "port": t.port})
-		Expect(res["control"]).To(HavePrefix("status "),
-			"the `*` rule did not let %s through, so a denial below would mean nothing", t)
+		t := targets(envOr("KOINON_ESCAPE_EGRESS_CONTROL", defaultControl))[0]
+		res := rig.probeIn(ctx, rig.workspace, name, check{"id": "control", "op": "http_status", "host": t.host, "via": t.host, "port": t.port})
+		Expect(res["control"]).To(MatchRegexp(`^status [23]\d\d `),
+			"the `*` rule did not let %s through (does atenet-egress have a route to it? see the precondition above), so a denial below would mean nothing", t)
 	}, NodeTimeout(2*time.Minute))
 
 	It("refuses the metadata address, the egress pod's loopback and the Envoy admin port, also under the `*` rule", func(ctx SpecContext) {
 		var checks []check
+		via := targets(envOr("KOINON_ESCAPE_EGRESS_CONTROL", defaultControl))[0].host
 		for _, t := range targets(envOr("KOINON_ESCAPE_EGRESS_REBIND", defaultRebind)) {
-			checks = append(checks, check{"id": "http " + t.String(), "op": "http_status", "host": t.host, "port": t.port})
+			checks = append(checks, check{"id": "http " + t.String(), "op": "http_status", "host": t.host, "via": via, "port": t.port})
 		}
 		res := rig.probeIn(ctx, rig.workspace, name, checks...)
 		for _, c := range checks {
 			got, _ := res[c["id"].(string)].(string)
 			GinkgoWriter.Printf("%s -> %s\n", c["id"], got)
-			// A refusal is a connection error, or an HTTP error the gateway answers itself (403 from
-			// v1.0.1 for a denied address, 502 or 503 for a name that did not resolve). A 2xx or 3xx
-			// is a response from the refused address.
-			Expect(got).To(Or(BeElementOf(denial...), MatchRegexp(`^(status [45]\d\d|noresponse)$`)), c["id"])
+			// A refusal is the gateway's own: a reset it sends, or 403, 502 or 503 with an Envoy marker
+			// (the `server` or an `x-envoy-*` header). A 401 or 400 is no refusal: a metadata server
+			// that is reached answers that to a bare GET (AWS IMDSv2, Azure IMDS). "badvia" and
+			// "ECONNREFUSED" mean the connection never reached the gateway, so they prove nothing.
+			Expect(got).To(Or(Equal("ECONNRESET"), MatchRegexp(`^status (403|502|503) .* envoy=1$`)), c["id"])
 		}
 	}, NodeTimeout(racescale.D(3*time.Minute)))
 })
