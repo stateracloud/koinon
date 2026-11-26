@@ -15,6 +15,7 @@ import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useInbox } from '@/hooks/use-inbox'
+import { describeError } from '@/lib/api-error'
 import type { ApprovalItem, QuestionItem } from '@/lib/inbox'
 import { useOrg } from '@/lib/org-context'
 
@@ -69,8 +70,8 @@ export function InboxPage() {
       const err = ConnectError.from(e)
       // Approve sends the hash the list showed; Aborted means the request changed since.
       // The server names who answered first ("Ana already answered this question").
-      if (err.code === Code.Aborted && item.kind === 'question') fail(id, err.rawMessage || 'This question was already answered, dismissed or expired.')
-      else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : err.rawMessage)
+      if (err.code === Code.Aborted && item.kind === 'question') fail(id, describeError(err, {}, 'This question was already answered, dismissed or expired.').message)
+      else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : describeError(err).message)
     } finally {
       track(id, false)
       await refresh()
@@ -93,7 +94,7 @@ export function InboxPage() {
       <h1 className="text-xl font-semibold">Inbox</h1>
       {error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(error).message}</AlertDescription>
         </Alert>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -148,7 +149,7 @@ export function InboxPage() {
               <CreateTaskForm
                 agents={agents.data.agents}
                 pending={createTask.isPending}
-                error={createTask.error ? ConnectError.from(createTask.error).rawMessage : undefined}
+                error={createTask.error ? describeError(createTask.error).message : undefined}
                 onCreate={(t) => createTask.mutateAsync({ orgId, agentId: t.agentId, title: t.title, message: t.message })}
               />
             </section>

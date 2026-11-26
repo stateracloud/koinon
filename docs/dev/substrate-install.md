@@ -24,7 +24,7 @@ koinon-api substrate install --substrate-source /path/to/substrate \
 
 ## Platforms
 
-`ate-setup` v1.0.0 has two install routes: GKE (GCS for snapshots, a Google service account, the GKE
+`ate-setup` v1.0.1 has two install routes: GKE (GCS for snapshots, a Google service account, the GKE
 credential provider) and kind. The kind route is mostly "not GCP": it installs an in-cluster object store
 (rustfs) for snapshots and an atelet without the GKE credential-provider hostPaths, which a read-only-root
 node such as Talos cannot create (upstream issue #2669). So Koinon uses it on any Kubernetes flavor and
@@ -128,7 +128,7 @@ server image with no tag fails the preflight. The preflight finds the api server
 (`ate-api-server`), not by position.
 
 The images are pinned by tag, not by digest. When Substrate publishes image digests with a release, they
-get pinned in `substratepin.go`. The images live at `ghcr.io/agent-substrate/substrate/<component>:v1.0.0`,
+get pinned in `substratepin.go`. The images live at `ghcr.io/agent-substrate/substrate/<component>:v1.0.1`,
 named by component (`ateapi` for the container `ate-api-server`), not by Deployment. The preflight reads the
 tag of the image of that container and never the image name.
 
@@ -231,8 +231,8 @@ get pod logs, and create and delete NetworkPolicies.
 
 ## Service-account issuer
 
-The probe repeats what Substrate v1.0.0's api server does to validate a token, from a pod with the default
-ServiceAccount of the probe namespace (source at commit `b34fbee7`). The issuer and the `iss` of a token are the
+The probe repeats what Substrate v1.0.1's api server does to validate a token, from a pod with the default
+ServiceAccount of the probe namespace (source at commit `20778a6d`). The issuer and the `iss` of a token are the
 same in every namespace. The probe pod does not pass the NetworkPolicies of `ate-system`: before the install there
 are none, and after the install they allow the api server's own egress, not the probe's.
 
@@ -268,7 +268,7 @@ Supported fixes, in this order:
    to `https://kubernetes.default.svc/openid/v1/jwks`.
 2. Or set it to a URL that pods reach with a certificate from the system roots.
 
-The real requirement: pods in the Substrate namespace reach the issuer Substrate trusts, because Substrate v1.0.0
+The real requirement: pods in the Substrate namespace reach the issuer Substrate trusts, because Substrate v1.0.1
 has no separate discovery URL (`cmd/ateapi/main.go` line 674 passes the issuer to `HTTPKeySource`). Kubernetes
 signs tokens with the first issuer and writes the same value as `issuer` in the discovery document, so
 `--expected-jwt-issuer` cannot turn an unroutable issuer into a reachable one. It is only an override that must
@@ -499,13 +499,13 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
 Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6). The chart creates it:
 `execution.substrate.workerNamespace`, default `ate-workers`. The default WorkerPool
 (`execution.substrate.workerPool`), its ServiceAccount and the worker NetworkPolicy live there. A
-WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
+WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.1): the
 controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
 
 - The chart creates the default WorkerPool (issue #1089). It is on by default with `execution.driver: substrate`.
   `koinon-api substrate install` and ate-setup create no pool. `helm upgrade` changes the pool, and `helm uninstall`
   removes it. The default pool is `koinon-gvisor`: one replica of the pinned worker image
-  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory (the
+  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.1`. Each replica requests 500m CPU and 1Gi memory (the
   idle cost), with limits of 4 CPU and 8704Mi (8.5Gi). The pool needs one node that runs the gvisor class: the node
   scheduler reserves the requests, and the largest sandbox needs 4 CPU and 8.5Gi free on that node. Change the size
   with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). The pool carries the label
@@ -517,11 +517,11 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
   exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
   identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps
-  ServiceAccount), or set `workerPool.enabled: false`. The default image is the tag `v1.0.0`: the interim digest
+  ServiceAccount), or set `workerPool.enabled: false`. The default image is the tag `v1.0.1`: the interim digest
   exemption (#1140) admits it, and the chart refuses the render when that exemption is gone. If you installed
   Substrate with `--image-repo`, set `workerPool.workerImage` or a registry mirror (`global.registryMirrors`), or the
   pool pulls from `ghcr.io`.
-- **Worker capacity** (Substrate v1.0.0). Read this before you change the pool size.
+- **Worker capacity** (Substrate v1.0.1). Read this before you change the pool size.
   - One worker pod runs many sandboxes. Its pod **limits** are one capacity that all its sandboxes share. The worker
     keeps 64Mi of the memory limit for itself. The pod requests do not add capacity: they only tell the node
     scheduler what to reserve.
@@ -651,7 +651,7 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 
 ## Verified and unverified
 
-Verified against the Substrate v1.0.0 source (commit `b34fbee7`), its `ate-setup --help` and
+Verified against the Substrate v1.0.1 source (commit `20778a6d`), its `ate-setup --help` and
 the koinon-lab install notes: the CRD names and the `v1` version, the Deployment names `ate-api-server`
 and `atenet-router`, the router flag `--ingress-allowed-spiffe-ids`, the SPIFFE ID
 `ns/<namespace>/sa/atenet-client`, the WorkerPool status (`replicas`, `readyReplicas`, a `Resolved`

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { ConfirmAction } from '@/components/confirm-action'
 import { PriceForm } from '@/components/price-form'
@@ -100,7 +100,7 @@ function PricesContent() {
         {adding && <PriceForm orgId={orgId} actions={actions} onDone={() => setAdding(false)} onSaved={saved} />}
         {prices.error && (
           <Alert variant="destructive" role="alert">
-            <AlertDescription>{ConnectError.from(prices.error).rawMessage}</AlertDescription>
+            <AlertDescription>{describeError(prices.error).message}</AlertDescription>
           </Alert>
         )}
         {prices.isPending ? (
@@ -217,7 +217,7 @@ function DefaultPrices({ orgId }: { orgId: string }) {
       </p>
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {changes.data && changes.data.fromVersion && (
@@ -323,7 +323,7 @@ function FlaggedPrices({ orgId }: { orgId: string }) {
       </div>
       {flagged.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(flagged.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(flagged.error).message}</AlertDescription>
         </Alert>
       )}
       {flagged.isPending ? (

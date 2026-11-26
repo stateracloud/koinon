@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
-import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { useAllAgents } from '@/hooks/use-all-agents'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { describeError } from '@/lib/api-error'
 import { harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 /** AgentsPage lists the org's agents. */
 export function AgentsPage() {
   const { org } = useOrg()
-  const list = useQuery(AgentService.method.listAgents, { orgId: org.orgId })
+  const list = useAllAgents(org.orgId)
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
       <div className="flex items-center gap-3">
@@ -27,7 +26,7 @@ export function AgentsPage() {
       </div>
       {list.isError && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       )}
       {list.isPending ? (
@@ -50,6 +49,8 @@ export function AgentsPage() {
       ) : (
         <p className="text-muted-foreground text-sm">No agents yet.</p>
       )}
+      {list.isFetchingMore && <p role="status" className="text-muted-foreground text-sm">Loading more agents…</p>}
+      {list.isError && list.data && <p className="text-muted-foreground text-sm">This list may be incomplete.</p>}
     </div>
   )
 }

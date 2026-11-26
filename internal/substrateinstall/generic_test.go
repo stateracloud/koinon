@@ -26,7 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/substrateinstall"
 )
 
-// The fixtures hold the lines of the pinned kind overlay (substrate b34fbee7, manifests/ate-install/kind)
+// The fixtures hold the lines of the pinned kind overlay (substrate 20778a6d, manifests/ate-install/kind)
 // that the corrections read; the rest of those files is left out.
 const (
 	kindKustomization = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ./atelet\n  - rustfs.yaml\n"

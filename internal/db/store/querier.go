@@ -297,6 +297,8 @@ type Querier interface {
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
+	// Saves an org template. No row comes back when the org already has a template with the slug.
+	CreateOrgTemplate(ctx context.Context, arg CreateOrgTemplateParams) (Template, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Per-org model providers and models (plan item PV1). api_key is an envelope
@@ -720,7 +722,11 @@ type Querier interface {
 	// What the task's runs have spent, by the ledger's settled cost: the figure the per-task cap is
 	// checked against (issue #99).
 	GetTaskSpend(ctx context.Context, arg GetTaskSpendParams) (string, error)
+	// By ID, for any org: the caller has the ID from an agent it can read. A caller that takes the ID from
+	// a request uses GetTemplateForOrg.
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
+	// A platform template or a template of the org; any other org's template is not found.
+	GetTemplateForOrg(ctx context.Context, arg GetTemplateForOrgParams) (Template, error)
 	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
@@ -937,7 +943,7 @@ type Querier interface {
 	// Every provider of every org with a cost API key, in a type that has a cost source; the
 	// reconciliation asks each of them once a day.
 	ListCostReportProviders(ctx context.Context, types []string) ([]ListCostReportProvidersRow, error)
-	// The most recently synced content of each template.
+	// The most recently synced content of each platform template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
@@ -1120,6 +1126,7 @@ type Querier interface {
 	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
 	// member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
 	ListOrgSummaries(ctx context.Context, arg ListOrgSummariesParams) ([]ListOrgSummariesRow, error)
+	ListOrgTemplates(ctx context.Context, orgID pgtype.UUID) ([]Template, error)
 	// Orgs whose default model migration 00045 left for BackfillDefaults.
 	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -1873,8 +1880,9 @@ type Querier interface {
 	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// Templates are platform data (not org-owned); see 00002_agents.sql.
-	// Records a template synced from the binary. Re-syncing known content only
+	// A template with a NULL org_id is platform data (synced from templates/*.yaml, read-only through the
+	// API); a template with an org_id belongs to that org and no other org may read it (00110_org_templates.sql).
+	// Records a platform template synced from the binary. Re-syncing known content only
 	// bumps last_synced_at.
 	UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error)
 	// SPDX-License-Identifier: Apache-2.0

@@ -8,14 +8,32 @@ import "koinon/auth/v1alpha1/auth.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1";
 
-// TemplateService lists the agent templates shipped with Koinon (ADR 0020).
-// Templates are platform data: they belong to no org, and every signed-in
-// user can list them.
+// TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs
+// to no org and is read-only; an org template belongs to one org, which saved it from an agent
+// (ADR 0126 section 5), and no other org sees it.
 service TemplateService {
-  // ListTemplates returns the current content of every template.
+  // ListTemplates returns the current content of every platform template and, when the request
+  // names an org, the org's own templates. Every signed-in user can list the platform templates;
+  // the org's templates need membership of the org.
   rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as
+  // template"). It needs the member role, as creating an agent does. The template keeps the agent's
+  // definition (instructions, model, grants without their bindings, limits, triggers, settings) and
+  // nothing the agent is bound to: no connection, repository or run data. Promotion to a platform
+  // template is not part of this API.
+  rpc CreateTemplateFromAgent(CreateTemplateFromAgentRequest) returns (CreateTemplateFromAgentResponse);
+}
+
+// TemplateScope says who owns a template.
+enum TemplateScope {
+  TEMPLATE_SCOPE_UNSPECIFIED = 0;
+  // Ships with Koinon; read-only; every signed-in user sees it.
+  TEMPLATE_SCOPE_PLATFORM = 1;
+  // Saved by an org; only that org sees it.
+  TEMPLATE_SCOPE_ORG = 2;
 }
 
 // Flavor is the earlier, closed list of harnesses (ADR 0035). Harnesses are named by string since
@@ -155,12 +173,37 @@ message Template {
   repeated string allowed_harnesses = 17;
   // The harness an agent gets when the request names none; one of allowed_harnesses.
   string default_harness = 18;
+  // Who owns the template.
+  TemplateScope scope = 19;
+  // The owning org of an org template; empty on a platform template.
+  string org_id = 20;
 }
 
-// ListTemplatesRequest is empty.
-message ListTemplatesRequest {}
+// ListTemplatesRequest names the org whose templates to list with the platform ones.
+message ListTemplatesRequest {
+  // Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs
+  // the viewer role in the org.
+  string org_id = 1;
+}
 
-// ListTemplatesResponse lists the templates, sorted by slug.
+// ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when
+// an org template has the same slug.
 message ListTemplatesResponse {
   repeated Template templates = 1;
+}
+
+// CreateTemplateFromAgentRequest saves an agent as a template of its org.
+message CreateTemplateFromAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // The template's name, 1 to 200 characters.
+  string display_name = 3;
+  string description = 4;
+  // Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name.
+  string slug = 5;
+}
+
+// CreateTemplateFromAgentResponse is the new org template.
+message CreateTemplateFromAgentResponse {
+  Template template = 1;
 }

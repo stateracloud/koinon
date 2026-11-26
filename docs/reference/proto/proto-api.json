@@ -19470,12 +19470,21 @@
           "name": "TemplateService",
           "fullName": "koinon.template.v1alpha1.TemplateService",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "TemplateService lists the agent templates shipped with Koinon (ADR 0020).\nTemplates are platform data: they belong to no org, and every signed-in\nuser can list them.",
+          "description": "TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs\nto no org and is read-only; an org template belongs to one org, which saved it from an agent\n(ADR 0126 section 5), and no other org sees it.",
           "deprecated": false,
           "methods": [
             {
+              "name": "CreateTemplateFromAgent",
+              "description": "CreateTemplateFromAgent saves the latest version of an agent as an org template (\"save as\ntemplate\"). It needs the member role, as creating an agent does. The template keeps the agent's\ndefinition (instructions, model, grants without their bindings, limits, triggers, settings) and\nnothing the agent is bound to: no connection, repository or run data. Promotion to a platform\ntemplate is not part of this API.",
+              "requestType": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+              "responseType": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListTemplates",
-              "description": "ListTemplates returns the current content of every template.",
+              "description": "ListTemplates returns the current content of every platform template and, when the request\nnames an org, the org's own templates. Every signed-in user can list the platform templates;\nthe org's templates need membership of the org.",
               "requestType": "koinon.template.v1alpha1.ListTemplatesRequest",
               "responseType": "koinon.template.v1alpha1.ListTemplatesResponse",
               "clientStreaming": false,
@@ -19486,6 +19495,78 @@
         }
       ],
       "messages": [
+        {
+          "name": "CreateTemplateFromAgentRequest",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentRequest saves an agent as a template of its org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The template's name, 1 to 200 characters."
+            },
+            {
+              "name": "description",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name."
+            }
+          ]
+        },
+        {
+          "name": "CreateTemplateFromAgentResponse",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentResponse is the new org template.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "template",
+              "number": 1,
+              "type": "koinon.template.v1alpha1.Template",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "Grant",
           "fullName": "koinon.template.v1alpha1.Grant",
@@ -19571,15 +19652,25 @@
           "name": "ListTemplatesRequest",
           "fullName": "koinon.template.v1alpha1.ListTemplatesRequest",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesRequest is empty.",
+          "description": "ListTemplatesRequest names the org whose templates to list with the platform ones.",
           "deprecated": false,
-          "fields": []
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs\nthe viewer role in the org."
+            }
+          ]
         },
         {
           "name": "ListTemplatesResponse",
           "fullName": "koinon.template.v1alpha1.ListTemplatesResponse",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesResponse lists the templates, sorted by slug.",
+          "description": "ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when\nan org template has the same slug.",
           "deprecated": false,
           "fields": [
             {
@@ -19851,6 +19942,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The harness an agent gets when the request names none; one of allowed_harnesses."
+            },
+            {
+              "name": "scope",
+              "number": 19,
+              "type": "koinon.template.v1alpha1.TemplateScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Who owns the template."
+            },
+            {
+              "name": "org_id",
+              "number": 20,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The owning org of an org template; empty on a platform template."
             }
           ]
         },
@@ -20015,6 +20124,33 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "TemplateScope",
+          "fullName": "koinon.template.v1alpha1.TemplateScope",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "TemplateScope says who owns a template.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "TEMPLATE_SCOPE_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "TEMPLATE_SCOPE_PLATFORM",
+              "number": 1,
+              "deprecated": false,
+              "description": "Ships with Koinon; read-only; every signed-in user sees it."
+            },
+            {
+              "name": "TEMPLATE_SCOPE_ORG",
+              "number": 2,
+              "deprecated": false,
+              "description": "Saved by an org; only that org sees it."
             }
           ]
         },

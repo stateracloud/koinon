@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
+import { describeError } from '@/lib/api-error'
 
 /**
  * RunContentRetentionSettings is where an org admin sets how many days a finished run's stored
@@ -26,7 +26,7 @@ export function RunContentRetentionSettings({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the run content retention: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the run content retention: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -87,7 +87,7 @@ export function RunContentRetentionSettings({ orgId }: { orgId: string }) {
       </form>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
     </section>

@@ -52,7 +52,7 @@ const permanent = new Set([
  * end-stream message with a different message and stays permanent.
  */
 function isTruncatedStream(err: ConnectError): boolean {
-  return err.code === Code.InvalidArgument && err.rawMessage.includes('missing EndStreamResponse')
+  return err.code === Code.InvalidArgument && err.message.includes('missing EndStreamResponse')
 }
 
 function finished(state: RunState | undefined): boolean {
