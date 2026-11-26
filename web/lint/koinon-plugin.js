@@ -14,11 +14,20 @@ const noRawMessage = {
   },
   create(context) {
     if (allowed.test(context.filename ?? context.getFilename())) return {}
+    const report = (node) => context.report({ node, messageId: 'raw' })
+    const isName = (n, computed) =>
+      !!n &&
+      ((!computed && n.type === 'Identifier' && n.name === 'rawMessage') ||
+        (n.type === 'Literal' && n.value === 'rawMessage') ||
+        (n.type === 'TemplateLiteral' && n.expressions.length === 0 && n.quasis[0]?.value.cooked === 'rawMessage'))
     return {
+      // e.rawMessage, e?.rawMessage, e['rawMessage'], e[`rawMessage`]
       MemberExpression(node) {
-        const p = node.property
-        if (!node.computed && p && p.name === 'rawMessage') context.report({ node: p, messageId: 'raw' })
-        if (node.computed && p && p.type === 'Literal' && p.value === 'rawMessage') context.report({ node: p, messageId: 'raw' })
+        if (isName(node.property, node.computed)) report(node.property)
+      },
+      // const { rawMessage } = e, ({ rawMessage }) => ...
+      Property(node) {
+        if (node.parent?.type === 'ObjectPattern' && isName(node.key, node.computed)) report(node.key)
       },
     }
   },

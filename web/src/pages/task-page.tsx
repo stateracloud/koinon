@@ -24,6 +24,9 @@ import { useOrg } from '@/lib/org-context'
 
 const route = getRouteApi('/app/tasks/$taskId')
 
+// sentence ends a message with a full stop when it has no end punctuation, so the link after it does not run on.
+const sentence = (m: string) => (/[.!?]$/.test(m) ? m : `${m}.`)
+
 export function TaskPage() {
   const { taskId } = route.useParams()
   const { org } = useOrg()
@@ -51,7 +54,7 @@ export function TaskPage() {
     return (
       <Alert variant="destructive" role="alert">
         <AlertDescription>
-          {describeError(taskQuery.error).message}{' '}
+          {sentence(describeError(taskQuery.error).message)}{' '}
           <Link to="/" className="underline">
             Back to the inbox
           </Link>
