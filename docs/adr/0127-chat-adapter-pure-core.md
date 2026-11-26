@@ -103,8 +103,8 @@ The types are platform-neutral. A platform field appears only where the platform
     thread root is a message from Koinon's bot; decision 6 reserves it) and `body` (a `Body` value, decision 8).
   - `message_changed` and `message_deleted`: the core returns `Drop(edit_ignored)`. A task keeps what the person
     first wrote. A later ADR can change this with the two-way mirroring question.
-  - `uninstalled` (connection scope): the core marks the connection as removed by the platform and drops later
-    events of the connection.
+  - `uninstalled` (connection scope): the core returns `MarkConnectionRemoved`. Later events of the connection see
+    the status as a read-only fact and end in `Drop(connection_removed)`.
 - **`State`**: a snapshot that the driver loads in the apply step. It has two parts:
   - **Read-only facts**: the connection's status and outward state; the org's channel event triggers in effect
     (`triggers.ForOrg`, [0066](0066-triggers-and-scheduling.md) TR1 read side) that name this connection; the actor's
@@ -117,9 +117,12 @@ The types are platform-neutral. A platform field appears only where the platform
   - `CreateTask(agent, trigger, origin, event)`: creates a task with the event as its first message and binds the key
     to the new task (decision 5).
   - `WakeTask(task, event, interrupt)`: adds the event to the task's timeline and wakes the task (decision 5).
+  - `MarkConnectionRemoved(connection)`: the driver sets the connection's status to "removed by the platform" in the
+    apply transaction. It locks the connection row after the connection's scope row, and takes no other lock.
   - `Drop(reason)`: the core ignores the event. The reason is a fixed enum and becomes a metric label.
 
-  `Step` returns at most one `CreateTask` or `WakeTask` for one event (decision 4, lock order).
+  `Step` returns at most one of `CreateTask`, `WakeTask` and `MarkConnectionRemoved` for one event (decision 4, lock
+  order).
 
 The core drops events from Koinon's own bot user and from other bots, unless a trigger allows bots. This is loop
 prevention.
@@ -127,8 +130,9 @@ prevention.
 **Actors on the timeline.** A task event with the actor kind `user` must name a Koinon user (the check on
 `task_events`, migration 00003, line 200). So a message from a linked person is a `user` event with the linked user. A
 message from an unlinked person, which a channel event trigger can accept ([0066](0066-triggers-and-scheduling.md)
-decision 3), is a `system` event. Its payload holds the platform and the platform user ID, never a display name. The
-first code issue confirms that the agent's prompt shows such a message as a message from a person (open question 6).
+decision 3), is a `system` event. Its payload holds `source` (`slack` or `teams`), the platform and the platform user
+ID, never a display name. The agent's prompt shows a `system` message only when its payload has `source`
+(`ListTaskMessagesAfter`, `internal/db/queries/tasks.sql`), so `source` is required. The first code issue confirms that the agent's prompt shows such a message as a message from a person (open question 6).
 
 **Origin.** `CreateTask` sets the run origin. A mention, a direct message, and a message from a linked person in a
 bound thread give `RunOriginInteractive`: a person waits in the thread. A message that only a channel rule matches
@@ -140,6 +144,19 @@ decision 12 requires. The interrupt of a running turn does not exist on `main` t
 `interrupt` input. The first code issue for the apply step adds it, as new work. Until then, `WakeTask` queues the
 input for the end of the turn, as the direct-message path does.
 
+The interrupt is a **signal after the commit**, not a write in the apply transaction. The wake holds the task row lock.
+`internal/runlock` documents the order "run rows, then the task row", and `Owner.Requeue` keeps it. A write to the
+running run row under the task lock would take the reverse order and could deadlock with a turn end. So the wake
+writes only the task event (and the reopen, if any) and returns an interrupt notification, which `durable.Commit`
+sends after the commit. The receiver locks the run in its own transaction, in the documented order. If the turn has
+ended when the signal arrives, the signal does nothing, and the queued run sees the message.
+
+**People from outside the org.** Slack Connect channels and guest accounts bring people from other workspaces or with
+limited access. This ADR does not decide how they act on tasks. Until a later decision, the core returns
+`Drop(external_user)` for a `message` or `mention` whose actor's team is not the connection's team, and for an
+unlinked guest account. Only a linked person can reopen a completed task (decision 5). The team check of decision 3
+reads the team of the event envelope (the installing workspace), not the actor's team.
+
 ### 3. Enqueue, then acknowledge
 
 The edge does these steps, in this order:
@@ -147,27 +164,33 @@ The edge does these steps, in this order:
 1. Find the connection. An HTTP delivery arrives on the path of its connection
    ([0066](0066-triggers-and-scheduling.md) decision 5). A Socket Mode delivery arrives on the socket of its
    connection. An unknown path gets HTTP 404.
-2. Verify the signature with that connection's credential: the Slack signing secret with its timestamp window, or the
-   Teams JWT. A delivery that fails gets HTTP 401. Koinon does not log its body.
+2. Verify the signature of an HTTP delivery with that connection's credential: the Slack signing secret with its
+   timestamp window, or the Teams JWT. A delivery that fails gets HTTP 401. Koinon does not log its body. A Socket
+   Mode delivery has no signature: the socket itself is opened with the connection's app-level token (decision 7).
 3. Check the team. A team in the payload that is not the connection's team gets HTTP 200 and `Drop(wrong_team)`, so
    that the platform does not retry it.
 4. Parse the delivery into an `Event`.
-5. **Filter on facts.** The edge drops an event at once (HTTP 200, a `Drop` metric) when it can have no effect: a
-   message from a bot when no trigger of the connection allows bots, and a `message` that is not `direct`, is in a
-   channel that no channel event trigger names, and is in a thread that was never bound. The filter never drops a
-   message with `root_by_koinon` set: the outbound path (#1397) needs those. The filter uses one indexed read and no
-   cache. It reads facts only. It never selects an action; the core does that. A wrong pass costs one apply step. The
-   filter must not drop an event that the core can act on, so each filter rule needs a core test that shows the core
-   drops the same event.
+5. **Filter on facts.** The edge drops an event at once (HTTP 200, a `Drop` metric) only on facts that cannot change
+   between the enqueue and the apply step: the event itself and the triggers in effect when the message was sent. It
+   drops a message from a bot when no trigger of the connection allows bots, and a **top-level** `message` that is not
+   `direct`, does not mention the bot, and is in a channel that no channel event trigger names. It never reads the
+   thread binding, because an earlier mention in the same thread can still wait in the queue and bind the thread later.
+   So it passes **every thread reply** to the core, also replies with `root_by_koinon` set, which the outbound path
+   (#1397) needs. The filter uses one indexed read of the triggers and no cache. It never selects an action; the core
+   does that. A wrong pass costs one apply step. The filter must not drop an event that the core can act on, so each
+   filter rule needs a core test that shows the core drops the same event.
 6. Enqueue one apply workflow on the org's partition of the chat apply queue (decision 4). The workflow ID is
    `chat:<platform>:<connection>:<cause_id>`. So a platform retry maps to the same workflow.
 7. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
 
-The edge does no other work before the acknowledgement: a connection lookup, the filter read and one enqueue write.
+The edge does no other work before the acknowledgement: a connection lookup, the filter read and the enqueue.
+`durable.EnqueueForOrg` reads the org's queue limits and can register a profile queue once (a write) before the
+enqueue write.
 This is what "acknowledge first" means in #24 and in [0066](0066-triggers-and-scheduling.md) decision 11: the
 acknowledgement does not wait for any task work. The enqueue comes before the acknowledgement, because an event that is
 acknowledged and then lost in a crash never comes back. If the enqueue fails, the edge answers with HTTP 5xx (or does
-not acknowledge the envelope), and the platform delivers again.
+not acknowledge the envelope), and the platform delivers again. The chat edge needs the DBOS runtime, so `koinon-api`
+serves it only with `--durable`. A held install has no DBOS runtime; decision 9 tells what the edge does then.
 
 ### 4. The apply step: idempotency, errors and order
 
@@ -198,7 +221,10 @@ not run again on the new state. The notifications of the first try are lost in t
 pre-wakes. Applied causes are removed after the dedupe window.
 
 - **Dedupe of operations.** Each Koinon operation is keyed by its action key with the source `slack` or `teams`
-  (new). `CreateTask` passes the action key as `TriggeredTask.Source` and `Key`. `CreateTriggeredTask` already calls
+  (new). `durable.Once` is unique per org, source and key, and one org can have more than one connection on one
+  platform (for example two Teams bots in one conversation). So the action key starts with the connection ID:
+  `<connection>:<cause_id>:<action kind>:<index>`. The DB3 amendment records this key format next to the `event_id`
+  key of the source `slack`. `CreateTask` passes the action key as `TriggeredTask.Source` and `Key`. `CreateTriggeredTask` already calls
   `durable.Once` with them, so the driver does not wrap it in a second `Once`. The wake operation calls `durable.Once`
   with the action key.
 - **The caller's transaction.** Today `services.CreateTriggeredTask` opens its own transaction, and its message is a
@@ -207,22 +233,38 @@ pre-wakes. Applied causes are removed after the dedupe window.
   lets task creation write the first message as a `user` event for a linked person. This is new API work.
 - **Expected outcomes are not errors.** An operation can end in an expected outcome: the agent is inactive
   (`services.ErrAgentInactive`, "drop, do not retry" in DB3), the agent has no active version
-  (`scheduler.ErrAgentNotActive`), the agent is unhealthy (`scheduler.ErrAgentUnhealthy`), the install is held
+  (`scheduler.ErrAgentNotActive`), the agent is unhealthy (`scheduler.ErrAgentUnhealthy`), a queued run exists already
+  (`scheduler.ErrQueuedRunExists`: the queued run sees the message, so the wake is done), the install is held
   ([0107](0107-restore-hold-mode.md) hold error), or the task refuses the message (decision 5,
   "the end of a task"). The core reads these facts first and returns `Drop` without the operation. A race can still
   give one of them. So the driver opens the savepoint **before** the `durable.Once` claim, because `durable.Once`
   takes no savepoint itself (`internal/durable/dedupe.go`). On an expected outcome, the driver rolls back to the
   savepoint. This removes the claim and the partial writes together. The driver records `Drop(reason)` and commits
   the cause and the new state. Only an unexpected error rolls back the transaction, and the DBOS step retries it.
+- **A task that ended in the race.** One expected outcome is different: the bound task became `canceled` or `failed`
+  between the fact read and the task lock. Decision 5 says that such a message follows the triggers again, so a `Drop`
+  would lose it. The driver rolls back to the savepoint, loads the facts again and calls `Step` once more in the same
+  transaction, while it still holds the scope row. The core now sees the closed binding and can return `CreateTask`.
+  The driver does this at most once per apply step; a second expected outcome gives `Drop`.
 - **Bounded retries.** The apply step has a fixed retry limit. When the limit is reached, the workflow records the
-  cause as applied with `Drop(apply_failed)` in a short transaction, and a metric counts it. The event is then lost
+  cause as applied with `Drop(apply_failed)` in a short transaction, and a metric counts it. The write does nothing
+  if the cause already has a row (`ON CONFLICT DO NOTHING`): the last attempt can have committed after DBOS lost its
+  result. The event is then lost
   for the task. It holds nothing else back: the inbound path has no buffer and no cursor.
 - **Lock order.** The scope row is a new lock. Only the apply step takes it, and it takes it first. Then it calls at
   most one existing Koinon operation, which takes its own locks in its own documented order: the wake takes the task
-  row (as `deliverDirectMessage` does; the rules of `internal/runlock`); task creation takes no existing row lock
-  first. The binding row refers to the task by a foreign key, which takes `FOR KEY SHARE` on the task row after the
+  row (as `deliverDirectMessage` does; the rules of `internal/runlock`); task creation inserts the task, which takes
+  only `FOR KEY SHARE` on the agent row through its foreign key; `MarkConnectionRemoved` locks the connection row. No
+  path that locks the agent or connection row waits for a scope row. The binding row refers to the task by a foreign key, which takes `FOR KEY SHARE` on the task row after the
   task lock, in the same order. No existing path can wait for a scope row. So the apply step adds no new order
   between two existing locks. This is why `Step` returns at most one Koinon operation for one event.
+- **A fair share for each thread.** Without a rule, the org's apply slots can all wait on one busy thread's scope
+  lock, and new mentions in other threads wait behind it. So the apply step takes the scope row with `FOR UPDATE
+  NOWAIT`. If another apply step holds it, the step ends at once without a change, and the workflow body starts a
+  delayed workflow outside the queue that enqueues the event again with the next attempt number (workflow ID
+  `chat:<platform>:<connection>:<cause_id>:busy:<n>`). So one thread holds at most one slot of the org at a time. The
+  cost: each try of a busy thread uses a start of the org's rate, and a busy thread waits a little longer. The delay
+  grows with each try, up to a limit (open question 8). The table of applied causes makes a repeat harmless.
 - **Order of messages.** Two apply workflows for one thread can take the scope lock in another order than the platform
   sent the messages. The task timeline then shows them in apply order. Each message event keeps the platform time
   `at` in its payload, so the agent's prompt can show it. Exact platform order needs the burst buffer, which is
@@ -259,7 +301,8 @@ The key holds platform IDs only, never names or text. Logs can hold it. Metric l
   a linked person is a `user` event and can interrupt (decision 2).
 - **The end of a task.** The core follows the rules of the direct-message path (`internal/services/directmessage.go`,
   [0066](0066-triggers-and-scheduling.md) TR3 amendment). A message to a bound task that has `completed` reopens the
-  task (same task, same timeline, reason `follow_up`). A bound task that has been `canceled` or has `failed` is not
+  task (same task, same timeline, reason `follow_up`), but only for a message from a linked person, because the reopen
+  is a `user` event. A message from an unlinked person to a completed task gives `Drop(task_ended)`. A bound task that has been `canceled` or has `failed` is not
   reopened: the core treats the binding as closed, and the event follows the triggers again. If that gives
   `CreateTask`, the apply step closes the old binding before `OnCreate` writes the new one, in the same transaction,
   so the unique constraint holds. The core cannot ask the person to start a new thread, as the inbox does, because the
@@ -290,7 +333,9 @@ The inbound part reserves these for #1397, so that #1397 adds to them and change
 
 - The signing secret and the Teams app credential are connection credentials of the `app-credential` auth type
   ([0006](0006-identity-layers.md), [0007](0007-connector-model.md)), stored in the secret store. Only the edge reads
-  them, in `koinon-api`. The bot token is for sends, so the inbound path does not read it.
+  them, in `koinon-api`. The Slack app-level token, which opens the Socket Mode connection, is a connection
+  credential too, and only the Socket Mode edge reads it. The bot token is for sends, so the inbound path does not read
+  it.
 - No chat credential goes into a sandbox. An agent never gets a chat token or a signing secret.
 - The Teams edge fetches the keys that verify the JWT only from a fixed list of hosts.
 
@@ -310,10 +355,22 @@ The inbound part reserves these for #1397, so that #1397 adds to them and change
 
 ### 9. The outward switch
 
-A Slack or Teams connection is a row of the `connections` table ([0007](0007-connector-model.md)). When an admin
-disables the connection, or the install is held after a restore ([0110](0110-held-copy-isolation.md)), the core
-returns `Drop(outward_disabled)` for every inbound event: no task is created or woken. The edge still acknowledges, so
-the platform does not retry. The outward kind for sends is #1397 work.
+A Slack or Teams connection is a row of the `connections` table ([0007](0007-connector-model.md)).
+
+- **A held install** ([0107](0107-restore-hold-mode.md) decision 2). A held `koinon-api` does no automatic work,
+  starts no outward call and runs no DBOS runtime (`runDurable` in `internal/cmd/koinonapi/main.go`). So:
+  - It opens no Socket Mode connection. A Socket Mode connection is an outward call. Also, Slack spreads the events of
+    an app over all its open sockets, so a restored copy with an open socket would take events from the live install.
+  - The HTTP edge does steps 1 to 3 of decision 3 and then answers HTTP 503, with no enqueue and no task work. This is
+    the "enqueue fails" case of decision 3. The platform delivers again for a short time and then gives up, so events
+    that arrive while the install is held are lost. This is the meaning of a hold: the install takes no new work.
+- **A disabled connection** ([0110](0110-held-copy-isolation.md) decision 5: a disabled target is not called). The
+  Socket Mode edge closes the connection's socket and opens no new one while the connection is disabled. The HTTP
+  edge answers HTTP 200 after step 3 and records `Drop(outward_disabled)`, with no enqueue, so the platform does not
+  retry. If an admin disables the connection after an event was enqueued, the core reads the status as a fact and
+  returns `Drop(outward_disabled)`: no task is created or woken.
+
+The outward kind for sends is #1397 work.
 
 ### 10. Tests
 
@@ -323,8 +380,11 @@ the platform does not retry. The outward kind for sends is #1397 work.
   operation; two concurrent mentions in a new thread give one task; an inactive or unhealthy agent and a held install
   end in a `Drop` and leave no dedupe claim; an apply step that always fails ends in `Drop(apply_failed)`; a wake that
   races with a turn end gives no deadlock; a message to a canceled task's thread creates a new task and moves the
-  binding.
-- The edge: recorded deliveries, including bad signatures, an unknown path, a wrong team and retries; each filter rule
+  binding; a canceled task found only under the task lock still gives a new task; a busy thread holds at most one
+  slot; a wake with an interrupt and a turn end at the same time give no deadlock.
+- The edge: recorded deliveries, including bad signatures, an unknown path, a wrong team and retries; a reply that
+  arrives before the mention that binds its thread is passed to the core; a held install answers 503 and opens no
+  socket; a disabled connection opens no socket; each filter rule
   has a core test that shows the core drops the same event.
 - No test calls the real platforms, as no test calls a paid model.
 
@@ -402,9 +462,12 @@ Each question gets a tracking issue with the code issues, after the review of th
 7. **The `channel_event` trigger filter.** Its shape (connection, channels, rules, @mention only, direct messages, bots
    allowed) and the order when more than one trigger matches are not decided. TR1 refuses `channel` until chat
    connectors exist.
-8. **Limits not decided:** the apply retry limit and the dedupe window for applied causes.
+8. **Limits not decided:** the apply retry limit, the dedupe window for applied causes, and the delays and limit of
+   the busy-thread retry.
 9. **Teams personal chat.** A personal chat has no reply chains. Proposed: the conversation ID is the thread, so one
    person has one bound task with the bot at a time, and a new task starts after the old one ends.
+10. **People from outside the org.** Slack Connect users and guest accounts get `Drop(external_user)` for now
+    (decision 2). A later decision can let them act, for example as unlinked people of the connection's org.
 
 ## Upstream verification
 
