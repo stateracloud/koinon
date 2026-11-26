@@ -293,6 +293,9 @@ type orgFixture struct {
 	trustedHost string
 	// githubLogin is the owner's linked GitHub login on github.com.
 	githubLogin string
+	// template is an org template saved from agent, with its slug (unique across orgs); set by
+	// newIsolationFixture.
+	template, templateSlug string
 	// appSetupState is the state of the owner's guided GitHub App setup, after GitHub created the
 	// App.
 	appSetupState string
