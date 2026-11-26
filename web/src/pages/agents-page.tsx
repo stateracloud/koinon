@@ -49,6 +49,8 @@ export function AgentsPage() {
       ) : (
         <p className="text-muted-foreground text-sm">No agents yet.</p>
       )}
+      {list.isFetchingMore && <p role="status" className="text-muted-foreground text-sm">Loading more agents…</p>}
+      {list.isError && list.data && <p className="text-muted-foreground text-sm">This list may be incomplete.</p>}
     </div>
   )
 }

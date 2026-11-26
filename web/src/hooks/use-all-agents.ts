@@ -20,10 +20,12 @@ export function useAllAgents(orgId: string, options: { refetchInterval?: number 
     },
   )
   // Two observers (the inbox page and the badge) share one query: cancelRefetch false keeps the second one from repeating the fetch.
-  const { hasNextPage, isFetchingNextPage, fetchNextPage, isError } = list
+  const { hasNextPage, isFetching, fetchNextPage, isError } = list
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage({ cancelRefetch: false })
-  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage])
+    // Run again when any fetch ends: fetchNextPage does nothing while another fetch (a refetch after an
+    // invalidation, for example) is in flight, and no other dependency would change after it.
+    if (hasNextPage && !isFetching && !isError) void fetchNextPage({ cancelRefetch: false })
+  }, [hasNextPage, isFetching, isError, fetchNextPage])
 
   const pages = list.data?.pages
   const data = useMemo(() => (pages ? { agents: pages.flatMap((p) => p.agents) } : undefined), [pages])
@@ -32,6 +34,6 @@ export function useAllAgents(orgId: string, options: { refetchInterval?: number 
     isPending: list.isPending,
     isError: list.isError,
     error: list.error,
-    isFetchingMore: Boolean(hasNextPage) || isFetchingNextPage,
+    isFetchingMore: Boolean(hasNextPage) && !isError,
   }
 }

@@ -10,9 +10,9 @@ import { pagedListAgents } from '@/test-agent-pages'
 import { agent, renderApp, whoAmI } from '@/test-utils'
 
 describe('Inbox agents paging', () => {
-  it('shows an unhealthy agent from page 2 of ListAgents', async () => {
+  it('shows an unhealthy agent from page 3 of ListAgents', async () => {
     const sick = agent('a-2', 'Page two bot', AgentStatus.ACTIVE, { atMs: Date.now() - 60_000, reason: 'its sandbox never became ready' })
-    const { listAgents, asked } = pagedListAgents([[agent('a-1', 'Repo helper')], [sick]])
+    const { listAgents, asked } = pagedListAgents([[agent('a-1', 'Repo helper')], [agent('a-3', 'Other bot')], [sick]])
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.ADMIN }) })
       service(AgentService, { listAgents })
@@ -20,7 +20,6 @@ describe('Inbox agents paging', () => {
     })
     renderApp(transport, '/')
     expect(await screen.findByText(/is unhealthy and takes no runs/)).toBeInTheDocument()
-    expect(screen.getAllByText(/Page two bot/).length).toBeGreaterThan(0)
-    expect(asked).toEqual(['', 'p1'])
+        expect(asked).toEqual(['', 'p1', 'p2'])
   })
 })

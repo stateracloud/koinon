@@ -11,15 +11,15 @@ import { agent, renderApp, whoAmI } from '@/test-utils'
 
 describe('AgentsPage', () => {
   it('lists the agents of every ListAgents page', async () => {
-    const { listAgents, asked } = pagedListAgents([[agent('a-1', 'Repo helper')], [agent('a-2', 'Page two bot')]])
+    const { listAgents, asked } = pagedListAgents([[agent('a-1', 'Repo helper')], [agent('a-2', 'Page two bot')], [agent('a-3', 'Page three bot')]])
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
       service(AgentService, { listAgents })
       service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
     renderApp(transport, '/agents')
-    expect(await screen.findByRole('link', { name: 'Page two bot' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Repo helper' })).toBeInTheDocument()
-    expect(asked).toEqual(['', 'p1'])
+    expect(await screen.findByRole('link', { name: 'Page three bot' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Page two bot' })).toBeInTheDocument()
+    expect(asked).toEqual(['', 'p1', 'p2'])
   })
 })
