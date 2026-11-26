@@ -94,8 +94,8 @@ On the `vm` tier, vsock belongs to the Kata agent, not to the guest server; the 
 keeps the payload away from it.
 
 The guest server's own process, descriptors and sockets belong to it, not to the payload. The guest
-server runs outside the launcher; the payload runs as uid 0 until the non-root gap closes, so uid
-alone does not keep it out. Each way to a socket the payload did not create is closed:
+server runs outside the launcher. On the gVisor tiers the payload runs as uid 10001 (see "The sandbox
+user"). On the `vm` tier it can still run as uid 0 (issue #1462). So uid alone does not keep it out. Each way to a socket the payload did not create is closed:
 
 | Way | Control |
 | --- | --- |
@@ -113,7 +113,8 @@ process it starts (a shell, git, a Node worker) has another pid, and such a rule
 without its own `/proc/self` (tested: the child gets `EACCES`). Landlock cannot express "the
 caller's own pid"; the per-process entries that matter are guarded by the ptrace access check above.
 A uid-0 payload can still read the guest server's `status` and `cmdline`, and list the numbers in
-its `fd` directory (a mode check only, no descriptor); that closes with the non-root user.
+its `fd` directory (a mode check only, no descriptor). The non-root user closes this on the gVisor
+tiers. On the `vm` tier it stays open until issue #1462.
 
 Exit 64 is a usage or policy error; exit 70 is a control that the policy requires and the guest
 could not apply (fail closed).
@@ -125,25 +126,57 @@ JSON, unknown fields refused. Each control has a `mode`: `require` (fail closed)
 `require`: `off` and `best_effort` fail `Validate` (exit 64), because a skipped filter also skips the vsock and process-access denies (ADR 0120 fail closed). A file that names
 `landlock` replaces the path lists.
 
-The overlay image carries two policies that differ in the Landlock mode only (ADR 0120 section 4.2
-and 4.3; the driver picks by tier through `LauncherPrefix(tier)`):
+The overlay image carries two policies that differ in the Landlock and user modes only (ADR 0120
+section 4.2 and 4.3, amendment of 2026-11-26; the driver picks by tier through `LauncherPrefix(tier)`):
 
-| Tier | File | Landlock |
-| --- | --- | --- |
-| `vm` | `cmd/koinon-guest-launcher/policy-vm.json` | `require`: no ABI 5 Landlock, no start (exit 70) |
-| `hardened`, `dev` (gVisor) | `cmd/koinon-guest-launcher/policy-gvisor.json` | `best_effort`: the kernel may not offer it |
+| Tier | File | Landlock | User |
+| --- | --- | --- | --- |
+| `vm` | `cmd/koinon-guest-launcher/policy-vm.json` | `require`: no ABI 5 Landlock, no start (exit 70) | `best_effort` until issue #1462 |
+| `hardened`, `dev` (gVisor) | `cmd/koinon-guest-launcher/policy-gvisor.json` | `best_effort`: the kernel may not offer it | `require`: no drop to uid 10001, no start (exit 70) |
 
-## The non-root gap
+## The sandbox user
 
-The Substrate v1.0.1 guest gives payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and
-`CAP_AUDIT_WRITE`. Without `CAP_SETUID` and `CAP_SETGID` the launcher cannot drop to uid 10001
-(`setresgid: operation not permitted`; phase 0 result, comment on #1087). The default `user.mode`
-is `best_effort`: the launcher logs "user drop failed, continuing as the current user" and applies
-every other control. `user.mode: require` fails closed. Tracked on #1087 (needs a payload uid/gid
-option in Substrate). As root the payload also keeps
-the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted and effective sets are
-reduced to the allowlist. When the drop works, the bounding set is shrunk before it (while root),
-and the allowlist is restored as effective, inheritable and ambient for the non-root user.
+The payload runs as the sandbox user, uid and gid 10001 (the `sandbox` user of the harness images,
+[images.md](images.md)). The launcher drops to it before it applies the filters: `setgroups([])`,
+`setresgid`, then `setresuid`. The bounding set is shrunk before the drop (while root), and the
+allowlist (empty in the image policies) is restored as effective, inheritable and ambient for the
+non-root user. The default `user.mode` is `require` (issue #1387): when the drop fails, the launcher
+exits 70 and the payload does not start. `best_effort` logs "user drop failed, continuing as the
+current user" and applies every other control. A policy with `require` and uid 0 fails `Validate`.
+
+**gVisor tiers (`hardened`, `dev`).** The actor template drops every capability of the agent container
+and adds only `SETUID`, `SETGID`, `SETPCAP` and `KILL` (`substrate.GVisorCapAdd`). The guest front
+uses `KILL` to signal the processes that it starts. The launcher uses the other three for the drop,
+and the payload keeps none of them. The lab run of 2026-11-26 (issue #1387) shows, as uid 10001:
+`CapEff` 0, `NoNewPrivs` 1, and `setuid(0)` returns `EPERM`, also in child processes. The guest front
+still listens on port 80 without `NET_BIND_SERVICE`: the gVisor netstack has no privileged-port
+check (gVisor commit `84708bc9b0a3`, `pkg/sentry/socket/netstack`, `pkg/tcpip/stack`). This is true only
+when runsc uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host
+kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
+
+The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
+modes. Two results follow:
+
+- **Upload.** The driver is unchanged by #1387. Upload under the Substrate driver already fails on main: the
+  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`, so `WriteFile` returns
+  `PermissionDenied` before `tar` starts. The checkpoint restore of the home fails the same way. A second gap:
+  the root front writes the archive with mode 0600, and `tar` runs as uid 10001. #1478 must solve both gaps. The
+  safe design in #1478: `tar` on exec stdin as the payload user, and the file service of the guest front off.
+  The root front never writes into a path that the payload can write (a symlink swap).
+- **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
+  `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
+  and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
+  `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
+  of #1387 (2026-11-26, head `41a2400b5`) showed `--network=sandbox`, Exec in `/sandbox` as uid 10001
+  with `CapEff` 0, `/sandbox` at `0:0` mode 777 and 14 of 18 escape specs (the 4 network failures are the
+  same on main; the cause is not confirmed). The Upload and restore proof belongs to #1478.
+
+**`vm` tier.** The template keeps the Substrate default set. The Substrate v1.0.1 microVM guest gave
+payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so the drop failed
+there (`setresgid: operation not permitted`; phase 0 result, comment on #1087). `policy-vm.json` keeps
+`user.mode: best_effort` until the lab proves the drop on the `vm` tier (issue #1462). As root the
+payload keeps the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted and
+effective sets are reduced to the allowlist.
 
 ## gVisor tiers
 
@@ -173,28 +206,31 @@ Tracked on #1087 until the maintainer files separate issues:
    `execution.substrate.allowUnhardened` stays required until they are (see the PR body of #1087).
 3. Read-only root on the gVisor tiers: decided against for now. See "gVisor tiers" above and issue #1150
    (review at each Substrate update).
-4. Non-root payload user: tracked on #1087 (needs a payload uid/gid option in Substrate). Until then `user.mode` stays `best_effort` and the payload runs as root in its microVM with
-   every other control applied; `require` still fails closed.
+4. Non-root payload user: done on the gVisor tiers (issue #1387). On the `vm` tier, `user.mode` stays
+   `best_effort` until issue #1462, and the payload can run as root in its microVM with every other
+   control applied.
 5. Rotation of the guest API signing key is not supported yet (#1326): the front accepts a list of keys, but
    the chart and the driver have one key. A new key (the Secret deleted, or a new install with old
    snapshots) makes every running sandbox and every memory snapshot that has the old public key unusable.
 6. The token check uses the guest clock. On the gVisor tiers the guest uses host time. On the `vm` tier,
    a memory restore must step the guest clock forward; the lab probe record (ADR 0119 P-C) must confirm it.
-7. On the gVisor tiers without Landlock (best effort), the root filesystem is writable (#1150) and the
-   payload runs as uid 0 (item 4). The payload can then replace `koinon-guest-launcher` or its policy
-   file, and the next Exec of the driver runs that code without the guest controls. The guest API token
-   does not close this gap: the non-root user or Landlock does. The probe record must state it before
-   `allowUnhardened` is removed.
+7. On the gVisor tiers without Landlock (best effort), the root filesystem is writable (#1150). The
+   payload runs as uid 10001 (issue #1387), so it cannot replace `koinon-guest-launcher` or its policy
+   file where the image makes them owned by root and not writable by others. The proof run on the lab
+   (issue #1387) must confirm this with the real front image before `allowUnhardened` is removed.
 
 ## Tests
 
 `go test ./internal/guestlaunch` (Ginkgo): policy parsing, the filter run through the BPF VM, and
 (`Label("docker")`, needs Docker) the launcher in a scratch container with a Go port of
 `hack/spike/probe`: each attempt is open without the launcher and blocked with it; the user drop
-succeeds, degrades and fails closed. The container specs also run both image policies in the shape
-the Substrate guest gives a payload (root, `--cap-drop=ALL` plus `KILL`, `NET_BIND_SERVICE`,
-`AUDIT_WRITE`): `CapPrm`, `CapEff` and `CapAmb` are 0 and `NoNewPrivs` is 1; and with Landlock hidden
-by a Docker seccomp profile, `policy-vm.json` exits 70 and `policy-gvisor.json` starts. The probe
+succeeds, degrades and fails closed. The container specs also run each image policy in the shape
+the Substrate guest gives a payload on its tier: root with `--cap-drop=ALL` plus `KILL`,
+`NET_BIND_SERVICE`, `AUDIT_WRITE` (`vm`), or plus `KILL`, `SETUID`, `SETGID`, `SETPCAP` (gVisor).
+`CapPrm`, `CapEff` and `CapAmb` are 0 and `NoNewPrivs` is 1; on the gVisor tiers the payload is uid
+10001 and `CapBnd` is 0. `policy-gvisor.json` in the `vm` shape (no `CAP_SETUID`) exits 70 and
+starts no payload. With Landlock hidden by a Docker seccomp profile, `policy-vm.json` exits 70 and
+`policy-gvisor.json` starts. The probe
 tries `clone(CLONE_NEWUSER)`, `clone3`, `io_uring_setup`, `socket(AF_VSOCK)`, creating a file or
 a block device node in `/dev`, opening an unlisted node and, when the host gives one, a block
 device. Before the launcher, the probe plays the guest server (`probe inherit --`): it leaves a

@@ -128,9 +128,10 @@ func lookPath(name string, env []string) (string, error) {
 	return "", fmt.Errorf("guest launcher: %q not found in PATH", name)
 }
 
-// dropUser switches to the policy's uid and gid. The guest of Substrate v1.0.1 gives payloads no
-// CAP_SETUID or CAP_SETGID (issue #1087, phase 0 result), so in best_effort mode a failed drop is
-// logged and the launcher continues with the current user.
+// dropUser switches to the policy's uid and gid. In require mode (the default and the gVisor tiers,
+// issue #1387) a failed drop stops the start: the payload never runs as root. In best_effort mode
+// (the vm tier until issue #1462) a failed drop is logged and the launcher continues with the current
+// user: the microVM guest of Substrate v1.0.1 gave payloads no CAP_SETUID or CAP_SETGID (issue #1087).
 func dropUser(u UserPolicy, log *slog.Logger) error {
 	if u.Mode == ModeOff || u.UID == 0 {
 		return nil
@@ -148,7 +149,7 @@ func dropUser(u UserPolicy, log *slog.Logger) error {
 	if u.Mode == ModeRequire {
 		return fmt.Errorf("guest launcher: user drop to %d:%d required but failed: %w", u.UID, u.GID, err)
 	}
-	log.Warn("guest launcher: user drop failed, continuing as the current user with every other control applied (issue #1087: the guest lacks CAP_SETUID/CAP_SETGID)",
+	log.Warn("guest launcher: user drop failed, continuing as the current user with every other control applied (best_effort; issue #1462: the guest lacks CAP_SETUID/CAP_SETGID)",
 		"uid", u.UID, "gid", u.GID, "error", err.Error(), "current_uid", os.Geteuid())
 	return nil
 }
