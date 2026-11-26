@@ -1423,6 +1423,11 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// The ledger of every org in [@from_at, @to_at) by UTC day, org and model. Platform admins only.
+	// It reads each org through the (org_id, occurred_at) index.
+	PlatformUsageByDay(ctx context.Context, arg PlatformUsageByDayParams) ([]PlatformUsageByDayRow, error)
+	// The runs of every org created since @since and how many of them are failed. Platform admins only.
+	PlatformUsageRunsSince(ctx context.Context, since pgtype.Timestamptz) (PlatformUsageRunsSinceRow, error)
 	// The ledger's cost of one provider's entries in [@since, @until), with how many there were.
 	ProviderLedgerForDay(ctx context.Context, arg ProviderLedgerForDayParams) (ProviderLedgerForDayRow, error)
 	// Whether any org has an enabled provider of this type (the refresh's auto mode). A yes or no only:
@@ -1884,6 +1889,17 @@ type Querier interface {
 	// Records a platform template synced from the binary. Re-syncing known content only
 	// bumps last_synced_at.
 	UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The usage and cost read model (issue #1268, ADR 0126 section 4). It reads the spend ledger and
+	// the runs table, never Prometheus. USD amounts cross the Go boundary as decimal text.
+	// The day is the UTC day of occurred_at, as the budgets count it.
+	// The ledger of one org in [@from_at, @to_at) by UTC day, principal, agent, model and provider.
+	// A NULL agent is a system check of the org. The filters are optional. The buckets are disjoint
+	// (ADR 0097 decision 3): input_tokens excludes the cache tokens.
+	UsageByDay(ctx context.Context, arg UsageByDayParams) ([]UsageByDayRow, error)
+	// The runs of an org created since @since and how many of them are failed.
+	UsageRunsSince(ctx context.Context, arg UsageRunsSinceParams) (UsageRunsSinceRow, error)
 	// The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
 	// fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the
 	// agent has no sandbox record yet (the reconciler creates it on activation, and a new sandbox
