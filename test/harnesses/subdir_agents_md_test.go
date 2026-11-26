@@ -4,21 +4,23 @@ package harnesses_test
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentd"
 	koinharness "github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
-// chatMessage is one message of a chat completions request, its content as raw JSON (a string or
-// a list of parts), which is enough to search for a marker.
+// chatMessage is one message of a chat completions request with its text: the content string, or
+// the text of its parts joined.
 type chatMessage struct {
-	Role    string
-	Content string
+	Role string
+	Text string
 }
 
 func chatMessages(body string) []chatMessage {
@@ -32,16 +34,39 @@ func chatMessages(body string) []chatMessage {
 	Expect(json.Unmarshal([]byte(body), &req)).To(Succeed())
 	out := make([]chatMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		out = append(out, chatMessage{Role: m.Role, Content: string(m.Content)})
+		var text string
+		if json.Unmarshal(m.Content, &text) != nil {
+			var parts []struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(m.Content, &parts) // null content (a tool call) has no text
+			texts := make([]string, 0, len(parts))
+			for _, p := range parts {
+				texts = append(texts, p.Text)
+			}
+			text = strings.Join(texts, "\n")
+		}
+		out = append(out, chatMessage{Role: m.Role, Text: text})
 	}
 	return out
 }
 
-// OpenCode 2.2.0 attaches an AGENTS.md from a directory above a file its read tool reads, as a
-// message that starts with "Instructions from: <path>", and has no switch to stop it (issue #71,
-// harnesses/opencode/README.md, "Repository guidance"). Koinon cannot turn it off, so its
-// instruction file ranks that text below its own (agentd.InstructionPrecedence). This spec records
-// the behaviour: a new OpenCode that changes it fails here, not in production.
+// indexOf is the index of the first message for which match holds, or -1.
+func indexOf(msgs []chatMessage, match func(chatMessage) bool) int {
+	for i, m := range msgs {
+		if match(m) {
+			return i
+		}
+	}
+	return -1
+}
+
+// OpenCode attaches every AGENTS.md between a file its read tool reads and the session directory
+// (exclusive) as a message that starts with "Instructions from: <path>", and has no switch to
+// stop it (issue #71, harnesses/opencode/README.md, "Repository guidance"). Koinon cannot turn it
+// off, so its instruction file ranks that text below its own (agentd.InstructionPrecedence) and
+// names the label (harness.Descriptor.AttachedInstructionsLabel). This spec records the
+// behaviour and the order the model sees: a new OpenCode that changes either fails here.
 var _ = Describe("koinon-opencode subdirectory AGENTS.md", func() {
 	const (
 		readMarker    = "KOINON-READ-NESTED"
@@ -61,10 +86,18 @@ var _ = Describe("koinon-opencode subdirectory AGENTS.md", func() {
 		{Text: helloReply},
 	}}
 
-	It("attaches the AGENTS.md files between the read file and the session directory after Koinon's system prompt", func(ctx SpecContext) {
-		gw := newGateway(script)
+	It("attaches them on read as user messages after Koinon's system prompt, which ranks them lower", func(ctx SpecContext) {
+		d, ok := koinharness.Lookup(koinharness.OpenCode)
+		Expect(ok).To(BeTrue())
+		label := d.AttachedInstructionsLabel
+		Expect(label).NotTo(BeEmpty(), "the descriptor names OpenCode's label")
 		precedence := agentd.InstructionPrecedence(koinharness.OpenCode)
+		Expect(precedence).To(ContainSubstring("`" + label + " <path>`"))
+
+		gw := newGateway(script)
 		sb := newOpencodeSandbox(ctx, "# Koinon\n\n"+precedence+instructionsMarker+"\n")
+		// The session directory's own AGENTS.md, a cloned repository's top-level one and one in a
+		// subdirectory of the repository, above the file the model reads.
 		sb.write(ctx, workdir+"/AGENTS.md", sessionMarker+"\n")
 		sb.run(ctx, "git", "init", "-q", repo)
 		sb.write(ctx, repo+"/AGENTS.md", repoMarker+"\n")
@@ -74,12 +107,39 @@ var _ = Describe("koinon-opencode subdirectory AGENTS.md", func() {
 
 		_, err := h.conn.Prompt(ctx, session, readMarker+" read the file.")
 		Expect(err).NotTo(HaveOccurred())
-		h.client.take()
+		updates, _ := h.client.take()
+		Expect(acp.Text(updates, "agent_message_chunk")).To(ContainSubstring(helloReply))
 
-		for i, b := range gw.modelBodies() {
-			GinkgoWriter.Printf("---- body %d\n%s\n", i, b)
+		// Nothing loads the session directory's AGENTS.md: project configuration is off and the
+		// read tool stops below the session directory.
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring(sessionMarker))))
+
+		msgs := chatMessages(lastBody(gw))
+		// Koinon's file, with the precedence rule, is the system prompt, under its own path.
+		Expect(msgs).NotTo(BeEmpty())
+		Expect(msgs[0].Role).To(Equal("system"))
+		Expect(msgs[0].Text).To(ContainSubstring(label + " " + instructionsPath))
+		Expect(msgs[0].Text).To(ContainSubstring(precedence))
+		Expect(msgs[0].Text).To(ContainSubstring(instructionsMarker))
+
+		tool := indexOf(msgs, func(m chatMessage) bool { return m.Role == "tool" && strings.Contains(m.Text, fileText) })
+		Expect(tool).To(BeNumerically(">", 0), "the read tool's result is in the request")
+		Expect(msgs[tool].Text).NotTo(ContainSubstring(subdirMarker), "the attached file is not data inside the read result")
+
+		// Each AGENTS.md above the read file arrives after the result, in a user message under its label
+		// and path, nearest first: never in a system message.
+		attached := indexOf(msgs, func(m chatMessage) bool { return strings.Contains(m.Text, subdirMarker) })
+		Expect(attached).To(BeNumerically(">", tool))
+		Expect(msgs[attached].Role).To(Equal("user"))
+		text := msgs[attached].Text
+		Expect(text).To(HavePrefix(label + " " + repo + "/pkg/AGENTS.md\n" + subdirMarker))
+		Expect(text).To(ContainSubstring(label + " " + repo + "/AGENTS.md\n" + repoMarker))
+		Expect(strings.Index(text, subdirMarker)).To(BeNumerically("<", strings.Index(text, repoMarker)))
+		for _, m := range msgs {
+			if m.Role == "system" {
+				Expect(m.Text).NotTo(ContainSubstring(subdirMarker))
+				Expect(m.Text).NotTo(ContainSubstring(repoMarker))
+			}
 		}
-		body := lastBody(gw)
-		Expect(body).To(ContainSubstring(fileText), "the model got the read tool's result")
 	}, SpecTimeout(3*time.Minute))
 })
