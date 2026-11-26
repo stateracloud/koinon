@@ -141,6 +141,36 @@ sub_np=$(render -f "$CHART/ci/substrate-values.yaml" --show-only templates/subst
 grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
 sub_fb=$(render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" --show-only templates/substrate-networkpolicy.yaml)
 if grep -q 'component: mcp-gateway$' <<<"$sub_fb"; then fail "the Substrate control plane egress reaches koinon-gateway with the fallback"; fi
+# Issue #1372: the control plane reaches koinon-gateway's MCP pods on the named ports an actor needs, not on every port.
+# The stats port (the metrics of all agents) and the health port stay closed.
+# mcp_rules <rendered policy>: each egress rule that has a koinon-gateway peer, each ended by a line "@@@". A rule ends at the
+# next rule, at the end of the egress list or at a document boundary.
+mcp_rules() { awk '
+function flush() { if (buf ~ /component: mcp-gateway/) printf "%s@@@\n", buf; buf = "" }
+/^---$/ { flush(); f = 0; next }
+/^  egress:/ { flush(); f = 1; next }
+f && /^    - / { flush(); buf = $0 "\n"; next }
+f && /^  [a-z]/ { flush(); f = 0; next }
+f { buf = buf $0 "\n" }
+END { flush() }' <<<"$1"; }
+# mcp_rule_check <label> <rendered policy> <yes|no: egress listener on>: exactly one rule reaches koinon-gateway, and it lists
+# only the named ports of an actor.
+mcp_rule_check() {
+	local rules n
+	rules=$(mcp_rules "$2")
+	n=$(grep -c '^@@@$' <<<"$rules" || true)
+	[ "$n" = 1 ] || { fail "$1: $n egress rules reach koinon-gateway, want exactly one (a second rule can open every port)"; return; }
+	grep -q 'ports:' <<<"$rules" || fail "$1: the egress rule for koinon-gateway has no ports: every port would be open"
+	grep -q 'port: mcp,' <<<"$rules" || fail "$1: the egress rule for koinon-gateway does not name the mcp port"
+	if grep -Eq 'port: (stats|health|15020|15021)' <<<"$rules"; then fail "$1: the egress rule for koinon-gateway opens the stats or health port"; fi
+	if [ "$3" = yes ]; then
+		grep -q 'port: egress,' <<<"$rules" || fail "$1: the egress rule for koinon-gateway does not name the egress port with the egress listener"
+	elif grep -q 'port: egress,' <<<"$rules"; then
+		fail "$1: the egress rule for koinon-gateway names the egress port without the egress listener"
+	fi
+}
+mcp_rule_check "Substrate control plane" "$sub_np" no
+mcp_rule_check "Substrate control plane with the egress listener" "$(render -f "$CHART/ci/substrate-values.yaml" --set gateway.mcp.koinon.egress.enabled=true --show-only templates/substrate-networkpolicy.yaml)" yes
 grep -q 'port: 8081$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the tools port of koinon-api"
 grep -q 'cnpg.io/cluster: koinon-pg$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the Postgres pods"
 grep -q 'port: 5432$' <<<"$mcp_np" || fail "koinon-gateway egress does not name the Postgres port"
