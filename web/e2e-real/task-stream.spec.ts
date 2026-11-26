@@ -112,7 +112,8 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText(repository)
 
   // 4. Agent from the repo-helper template, bound to the repository, activated.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  // The overview has the "New agent" link; the Main navigation has no Agents link (#1385).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   // Anchored: "Repo helper (Gitea)" is a template too (old issue 370).
   await page.getByRole('region', { name: 'Platform templates' }).getByRole('link', { name: /^Repo helper(?! \(Gitea\))/ }).click()
@@ -155,7 +156,8 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
 
   // 8. The other path (ADR 0126 section 5): a blank agent from the form, saved as an org template,
   // then activated by the admin. It comes last so that the task above has one agent to pick.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  // The overview has the "New agent" link; the Main navigation has no Agents link (#1385).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   await page.getByRole('link', { name: /Blank agent/ }).click()
   await page.getByLabel('Name', { exact: true }).fill('Docs helper')
