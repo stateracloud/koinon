@@ -189,6 +189,32 @@ var _ = Describe("Pool", func() {
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nsummarise yesterday's issues"}))
 	})
 
+	It("sends a message from an external actor with a line that says who wrote it (ADR 0130)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		t, err := q.CreateTask(ctx, store.CreateTaskParams{
+			OrgID: e.org, Title: uniq("From Slack"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
+			CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		person, err := q.EnsureExternalActor(ctx, store.EnsureExternalActorParams{
+			OrgID: e.org, Platform: "slack", Team: "T0TEST", PlatformUserID: "U0TEST",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindExternal,
+			ActorExternalID: person.ID, Payload: []byte(`{"text":"the build is red","source":"slack"}`), Prompt: true,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, t)
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\n" +
+			"[A person without a Koinon account wrote this message in Slack. This person cannot approve tool calls or " +
+			"answer questions; members of the org do that in Koinon.]\nthe build is red\n" +
+			"[End of the message from the person without a Koinon account.]"}))
+	})
+
 	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		t := e.task(ctx, "first")

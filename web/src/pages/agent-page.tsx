@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { describeError } from '@/lib/api-error'
@@ -42,6 +42,7 @@ export function AgentPage() {
   const orgId = org.orgId
   const queryClient = useQueryClient()
   const get = useQuery(AgentService.method.getAgent, { orgId, agentId })
+  const who = useQuery(AuthService.method.whoAmI, {})
   const connections = useQuery(ConnectionService.method.listConnections, { orgId })
   const connName = (id: string) => connections.data?.connections.find((c) => c.id === id)?.displayName ?? id
 
@@ -69,6 +70,10 @@ export function AgentPage() {
   // change, ADR 0020) can have open tasks, so it gets "Apply to open tasks".
   const wasActive = a.activeVersion > 0
   const grants = draft || pendingVersion ? a.proposedGrants : a.approvedGrants
+  // The server's rule (UpdateAgent): an admin or owner edits any draft; a member edits only a draft
+  // they created that was never activated. After activation the agent is an admin's to change.
+  const ownDraft = draft && !wasActive && org.role >= OrgRole.MEMBER && a.createdBy !== '' && a.createdBy === who.data?.user?.id
+  const canEditDraft = draft && (isApprover(org.role) || ownDraft)
 
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
@@ -192,7 +197,7 @@ export function AgentPage() {
         <h2 className="mt-2 font-semibold">{draft || pendingVersion ? 'Proposed grants' : 'Approved grants'}</h2>
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
-      {isApprover(org.role) && draft && <AgentDraftEdit agent={a} />}
+      {canEditDraft && <AgentDraftEdit agent={a} />}
       {isApprover(org.role) && <AgentModel agent={a} />}
       {isApprover(org.role) && <AgentSandboxResources agent={a} />}
       {isApprover(org.role) && <AgentKeepWarm agent={a} />}

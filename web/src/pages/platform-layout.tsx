@@ -9,8 +9,12 @@ import { useSignOut } from '@/hooks/use-sign-out'
 import { orgName, useOrgSession } from '@/lib/org-context'
 import { navActive, navGroup, navGroupHeading, navLink, sidebar, skipLink } from '@/lib/shell-styles'
 
-/** The sidebar of the platform console (ADR 0126 section 4), in the order of the board "Platform console: home". */
+/**
+ * The sidebar of the platform console (ADR 0126 section 4), in the order of the board "Platform console: home". The
+ * usage links match their exact path: "Usage" is /platform/usage, and the other pages are under it.
+ */
 const usageItems = [
+  { to: '/platform/usage', label: 'Usage' },
   { to: '/platform/usage/budgets', label: 'Budget ceilings' },
   { to: '/platform/usage/prices', label: 'Prices' },
 ] as const
@@ -58,7 +62,7 @@ export function PlatformLayout() {
             Usage and cost
           </h2>
           {usageItems.map((i) => (
-            <Link key={i.to} to={i.to} className={navLink} activeProps={navActive}>
+            <Link key={i.to} to={i.to} className={navLink} activeOptions={{ exact: true }} activeProps={navActive}>
               {i.label}
             </Link>
           ))}

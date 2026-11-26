@@ -19,7 +19,6 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	orgv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1"
 	platformv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
-	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	"github.com/stateracloud/koinon/internal/money"
 )
 
@@ -36,19 +35,6 @@ const (
 
 var errBadPageToken = connect.NewError(connect.CodeInvalidArgument, "page_token is not a next_page_token of this call")
 
-// platformAdmin returns the caller when it is a platform admin, else PermissionDenied. Membership of
-// an org does not count: an org admin or owner is not a platform admin.
-func platformAdmin(ctx context.Context) (*auth.Principal, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), refusalv1.Reason_PLATFORM_ADMIN_REQUIRED)
-	}
-	return p, nil
-}
-
 // pageSize clamps a requested page size to (0, maxSize], with def for 0 or less.
 func pageSize(req int32, def, maxSize int) int {
 	switch {
@@ -63,7 +49,7 @@ func pageSize(req int32, def, maxSize int) int {
 
 // ListOrgs implements PlatformService.
 func (s *Server) ListOrgs(ctx context.Context, req *platformv1alpha1.ListOrgsRequest) (*platformv1alpha1.ListOrgsResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	size := pageSize(req.GetPageSize(), defaultOrgPageSize, maxOrgPageSize)
@@ -102,7 +88,7 @@ func (s *Server) ListOrgs(ctx context.Context, req *platformv1alpha1.ListOrgsReq
 
 // GetOrg implements PlatformService. The platform admin need not be a member of the org.
 func (s *Server) GetOrg(ctx context.Context, req *platformv1alpha1.GetOrgRequest) (*platformv1alpha1.GetOrgResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	org, err := parseID("org_id", req.GetOrgId())

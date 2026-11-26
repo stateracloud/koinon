@@ -30,3 +30,30 @@ describe('Timeline message authors', () => {
     expect(screen.getByRole('article')).not.toHaveTextContent('You')
   })
 })
+
+const ext = (key: string, platform: string, platformUserId: string): TimelineItem => ({
+  key,
+  at: 1000,
+  type: 'message',
+  actor: ActorKind.EXTERNAL,
+  actorUserId: '',
+  actorName: '',
+  external: { platform, platformUserId },
+  text: `text ${key}`,
+})
+
+describe('Timeline messages from a person without a Koinon account (ADR 0130)', () => {
+  it('names the platform and the platform user ID, says there is no account, and never says You', () => {
+    render(<Timeline meUserId="u-1" items={[ext('x', 'slack', 'U0TEST')]} />)
+    const article = screen.getByRole('article')
+    expect(article).toHaveTextContent('Slack user U0TEST')
+    expect(article).toHaveTextContent('No Koinon account')
+    expect(article).not.toHaveTextContent('You')
+    expect(article.className).not.toContain('ml-auto')
+  })
+
+  it('says Teams for a Teams person', () => {
+    render(<Timeline items={[ext('t', 'teams', '29:abc')]} />)
+    expect(screen.getByRole('article')).toHaveTextContent('Teams user 29:abc')
+  })
+})

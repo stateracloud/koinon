@@ -36,6 +36,7 @@ import { TaskPage } from '@/pages/task-page'
 import { ObservabilityPage } from '@/pages/observability-page'
 import { PlatformObservabilityPage } from '@/pages/platform-observability-page'
 import { PlatformPricesPage } from '@/pages/platform-prices-page'
+import { PlatformUsagePage } from '@/pages/platform-usage-page'
 
 export type RouterContext = { queryClient: QueryClient }
 
@@ -182,6 +183,7 @@ export const tokensRoute = createRoute({ getParentRoute: () => orgRoute, path: '
 export const platformRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform', component: PlatformLayout })
 export const platformHomeRoute = createRoute({ getParentRoute: () => platformRoute, path: '/', component: PlatformConsolePage })
 export const platformOrgsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/orgs', component: PlatformOrgsPage })
+export const platformUsageRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage', component: PlatformUsagePage })
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/budgets', component: PlatformBudgetsPage })
 export const platformPricesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/prices', component: PlatformPricesPage })
 export const platformProvidersRoute = createRoute({ getParentRoute: () => platformRoute, path: '/providers', component: PlatformProvidersPage })
@@ -198,7 +200,6 @@ const platformRedirects = (
     ['/budgets', '/platform/usage/budgets'],
     ['/prices', '/platform/usage/prices'],
     ['/observability', '/platform/settings/observability'],
-    ['/usage', '/platform/usage/budgets'],
     ['/settings', '/platform/settings/observability'],
   ] as const
 ).map(([path, to]) =>
@@ -246,6 +247,7 @@ const routeTree = rootRoute.addChildren([
     platformRoute.addChildren([
       platformHomeRoute,
       platformOrgsRoute,
+      platformUsageRoute,
       platformBudgetsRoute,
       platformPricesRoute,
       platformProvidersRoute,

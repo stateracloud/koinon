@@ -149,5 +149,6 @@ are in [0046](0046-adr-conventions.md).
 | [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |
 | [0125](0125-hide-unreviewed-mcp-tools.md) | Hide MCP tools that no admin reviewed | Proposed (needs main: ADR number) |
 | [0126](0126-web-ui-v2.md) | Web UI v2: brand look, org home, platform console and new-agent flow | Accepted (maintainer decisions of 2026-11-24; mockups approved: "Mocks lgtm") |
-| [0127](0127-chat-adapter-pure-core.md) | Slack and Teams adapter as a pure event-to-actions core | Proposed (step 1 of #24: the maintainer reviews this ADR before any code) |
+| [0127](0127-chat-adapter-pure-core.md) | Slack and Teams adapter as a pure event-to-actions core | Proposed (step 1 of #24: the maintainer reviews this ADR before any code); amended by [0130](0130-external-actor-kind.md) (the identity of an `external` actor is a row, not payload fields) |
 | [0128](0128-substrate-provisioner.md) | A provisioner holds the global Substrate role | Accepted (decided by the maintainer on 2026-11-26) |
+| [0130](0130-external-actor-kind.md) | The external actor kind: people without a Koinon account on the task timeline | Accepted (issue #1408; the maintainer accepted it on 2026-11-26) |

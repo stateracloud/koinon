@@ -528,6 +528,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
+            },
+            {
+              "name": "created_by",
+              "number": 31,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user ID of the person who created the agent; empty when no user did. While the agent is a\ndraft that was never activated, this person may change it with the member role (UpdateAgent)."
             }
           ]
         },
@@ -19694,6 +19703,42 @@
           ]
         },
         {
+          "name": "ExternalActor",
+          "fullName": "koinon.task.v1alpha1.ExternalActor",
+          "file": "koinon/task/v1alpha1/task.proto",
+          "description": "ExternalActor is a person without a linked Koinon account who writes from a chat platform\n(ADR 0130). It holds no display name and no other profile data.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "platform",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"slack\" or \"teams\"."
+            },
+            {
+              "name": "team",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack team ID or the Teams tenant ID of the workspace in which the person wrote."
+            },
+            {
+              "name": "platform_user_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack user ID or the Teams user ID."
+            }
+          ]
+        },
+        {
           "name": "GetTaskRequest",
           "fullName": "koinon.task.v1alpha1.GetTaskRequest",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -20868,6 +20913,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "The typed event. It is not set for a kind that this server does not know, or for a payload that\nit cannot read."
+            },
+            {
+              "name": "actor_external",
+              "number": 11,
+              "type": "koinon.task.v1alpha1.ExternalActor",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any\nrole that can read the task sees it."
             }
           ]
         },
@@ -21245,6 +21299,12 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "ACTOR_KIND_EXTERNAL",
+              "number": 4,
+              "deprecated": false,
+              "description": "A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account\n(ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages."
             }
           ]
         },

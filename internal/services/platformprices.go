@@ -10,7 +10,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/auth"
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
 	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -27,12 +26,9 @@ func (s *Server) BindPriceRefresher(r *prices.Refresher) { s.refresher = r }
 
 // platformPriceCaller authorizes a platform admin and returns the actor to audit.
 func (s *Server) platformPriceCaller(ctx context.Context) (audit.Actor, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return audit.Actor{}, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return audit.Actor{}, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), refusalv1.Reason_PLATFORM_ADMIN_REQUIRED)
+	p, err := requirePlatformAdmin(ctx)
+	if err != nil {
+		return audit.Actor{}, err
 	}
 	return audit.User(p.UserID), nil
 }

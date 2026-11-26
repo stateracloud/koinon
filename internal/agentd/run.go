@@ -1028,11 +1028,8 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 		if kept[m.Seq] {
 			continue // the context guard kept this one whole and asked; it is not sent
 		}
-		var body struct {
-			Text string `json:"text"`
-		}
-		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
-			texts = append(texts, body.Text)
+		if t := promptMessage(m); t != "" {
+			texts = append(texts, t)
 			seqs = append(seqs, m.Seq)
 		}
 	}

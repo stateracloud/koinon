@@ -76,7 +76,19 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    claim-tests and the dependency age steps, which run on pull requests only) must succeed on the tagged
    commit and also on the merged pull request's head (`both` in the script). The three above are listed in
    the script (`pr_only`); the pull request head is the newest run that started before the merge (the
-   `closed` event reruns some of them as skipped). They are listed rather than inferred from "no run on the
+   `closed` event reruns some of them as skipped). When the tagged commit is a merge commit, the merged
+   pull request is the one whose head is the second parent of the commit (#1373). A merge queue group of
+   two or more pull requests puts one merge commit for each pull request on main, but GitHub gives each
+   pull request of the group the first merge commit of the group as its merge commit. Thus the pull
+   request list of a later merge commit in the group is empty. The merge commit of that pull request must
+   be the tagged commit, or the first merge commit of the same group: the first-parent walk from the tagged
+   commit reaches it in `MERGE_GROUP_LIMIT` steps or fewer (default 10), and each commit between them merges
+   a pull request of that group. Each of these merge commits must also bring its second parent onto main for
+   the first time (`git merge-base --is-ancestor` in the clone). Thus a later merge of an old pull request
+   head is not evidence. A group with more merge commits than the limit fails the gate; set
+   `MERGE_GROUP_LIMIT` (at most 100) for that release. A commit
+   with one parent (a squash or rebase merge) uses the pull request of the commit whose merge commit is the
+   tagged commit. The three contexts are listed rather than inferred from "no run on the
    commit", so a new push-triggered required check that is missing or red on the commit cannot be excused.
    When a workflow gains or loses a `push` trigger, move its context in or out of `pr_only`.
    An admin-merged commit has no queue build: its `ci` jobs ran in its own push run, `dco`, `claim` and

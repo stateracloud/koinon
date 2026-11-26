@@ -140,6 +140,41 @@ func messageText(e store.TaskEvent) string {
 	return strings.TrimSpace(body.Text)
 }
 
+// externalPlatforms names the chat platforms of an external message's source for the prompt.
+var externalPlatforms = map[string]string{"slack": "Slack", "teams": "Microsoft Teams"}
+
+// externalNote is the line that agentd puts before a message from an external actor (ADR 0130
+// decision 4): a person without a Koinon account who wrote in Slack or Teams. It has no name and no
+// ID. It tells the agent that this person cannot approve its tool calls or answer its questions, so
+// the agent does not ask them to. externalEnd closes the message, so the agent can see where the
+// person's text stops: text in the message that claims to come from Koinon is still theirs.
+func externalNote(source string) string {
+	where := externalPlatforms[source]
+	if where == "" {
+		where = "a chat platform"
+	}
+	return "[A person without a Koinon account wrote this message in " + where +
+		". This person cannot approve tool calls or answer questions; members of the org do that in Koinon.]"
+}
+
+const externalEnd = "[End of the message from the person without a Koinon account.]"
+
+// promptMessage is the text of a task message as the prompt shows it, "" if it has none. A message
+// from an external actor is between externalNote and externalEnd.
+func promptMessage(e store.TaskEvent) string {
+	var body struct {
+		Text   string `json:"text"`
+		Source string `json:"source"`
+	}
+	if json.Unmarshal(e.Payload, &body) != nil || strings.TrimSpace(body.Text) == "" {
+		return ""
+	}
+	if e.ActorKind == store.TaskActorKindExternal {
+		return externalNote(body.Source) + "\n" + strings.TrimSpace(body.Text) + "\n" + externalEnd
+	}
+	return body.Text
+}
+
 // handoffPrompt builds a fresh session's first prompt. It returns the prompt and the timeline seq it
 // covers (the last user message, never going back).
 func (r *runner) handoffPrompt(ctx context.Context, task store.Task, outcomes, notice string) (string, int64, error) {
@@ -158,7 +193,7 @@ func (r *runner) handoffPrompt(ctx context.Context, task store.Task, outcomes, n
 	h := handoff{Title: task.Title, Notice: notice, Summary: strings.TrimSpace(task.AgentSummary.String), Outcomes: outcomes}
 	through := r.run.PromptThroughSeq.Int64
 	for _, m := range msgs {
-		if t := messageText(m); t != "" {
+		if t := strings.TrimSpace(promptMessage(m)); t != "" {
 			h.Messages = append(h.Messages, t)
 		}
 		through = max(through, m.Seq)
