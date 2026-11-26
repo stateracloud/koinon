@@ -54,8 +54,19 @@ import (
 // "<atespace>/<actor>" (Substrate env client, internal/ate TargetActorHeader).
 const TargetActorHeader = "ate-target-actor"
 
+// Provisioner creates the org atespace and its access policy. The caller of the driver holds no right to
+// create an atespace (ADR 0128): only the provisioner does.
+type Provisioner interface {
+	// EnsureAtespace makes sure the atespace name exists and that the caller may use it. It is idempotent.
+	EnsureAtespace(ctx context.Context, name string) error
+}
+
 // Config tunes the driver. The zero value is usable: every field has a default.
 type Config struct {
+	// Provisioner, when set, creates the atespace of an org. EnsureWorkspace then never calls CreateAtespace:
+	// the reconciler holds no global owner role (ADR 0128). Nil keeps the old behaviour, for a caller that is
+	// itself a global owner (a test, a single-principal lab).
+	Provisioner Provisioner
 	// PollInterval is how long the driver waits between reads of an actor's state while it waits
 	// for it to run. Default 250 ms; the wait backs off to eight times that.
 	PollInterval time.Duration
@@ -250,7 +261,16 @@ func ref(atespace, name string) *ateapiv1.ObjectRef {
 func (d *Driver) EnsureWorkspace(ctx context.Context, name string, _ map[string]string) (execution.Workspace, error) {
 	const op = "EnsureWorkspace"
 	as, err := d.control.GetAtespace(ctx, &ateapiv1.GetAtespaceRequest{Atespace: ref("", name)})
-	if isCode(err, codeNotFound) {
+	if p := d.cfg.Provisioner; p != nil {
+		// A caller without a role on a missing atespace gets PermissionDenied, not NotFound (the check runs
+		// before the handler), and one whose policy is not written yet gets it too. Both go to the provisioner.
+		if isCode(err, codeNotFound) || isCode(err, codes.PermissionDenied) {
+			if perr := p.EnsureAtespace(ctx, name); perr != nil {
+				return execution.Workspace{}, fail(op, execution.ErrUnavailable, "the provisioner could not ensure atespace %s: %v", name, perr)
+			}
+			as, err = d.control.GetAtespace(ctx, &ateapiv1.GetAtespaceRequest{Atespace: ref("", name)})
+		}
+	} else if isCode(err, codeNotFound) {
 		as, err = d.control.CreateAtespace(ctx, &ateapiv1.CreateAtespaceRequest{
 			Atespace: &ateapiv1.Atespace{Metadata: &ateapiv1.ResourceMetadata{Name: name}},
 		})

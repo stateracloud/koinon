@@ -770,6 +770,16 @@
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
+            "provisioner": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "tokenAudience": {"type": "string", "minLength": 1},
+                "resources": {"type": "object"}
+              }
+            },
             "guestKey": {
               "type": "object",
               "additionalProperties": false,

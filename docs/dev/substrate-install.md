@@ -229,6 +229,34 @@ plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode als
 Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
 get pod logs, and create and delete NetworkPolicies.
 
+## Access in Substrate: the provisioner
+
+Only Substrate's global `owner` role can create an atespace, and Koinon makes one atespace for each org. So a
+small pod of its own, the provisioner, holds that role. The reconciler and agentd hold no global role
+([ADR 0128](../adr/0128-substrate-provisioner.md)).
+
+| Component | Principal | Role |
+| --- | --- | --- |
+| provisioner | `system:serviceaccount:<ns>:<release>-provisioner` | `owner` in the global policy |
+| reconciler | `system:serviceaccount:<ns>:<release>-reconciler` | `editor` in each org atespace |
+| agentd | `system:serviceaccount:<ns>:<release>-agentd` | `viewer` in each org atespace |
+
+- **The installer** adds the provisioner to the global access policy `default` as a revocable member, never as a
+  bootstrap owner. It reads the policy, adds the member and writes it back with the uid and version it read. It
+  keeps every other member. It writes nothing when the member is there, so run `koinon-api substrate install`
+  again on every upgrade: an install from before the provisioner gets the grant and keeps its other members.
+- `--koinon-namespace` (default `koinon`) and `--koinon-release` (default `koinon`) name the provisioner's
+  ServiceAccount. Pass the namespace and the release name of your `helm install`.
+- The installer acts as `ate-client`, the default bootstrap owner: it mints a short-lived token and calls ateapi
+  through a port-forward to the api server pod. If your install names other bootstrap owners, pass a token of a
+  global owner with `--api-token-file`.
+- **The chart** renders the provisioner (`execution.substrate.provisioner`, on by default): a Deployment of the
+  reconciler image in `provision` mode, its own ServiceAccount, a ClusterRole that only creates TokenReviews, a
+  Service and a NetworkPolicy that admits only the reconciler. The reconciler asks it for an org atespace only when
+  the atespace is missing or its policy does not give the reconciler a role yet.
+- Substrate has no scoped create role. When a Substrate release adds one, check whether the provisioner can be
+  removed (issue #1398).
+
 ## Service-account issuer
 
 The probe repeats what Substrate v1.0.1's api server does to validate a token, from a pod with the default
