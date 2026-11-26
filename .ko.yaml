@@ -6,9 +6,9 @@
 # The digest must be at least 3 days old, or carry the security exception (ADR 0079, hack/dep-age-check.sh).
 # The pin below is the index (amd64, arm64) that cgr.dev built on 2026-11-19T00:06:23Z (5.3 days old on 2026-11-24).
 #
-# ko's default static base has no git. koinon-fakegitea runs git and git-http-backend, so it
-# builds on Chainguard's git image (git-core with http-backend; the entrypoint is overridden by
-# ko). Its bare repositories live under TMPDIR, so the pod must mount a writable emptyDir there
+# ko's default static base has no git. koinon-fakegitea runs git (git upload-pack and git
+# receive-pack serve smart HTTP; it needs no git-http-backend, which this image does not ship), so it
+# builds on Chainguard's git image (the entrypoint is overridden by ko). Its bare repositories live under TMPDIR, so the pod must mount a writable emptyDir there
 # (CH5 wiring). Re-pin with: crane digest cgr.dev/chainguard/git:latest
 defaultBaseImage: cgr.dev/chainguard/static@sha256:8658e9eaeb2294fa0e49b0667f7d66b4e21fa7690b8d2a4c30cd1d013ceb9eb7
 baseImageOverrides:

@@ -161,7 +161,7 @@ diagnostics() {
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=mcp-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-mcp-gateway.log" 2>&1 || true
   # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
-  for c in fakemodel fakegithub fakemcp; do
+  for c in fakemodel fakegithub fakemcp fakegitea; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true

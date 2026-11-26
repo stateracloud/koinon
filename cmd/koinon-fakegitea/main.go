@@ -15,7 +15,7 @@
 // egress listener sends a credential only over HTTPS (ADR 0120, #1086 part C2).
 //
 // The fake keeps its repositories as bare git repositories in the temporary directory and runs
-// the git binary, so the image it runs in needs git (with git-http-backend) and a writable
+// the git binary, so the image it runs in needs core git (not git-http-backend) and a writable
 // TMPDIR. .ko.yaml points ko at a pinned Chainguard git base for this binary; mount an emptyDir
 // at TMPDIR in the pod.
 package main
@@ -69,6 +69,12 @@ func main() {
 			f.AddRepo(r)
 			names = append(names, r)
 		}
+	}
+	// Serve git or exit: a base image that cannot run git's services fails the rollout loudly.
+	if err := f.CheckServe(); err != nil {
+		slog.Error("koinon-fakegitea cannot serve git over HTTP", "err", err)
+		f.Close()
+		os.Exit(1) //nolint:gocritic // Close was called on the line above
 	}
 
 	mux := http.NewServeMux()

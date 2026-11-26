@@ -119,10 +119,11 @@ func egressCloneE2E(ctx context.Context, c *e2eclient.Client, org string) {
 	done := w.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &kinds, func(r *runv1alpha1.Run) bool {
 		return terminal(r.GetState())
 	})
-	Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), "events: %v", kinds)
+	// Read the fake's requests first: when the run fails, their statuses say where the clone stopped.
+	got := fakeGiteaGit(ctx, kubectl)
+	Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), "events: %v; the fake Gitea's git requests: %+v", kinds, got[min(before, len(got)):])
 
 	By("the fake Gitea served the clone's git-upload-pack with a credential it accepted, and without the actor token")
-	got := fakeGiteaGit(ctx, kubectl)
 	Expect(len(got)).To(BeNumerically(">=", before))
 	clone := got[before:]
 	Expect(clone).To(ContainElement(fakeGitRequest{
