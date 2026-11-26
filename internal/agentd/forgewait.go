@@ -30,28 +30,36 @@ func (r *runner) expectsForge() bool {
 	return ok || err != nil
 }
 
-// activeExpectsForge applies the same rule to the agent's active version, the one koinon-reconciler
-// renders the forge routes from. A run can be pinned to an older version than the active one
-// (sandbox.go): when only the pinned version has a grant, the reconciler writes no row, and no wait
-// brings one.
-func (r *runner) activeExpectsForge(ctx context.Context) (bool, error) {
+// activeForgeGap says why koinon-reconciler will write no row for the agent, or "" when a pass can
+// still write one. The reconciler writes the rows of active agents only, from the active version
+// (forgegate.go). A run can be pinned to an older version than the active one (sandbox.go), and the
+// agent can leave the active state after the run was claimed: then no wait brings a row.
+func (r *runner) activeForgeGap(ctx context.Context) (string, error) {
 	agent, err := r.q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
 	if err != nil {
-		return false, err
+		return "", err
+	}
+	if agent.Status != store.AgentStatusActive {
+		return "the agent is not active, so koinon-reconciler makes no code-host credential for it; activate the agent, then run the task again", nil
 	}
 	if !agent.ActiveVersionID.Valid || agent.ActiveVersionID == r.run.AgentVersionID {
-		return true, nil
+		return "", nil
 	}
 	v, err := r.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: r.run.OrgID, ID: agent.ActiveVersionID})
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	cfg, err := versionConfig(v.Config)
 	if err != nil {
-		return true, nil // the reconciler writes the cause
+		// koinon-reconciler cannot read it either: it stops the pass and writes no row and no cause.
+		return "the agent's active version has a config that cannot be read (" + err.Error() + "), so koinon-reconciler makes no " +
+			"code-host credential for the agent; fix the agent's config, then run the task again", nil
 	}
-	_, ok, err := providers.Default().ReadGrant(cfg)
-	return ok || err != nil, nil
+	if _, ok, err := providers.Default().ReadGrant(cfg); !ok && err == nil {
+		return "the run's agent version has a code-host read grant, but the agent's active version has none, " +
+			"so koinon-reconciler makes no code-host credential for the agent; run the task again on the active version", nil
+	}
+	return "", nil
 }
 
 // waitForge waits until koinon-gateway serves the agent's forge credential, so the run's first clone
@@ -68,6 +76,7 @@ func (r *runner) waitForge(ctx context.Context) error {
 	started := now()
 	var (
 		recorded bool
+		warned   bool
 		nudged   time.Time
 		poll     = r.p.cfg.Poll
 	)
@@ -80,13 +89,14 @@ func (r *runner) waitForge(ctx context.Context) error {
 		f, err := r.q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			active, aerr := r.activeExpectsForge(ctx)
-			if aerr == nil && !active {
-				return &failure{reason: "the run's agent version has a code-host read grant, but the agent's active version has none, " +
-					"so koinon-reconciler makes no code-host credential for the agent; run the task again on the active version"}
+			gap, gerr := r.activeForgeGap(ctx)
+			if gerr == nil && gap != "" {
+				return &failure{reason: gap}
 			}
-			if aerr != nil && ctx.Err() == nil {
-				r.log.Warn("reading the agent's active version failed", "err", aerr)
+			if gerr != nil && ctx.Err() == nil && !warned {
+				// Once: the loop polls again and fails at ForgeServeTimeout if the read keeps failing.
+				warned = true
+				r.log.Warn("reading the agent's active version failed", "err", gerr)
 			}
 			// The agent expects a credential and no pass wrote its row yet (a version with a new grant
 			// that no pass has seen): wait for the pass, as for a row that is not served.

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -18,18 +19,35 @@ import (
 // while distributions ship git-http-backend in a split package (git-daemon on Alpine and Wolfi), and
 // a base image without it answered every clone with a bare 500 (#1086 part C2). The fake always speaks
 // protocol version 0, which every git client supports.
-var smartServices = map[string]bool{"git-upload-pack": true, "git-receive-pack": true}
+var smartServices = []string{"git-upload-pack", "git-receive-pack"}
+
+// gitCommand is the git subcommand of a smart HTTP service, a constant: the service name comes from the
+// request, and only these two run.
+func gitCommand(svc string) (string, bool) {
+	switch svc {
+	case "git-upload-pack":
+		return "upload-pack", true
+	case "git-receive-pack":
+		return "receive-pack", true
+	}
+	return "", false
+}
 
 // pktLine frames s as one git pkt-line.
 func pktLine(s string) string { return fmt.Sprintf("%04x%s", len(s)+4, s) }
 
 // service runs git's upload-pack or receive-pack on the bare repository at dir.
 func service(ctx context.Context, name, dir, login string, advertise bool, stdin io.Reader, stdout io.Writer) error {
-	args := []string{strings.TrimPrefix(name, "git-"), "--stateless-rpc"}
+	sub, ok := gitCommand(name)
+	if !ok {
+		return fmt.Errorf("%q is not a git smart HTTP service", name)
+	}
+	args := []string{sub, "--stateless-rpc"}
 	if advertise {
 		args = append(args, "--advertise-refs")
 	}
-	cmd := exec.CommandContext(ctx, "git", append(args, dir)...) //nolint:gosec // fixed binary; name is one of smartServices
+	// dir is the registry's path of a known repository, never the request's; -- ends the options.
+	cmd := exec.CommandContext(ctx, "git", append(args, "--", dir)...) //nolint:gosec // fixed binary; the subcommand is a constant of gitCommand
 	// A push writes the login into reflogs where they are on, as git-http-backend does with REMOTE_USER.
 	cmd.Env = append(slicesClone(gitBaseEnv), "GIT_COMMITTER_NAME="+login, "GIT_COMMITTER_EMAIL="+login+"@fakegitea.invalid")
 	cmd.Stdin, cmd.Stdout = stdin, stdout
@@ -52,7 +70,7 @@ func (f *Fake) CheckServe() error {
 	}
 	f.mu.Unlock()
 	for _, dir := range dirs {
-		for name := range smartServices {
+		for _, name := range smartServices {
 			if err := service(context.Background(), name, dir, "check", true, nil, io.Discard); err != nil {
 				return err
 			}
@@ -78,13 +96,11 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSuffix(parts[1], ".git")
 	f.mu.Lock()
-	_, err := f.lookup(parts[0], name)
+	rp, err := f.lookup(parts[0], name)
 	perm := f.permission(login, name)
 	scope := f.scopes[token]
-	// The repository directory carries the name as created, so match case-insensitively.
-	rp := f.repos[strings.ToLower(name)]
 	f.mu.Unlock()
-	if err != nil || perm == "" || rp == nil {
+	if err != nil || perm == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -96,7 +112,7 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		svc = parts[2]
 	}
-	if !smartServices[svc] {
+	if _, ok := gitCommand(svc); !ok {
 		// Only the smart protocol: git-http-backend would also serve the dumb one, no Koinon client uses it.
 		http.Error(w, "the fake serves only the smart HTTP protocol", http.StatusForbidden)
 		return
@@ -110,7 +126,7 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	if advertise {
 		var out bytes.Buffer
 		if err := service(r.Context(), svc, rp.dir, login, true, nil, &out); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serviceFailed(w, svc, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-"+svc+"-advertisement")
@@ -135,9 +151,16 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	// Buffer the answer, so a failure is a 500 and not a cut stream.
 	var out bytes.Buffer
 	if err := service(r.Context(), svc, rp.dir, login, false, body, &out); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serviceFailed(w, svc, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-"+svc+"-result")
 	_, _ = w.Write(out.Bytes())
+}
+
+// serviceFailed logs git's error, which names the repository's path on disk, and answers with a short
+// body.
+func serviceFailed(w http.ResponseWriter, svc string, err error) {
+	slog.Warn("koinon-fakegitea: git failed", "service", svc, "err", err)
+	http.Error(w, svc+" failed; see the fake's log", http.StatusInternalServerError)
 }

@@ -257,6 +257,37 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 			Expect(args).To(BeEmpty(), "the harness never starts")
 		})
 
+		It("fails a waiting run at once when the agent leaves the active state", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress)
+			Eventually(waits(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			// koinon-reconciler writes rows for active agents only: no pass writes this one now.
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: e.org, ID: e.agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("the agent is not active, so koinon-reconciler makes no code-host credential for it"))
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(BeEmpty(), "the harness never starts")
+		})
+
+		It("fails a waiting run at once when the agent's active version has a config that cannot be read", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress)
+			Eventually(waits(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			v2, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: e.org, AgentID: e.agent.ID, CreatedBy: e.user, Config: []byte(`{"instructions":5}`),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: e.org, ID: e.agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: e.org, ID: e.agent.ID, VersionID: v2.ID, ActivatedBy: e.user})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("the agent's active version has a config that cannot be read"))
+		})
+
 		It("does not read the record of an agent that does not clone through the gateway", func(ctx SpecContext) {
 			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
 			record(ctx, e, 0, false, "")
