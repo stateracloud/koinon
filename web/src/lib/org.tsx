@@ -14,7 +14,11 @@ function stored(): string | null {
   }
 }
 
-/** OrgProvider holds the org the user works in, remembered per browser. */
+/**
+ * OrgProvider holds the org the user works in. The last org the user used is remembered per browser, so a user (a
+ * platform admin too) lands in it after login (ADR 0126 section 4). memberships must hold at least one org: the
+ * caller shows the first-login screen when the user has no team org.
+ */
 export function OrgProvider({ memberships, children }: { memberships: readonly Membership[]; children: ReactNode }) {
   const [chosen, setChosen] = useState<string | null>(stored)
   const value = useMemo<OrgContextValue | null>(() => {
@@ -33,6 +37,6 @@ export function OrgProvider({ memberships, children }: { memberships: readonly M
       },
     }
   }, [memberships, chosen])
-  if (!value) return <p className="p-6">You are not a member of any org yet.</p>
+  if (!value) return null
   return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
 }

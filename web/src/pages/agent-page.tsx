@@ -182,7 +182,7 @@ export function AgentPage() {
               {activate.data.ticketsRestarting} open {activate.data.ticketsRestarting === 1 ? 'task' : 'tasks'} will start a fresh session at their next run.
             </>
           )}{' '}
-          <Link to="/" className="underline">
+          <Link to="/inbox" className="underline">
             Hand it a task from the inbox
           </Link>
         </p>

@@ -75,7 +75,7 @@ function Editor({ agentId, servers, tools, initial }: { agentId: string; servers
     return (
       <p className="text-muted-foreground">
         The org has no remote MCP servers. Add one on the{' '}
-        <Link to="/servers" className="underline">
+        <Link to="/mcp-servers" className="underline">
           Servers page
         </Link>
         .

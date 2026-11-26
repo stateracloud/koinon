@@ -18,7 +18,7 @@ export function ApprovalPage() {
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
       <div className="flex gap-4 text-sm">
-        <Link to="/" className="text-muted-foreground hover:underline">
+        <Link to="/inbox" className="text-muted-foreground hover:underline">
           ← Inbox
         </Link>
         {ticketId && (

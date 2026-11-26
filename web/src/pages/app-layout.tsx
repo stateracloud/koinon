@@ -2,22 +2,22 @@
 
 import { Code, ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useQueryClient } from '@tanstack/react-query'
-import { Link, Navigate, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { Link, Navigate, Outlet, useLocation } from '@tanstack/react-router'
+import { useEffect, useMemo } from 'react'
 import { Logo } from '@/components/logo'
 import { NoticeBanner } from '@/components/notice-banner'
-import { ThemeSwitch } from '@/components/theme-switch'
+import { OrgSwitcher } from '@/components/org-switcher'
+import { UserMenu } from '@/components/user-menu'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AuthService, type WhoAmIResponse } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { useInbox } from '@/hooks/use-inbox'
 import { isApprover } from '@/lib/approvals'
 import { OrgProvider } from '@/lib/org'
-import { useOrg } from '@/lib/org-context'
-import { logout } from '@/lib/session'
+import { teamMemberships, useOrg } from '@/lib/org-context'
+import { useSignOut } from '@/hooks/use-sign-out'
 import { ChangePasswordPage } from '@/pages/change-password-page'
+import { FirstLoginPage } from '@/pages/first-login-page'
 
 /**
  * AppLayout gates every signed-in page on WhoAmI: no session goes to the
@@ -56,43 +56,43 @@ export function AppLayout() {
     )
   }
   if (who.data.passwordChangeRequired) return <ChangePasswordPage />
+  return <SignedIn who={who.data} />
+}
+
+/** SignedIn shows the first-login screen to a user with no team org, else the org shell. */
+function SignedIn({ who }: { who: WhoAmIResponse }) {
+  const teams = useMemo(() => teamMemberships(who.memberships, who.user?.personalOrgId), [who.memberships, who.user?.personalOrgId])
+  if (teams.length === 0) return <FirstLoginPage name={who.user?.displayName || who.user?.email || 'there'} />
   return (
-    <OrgProvider memberships={who.data.memberships}>
-      <Shell who={who.data} />
+    <OrgProvider memberships={teams}>
+      <Shell who={who} />
     </OrgProvider>
   )
 }
 
 function Shell({ who }: { who: WhoAmIResponse }) {
-  const { org, memberships, setOrgId } = useOrg()
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [loggingOut, setLoggingOut] = useState(false)
-
-  async function onLogout() {
-    setLoggingOut(true)
-    try {
-      await logout()
-    } finally {
-      queryClient.clear()
-      await navigate({ to: '/login', search: {} })
-    }
-  }
-
-  const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
-  const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
+  const { org, memberships } = useOrg()
+  const { signOut, signingOut } = useSignOut()
   const admin = isApprover(org.role)
   // The same polled queries the inbox page uses: one request serves both.
   const waiting = useInbox().items.length
   useDocumentTitle(waiting)
+  const name = who.user?.displayName || who.user?.email || 'You'
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="bg-card w-full shrink-0 border-b p-3 md:w-56 md:border-r md:border-b-0">
-        <Link to="/" aria-label="Koinon" className="mb-2 block px-3 md:mb-4">
+      <a href="#main" className="bg-raised sr-only z-50 rounded-md px-3 py-1.5 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2">
+        Skip to content
+      </a>
+      <aside className="bg-card flex w-full shrink-0 flex-col gap-3 border-b p-3 md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto md:border-r md:border-b-0">
+        <Link to="/" aria-label="Koinon" className="block px-3">
           <Logo />
         </Link>
+        <OrgSwitcher platformAdmin={who.platformAdmin} />
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
-          <Link to="/" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
+          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={active}>
+            Overview
+          </Link>
+          <Link to="/inbox" className={navLink} activeProps={active}>
             Inbox
             {waiting > 0 && (
               <span data-testid="inbox-badge" aria-label={`${waiting} waiting on you`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-attention text-attention-foreground px-1.5 text-xs font-semibold">
@@ -100,97 +100,74 @@ function Shell({ who }: { who: WhoAmIResponse }) {
               </span>
             )}
           </Link>
-          <Link to="/board" className={navLink} activeProps={active}>
-            Board
-          </Link>
-          <Link to="/agents" className={navLink} activeProps={active}>
-            Agents
-          </Link>
           <Link to="/connections" className={navLink} activeProps={active}>
             Connections
           </Link>
         </nav>
         {admin && (
-          <nav aria-labelledby="settings-nav" className="mt-2 flex flex-wrap items-center gap-1 md:mt-6 md:grid">
+          <nav aria-labelledby="settings-nav" className="flex flex-wrap items-center gap-1 md:mt-3 md:grid">
             <h2 id="settings-nav" className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase md:pb-1">
               Settings
             </h2>
-            <Link to="/settings/providers" className={navLink} activeProps={active}>
-              Providers
-            </Link>
-            <Link to="/servers" className={navLink} activeProps={active}>
-              MCP servers
-            </Link>
-            <Link to="/settings/prices" className={navLink} activeProps={active}>
-              Prices
-            </Link>
-            <Link to="/settings/budgets" className={navLink} activeProps={active}>
-              Budgets
-            </Link>
-            <Link to="/settings/observability" className={navLink} activeProps={active}>
-              Observability
-            </Link>
-            <Link to="/settings/tokens" className={navLink} activeProps={active}>
-              API tokens
-            </Link>
+            {settingsItems.map((i) => (
+              <Link key={i.to} to={i.to} className={navLink} activeProps={active}>
+                {i.label}
+              </Link>
+            ))}
           </nav>
         )}
-        {who.platformAdmin && (
-          <nav aria-labelledby="platform-nav" className="mt-2 flex flex-wrap items-center gap-1 md:mt-6 md:grid">
-            <h2 id="platform-nav" className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase md:pb-1">
-              Platform
-            </h2>
-            <Link to="/platform/budgets" className={navLink} activeProps={active}>
-              Budget ceilings
-            </Link>
-            <Link to="/platform/prices" className={navLink} activeProps={active}>
-              Platform prices
-            </Link>
-            <Link to="/platform/observability" className={navLink} activeProps={active}>
-              Observability
-            </Link>
-          </nav>
-        )}
+        <div className="grid gap-1 md:mt-auto">
+          {who.platformAdmin && (
+            <nav aria-label="Platform">
+              <Link to="/platform" className={navLink} activeProps={active}>
+                Platform console
+              </Link>
+            </nav>
+          )}
+          <UserMenu name={name} email={who.user?.email ?? ''} onSignOut={signOut} signingOut={signingOut} />
+        </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-wrap items-center justify-end gap-3 border-b px-4 py-3 text-sm">
-          {memberships.length > 1 ? (
-            <Select value={org.orgId} onValueChange={setOrgId}>
-              <SelectTrigger size="sm" aria-label="Org">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {memberships.map((m) => (
-                  <SelectItem key={m.orgId} value={m.orgId}>
-                    {m.orgDisplayName || m.orgSlug}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <span>{org.orgDisplayName || org.orgSlug}</span>
-          )}
-          <span className="text-muted-foreground">{who.user?.displayName || who.user?.email}</span>
-          <ThemeSwitch />
-          <Button variant="outline" size="sm" onClick={() => void onLogout()} disabled={loggingOut}>
-            Log out
-          </Button>
-        </header>
         {admin && <NoticeBanner key={org.orgId} orgId={org.orgId} platformAdmin={who.platformAdmin} />}
         {who.platformAdmin && !memberships.some((m) => m.orgId === org.orgId) && (
           <p role="note" className="bg-muted px-4 py-1.5 text-xs md:px-6">
             You are acting as a platform admin in an org you are not a member of.
           </p>
         )}
-        <main className="min-w-0 flex-1 px-4 py-6 md:px-6">
-          {/* Remount pages when the org changes so no query mixes two orgs. */}
-          <div key={org.orgId}>
-            <Outlet />
-          </div>
-        </main>
+        <div className="flex min-w-0 flex-1">
+          <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
+            {/* Remount pages when the org changes so no query mixes two orgs. */}
+            <div key={org.orgId}>
+              <Outlet />
+            </div>
+          </main>
+          <ConciergeSlot />
+        </div>
       </div>
     </div>
   )
+}
+
+const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
+const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
+
+/** The Settings group of the org sidebar, in the order of ADR 0126 section 4. Only org admins and owners see it. */
+const settingsItems = [
+  { to: '/settings/org', label: 'Org settings' },
+  { to: '/settings/providers', label: 'Providers' },
+  { to: '/mcp-servers', label: 'MCP servers' },
+  { to: '/settings/prices', label: 'Prices' },
+  { to: '/settings/budgets', label: 'Budgets' },
+  { to: '/settings/observability', label: 'Observability' },
+  { to: '/settings/tokens', label: 'API tokens' },
+] as const
+
+/**
+ * ConciergeSlot reserves the layout region of the concierge side panel (ADR 0126 section 6, ADR 0067). The concierge
+ * comes in v0.3: until then the region renders nothing, with no disabled control and no placeholder text.
+ */
+function ConciergeSlot() {
+  return <div data-slot="concierge" hidden />
 }
 
 /** useDocumentTitle puts the waiting count in the tab title so a background tab shows it. */

@@ -136,6 +136,22 @@ export function connectionStatusLabel(s: ConnectionStatus): string {
 }
 
 /** The roles an API token can have; viewers and members cannot hold one. */
+/** orgRoleLabel names a member's role in an org (the org switcher). */
+export function orgRoleLabel(r: OrgRole): string {
+  switch (r) {
+    case OrgRole.OWNER:
+      return 'Owner'
+    case OrgRole.ADMIN:
+      return 'Admin'
+    case OrgRole.MEMBER:
+      return 'Member'
+    case OrgRole.VIEWER:
+      return 'Viewer'
+    default:
+      return 'Unknown'
+  }
+}
+
 export function tokenRoleLabel(r: OrgRole): string {
   switch (r) {
     case OrgRole.OWNER:

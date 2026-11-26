@@ -202,7 +202,7 @@ function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; fa
       },
     })
   })
-  renderApp(transport, opts.path ?? '/servers')
+  renderApp(transport, opts.path ?? '/mcp-servers')
   return calls
 }
 
