@@ -34,7 +34,7 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByRole('button', { name: 'Change password' }).click()
   // The home screen is the inbox; the board is its secondary view, at /board.
   await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
-  await expect(page.getByRole('heading', { level: 2, name: 'Waiting on you' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /^Blocked on you/ })).toBeVisible()
 
   // 2. Model provider: added in the UI (the fake model server as an OpenAI-compatible provider), with
   // one model. The key is write-only: it is not on the page afterwards.
