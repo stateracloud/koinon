@@ -2,45 +2,11 @@
 // The shadcn/ui "data table" pattern on TanStack Table v9 (issue #1270); the source is ours to edit.
 
 import * as React from "react"
-import {
-  createColumnHelper,
-  createSortedRowModel,
-  rowSortingFeature,
-  sortFn_alphanumeric,
-  sortFn_basic,
-  sortFn_datetime,
-  sortFn_text,
-  tableFeatures,
-  useTable,
-  type ColumnDef,
-  type RowData,
-  type SortingState,
-} from "@tanstack/react-table"
+import { useTable, type RowData, type SortingState } from "@tanstack/react-table"
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react"
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { dataTableFeatures, type DataTableColumn } from "@/lib/data-table"
 import { cn } from "@/lib/utils"
-
-/** dataTableFeatures is the one feature set of every DataTable: sorting on the client. */
-export const dataTableFeatures = tableFeatures({
-  rowSortingFeature,
-  sortedRowModel: createSortedRowModel(),
-  sortFns: { alphanumeric: sortFn_alphanumeric, text: sortFn_text, datetime: sortFn_datetime, basic: sortFn_basic },
-  columnMeta: {} as {
-    /** Classes for the header and the cells of the column. */
-    className?: string
-    /** The column names the row: its cells are `<th scope="row">`. */
-    rowHeader?: boolean
-  },
-})
-
-export type DataTableFeatures = typeof dataTableFeatures
-// A column list mixes value types, as in the TanStack examples.
-export type DataTableColumn<TData extends RowData> = ColumnDef<DataTableFeatures, TData, any>
-
-/** dataTableColumns returns the column helper for rows of type TData. */
-export function dataTableColumns<TData extends RowData>() {
-  return createColumnHelper<DataTableFeatures, TData>()
-}
 
 export type DataTableProps<TData extends RowData> = {
   columns: DataTableColumn<TData>[]

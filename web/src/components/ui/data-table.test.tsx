@@ -3,7 +3,8 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { DataTable, dataTableColumns, type DataTableColumn } from './data-table'
+import { dataTableColumns, type DataTableColumn } from '@/lib/data-table'
+import { DataTable } from './data-table'
 
 type Row = { id: string; name: string; size: number }
 
