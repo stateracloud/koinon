@@ -21,6 +21,9 @@ export type RepoPickerProps = {
   searchable: boolean
   'aria-label': string
   'aria-invalid'?: boolean
+  /** The ID of a hint that states the rule for the field, for example that a repository is required. */
+  'aria-describedby'?: string
+  'aria-required'?: boolean
 }
 
 /**
@@ -30,7 +33,7 @@ export type RepoPickerProps = {
  * GitHub's spelling. Any name can still be typed; the API checks it when the
  * draft is created.
  */
-export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-label': label, 'aria-invalid': invalid }: RepoPickerProps) {
+export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-label': label, 'aria-invalid': invalid, 'aria-describedby': describedBy, 'aria-required': required }: RepoPickerProps) {
   const id = useId()
   const { org } = useOrg()
   const [open, setOpen] = useState(false)
@@ -76,6 +79,8 @@ export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-la
         role="combobox"
         aria-label={label}
         aria-invalid={invalid}
+        aria-describedby={describedBy}
+        aria-required={required}
         aria-autocomplete="list"
         aria-expanded={shown}
         aria-controls={listId}

@@ -5,6 +5,7 @@ package reconciler_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"net/url"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -161,5 +162,62 @@ var _ = Describe("The org egress routes of an agent (#1086 part B)", func() {
 		Expect(reconciler.PluginInstallsOn(on, harness.OpenCode)).To(BeTrue())
 		Expect(reconciler.PluginInstallsOn(agentconfig.Config{}, harness.OpenCode)).To(BeFalse())
 		Expect(reconciler.PluginInstallsOn(on, "no-such-harness")).To(BeFalse())
+	})
+})
+
+var _ = Describe("The sandbox rule of the gateway's egress listener (#1086 part C2)", func() {
+	gw := reconciler.Endpoint{Host: "koinon-mcp-gateway.koinon.svc.cluster.local", Port: 8081}
+	bins := []string{"/usr/bin/git", "/usr/lib/git-core/git-remote-http"}
+
+	It("allows the grant's own requests under the egress prefix and nothing else on the listener", func() {
+		cfg := agentconfig.Config{
+			Grants:   []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Bindings: []agentconfig.Binding{{Connector: "github", ConnectionID: "00000000-0000-0000-0000-000000000001", Targets: []string{"acme/widgets"}}},
+		}
+		read := mustRead(cfg)
+		rule := reconciler.EgressRule(gw, read, bins)
+		Expect(rule.Binaries).To(Equal(bins))
+		Expect(rule.Endpoints).To(HaveLen(1))
+		ep := rule.Endpoints[0]
+		Expect(ep.Host).To(Equal(gw.Host))
+		Expect(ep.Port).To(Equal(gw.Port))
+		Expect(ep.Protocol).To(Equal("rest"), "enforced at L7")
+		Expect(ep.Access).To(BeEmpty(), "no open access preset")
+
+		var allow, deny int
+		for _, e := range read.Endpoints {
+			allow += len(e.Allow)
+			deny += len(e.Deny)
+		}
+		Expect(ep.Allow).To(HaveLen(allow))
+		Expect(ep.Deny).To(HaveLen(deny))
+		for _, r := range append(append([]execution.L7Rule{}, ep.Allow...), ep.Deny...) {
+			Expect(r.Path).To(Or(HavePrefix("/egress/github.com/"), HavePrefix("/egress/api.github.com/")), r.Path)
+		}
+		Expect(ep.Allow).To(ContainElement(HaveField("Path", "/egress/github.com/acme/widgets.git/git-upload-pack")))
+		var wantAllow, wantDeny []execution.L7Rule
+		for _, e := range read.Endpoints {
+			prefix := "/egress/" + e.Host
+			if e.Port != 0 && e.Port != 443 {
+				prefix += fmt.Sprintf(":%d", e.Port)
+			}
+			for _, r := range e.Allow {
+				wantAllow = append(wantAllow, execution.L7Rule{Method: r.Method, Path: prefix + r.Path, Query: r.Query})
+			}
+			for _, r := range e.Deny {
+				wantDeny = append(wantDeny, execution.L7Rule{Method: r.Method, Path: prefix + r.Path, Query: r.Query})
+			}
+		}
+		Expect(ep.Allow).To(Equal(wantAllow), "each forge rule, under the egress prefix")
+		Expect(ep.Deny).To(Equal(wantDeny))
+	})
+
+	It("names a host on another port with its port, as koinon-agentd's rewrite does", func() {
+		read := reconciler.GitHubRead{Endpoints: []execution.Endpoint{{
+			Host: "ghes.example.test", Port: 8443, Protocol: "rest",
+			Allow: []execution.L7Rule{{Method: "GET", Path: "/acme/widgets.git/info/refs", Query: map[string]string{"service": "git-upload-pack"}}},
+		}}}
+		ep := reconciler.EgressRule(gw, read, bins).Endpoints[0]
+		Expect(ep.Allow).To(Equal([]execution.L7Rule{{Method: "GET", Path: "/egress/ghes.example.test:8443/acme/widgets.git/info/refs", Query: map[string]string{"service": "git-upload-pack"}}}))
 	})
 })

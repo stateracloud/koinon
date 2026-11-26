@@ -166,12 +166,15 @@ diagnostics() {
   mkdir -p "$d"
   "${K[@]}" get pods -A -o wide >"$d/pods.txt" 2>&1 || true
   "${K[@]}" get events -A --sort-by=.lastTimestamp >"$d/events.txt" 2>&1 || true
-  for c in api reconciler agentd gateway mcp-gateway; do
+  for c in api reconciler agentd gateway; do
     "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
   done
+  # koinon-mcp-gateway runs two replicas at least, and a request can reach any of them: every pod's log,
+  # each line prefixed with its pod.
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=mcp-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-mcp-gateway.log" 2>&1 || true
   # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
-  for c in fakemodel fakegithub fakemcp; do
+  for c in fakemodel fakegithub fakemcp fakegitea; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   if [[ $DRIVER == substrate ]]; then
@@ -252,11 +255,11 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
     cat "$OUT/images-build.log"
     echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
-    done_step "Images: ko build and push, harness pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
+    done_step "Images: ko build and push, harness pull or buildx and push (9 images; started with the prerequisites, this is only the wait that was left)"
   else
     step "images (kind/images.sh): Koinon, the fakes and the OpenCode harness"
     CLUSTER="$CLUSTER" "$here/kind/images.sh"
-    done_step "Images: ko build and push (6 binaries), OpenCode harness (pull or buildx) and push"
+    done_step "Images: ko build and push (8 binaries), OpenCode harness (pull or buildx) and push"
   fi
 fi
 
@@ -282,15 +285,30 @@ step "fakes ($FAKES)"
 # The fake MCP server serves HTTPS (ADR 0120: a credential goes only over HTTPS). One throw-away CA and
 # certificate per run, given to the fake as a Secret; the e2e suite registers the CA on each server record
 # (caBundle), so the gateway trusts it for that server only. Nothing here is kept or in the tree.
+# The fake Gitea (the clone through koinon-gateway's egress listener, #1086 part C2) has the same certificate;
+# the Gitea connection names the CA, and the install's gateway.mcp.koinon.egress.caBundle gets it below.
 FAKETLS="$OUT/faketls"
 (cd "$root" && go run ./cmd/koinon-faketls -dir "$FAKETLS" \
-  -hosts "fakemcp.$FAKES.svc,fakemcp.$FAKES.svc.cluster.local,fakemcp.$FAKES,fakemcp,localhost,127.0.0.1")
+  -hosts "fakemcp.$FAKES.svc,fakemcp.$FAKES.svc.cluster.local,fakemcp.$FAKES,fakemcp,fakegitea.$FAKES.svc,fakegitea.$FAKES.svc.cluster.local,localhost,127.0.0.1")
 "${K[@]}" get ns "$FAKES" >/dev/null 2>&1 || "${K[@]}" create ns "$FAKES"
-"${K[@]}" -n "$FAKES" create secret generic fakemcp-tls --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
-  --dry-run=client -o yaml | "${K[@]}" apply -f -
+for tls in fakemcp-tls fakegitea-tls; do
+  "${K[@]}" -n "$FAKES" create secret generic "$tls" --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
+    --dry-run=client -o yaml | "${K[@]}" apply -f -
+done
+# koinon-values.yaml holds the line `caBundle: "@E2E_EGRESS_CA@"`; it becomes a block with this run's CA.
+awk -v ca="$FAKETLS/ca.crt" '
+  index($0, "\"@E2E_EGRESS_CA@\"") {
+    ind = substr($0, 1, match($0, /[^ ]/) - 1); print ind "caBundle: |"
+    while ((getline l < ca) > 0) print ind "  " l
+    close(ca); found = 1; next
+  }
+  { print }
+  END { if (!found) { print "run.sh: no @E2E_EGRESS_CA@ line in the install values" > "/dev/stderr"; exit 1 } }
+' "$OUT/quickstart/values.yaml" >"$OUT/quickstart/values.yaml.new"
+mv "$OUT/quickstart/values.yaml.new" "$OUT/quickstart/values.yaml"
 sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
-"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
-"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
+"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea >/dev/null
+"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea --timeout=120s
 done_step "Fakes deployed"
 
 # The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
@@ -414,9 +432,13 @@ go)
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
+  # The first spec replaces the bootstrap password; the others sign in with this one (web/e2e-real/session.ts).
+  # KOINON_E2E_FAKEMCP_CA is the fake MCP server's CA, which mcp-servers.spec.ts registers on the server record.
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="${KOINON_E2E_NEW_PASSWORD:-e2e-browser-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}" \
     KOINON_E2E_FAKEMODEL_URL="http://fakemodel.$FAKES.svc:8080/v1" \
     PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
     pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"

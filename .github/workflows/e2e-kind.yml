@@ -190,6 +190,36 @@ jobs:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
         shell: bash
     steps:
+      # A dispatch with inputs.commit runs that commit's code in the cache scope of the dispatch ref (main for
+      # hack/e2e-bisect.sh). Code in a job can write cache entries without a save step, so an unmerged commit (a
+      # fork's commit is reachable by sha) could poison the caches that main's runs restore (CodeQL
+      # cache-poisoning, issue 1365). So the commit must be a first-parent commit of the dispatch ref: the head
+      # or a merge on it. Any ancestor is not enough: main keeps the inner commits of every merged pull request,
+      # and nobody reviewed those as a tree. hack/e2e-bisect.sh dispatches first-parent commits of main only.
+      # This step runs before the checkout. It fetches the commit graph only (no file of any commit) and runs no
+      # code of the commit. The drill job has the same step.
+      - name: The commit input is a first-parent commit of the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          graph="$RUNNER_TEMP/dispatch-ref"
+          git init -q "$graph"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -C "$graph" -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --no-tags --filter=tree:0 \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          # To a file, not a pipe: under pipefail, `grep -q` would end the pipe early and rev-list would fail.
+          git -C "$graph" rev-list --first-parent FETCH_HEAD > "$graph.list"
+          if ! grep -qxF "$COMMIT" "$graph.list"; then
+            echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }} # empty: the event's own ref
@@ -544,6 +574,28 @@ jobs:
       run:
         shell: bash
     steps:
+      # Only a first-parent commit of the dispatch ref runs here: the reason is at the same step of the quickstart job.
+      - name: The commit input is a first-parent commit of the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          graph="$RUNNER_TEMP/dispatch-ref"
+          git init -q "$graph"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -C "$graph" -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --no-tags --filter=tree:0 \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git -C "$graph" rev-list --first-parent FETCH_HEAD > "$graph.list"
+          if ! grep -qxF "$COMMIT" "$graph.list"; then
+            echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}

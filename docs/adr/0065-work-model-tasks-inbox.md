@@ -276,8 +276,10 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 
 ## Amendment (2026-10-27, plan item TK2): the inbox as built
 
-- **Routes.** `/` is the inbox; `/board` is the board (secondary view); `/tasks/{id}` is a task. A
-  task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
+- **Routes.** `/tasks/{id}` is a task. The inbox and the board moved in the app shell v2
+  ([ADR 0126](0126-web-ui-v2.md) section 4): `/` is the overview, `/inbox` is the inbox, and `/board`
+  redirects to the Board tab of the overview (`/?tab=board`). Before that, `/` was the inbox and `/board`
+  was the board. A task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
   web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); Issue #731 removed the `TicketService` handler
   (2026-11-24): a call to a `TicketService` method now gets `unimplemented`. The `.proto` file stays so
   its field numbers stay reserved, and there is no replacement for "move to Done": people do not move

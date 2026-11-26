@@ -193,6 +193,9 @@ message Agent {
   // Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also
   // of a person who left the org since; AgentSummary gives the name and leaves out such a person.
   AgentReportsTo reports_to = 30;
+  // The user ID of the person who created the agent; empty when no user did. While the agent is a
+  // draft that was never activated, this person may change it with the member role (UpdateAgent).
+  string created_by = 31;
 }
 
 // AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.

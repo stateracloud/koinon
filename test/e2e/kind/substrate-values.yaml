@@ -44,7 +44,8 @@ execution:
   substrate:
     # The ateapi certificate names api.ate-system.svc only: a name with .cluster.local fails the TLS handshake.
     controlAddress: api.ate-system.svc:443
-    routerAddress: atenet-router.ate-system.svc.cluster.local:80
+    # The router serves TLS on 443 only (#1446); its certificate names atenet-router.ate-system.svc.
+    routerAddress: atenet-router.ate-system.svc:443
     # ate-setup makes ateapi accept tokens with this audience only (the authentication config it writes).
     tokenAudience: api.ate-system.svc
     # The Secret that kind/substrate.sh ca makes: the roots of the pod certificate controller's service-DNS signer.

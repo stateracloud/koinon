@@ -1531,9 +1531,10 @@ func AllSandboxStateValues() []SandboxState {
 type TaskActorKind string
 
 const (
-	TaskActorKindUser   TaskActorKind = "user"
-	TaskActorKindAgent  TaskActorKind = "agent"
-	TaskActorKindSystem TaskActorKind = "system"
+	TaskActorKindUser     TaskActorKind = "user"
+	TaskActorKindAgent    TaskActorKind = "agent"
+	TaskActorKindSystem   TaskActorKind = "system"
+	TaskActorKindExternal TaskActorKind = "external"
 )
 
 func (e *TaskActorKind) Scan(src interface{}) error {
@@ -1576,6 +1577,7 @@ func AllTaskActorKindValues() []TaskActorKind {
 		TaskActorKindUser,
 		TaskActorKindAgent,
 		TaskActorKindSystem,
+		TaskActorKindExternal,
 	}
 }
 
@@ -2058,6 +2060,24 @@ type DefaultPriceList struct {
 	Seq      pgtype.Int8
 	Entries  []byte
 	LoadedAt pgtype.Timestamptz
+}
+
+type ExternalActor struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	Platform       string
+	Team           string
+	PlatformUserID string
+	CreatedAt      pgtype.Timestamptz
+}
+
+type GatewayAgentForge struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	StateRevision pgtype.Int8
+	ServedAt      pgtype.Timestamptz
+	Failure       string
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type GatewayProviderFailure struct {
@@ -3152,19 +3172,20 @@ type Task struct {
 }
 
 type TaskEvent struct {
-	OrgID          pgtype.UUID
-	ID             pgtype.UUID
-	TaskID         pgtype.UUID
-	Seq            int64
-	Kind           string
-	ActorKind      TaskActorKind
-	ActorUserID    pgtype.UUID
-	ActorAgentID   pgtype.UUID
-	RunID          pgtype.UUID
-	Payload        []byte
-	CreatedAt      pgtype.Timestamptz
-	PayloadVersion int16
-	Prompt         bool
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	TaskID          pgtype.UUID
+	Seq             int64
+	Kind            string
+	ActorKind       TaskActorKind
+	ActorUserID     pgtype.UUID
+	ActorAgentID    pgtype.UUID
+	RunID           pgtype.UUID
+	Payload         []byte
+	CreatedAt       pgtype.Timestamptz
+	PayloadVersion  int16
+	Prompt          bool
+	ActorExternalID pgtype.UUID
 }
 
 type Template struct {

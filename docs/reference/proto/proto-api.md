@@ -88,6 +88,7 @@ Agent is an agent and the definition it runs.
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 | team | 29 | `string` | singular |  | The agent's team label (SetAgentPlacement); empty for no team. |
 | reports_to | 30 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also of a person who left the org since; AgentSummary gives the name and leaves out such a person. |
+| created_by | 31 | `string` | singular |  | The user ID of the person who created the agent; empty when no user did. While the agent is a draft that was never activated, this person may change it with the member role (UpdateAgent). |
 
 ### Message AgentDefinition
 
@@ -3519,7 +3520,25 @@ OutwardTargetKind is what kind of target the switch is for.
 
 ## koinon.platform.v1alpha1
 
-Files: `koinon/platform/v1alpha1/platform.proto`
+Files: `koinon/platform/v1alpha1/platform.proto`, `koinon/platform/v1alpha1/resources.proto`
+
+### Service PlatformResourceService
+
+PlatformResourceService lists the providers, the templates and the MCP servers of every org for the
+platform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any
+other caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:
+changes stay with the per-org services (ProviderService, TemplateService, McpServerService), which
+a platform admin can call as for any org.
+
+Each list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of
+them, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that
+one org (personal or team) and has one page.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ListMcpServers | `koinon.platform.v1alpha1.ListMcpServersRequest` | `koinon.platform.v1alpha1.ListMcpServersResponse` | - | ListMcpServers lists the remote MCP servers of the orgs. |
+| ListProviders | `koinon.platform.v1alpha1.ListProvidersRequest` | `koinon.platform.v1alpha1.ListProvidersResponse` | - | ListProviders lists the model providers of the orgs. A provider never holds its key here either. |
+| ListTemplates | `koinon.platform.v1alpha1.ListTemplatesRequest` | `koinon.platform.v1alpha1.ListTemplatesResponse` | - | ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts with the platform templates, which have no org. |
 
 ### Service PlatformService
 
@@ -3545,6 +3564,22 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | org | 1 | `koinon.platform.v1alpha1.OrgSummary` | singular |  |  |
 | month_start | 2 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
 
+### Message ListMcpServersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListMcpServersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| servers | 1 | `koinon.platform.v1alpha1.OrgMcpServer` | repeated |  | servers are by org slug, then in the order of McpServerService.ListServers. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
 ### Message ListOrgsRequest
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -3560,6 +3595,67 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | orgs | 1 | `koinon.platform.v1alpha1.OrgSummary` | repeated |  |  |
 | next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
 | month_start | 3 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
+
+### Message ListProvidersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListProvidersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| providers | 1 | `koinon.platform.v1alpha1.OrgProvider` | repeated |  | providers are by org slug, then in the order of ProviderService.ListProviders. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message ListTemplatesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListTemplatesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| templates | 1 | `koinon.platform.v1alpha1.OrgTemplate` | repeated |  | templates are the platform templates by slug (first page only), then the org templates by org slug and template slug. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message OrgMcpServer
+
+OrgMcpServer is one remote MCP server with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| server | 2 | `koinon.mcpserver.v1alpha1.Server` | singular |  |  |
+
+### Message OrgProvider
+
+OrgProvider is one provider with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| provider | 2 | `koinon.provider.v1alpha1.Provider` | singular |  |  |
+
+### Message OrgRef
+
+OrgRef names the org that owns a row.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| slug | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  |  |
+| kind | 4 | `koinon.org.v1alpha1.OrgKind` | singular |  |  |
 
 ### Message OrgSummary
 
@@ -3578,6 +3674,15 @@ BudgetService writes them.
 | monthly_cap_usd | 8 | `string` | singular |  | monthly_cap_usd is the org's monthly budget; empty when the org has none. |
 | platform_ceiling_usd | 9 | `string` | singular |  | platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none. |
 | created_at | 10 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message OrgTemplate
+
+OrgTemplate is one template with the org that owns it. org is unset on a platform template.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| template | 2 | `koinon.template.v1alpha1.Template` | singular |  |  |
 
 ## koinon.provider.v1alpha1
 
@@ -4622,6 +4727,17 @@ Creator is who or what created a task. Exactly the field of its kind is set.
 | agent_id | 3 | `string` | singular |  |  |
 | trigger_id | 4 | `string` | singular |  |  |
 
+### Message ExternalActor
+
+ExternalActor is a person without a linked Koinon account who writes from a chat platform
+(ADR 0130). It holds no display name and no other profile data.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| platform | 1 | `string` | singular |  | "slack" or "teams". |
+| team | 2 | `string` | singular |  | The Slack team ID or the Teams tenant ID of the workspace in which the person wrote. |
+| platform_user_id | 3 | `string` | singular |  | The Slack user ID or the Teams user ID. |
+
 ### Message GetTaskRequest
 
 GetTaskRequest names a task.
@@ -4878,6 +4994,7 @@ TaskEvent is one entry of the task timeline: a message, a state change or a run 
 | created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
 | actor_display_name | 9 | `string` | singular |  | The display name of actor_user_id, for a person's event; empty for other actors, an unnamed user or a deleted user. Never an email address. Any role that can read the task sees it. |
 | event | 10 | `koinon.task.v1alpha1.TimelineEvent` | singular |  | The typed event. It is not set for a kind that this server does not know, or for a payload that it cannot read. |
+| actor_external | 11 | `koinon.task.v1alpha1.ExternalActor` | singular |  | The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any role that can read the task sees it. |
 
 ### Message TaskNote
 
@@ -4950,6 +5067,7 @@ ActorKind says who wrote a task event.
 | ACTOR_KIND_USER | 1 |  |
 | ACTOR_KIND_AGENT | 2 |  |
 | ACTOR_KIND_SYSTEM | 3 |  |
+| ACTOR_KIND_EXTERNAL | 4 | A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages. |
 
 ### Enum CreatorKind
 

@@ -203,7 +203,7 @@ type platformUsage struct {
 }
 
 func (s *Server) platformUsage(ctx context.Context, rng *usagev1alpha1.UsageRange) (*platformUsage, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	from, to, err := usageRange(rng)

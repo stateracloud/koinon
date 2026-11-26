@@ -33,6 +33,11 @@ var (
 	// ErrUnavailable: the gateway or the sandbox relay is unreachable or overloaded;
 	// retrying later may succeed.
 	ErrUnavailable = errors.New("unavailable")
+	// ErrUnreachable: the driver cannot open its connection to the data path (the address, the TLS
+	// handshake or the client certificate is wrong) and it never was connected. Unlike ErrUnavailable, retrying
+	// later does not help until an operator fixes the install, so the caller fails the work with the error as the
+	// reason. An outage of a connection that worked is ErrUnavailable.
+	ErrUnreachable = errors.New("unreachable")
 	// ErrUnsupported: the gateway does not support something Koinon requires.
 	ErrUnsupported = errors.New("unsupported")
 	// ErrStreamClosed: an exec stream ended without an exit status.

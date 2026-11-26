@@ -840,6 +840,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
 
+	It("8. (not part of the quickstart, after its time check) an agent with a Gitea connection clones through koinon-gateway's egress listener; its sandbox holds no credential (#1086 part C2)", Label("egress"), func(ctx SpecContext) {
+		egressCloneE2E(ctx, c, org)
+	})
+
 	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, old issue 240, old issue 316)", func(ctx SpecContext) {
 		t.begin()
 		// The fake model server runs with -strict-messages (test/e2e/kind/fakes.yaml): it answers 400

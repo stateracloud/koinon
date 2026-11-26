@@ -434,7 +434,7 @@ func (q *Queries) InsertUploadNonce(ctx context.Context, arg InsertUploadNoncePa
 }
 
 const listRecentAgentReplies = `-- name: ListRecentAgentReplies :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt FROM task_events
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt, actor_external_id FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND kind = 'message' AND actor_kind = 'agent'
 ORDER BY seq DESC
 LIMIT $3
@@ -470,6 +470,7 @@ func (q *Queries) ListRecentAgentReplies(ctx context.Context, arg ListRecentAgen
 			&i.CreatedAt,
 			&i.PayloadVersion,
 			&i.Prompt,
+			&i.ActorExternalID,
 		); err != nil {
 			return nil, err
 		}

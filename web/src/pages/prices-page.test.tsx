@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import {
   FlaggedPriceSchema,
+  ModelPriceSourceSchema,
   PriceChangeSchema,
   PriceEntrySchema,
   PriceService,
@@ -31,10 +32,26 @@ const gpt = create(PriceEntrySchema, {
   id: 'openai-gpt', provider: 'openai', match: { glob: 'gpt-*' }, validFrom: '2026-10-01', rates: { input: '2', output: '8' }, tokenizer: 'bytes', ratio: '3.0',
   sourceUrl: 'https://openai.com/api/pricing/', sourceAccessed: '2026-10-20', maxOutput: 32000,
 })
+const explained = [
+  create(ModelPriceSourceSchema, {
+    providerName: 'router', providerType: 'openrouter', model: 'anthropic/claude-sonnet-4', source: 'org', priceRef: 'org#pv-1',
+    entry: { id: 'sonnet-mine', rates: { input: '2.5', output: '12', cacheRead: '0.3' }, maxOutput: 64000 },
+    replaces: { source: 'platform', priceRef: 'platform@3#sonnet', entry: { id: 'sonnet', rates: { input: '3', output: '15', cacheRead: '0.3' } } },
+  }),
+  create(ModelPriceSourceSchema, {
+    providerName: 'router', providerType: 'openrouter', model: 'openai/gpt-6', source: 'platform', priceRef: 'platform@3#gpt-6', platformVersion: 3n,
+    entry: { id: 'gpt-6', rates: { input: '4', output: '20' }, maxOutput: 32000, tokenizer: 'tiktoken:o200k_base', ratio: '4.0', tiers: [{ contextOver: 200000n, rates: { input: '8' } }] },
+  }),
+  create(ModelPriceSourceSchema, {
+    providerName: 'openai-main', providerType: 'openai', model: 'gpt-5', source: 'default', priceRef: 'default@2026-10-24.1#openai-gpt', listVersion: '2026-10-24.1',
+    entry: { id: 'openai-gpt', rates: { input: '2', output: '8', cacheRead: '0.2' }, maxOutput: 32000 },
+  }),
+  create(ModelPriceSourceSchema, { providerName: 'home', providerType: 'ollama', model: 'local/q', unpricedReason: 'no_price' }),
+]
 const bad = create(PriceEntrySchema, { id: 'bad-link', provider: '*', match: { glob: 'x' }, validFrom: '2026-10-01', rates: { input: '1', output: '1' }, sourceUrl: 'javascript:alert(1)' })
 
 function setup(role = OrgRole.OWNER, warnings: string[] = []) {
-  const calls = { sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[], gate: undefined as Promise<void> | undefined }
+  const calls = { explained: 0, sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[], gate: undefined as Promise<void> | undefined }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role }) })
     service(PriceService, {
@@ -44,6 +61,10 @@ function setup(role = OrgRole.OWNER, warnings: string[] = []) {
         return { prices: [mine, migrated] }
       },
       getDefaultPrices: () => ({ version: '2026-10-24.1', entries: [gpt, bad] }),
+      explainOrgPrices: () => {
+        calls.explained++
+        return { models: explained }
+      },
       getDefaultPriceChanges: () => ({
         fromVersion: '2026-10-23.1',
         toVersion: '2026-10-24.1',
@@ -72,7 +93,107 @@ function setup(role = OrgRole.OWNER, warnings: string[] = []) {
   return calls
 }
 
+const rowOf = (table: HTMLElement, model: string) => within(table).getByRole('rowheader', { name: model }).closest('tr')!
+
 describe('Prices page', () => {
+  it('shows the source of each model in the prices table, with the legend and the replaced price struck through', async () => {
+    setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    const legend = screen.getByRole('list', { name: 'Price sources' })
+    expect(within(legend).getByText('Org override')).toBeInTheDocument()
+    expect(within(legend).getByText('Platform')).toBeInTheDocument()
+    expect(within(legend).getByText('Default')).toBeInTheDocument()
+
+    const org = rowOf(table, 'anthropic/claude-sonnet-4')
+    expect(within(org).getByText('Org override')).toBeInTheDocument()
+    const struck = org.querySelectorAll('del')
+    expect([...struck].map((d) => d.textContent)).toEqual(['Platform price was $3', 'Platform price was $15'])
+    expect(org).toHaveTextContent('$2.5')
+    expect(org).toHaveTextContent('$12')
+    expect(within(org).queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+
+    const platform = rowOf(table, 'openai/gpt-6')
+    expect(within(platform).getByText('Platform')).toBeInTheDocument()
+    expect(platform.querySelector('del')).toBeNull()
+    expect(await within(platform).findByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toBeInTheDocument()
+
+    const def = rowOf(table, 'gpt-5')
+    expect(within(def).getByText('Default')).toBeInTheDocument()
+    expect(def).toHaveTextContent('openai-main')
+    expect(def).toHaveTextContent('$0.2')
+
+    const unpriced = rowOf(table, 'local/q')
+    expect(within(unpriced).getByText('No price')).toBeInTheDocument()
+  })
+
+  it('finds a model in the prices table by name or by provider', async () => {
+    setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    const search = screen.getByLabelText('Search models')
+    await userEvent.type(search, 'SONNET')
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['anthropic/claude-sonnet-4'])
+    await userEvent.clear(search)
+    await userEvent.type(search, 'openai-main')
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['gpt-5'])
+    await userEvent.clear(search)
+    await userEvent.type(search, 'ollama')
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['local/q'])
+    await userEvent.type(search, 'zzz')
+    expect(await screen.findByText('No model matches the search.')).toBeInTheDocument()
+  })
+
+  it('sorts the prices table by a rate, unset rates last', async () => {
+    setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    await userEvent.click(within(table).getByRole('button', { name: 'Input' }))
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['gpt-5', 'anthropic/claude-sonnet-4', 'openai/gpt-6', 'local/q'])
+    expect(within(table).getByRole('columnheader', { name: 'Input' })).toHaveAttribute('aria-sort', 'ascending')
+    await userEvent.click(within(table).getByRole('button', { name: 'Input' }))
+    expect(within(table).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['openai/gpt-6', 'anthropic/claude-sonnet-4', 'gpt-5', 'local/q'])
+  })
+
+  it('overrides a platform price with an org price filled from the price in use', async () => {
+    const calls = setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    await userEvent.click(await within(rowOf(table, 'openai/gpt-6')).findByRole('button', { name: /Override/ }))
+    const form = screen.getByRole('form', { name: 'Override the price of openai/gpt-6' })
+    expect(form.contains(document.activeElement)).toBe(true)
+    expect(within(form).getByLabelText('Name')).toHaveValue('openrouter-openai-gpt-6')
+    expect(within(form).getByLabelText('Model pattern')).toHaveValue('openai/gpt-6')
+    await userEvent.clear(within(form).getByLabelText('Input'))
+    await userEvent.type(within(form).getByLabelText('Input'), '3.5')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add price' }))
+    await waitFor(() => expect(calls.sets).toHaveLength(1))
+    expect(calls.sets[0]).toMatchObject({
+      orgId: 'org-1', name: 'openrouter-openai-gpt-6', provider: 'openrouter', match: { glob: 'openai/gpt-6' }, rates: { input: '3.5', output: '20' },
+      maxOutput: 32000, tokenizer: 'tiktoken:o200k_base', ratio: '4.0', tiers: [{ contextOver: 200000n, rates: { input: '8' } }],
+    })
+    expect(await screen.findByText(/Saved openrouter-openai-gpt-6/)).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Override the price of openai/gpt-6' })).not.toBeInTheDocument()
+    await waitFor(() => expect(calls.explained).toBeGreaterThanOrEqual(2))
+  })
+
+  it('shows no Override button until the org prices have loaded, so a name cannot be reused', async () => {
+    let release: () => void = () => undefined
+    const calls = setup()
+    calls.gate = new Promise<void>((r) => (release = r))
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    expect(within(table).queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
+    release()
+    expect(await within(table).findByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toBeInTheDocument()
+  })
+
+  it('returns focus to the Override button of the row when the override form is cancelled', async () => {
+    setup()
+    const table = await screen.findByRole('table', { name: 'Prices in use' })
+    const button = await within(rowOf(table, 'openai/gpt-6')).findByRole('button', { name: /Override/ })
+    await userEvent.click(button)
+    const form = screen.getByRole('form', { name: 'Override the price of openai/gpt-6' })
+    await userEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('form', { name: 'Override the price of openai/gpt-6' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Override the price of openai/gpt-6 (router)' })).toHaveFocus()
+  })
+
   it('lists the org prices, the default list with source links and change markers, and flagged requests', async () => {
     setup()
     expect(await screen.findByRole('heading', { name: 'Prices', level: 1 })).toBeInTheDocument()

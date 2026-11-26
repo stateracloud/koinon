@@ -172,45 +172,68 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 	return task, run, s.sendFailed(err, "waking the agent's sandbox for a new task failed")
 }
 
-// eventActorNames maps the people who wrote the events to their display names, by user ID. It reads
-// only the id and the display name (never an email), and only for users that belong to the org, so a
-// name never crosses orgs (#1031). A user without a name, a deleted user and a former member are
-// absent from the map. The caller has already authorized the read of the task (viewer or higher).
-func eventActorNames(ctx context.Context, q *store.Queries, org pgtype.UUID, events []store.TaskEvent) (map[string]string, error) {
-	var ids []pgtype.UUID
+// eventActors holds the authors of a set of task events, by ID, for taskEventProto.
+type eventActors struct {
+	// names maps a user ID to a display name. A user without a name, a deleted user and a former
+	// member are absent.
+	names map[string]string
+	// external maps an external actor's ID to the person (ADR 0130).
+	external map[string]*taskv1alpha1.ExternalActor
+}
+
+// loadEventActors reads the authors of the events. For people it reads only the id and the display
+// name (never an email), and only for users that belong to the org, so a name never crosses orgs
+// (#1031). For external actors it reads the platform identity, which holds no name (ADR 0130). The
+// caller has already authorized the read of the task (viewer or higher).
+func loadEventActors(ctx context.Context, q *store.Queries, org pgtype.UUID, events []store.TaskEvent) (eventActors, error) {
+	out := eventActors{names: map[string]string{}, external: map[string]*taskv1alpha1.ExternalActor{}}
+	var userIDs, externalIDs []pgtype.UUID
 	seen := map[pgtype.UUID]bool{}
 	for _, e := range events {
-		if e.ActorKind == store.TaskActorKindUser && e.ActorUserID.Valid && !seen[e.ActorUserID] {
+		switch {
+		case e.ActorKind == store.TaskActorKindUser && e.ActorUserID.Valid && !seen[e.ActorUserID]:
 			seen[e.ActorUserID] = true
-			ids = append(ids, e.ActorUserID)
+			userIDs = append(userIDs, e.ActorUserID)
+		case e.ActorKind == store.TaskActorKindExternal && e.ActorExternalID.Valid && !seen[e.ActorExternalID]:
+			seen[e.ActorExternalID] = true
+			externalIDs = append(externalIDs, e.ActorExternalID)
 		}
 	}
-	names := map[string]string{}
-	if len(ids) == 0 {
-		return names, nil
-	}
-	rows, err := q.ListEventActorNames(ctx, store.ListEventActorNamesParams{OrgID: org, UserIds: ids})
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		// OIDC sign-in can store an email address as the display name (no name claim); the name on
-		// an event is never an email, so a name with "@" is left out.
-		if r.DisplayName != "" && !strings.Contains(r.DisplayName, "@") {
-			names[idString(r.ID)] = r.DisplayName
+	if len(userIDs) > 0 {
+		rows, err := q.ListEventActorNames(ctx, store.ListEventActorNamesParams{OrgID: org, UserIds: userIDs})
+		if err != nil {
+			return eventActors{}, err
+		}
+		for _, r := range rows {
+			// OIDC sign-in can store an email address as the display name (no name claim); the name
+			// on an event is never an email, so a name with "@" is left out.
+			if r.DisplayName != "" && !strings.Contains(r.DisplayName, "@") {
+				out.names[idString(r.ID)] = r.DisplayName
+			}
 		}
 	}
-	return names, nil
+	if len(externalIDs) > 0 {
+		rows, err := q.ListExternalActors(ctx, store.ListExternalActorsParams{OrgID: org, Ids: externalIDs})
+		if err != nil {
+			return eventActors{}, err
+		}
+		for _, r := range rows {
+			out.external[idString(r.ID)] = &taskv1alpha1.ExternalActor{
+				Platform: r.Platform, Team: r.Team, PlatformUserId: r.PlatformUserID,
+			}
+		}
+	}
+	return out, nil
 }
 
 // taskView is a task with its timeline and runs, read in one snapshot.
 type taskView struct {
 	task   store.Task
 	events []store.TaskEvent
-	// names maps the events' authors to display names (eventActorNames).
-	names map[string]string
-	runs  []*runv1alpha1.Run
-	cost  *runv1alpha1.Cost
+	// actors holds the events' authors (loadEventActors).
+	actors eventActors
+	runs   []*runv1alpha1.Run
+	cost   *runv1alpha1.Cost
 }
 
 func (s *Server) loadTask(ctx context.Context, c caller, id pgtype.UUID) (taskView, error) {
@@ -226,7 +249,7 @@ func (s *Server) loadTask(ctx context.Context, c caller, id pgtype.UUID) (taskVi
 		}); err != nil {
 			return err
 		}
-		if v.names, err = eventActorNames(ctx, q, c.org, v.events); err != nil {
+		if v.actors, err = loadEventActors(ctx, q, c.org, v.events); err != nil {
 			return err
 		}
 		runs, err := q.ListRunsForTask(ctx, store.ListRunsForTaskParams{OrgID: c.org, TaskID: id})
@@ -514,7 +537,7 @@ func (a taskAPI) GetTask(ctx context.Context, req *taskv1alpha1.GetTaskRequest) 
 		return nil, a.dbError(err, "task")
 	}
 	for _, e := range v.events {
-		res.Events = append(res.Events, taskEventProto(e, v.names))
+		res.Events = append(res.Events, taskEventProto(e, v.actors))
 	}
 	return res, nil
 }
@@ -540,11 +563,11 @@ func (a taskAPI) AppendMessage(ctx context.Context, req *taskv1alpha1.AppendMess
 	if err != nil {
 		return nil, a.dbError(err, "task")
 	}
-	names, err := eventActorNames(ctx, a.q, c.org, []store.TaskEvent{ev})
+	actors, err := loadEventActors(ctx, a.q, c.org, []store.TaskEvent{ev})
 	if err != nil {
 		return nil, a.dbError(err, "task")
 	}
-	return &taskv1alpha1.AppendMessageResponse{Event: taskEventProto(ev, names), Run: run}, nil
+	return &taskv1alpha1.AppendMessageResponse{Event: taskEventProto(ev, actors), Run: run}, nil
 }
 
 // CancelTask implements TaskService.

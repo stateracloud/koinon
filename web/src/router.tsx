@@ -13,6 +13,9 @@ import { parseOverviewTab, type OverviewTab } from '@/lib/overview'
 import { PlatformConsolePage } from '@/pages/platform-console-page'
 import { PlatformLayout } from '@/pages/platform-layout'
 import { PlatformOrgsPage } from '@/pages/platform-orgs-page'
+import { PlatformProvidersPage } from '@/pages/platform-providers-page'
+import { PlatformTemplatesPage } from '@/pages/platform-templates-page'
+import { PlatformMcpServersPage } from '@/pages/platform-mcp-servers-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
 import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
@@ -20,9 +23,11 @@ import { BudgetsPage } from '@/pages/budgets-page'
 import { PlatformBudgetsPage } from '@/pages/platform-budgets-page'
 import { PricesPage } from '@/pages/prices-page'
 import { ProvidersPage } from '@/pages/providers-page'
+import { NewServerPage } from '@/pages/new-server-page'
+import { ServerPage } from '@/pages/server-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
-import { NewAgentPage } from '@/pages/new-agent-page'
+import { BlankAgentPage, NewAgentPage, TemplateAgentPage } from '@/pages/new-agent-page'
 import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
 import { GitHubAppCreatedPage, GitHubAppInstalledPage } from '@/pages/github-app-setup-pages'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
@@ -31,6 +36,7 @@ import { TaskPage } from '@/pages/task-page'
 import { ObservabilityPage } from '@/pages/observability-page'
 import { PlatformObservabilityPage } from '@/pages/platform-observability-page'
 import { PlatformPricesPage } from '@/pages/platform-prices-page'
+import { PlatformUsagePage } from '@/pages/platform-usage-page'
 
 export type RouterContext = { queryClient: QueryClient }
 
@@ -108,7 +114,10 @@ export const agentsRedirectRoute = createRoute({
     throw redirect({ to: '/', replace: true })
   },
 })
+// New agent (ADR 0126 section 5): the gallery, then a template's wizard or the blank form.
 export const newAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new', component: NewAgentPage })
+export const newBlankAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/blank', component: BlankAgentPage })
+export const newTemplateAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/template/$templateId', component: TemplateAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/$agentId', component: AgentPage })
 
 export const connectionsRoute = createRoute({
@@ -155,6 +164,8 @@ export const connectionRoute = createRoute({ getParentRoute: () => orgRoute, pat
 export const providersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/providers', component: ProvidersPage })
 export const orgSettingsRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/org', component: OrgSettingsPage })
 export const mcpServersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers', component: ServersPage })
+export const newMcpServerRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers/new', component: NewServerPage })
+export const mcpServerRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers/$serverId', component: ServerPage })
 // The org MCP servers page moved under Settings (ADR 0126 section 6).
 export const serversRedirectRoute = createRoute({
   getParentRoute: () => orgRoute,
@@ -172,8 +183,12 @@ export const tokensRoute = createRoute({ getParentRoute: () => orgRoute, path: '
 export const platformRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform', component: PlatformLayout })
 export const platformHomeRoute = createRoute({ getParentRoute: () => platformRoute, path: '/', component: PlatformConsolePage })
 export const platformOrgsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/orgs', component: PlatformOrgsPage })
+export const platformUsageRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage', component: PlatformUsagePage })
 export const platformBudgetsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/budgets', component: PlatformBudgetsPage })
 export const platformPricesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/prices', component: PlatformPricesPage })
+export const platformProvidersRoute = createRoute({ getParentRoute: () => platformRoute, path: '/providers', component: PlatformProvidersPage })
+export const platformTemplatesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/templates', component: PlatformTemplatesPage })
+export const platformMcpServersRoute = createRoute({ getParentRoute: () => platformRoute, path: '/mcp-servers', component: PlatformMcpServersPage })
 export const platformObservabilityRoute = createRoute({
   getParentRoute: () => platformRoute,
   path: '/settings/observability',
@@ -185,7 +200,6 @@ const platformRedirects = (
     ['/budgets', '/platform/usage/budgets'],
     ['/prices', '/platform/usage/prices'],
     ['/observability', '/platform/settings/observability'],
-    ['/usage', '/platform/usage/budgets'],
     ['/settings', '/platform/settings/observability'],
   ] as const
 ).map(([path, to]) =>
@@ -210,6 +224,8 @@ const routeTree = rootRoute.addChildren([
       approvalRoute,
       agentsRedirectRoute,
       newAgentRoute,
+      newBlankAgentRoute,
+      newTemplateAgentRoute,
       agentRoute,
       connectionsRoute,
       newGitHubConnectionRoute,
@@ -220,13 +236,26 @@ const routeTree = rootRoute.addChildren([
       providersRoute,
       orgSettingsRoute,
       mcpServersRoute,
+      newMcpServerRoute,
+      mcpServerRoute,
       serversRedirectRoute,
       pricesRoute,
       budgetsRoute,
       observabilityRoute,
       tokensRoute,
     ]),
-    platformRoute.addChildren([platformHomeRoute, platformOrgsRoute, platformBudgetsRoute, platformPricesRoute, platformObservabilityRoute, ...platformRedirects]),
+    platformRoute.addChildren([
+      platformHomeRoute,
+      platformOrgsRoute,
+      platformUsageRoute,
+      platformBudgetsRoute,
+      platformPricesRoute,
+      platformProvidersRoute,
+      platformTemplatesRoute,
+      platformMcpServersRoute,
+      platformObservabilityRoute,
+      ...platformRedirects,
+    ]),
   ]),
 ])
 

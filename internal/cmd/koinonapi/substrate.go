@@ -90,6 +90,11 @@ func newSubstrateCommand() *cobra.Command {
 				return err
 			}
 			profile.Platform = p
+			// The router allow-list gets agentd's identity, the only Koinon pod with one (issue #1446).
+			if c.substrateAgentdSA == "" {
+				c.substrateAgentdNS = koinonNamespace
+				c.substrateAgentdSA = substrateauthz.ComponentServiceAccount(koinonRelease, "agentd")
+			}
 			return c.validate()
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {

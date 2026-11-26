@@ -11,6 +11,10 @@ In kubernetes mode the controller owns the proxy and its Service, which exposes 
 port, so the chart renders a PodMonitor on the proxy pods instead (chart-owned, not created by the
 reconciler). Its NetworkPolicy side is networkPolicy.metricsFrom. agentgateway's series carry
 gateway, listener, route, backend, status and model labels, never a key or an agent ID (ADR 0023).
+
+With gateway.model.driver=koinon, the monitor also scrapes the "stats" port of the model-gateway Service
+(koinon-gateway's /metrics). The alert KoinonModelKeyEcho reads a counter from there (ADR 0097 section 15,
+issue #1332). Its NetworkPolicy side is networkPolicy.metricsFrom too.
 */ -}}
 {{- $sm := .Values.metrics.serviceMonitor }}
 {{- if and $sm.enabled (not $sm.skipCapabilityCheck) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) }}
@@ -85,6 +89,36 @@ spec:
       {{- with $sm.interval }}
       interval: {{ . | quote }}
       {{- end }}
+{{- if include "koinon.mcpKoinon" . }}
+{{- /*
+With gateway.mcp.driver=koinon (the default; it needs standalone mode), the monitor also scrapes the
+"stats" port of the mcp-gateway Service (koinon-gateway's /metrics, gateway-koinon-mcp.yaml; issue #1452).
+Its series carry fixed label sets only (reason, path, result, ...), never an org, agent or run ID (ADR 0023).
+Its NetworkPolicy side is networkPolicy.metricsFrom.
+*/}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list . "mcp-gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  endpoints:
+    - port: stats
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
 {{- else }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -104,6 +138,30 @@ spec:
     matchNames: [{{ .Release.Namespace | quote }}]
   podMetricsEndpoints:
     - portNumber: 15020
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
+{{- if include "koinon.modelKoinon" . }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list . "model-gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "model-gateway") | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "model-gateway") | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  endpoints:
+    - port: stats
       path: /metrics
       {{- with $sm.interval }}
       interval: {{ . | quote }}

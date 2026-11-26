@@ -62,7 +62,8 @@ type Metrics struct {
 	// which leaves the sandbox admission policies matching none of its namespaces (old issue 475).
 	GatewayIDMismatch prometheus.Gauge
 	// MCPProbesSkipped counts the MCP probes held back because a live koinon-gateway copy did not ack the
-	// newest State revision (#1347). A copy whose apply keeps failing makes this grow every probe interval.
+	// revision they need, or no stored revision holds their key yet (#1260, #1347). A copy whose apply
+	// keeps failing makes this grow every probe interval.
 	// No labels: no copy, org or revision is a label (ADR 0023).
 	MCPProbesSkipped prometheus.Counter
 }
@@ -119,7 +120,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help: "Failed Applies of the sandbox default-deny NetworkPolicy (#993), by reason (forbidden, not_found or other).",
 		}, []string{"reason"}),
 		MCPProbesSkipped: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "koinon_reconciler_mcp_probes_skipped_total", Help: "MCP probes held back because a live koinon-gateway copy did not ack the newest State revision in time. A count that keeps growing means a copy cannot apply the revision and serves an old one; the copy turns unready after its stale bound.",
+			Name: "koinon_reconciler_mcp_probes_skipped_total", Help: "MCP probes held back because a live koinon-gateway copy did not ack the State revision they need in time, or no stored revision holds their key yet (the State could not be stored). A count that keeps growing means a copy cannot apply the revision and serves an old one (the copy turns unready after its stale bound), or the State store fails.",
 		}),
 		GatewayIDMismatch: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_openshell_gateway_id_mismatch",

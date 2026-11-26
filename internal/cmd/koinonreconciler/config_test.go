@@ -440,6 +440,27 @@ var _ = Describe("koinon-reconciler's settings", func() {
 		Expect(err).To(MatchError(And(ContainSubstring("database-url"), ContainSubstring("kek-dir"), ContainSubstring("gateway-url"))))
 	})
 
+	It("takes the gateway's egress URL with sealed MCP credentials, and refuses it alone or malformed (#1086 part C2)", func() {
+		env := base(write(chartConfig))
+		c, err := parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err := c.egressEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep).To(BeNil(), "off by default")
+
+		c, err = parseConfig([]string{"--gateway-mcp-sealed", "--gateway-egress-url=http://koinon-mcp-gateway.koinon.svc:8081"}, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err = c.egressEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep.Host).To(Equal("koinon-mcp-gateway.koinon.svc"))
+		Expect(ep.Port).To(BeEquivalentTo(8081))
+
+		_, err = parseConfig([]string{"--gateway-egress-url=http://koinon-mcp-gateway.koinon.svc:8081"}, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-mcp-sealed")))
+		_, err = parseConfig([]string{"--gateway-mcp-sealed", "--gateway-egress-url=::not a url"}, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-egress-url")))
+	})
+
 	It("refuses an unknown flag and an environment variable nothing reads", func() {
 		_, err := parseConfig([]string{"--no-such-flag"}, base(write(chartConfig)))
 		Expect(err).To(MatchError(ContainSubstring("unknown flag")))
@@ -467,7 +488,7 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 		}
 		return parseConfig([]string{
 			"--execution-driver=" + driver,
-			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
+			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:443",
 			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
 		}, env)
 	}

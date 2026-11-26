@@ -69,14 +69,15 @@ function api(role = 'ORG_ROLE_OWNER') {
       expiresAt: at(6 * 86_400_000),
     },
   })
-  const ev = (seq: number, kind: string, payload: Json, actorKind = 'ACTOR_KIND_SYSTEM') => ({ seq: String(seq), kind, actorKind, payload, createdAt: at(-60_000 + seq * 100), runId: 'r-1' })
+  // A task event as the API sends it: its kind and its typed event (protojson).
+  const ev = (seq: number, kind: string, event: Json, actorKind = 'ACTOR_KIND_SYSTEM') => ({ seq: String(seq), kind, actorKind, event, createdAt: at(-60_000 + seq * 100), runId: 'r-1' })
   const events = [
-    ev(1, 'task.created', { title: 'Fix the README typo' }),
-    ev(2, 'sandbox.recreated', { message: 'Sandbox recreated: its process could not be stopped' }),
-    ev(3, 'sandbox.work_lost', { message: 'Unsaved work in the old sandbox could not be saved' }),
-    ev(4, 'approval.requested', { system: true, approval_id: 'ap-1', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: sha }),
-    ev(5, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
-    ev(6, 'agent.unhealthy', { message: 'Agent marked unhealthy: its sandbox kept getting stuck' }),
+    ev(1, 'task.created', { taskCreated: { title: 'Fix the README typo' } }),
+    ev(2, 'sandbox.recreated', { sandboxRecreated: { message: 'Sandbox recreated: its process could not be stopped' } }),
+    ev(3, 'sandbox.work_lost', { sandboxWorkLost: { message: 'Unsaved work in the old sandbox could not be saved' } }),
+    ev(4, 'approval.requested', { approvalRequested: { system: true, approvalId: 'ap-1', tool: 'push_saved_work', target: 'github:acme/widgets', argsSha256: sha } }),
+    ev(5, 'run.session_restarted', { runSessionRestarted: { message: 'Session restarted: new instructions.' } }),
+    ev(6, 'agent.unhealthy', { agentUnhealthy: { message: 'Agent marked unhealthy: its sandbox kept getting stuck' } }),
   ]
   const handlers: Handlers = {
     unary: {

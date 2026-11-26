@@ -407,6 +407,27 @@ func TestSPIFFEIDFollowsTheNamespace(t *testing.T) {
 		"--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/substrate-prod/sa/atenet-client"))
 }
 
+// agentd's pod certificate is the only Koinon identity on the router allow-list (issue #1446).
+func TestAgentdIdentityIsOnTheAllowList(t *testing.T) {
+	g := NewWithT(t)
+	id := preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")
+	g.Expect(id).To(Equal("spiffe://cluster.local/ns/koinon/sa/koinon-agentd"))
+	args := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("ate-system", id)
+	g.Expect(args).To(ContainElement("--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system") + "," + id))
+
+	i, _, client := setup("37", true, nil)
+	i.Checker.Config.Substrate.AgentdNamespace, i.Checker.Config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+	_, err := client.AppsV1().Deployments("ate-system").Create(t.Context(), router(), metav1.CreateOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed())
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed(), "idempotent")
+	d, err := client.AppsV1().Deployments("ate-system").Get(t.Context(), "atenet-router", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	got := strings.Join(d.Spec.Template.Spec.Containers[1].Args, " ")
+	g.Expect(got).To(And(ContainSubstring(id), ContainSubstring("sa/atenet-client")))
+	g.Expect(strings.Count(got, id)).To(Equal(1))
+}
+
 func TestEnsureRouterSPIFFEUsesTheConfiguredNamespace(t *testing.T) {
 	g := NewWithT(t)
 	i, _, client := setup("37", true, nil)

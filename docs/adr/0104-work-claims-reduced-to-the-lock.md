@@ -8,7 +8,7 @@ relates: ["0046", "0082", "0094"]
 ---
 # 0104. Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane
 
-- Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default)
+- Status: Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default) and 2026-11-26 (below: `claim` is not required, #682)
 - Date: 2026-11-09
 - Area: engineering-process
 - Tags: claims, ci
@@ -174,6 +174,13 @@ limit.
 - One claim per lane is unchanged.
 - Exit condition: set the cap again (a default in `hack/claim.sh`) when a second human works on the
   repository.
+
+## Amendment (2026-11-26, #682): the `claim` check is not required
+
+Decision 7 changes: the `claim` check still runs on every pull request and every queue build, with the same
+rule, but it is no longer a required status check (it leaves `hack/ci-required.txt` and the ruleset). A red
+`claim` tells the author to talk to the holder of the claim; it does not block the merge or eject a queue
+entry. The claim lock itself (`hack/claim.sh take`, `release`, ADR reservations) does not change. Reason: issue #682 (decision D4): a required `claim` check costs time and gives little value. The merge-queue fence of ADR 0094 decision 4 is information only from now on.
 
 ## Links
 

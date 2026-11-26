@@ -379,6 +379,8 @@ type Querier interface {
 	DeleteExpiredGitHubLinkFlows(ctx context.Context, arg DeleteExpiredGitHubLinkFlowsParams) error
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	// The agents of the org that no longer expect a forge credential.
+	DeleteGatewayAgentForge(ctx context.Context, arg DeleteGatewayAgentForgeParams) error
 	// Only the stream that touched the row last removes it.
 	DeleteGatewayStateCopy(ctx context.Context, arg DeleteGatewayStateCopyParams) error
 	DeleteGitHubAppSetup(ctx context.Context, arg DeleteGitHubAppSetupParams) (int64, error)
@@ -416,6 +418,10 @@ type Querier interface {
 	// A trigger needs the poller of (connection, resource): created due at @now (the pass's clock),
 	// or left as it is.
 	EnsureCodeHostPoller(ctx context.Context, arg EnsureCodeHostPollerParams) error
+	// The row of a person without a Koinon account who writes from a chat platform (ADR 0130): it
+	// creates the row the first time and returns the same row after that. The update on a conflict
+	// changes nothing; it only makes the statement return the row that a concurrent writer committed.
+	EnsureExternalActor(ctx context.Context, arg EnsureExternalActorParams) (ExternalActor, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The leak guard's state (ADR 0084, ADR 0091; old issue 349): sessions per home generation with their legs,
@@ -548,6 +554,7 @@ type Querier interface {
 	// between runs) the task of the agent's latest finished run whose task is not in an end state.
 	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
 	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
+	GetGatewayAgentForge(ctx context.Context, arg GetGatewayAgentForgeParams) (GetGatewayAgentForgeRow, error)
 	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
 	// while it was down keeps being served with the previous file until the new one has arrived.
 	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
@@ -980,6 +987,9 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	// The external actors that the events of a task name, by ID (ADR 0130): what a task read shows
+	// beside each of their messages. The rows hold no name and no profile data.
+	ListExternalActors(ctx context.Context, arg ListExternalActorsParams) ([]ExternalActor, error)
 	// Price entries with requests Koinon flagged since @since, with how often, why and by how
 	// much: the recomputed cost differs from the gateway's by more than 1% (gateway_diff), the
 	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
@@ -1125,6 +1135,10 @@ type Querier interface {
 	// (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships
 	// (ADR 0004); the highest role wins.
 	ListOrgMembers(ctx context.Context, arg ListOrgMembersParams) ([]ListOrgMembersRow, error)
+	// The live orgs by slug after @after_slug, without counts, for the platform console's lists of org
+	// resources (PlatformResourceService, ADR 0126). Platform admins only. @only_org_id narrows the list
+	// to one org; personal orgs are left out unless @include_personal or @only_org_id is set.
+	ListOrgRefs(ctx context.Context, arg ListOrgRefsParams) ([]ListOrgRefsRow, error)
 	// The live orgs by slug after @after_slug, with member and agent counts, budget and spend since
 	// @since, for the platform console (ADR 0126). Platform admins only. @only_org_id narrows the list
 	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
@@ -1345,6 +1359,8 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// Every live copy acked the revision that holds the agent's credential.
+	MarkGatewayAgentForgeServed(ctx context.Context, arg MarkGatewayAgentForgeServedParams) error
 	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
 	// snapshot_missing_at tells it apart from a backup that failed: the recreate gate does not block on
@@ -1640,6 +1656,12 @@ type Querier interface {
 	// Changes the format of a model that is still not overridden, so a save that raced the startup
 	// re-derivation wins.
 	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// When koinon-gateway serves an agent's forge credential (#1086 part C2). Org-owned.
+	// Records what the agent expects of its forge credential (#1086 part C2). A new revision or cause
+	// clears served_at; the same values change nothing.
+	SetGatewayAgentForge(ctx context.Context, arg SetGatewayAgentForgeParams) error
 	// koinon-reconciler, after an apply that took effect: a provider the pass left out of the render
 	// (its URL is not allowed, its key cannot be opened, a price is unusable) is failed with the reason.
 	// Runs after ClearGatewayProviderFailures; the first reason of a pass stays.

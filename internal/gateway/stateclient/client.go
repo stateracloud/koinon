@@ -285,9 +285,14 @@ func (c *Client) session(ctx context.Context) (int, bool, error) {
 
 // handle applies both halves of u and acks each one that applied. The halves are independent: one
 // failing to apply does not hold back the other. It returns an error for a lost ack or a failed apply, which ends the session so that Run
-// reconnects and the replayed newest revision retries the half.
+// reconnects and the replayed newest revision retries the half. The org egress routes go first: the
+// reconciler reads an ack of the MCP half as "this copy serves the revision's forge credentials" too
+// (#1086 part C2), so a run's first clone never meets the routes of an older revision.
 func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 	state := staterev.FromProto(u)
+	if c.cfg.Egress != nil {
+		c.egress(ctx, u.GetRevision(), state.EgressState)
+	}
 	var ackErr error
 	if c.cfg.Model != nil {
 		ackErr = errors.Join(ackErr, c.half(ctx, u.GetRevision(), gwv1.Half_HALF_MODEL, func(ctx context.Context) error {
@@ -300,9 +305,6 @@ func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 			_, err := c.cfg.MCP.ApplyMCP(ctx, state.MCPConfig())
 			return err
 		}))
-	}
-	if c.cfg.Egress != nil {
-		c.egress(ctx, u.GetRevision(), state.EgressState)
 	}
 	return ackErr
 }

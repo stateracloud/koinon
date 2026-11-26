@@ -786,12 +786,30 @@ func describeMode(name, valuesFile string) {
 			// through --database-url-file, and the migration's grants let it read what the guard reads.
 			Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
 				Should(ContainSubstring("the leak guard reached its database"), "the gateway's login and grants work; logs:\n%s", w.Logs(ctx))
+			if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
+				// The egress listener (#1086 part C2) loads the public actor token key that the ensure-secrets
+				// Job made, before any listener starts; a missing or bad key stops the pod.
+				Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+					Should(MatchRegexp(`egress routes loaded"?,? ?"?keys"?[=:]1\b`), "the egress listener loaded the actor token key; logs:\n%s", w.Logs(ctx))
+			}
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
 			if slices.Contains(c.Args, "--restore-hold") {
 				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
 				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+				if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
+					// The held egress listener serves no request either (issue #1390): 503, reason held, before
+					// the actor token check and the route match.
+					eg := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+						Path: "/egress/registry.example.test/held", Port: intstr.FromString("egress"),
+					}}}
+					egStatus, why := w.ProbeStatus(ctx, eg, 10*time.Second)
+					Expect(why).To(BeEmpty(), "the egress listener did not answer; logs:\n%s", w.Logs(ctx))
+					Expect(egStatus).To(Equal(http.StatusServiceUnavailable), "a held egress listener refuses every request; logs:\n%s", w.Logs(ctx))
+					Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+						Should(MatchRegexp(`egress request.*"?result"?[=:]"?held\b`), "the refusal is logged as held; logs:\n%s", w.Logs(ctx))
+				}
 			} else {
 				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
 			}

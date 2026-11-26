@@ -411,6 +411,28 @@ gateway:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      # The egress listener (ADR 0097, ADR 0120 sections 1 and 2, issue #1086 part C2). With it on, git of an
+      # agent with a code-host connection goes to <this Service>:<port>/egress/<host>/ and not to the forge.
+      # The gateway checks the run's actor token, matches the agent's forge routes and attaches the
+      # credential, so the sandbox holds no forge credential. koinon-agentd mints the token outside the guest
+      # with an Ed25519 key: only koinon-agentd mounts the private seed, and only this gateway mounts the
+      # public key. The reconciler adds an enforced L7 sandbox rule for this port. The direct forge rule of
+      # the sandbox stays until part C3. Off by default.
+      egress:
+        enabled: false
+        port: 8081
+        # PEM bundle of extra CA roots, added to the system roots, that verify the forges the listener
+        # reaches (a forge with a private CA). The host must also be in egress.allowedInternalHosts and
+        # networkPolicy.gatewayEgressTo when it is internal. Empty: the system roots only.
+        caBundle: ""
+        actorToken:
+          # The issuer (iss) of the tokens and the key ID (kid). Change keyId to rotate the key: set
+          # existingSecret to a new Secret, or delete the generated one, and roll koinon-agentd and the gateway.
+          issuer: koinon-agentd
+          keyId: k1
+          # A Secret with the keys key (64 lowercase hex characters, the Ed25519 seed) and public.pem (its PEM
+          # public key). Empty: the ensure-secrets Job creates <fullname>-actor-token-key once.
+          existingSecret: ""
       # The gateway's recipient key (ADR 0097 decision 12, issue #1151): koinon-api seals each stored MCP
       # credential to the public key, and only koinon-gateway holds the private key. The private key is
       # wrapped by a KMS key of its own, never the KEK's: the gateway identity may decrypt with it, only the
@@ -837,8 +859,15 @@ execution:
     # ateapi's host:port, for example api.ate-system.svc:443. Required with substrate. Use that exact name: the
     # ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the TLS handshake.
     controlAddress: ""
-    # The atenet router's host:port, for example atenet-router.ate-system.svc.cluster.local:80.
+    # The atenet router's host:port, for example atenet-router.ate-system.svc:443. The router serves TLS on 443
+    # only (Substrate v1.0.1 has no plain listener) and requires a client certificate: koinon-agentd, the one
+    # component that calls it, gets a pod certificate (a podCertificate projected volume) and the CA of the
+    # router's certificate (a clusterTrustBundle volume), and the installer puts agentd's SPIFFE ID on the router
+    # allow-list (koinon-api substrate install --koinon-namespace and --koinon-release; issue #1446).
     routerAddress: ""
+    # Name checked against the router's certificate. Empty uses the host of routerAddress; the certificate names
+    # atenet-router.<namespace>.svc, so use that form in routerAddress or set this.
+    routerServerName: ""
     # Secret with ca.crt, the CA that signed ateapi's certificate. Empty uses the system roots.
     caSecret: ""
     # Name checked against ateapi's certificate. Empty uses the host of controlAddress.
@@ -1019,6 +1048,11 @@ execution:
       # atenet-router.yaml:189, atenet-egress.yaml:1211. A missing pod keeps the cluster default
       # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
+      # The container ports of the control-plane pods that Koinon's namespace may reach (issue #1446): 443 is
+      # ate-api-server (the Service api, ate-api-server.yaml:281,420) and 8443 is the TLS listener of atenet-router (the
+      # Service atenet-router port 443 targets it, atenet-router.yaml:344,427). The ingress of the control policy for
+      # Koinon's namespace lists only these, not every port of every control-plane pod.
+      koinonIngressPorts: [443, 8443]
       # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
@@ -1421,7 +1455,9 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # Peers allowed to scrape the gateway stats port (15020): agentgateway's, the mcp-gateway's with
+  # gateway.mcp.driver=koinon (the default), and the model-gateway's with gateway.model.driver=koinon
+  # (the KoinonModelKeyEcho alert reads its counter). Like metrics.allowFrom, this only
   # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
   # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
@@ -1445,7 +1481,7 @@ metrics:
   # example Prometheus's namespace:
   #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
   # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
-  # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  # until you name the scraper. (networkPolicy.metricsFrom is separate: the gateways' stats ports.)
   # This only opens the port. A scraper that is not prometheus-operator (for example VictoriaMetrics'
   # VMServiceScrape) needs no ServiceMonitor: leave serviceMonitor.enabled false, list its namespace
   # here and in networkPolicy.metricsFrom, and point it at the <release>-koinon-<component>-metrics
@@ -1453,7 +1489,10 @@ metrics:
   allowFrom: []
   serviceMonitor:
     # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
-    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes), one for
+    # the mcp-gateway Service's "stats" port with gateway.mcp.driver=koinon (the default), and one
+    # for the model-gateway Service's "stats" port with gateway.model.driver=koinon. A scraper of its
+    # own must add the model-gateway port as a target too, or KoinonModelKeyEcho gets no data. Needs
     # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
     # enabling it without them fails the install.
     enabled: false

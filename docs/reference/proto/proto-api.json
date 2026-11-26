@@ -528,6 +528,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
+            },
+            {
+              "name": "created_by",
+              "number": 31,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user ID of the person who created the agent; empty when no user did. While the agent is a\ndraft that was never activated, this person may change it with the member role (UpdateAgent)."
             }
           ]
         },
@@ -14690,9 +14699,46 @@
     {
       "name": "koinon.platform.v1alpha1",
       "files": [
-        "koinon/platform/v1alpha1/platform.proto"
+        "koinon/platform/v1alpha1/platform.proto",
+        "koinon/platform/v1alpha1/resources.proto"
       ],
       "services": [
+        {
+          "name": "PlatformResourceService",
+          "fullName": "koinon.platform.v1alpha1.PlatformResourceService",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "PlatformResourceService lists the providers, the templates and the MCP servers of every org for the\nplatform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any\nother caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:\nchanges stay with the per-org services (ProviderService, TemplateService, McpServerService), which\na platform admin can call as for any org.\n\nEach list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of\nthem, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that\none org (personal or team) and has one page.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "ListMcpServers",
+              "description": "ListMcpServers lists the remote MCP servers of the orgs.",
+              "requestType": "koinon.platform.v1alpha1.ListMcpServersRequest",
+              "responseType": "koinon.platform.v1alpha1.ListMcpServersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListProviders",
+              "description": "ListProviders lists the model providers of the orgs. A provider never holds its key here either.",
+              "requestType": "koinon.platform.v1alpha1.ListProvidersRequest",
+              "responseType": "koinon.platform.v1alpha1.ListProvidersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListTemplates",
+              "description": "ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts\nwith the platform templates, which have no org.",
+              "requestType": "koinon.platform.v1alpha1.ListTemplatesRequest",
+              "responseType": "koinon.platform.v1alpha1.ListTemplatesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        },
         {
           "name": "PlatformService",
           "fullName": "koinon.platform.v1alpha1.PlatformService",
@@ -14768,6 +14814,78 @@
           ]
         },
         {
+          "name": "ListMcpServersRequest",
+          "fullName": "koinon.platform.v1alpha1.ListMcpServersRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListMcpServersResponse",
+          "fullName": "koinon.platform.v1alpha1.ListMcpServersResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "servers",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgMcpServer",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "servers are by org slug, then in the order of McpServerService.ListServers."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
           "name": "ListOrgsRequest",
           "fullName": "koinon.platform.v1alpha1.ListOrgsRequest",
           "file": "koinon/platform/v1alpha1/platform.proto",
@@ -14836,6 +14954,249 @@
               "oneof": "",
               "deprecated": false,
               "description": "month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from."
+            }
+          ]
+        },
+        {
+          "name": "ListProvidersRequest",
+          "fullName": "koinon.platform.v1alpha1.ListProvidersRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListProvidersResponse",
+          "fullName": "koinon.platform.v1alpha1.ListProvidersResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "providers",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgProvider",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "providers are by org slug, then in the order of ProviderService.ListProviders."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
+          "name": "ListTemplatesRequest",
+          "fullName": "koinon.platform.v1alpha1.ListTemplatesRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListTemplatesResponse",
+          "fullName": "koinon.platform.v1alpha1.ListTemplatesResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "templates",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgTemplate",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "templates are the platform templates by slug (first page only), then the org templates by org\nslug and template slug."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
+          "name": "OrgMcpServer",
+          "fullName": "koinon.platform.v1alpha1.OrgMcpServer",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgMcpServer is one remote MCP server with the org that owns it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "server",
+              "number": 2,
+              "type": "koinon.mcpserver.v1alpha1.Server",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgProvider",
+          "fullName": "koinon.platform.v1alpha1.OrgProvider",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgProvider is one provider with the org that owns it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider",
+              "number": 2,
+              "type": "koinon.provider.v1alpha1.Provider",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgRef",
+          "fullName": "koinon.platform.v1alpha1.OrgRef",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgRef names the org that owns a row.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "kind",
+              "number": 4,
+              "type": "koinon.org.v1alpha1.OrgKind",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -14931,6 +15292,33 @@
               "name": "created_at",
               "number": 10,
               "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgTemplate",
+          "fullName": "koinon.platform.v1alpha1.OrgTemplate",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgTemplate is one template with the org that owns it. org is unset on a platform template.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "template",
+              "number": 2,
+              "type": "koinon.template.v1alpha1.Template",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -19315,6 +19703,42 @@
           ]
         },
         {
+          "name": "ExternalActor",
+          "fullName": "koinon.task.v1alpha1.ExternalActor",
+          "file": "koinon/task/v1alpha1/task.proto",
+          "description": "ExternalActor is a person without a linked Koinon account who writes from a chat platform\n(ADR 0130). It holds no display name and no other profile data.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "platform",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"slack\" or \"teams\"."
+            },
+            {
+              "name": "team",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack team ID or the Teams tenant ID of the workspace in which the person wrote."
+            },
+            {
+              "name": "platform_user_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack user ID or the Teams user ID."
+            }
+          ]
+        },
+        {
           "name": "GetTaskRequest",
           "fullName": "koinon.task.v1alpha1.GetTaskRequest",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -20489,6 +20913,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "The typed event. It is not set for a kind that this server does not know, or for a payload that\nit cannot read."
+            },
+            {
+              "name": "actor_external",
+              "number": 11,
+              "type": "koinon.task.v1alpha1.ExternalActor",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any\nrole that can read the task sees it."
             }
           ]
         },
@@ -20866,6 +21299,12 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "ACTOR_KIND_EXTERNAL",
+              "number": 4,
+              "deprecated": false,
+              "description": "A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account\n(ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages."
             }
           ]
         },

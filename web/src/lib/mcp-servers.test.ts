@@ -16,6 +16,7 @@ import {
   serverErrorField,
   serverNameError,
   summarizeTools,
+  waitingNotice,
   summaryText,
   tierLabel,
   toggleLeg,
@@ -159,7 +160,34 @@ describe('summarizeTools', () => {
     ]
     const s = summarizeTools(tools)
     expect(s).toEqual({ total: 3, review: 1, suggested: 1, gone: 1 })
-    expect(summaryText(s)).toBe('3 tools, 1 to review, 1 suggested read-only')
+    expect(summaryText(s)).toBe('3 tools, 1 waits for review, 1 suggested read-only')
+  })
+
+  it('counts a new tool with text that no admin approved', () => {
+    const tools = [
+      create(ToolSchema, { name: 'a', present: true, tier: Tier.ASK, toolHash: 'h-a' }),
+      create(ToolSchema, { name: 'b', present: true, tier: Tier.ASK, toolHash: 'h-b', approvedHash: 'h-b' }),
+      create(ToolSchema, { name: 'c', present: false, tier: Tier.ASK, toolHash: 'h-c' }),
+    ]
+    expect(summaryText(summarizeTools(tools))).toBe('2 tools, 1 waits for review')
+  })
+})
+
+describe('waitingNotice', () => {
+  const server = create(ServerSchema, { id: 's', name: 's' })
+  it('counts the tools that wait for review', () => {
+    const t = (name: string) => create(ToolSchema, { serverId: 's', name, present: true, toolHash: `h-${name}` })
+    expect(waitingNotice(server, [t('a')])).toBe('1 tool waits for review')
+    expect(waitingNotice(server, [t('a'), t('b')])).toBe('2 tools wait for review')
+  })
+  it('says when the server is at the limit of unreviewed tools', () => {
+    const capped = create(ServerSchema, { id: 's', name: 's', unreviewedToolsCappedAt: timestampFromDate(new Date()) })
+    expect(waitingNotice(capped, [])).toBe('At the limit of unreviewed tools')
+    const t = create(ToolSchema, { serverId: 's', name: 'a', present: true, toolHash: 'h-a' })
+    expect(waitingNotice(capped, [t])).toBe('1 tool waits for review, at the limit of unreviewed tools')
+  })
+  it('is empty when nothing waits', () => {
+    expect(waitingNotice(server, [create(ToolSchema, { serverId: 's', name: 'a', present: true, toolHash: 'h', approvedHash: 'h' })])).toBe('')
   })
 })
 

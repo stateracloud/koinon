@@ -23,7 +23,7 @@ import (
 // passes"), and the fix removes the entry and the wrapper; a bump that adds a gap adds an entry,
 // reviewed like code (ADR 0097 decision 4). The issues are in stateracloud/koinon.
 var AgentgatewayV170Gaps = map[string]string{
-	"#78": "agentgateway v1.7.0 ignores Messages output_tokens_details.thinking_tokens, so the thinking split is never recorded for Claude",
+	"#1464": "agentgateway v1.7.0 ignores Messages output_tokens_details.thinking_tokens, so the thinking split is never recorded for Claude",
 	"#550": "agentgateway v1.7.0 records a provider's mid-stream error event, and a stream the client cancels, with status 200 and " +
 		"no error reason: the record is not marked failed, so the ledger charges the partial usage as a completed call",
 	"#254": "agentgateway v1.7.0 sends the leak guard only tools/call replies: tools/list descriptions, JSON-RPC error " +

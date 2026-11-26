@@ -206,6 +206,46 @@ var _ = Describe("Substrate checks", func() {
 		Expect(r.Fix).To(ContainSubstring("ns/substrate-prod/sa/atenet-client"))
 	})
 
+	It("fails when the router does not allow agentd's identity", func(ctx SpecContext) {
+		c := healthySubstrate()
+		c.config.Substrate.AgentdNamespace, c.config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+		r := find(c.run(ctx), "Substrate router")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring("ns/koinon/sa/koinon-agentd"))
+		Expect(r.Fix).To(ContainSubstring(preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")))
+
+		c = healthySubstrate()
+		c.config.Substrate.AgentdNamespace, c.config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" +
+			preflight.SubstrateRouterSPIFFEID("ate-system") + "," + preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")}, 1)
+		Expect(find(c.run(ctx), "Substrate router").Status).To(Equal(preflight.Pass))
+	})
+
+	It("fails when the router Service does not serve the port of routerAddress", func(ctx SpecContext) {
+		svc := func(port int32) *corev1.Service {
+			return &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "atenet-router", Namespace: "ate-system"},
+				Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "https", Port: port}}},
+			}
+		}
+		c := healthySubstrate()
+		c.config.Substrate.RouterPort = 80
+		c.kube = append(c.kube, svc(443))
+		r := find(c.run(ctx), "Substrate router")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring("no port 80"))
+		Expect(r.Fix).To(ContainSubstring("443"))
+
+		c = healthySubstrate()
+		c.config.Substrate.RouterPort = 443
+		c.kube = append(c.kube, svc(443))
+		Expect(find(c.run(ctx), "Substrate router").Status).To(Equal(preflight.Pass))
+
+		c = healthySubstrate()
+		c.config.Substrate.RouterPort = 443
+		Expect(find(c.run(ctx), "Substrate router").Message).To(ContainSubstring("Service ate-system/atenet-router not found"))
+	})
+
 	It("fails on a worker pool that is missing or not ready", func(ctx SpecContext) {
 		c := healthySubstrate()
 		c.dynamic[len(c.dynamic)-1] = workerPool("vm-pool", "False")

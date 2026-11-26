@@ -174,6 +174,10 @@ type runner struct {
 	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
 	// requests resolve their paths in it.
 	sbWorkspace, sbName string
+	// egress is set by writeGitConfig when git of this run goes through the gateway's egress
+	// prefix with an actor token (actortoken.go); orgSlug is the token's org, read once.
+	egress  bool
+	orgSlug string
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -623,6 +627,13 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
 		return r.execErr(ctx, "write the git configuration", err)
 	}
+	if r.egress {
+		defer r.keepActorToken(ctx, workspace, sandbox)()
+		// The agent clones through koinon-gateway: its forge credential must be served first (forgewait.go).
+		if err := r.waitForge(fctx); err != nil {
+			return r.execErr(ctx, "wait for the forge credential", err)
+		}
+	}
 
 	var stderr tail
 	proc, err := r.p.backend.Exec(ctx, workspace, sandbox, execution.ExecRequest{
@@ -841,6 +852,12 @@ func (r *runner) execErr(ctx context.Context, what string, err error) error {
 	if errors.As(err, &rq) {
 		return rq
 	}
+	if errors.Is(err, execution.ErrUnreachable) {
+		// The driver cannot connect to the sandbox data path (a wrong address, a failed TLS handshake, a client
+		// certificate the router refuses). Another worker would meet the same refusal and no stream ever opened,
+		// so this is no lost harness connection: fail the run at once with the dial error (issue #1446).
+		return &failure{reason: what + ": " + err.Error()}
+	}
 	if errors.Is(err, execution.ErrUnavailable) || errors.Is(err, execution.ErrFailedPrecondition) ||
 		errors.Is(err, execution.ErrStreamClosed) {
 		// The gateway or the sandbox is not reachable right now: resume later.
@@ -1011,11 +1028,8 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 		if kept[m.Seq] {
 			continue // the context guard kept this one whole and asked; it is not sent
 		}
-		var body struct {
-			Text string `json:"text"`
-		}
-		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
-			texts = append(texts, body.Text)
+		if t := promptMessage(m); t != "" {
+			texts = append(texts, t)
 			seqs = append(seqs, m.Seq)
 		}
 	}

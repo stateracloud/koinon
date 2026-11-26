@@ -258,3 +258,15 @@ var _ = Describe("Decode", func() {
 		Expect(err).To(HaveOccurred())
 	})
 })
+
+var _ = Describe("ExternalActorCanWrite", func() {
+	It("lets an external actor write a message and no other kind of the catalog (ADR 0130)", func() {
+		Expect(tasks.ExternalActorCanWrite("message")).To(BeTrue())
+		for _, k := range tasks.Kinds() {
+			if k != "message" {
+				Expect(tasks.ExternalActorCanWrite(k)).To(BeFalse(), k)
+			}
+		}
+		Expect(tasks.ExternalActorCanWrite("no.such.kind")).To(BeFalse())
+	})
+})

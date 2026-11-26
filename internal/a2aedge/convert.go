@@ -60,16 +60,24 @@ func statusTo(e store.TaskEvent) (store.TaskState, bool) {
 	return store.TaskState(p.To), true
 }
 
+// personMessage reports whether an event is a message of a person: a Koinon user, or a person
+// without a Koinon account (actor kind external, ADR 0130). Both open and answer turns, so the turns
+// agree with the history that historyMessage shows.
+func personMessage(e store.TaskEvent) bool {
+	return e.Kind == kindMessage && (e.ActorKind == store.TaskActorKindUser || e.ActorKind == store.TaskActorKindExternal)
+}
+
 // historyMessage maps a timeline event to an A2A message, or nil when the event is not a
-// conversation entry. Messages of people are user messages; messages of the agent and its
-// questions are agent messages.
+// conversation entry. Messages of people are user messages, also those of a person without a
+// Koinon account (actor kind external, ADR 0130); messages of the agent and its questions are agent
+// messages.
 func historyMessage(thread string, task a2a.TaskID, e store.TaskEvent) *a2a.Message {
 	var (
 		role a2a.MessageRole
 		text string
 	)
 	switch {
-	case e.Kind == kindMessage && e.ActorKind == store.TaskActorKindUser:
+	case personMessage(e):
 		role, text = a2a.MessageRoleUser, decode(e.Payload).text()
 	case e.Kind == kindMessage && e.ActorKind == store.TaskActorKindAgent:
 		role, text = a2a.MessageRoleAgent, decode(e.Payload).text()
@@ -112,7 +120,7 @@ func turnStarts(events []store.TaskEvent) []int {
 		switch {
 		case reopenedFrom(e):
 			reopened = true
-		case e.Kind == kindMessage && e.ActorKind == store.TaskActorKindUser:
+		case personMessage(e):
 			if len(starts) == 0 || reopened {
 				starts = append(starts, i)
 			}

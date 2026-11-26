@@ -115,6 +115,10 @@ type Config struct {
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
+	// Egress is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it, the
+	// sandbox of an agent with a code-host grant gets a rule for the forge routes there (EgressRule).
+	// Nil: no such rule, and git reaches the forge only through the driver's own rule.
+	Egress *Endpoint
 	// MCPGateway is koinon-gateway's MCP listener as sandboxes reach it, when koinon-gateway serves the
 	// agents' MCP path (gateway.mcp.driver=koinon, ADR 0097 decision 5). The sandbox profile then allows
 	// /mcp on it and not on Gateway, and the MCP prober lists tools through it. Zero: agentgateway serves /mcp
@@ -307,8 +311,17 @@ type Reconciler struct {
 	keyRevMu    sync.Mutex
 	keyRevs     map[string]int64
 	pendingKeys map[string]bool
-	probeDue    []dueProbe
-	probeWake   chan struct{}
+	// forgeRevs maps each forge credential name in the stored State to the first revision that held it
+	// (noteForge), under keyRevMu. forgeRows is what the database holds for each agent (recordForge,
+	// pass goroutine only).
+	forgeRevs map[string]int64
+	forgeRows map[agentKey]forgeRow
+	probeDue  []dueProbe
+	probeWake chan struct{}
+	// probeParked holds, under probeMu, the servers whose probe was held because no stored revision
+	// held the probe key (the publish failed). The next pass that stores a revision queues them again
+	// (#1260), so they do not wait for the next probe interval.
+	probeParked map[pgtype.UUID]bool
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -472,6 +485,7 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, 
 				r.log.Debug("gateway state revision stored", "revision", p.Revision)
 			}
 			r.noteKeys(served.Keys, p.Revision, s.Keys)
+			r.noteForge(served.EgressCredentials, p.Revision)
 			return p.Revision, nil
 		}
 		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)
@@ -512,6 +526,10 @@ type work struct {
 	// when the agent has none.
 	forge     *gatewayplan.ForgeCredential
 	forgeFile []byte
+	// forgeErr says why an agent with a forge read grant has no credential (recordForge).
+	forgeErr error
+	// forgeExpects says the agent's run start waits for its forge credential (agentEgress).
+	forgeExpects bool
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -839,6 +857,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// never waits for the queue: a slow call for one agent holds only that agent. koinon-gateway must
 	// serve the key too: an early agent whose key the live copies have not acked waits with the others.
 	early, deferred, _ := r.newKeyGate(ctx, servedKeys).split(ctx, items, plan.Early)
+	// What the run start of each agent waits for on its forge credential (#1086 part C2), before any
+	// sandbox work of this pass: a run must never find no row for an agent that expects one, because
+	// the pass has not written it yet. The rows are marked served at the end of the pass.
+	if err := r.recordForge(ctx, items, false); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	r.submit(q, b, workOf(items, early), workspaces)
 
 	var res gatewayplan.ApplyResult
@@ -883,6 +908,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
 	r.probeSoon(outcome.Probe, stateRev)
+	if pubErr == nil {
+		r.probeSoon(r.takeParked(), stateRev)
+	}
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -941,6 +969,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		}
 	}
 	r.submit(q, b, workOf(items, run), workspaces)
+	// Mark the forge rows whose revision every live koinon-gateway copy acked. It comes after the submit:
+	// the sandbox work does not wait for it, only the harness start in koinon-agentd does.
+	if err := r.recordForge(ctx, items, true); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	// Each rejected object is reported on its org's agents, after their own work item has recorded its
 	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
@@ -1130,8 +1164,13 @@ func (l planLookups) SystemKey(ctx context.Context, secret string, org gatewaypl
 	return l.r.systemKey(ctx, secret, org.ID, ref)
 }
 
+// IssueKey issues a probe key. Until a stored revision holds it, the prober does not use it (#1260).
 func (l planLookups) IssueKey(ctx context.Context, ref gateway.AgentRef) (gateway.IssuedKey, error) {
-	return l.r.gw.IssueKey(ctx, ref)
+	k, err := l.r.gw.IssueKey(ctx, ref)
+	if err == nil {
+		l.r.keyIssued(k.ID)
+	}
+	return k, err
 }
 
 func (l planLookups) SystemLimit(ctx context.Context, org gatewayplan.Org, now time.Time) (*gateway.Limit, error) {
@@ -1194,7 +1233,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
-		w.egress, w.forge, w.forgeFile = r.agentEgress(ctx, w)
+		w.egress, w.forge, w.forgeFile, w.forgeErr = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err
@@ -1373,6 +1412,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		providers = append(providers, names.GitHubProvider)
 		network[githubRule] = GitHubRule(read, r.githubBinaries(harness))
+		if r.cfg.Egress != nil {
+			network[egressRule] = EgressRule(*r.cfg.Egress, read, r.githubBinaries(harness))
+		}
 	}
 	if rule, ok := PluginInstallRule(w.cfg, w.agent.Harness, harness); ok {
 		network[npmRule] = rule

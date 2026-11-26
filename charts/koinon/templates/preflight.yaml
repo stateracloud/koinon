@@ -77,6 +77,11 @@ rules:
     resources: [deployments]
     resourceNames: [ate-api-server, atenet-router{{ if eq .Values.gateway.mode "kubernetes" }}, {{ .Values.preflight.agentgateway.controller }}{{ end }}]
     verbs: [get]
+  # The router Service, for its ports (the port of routerAddress must be one of them; issue #1446).
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [atenet-router]
+    verbs: [get]
   {{- else }}
   # The Agent Sandbox controller, for its release version (its namespace is checked by name).
   - apiGroups: [apps]
@@ -222,6 +227,11 @@ spec:
             - --driver=substrate
             - --substrate-namespace={{ $sub.namespace }}
             - --substrate-worker-namespace={{ $sub.workerNamespace }}
+            # The router allow-list must hold agentd's identity and the router Service must serve the port of
+            # routerAddress (issue #1446): a wrong port or a missing identity fails every Exec, so fail here.
+            - --substrate-router-address={{ $sub.routerAddress }}
+            - --substrate-agentd-namespace={{ .Release.Namespace }}
+            - --substrate-agentd-service-account={{ include "koinon.componentName" (list . "agentd") }}
             # No probe pod, so the vm-tier and gVisor flags keep their defaults: the device and user-namespace
             # checks only warn that they did not run.
             - --substrate-probes=false

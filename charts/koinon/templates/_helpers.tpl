@@ -292,6 +292,27 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the egress listener (gateway.mcp.koinon.egress.enabled, #1086 part
+C2). It needs gateway.mcp.driver=koinon: only koinon-gateway opens the sealed forge credentials. */}}
+{{- define "koinon.egressListener" -}}
+{{- if .Values.gateway.mcp.koinon.egress.enabled -}}
+{{- if not (include "koinon.mcpKoinon" .) -}}
+{{- fail "gateway.mcp.koinon.egress.enabled needs gateway.mcp.driver=koinon: only koinon-gateway holds the key the forge credentials are sealed to" -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The base URL of the egress listener, as sandboxes and koinon-agentd name it. */}}
+{{- define "koinon.egressURL" -}}
+{{- printf "http://%s:%d" (include "koinon.mcpGatewayHost" .) (int .Values.gateway.mcp.koinon.egress.port) -}}
+{{- end }}
+
+{{/* The Secret with the actor token key (ensure-secrets kind ed25519-key): key, the seed (koinon-agentd only), and public.pem (koinon-gateway only). */}}
+{{- define "koinon.actorTokenKeyName" -}}
+{{- .Values.gateway.mcp.koinon.egress.actorToken.existingSecret | default (include "koinon.componentName" (list . "actor-token-key")) -}}
+{{- end }}
+
 {{/* The URL koinon-api sends approved MCP calls to. */}}
 {{- define "koinon.gatewayMCPURL" -}}
 {{- if include "koinon.mcpKoinon" . -}}
@@ -779,6 +800,44 @@ ServiceAccount is the only Koinon principal that holds a global role in Substrat
 {{- end }}
 {{- end }}
 
+{{/*
+koinon-agentd's identity for the atenet router (issue #1446): the router serves TLS only and lets a client in by the
+SPIFFE ID of its certificate. A projected volume holds the pod certificate (signer podidentity.podcert.ate.dev/identity,
+which issues spiffe://cluster.local/ns/<namespace>/sa/<ServiceAccount>) and the CA of the router's certificate (the
+ClusterTrustBundle of the servicedns signer, as in Substrate v1.0.1 cmd/atenet/internal/router/README.md "Client in the
+cluster, pod identity CA"). The kubelet rotates both files in place and the driver reads them again. Only agentd mounts
+it: the allow-list has the agentd ServiceAccount and no other Koinon pod, because any allowed ID can reach any actor.
+*/}}
+{{- define "koinon.substrateRouterDir" -}}
+/etc/koinon/substrate-router
+{{- end }}
+
+{{- define "koinon.substrateRouterVolumeMount" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-router
+  mountPath: {{ include "koinon.substrateRouterDir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.substrateRouterVolume" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-router
+  projected:
+    sources:
+      - podCertificate:
+          signerName: podidentity.podcert.ate.dev/identity
+          keyType: ECDSAP256
+          credentialBundlePath: credential-bundle.pem
+      - clusterTrustBundle:
+          signerName: servicedns.podcert.ate.dev/identity
+          labelSelector:
+            matchLabels:
+              podcert.ate.dev/canarying: live
+          path: router-ca.pem
+{{- end }}
+{{- end }}
+
 {{- define "koinon.substrateVolume" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
@@ -873,6 +932,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
+{{- end -}}
+{{- if and (include "koinon.egressListener" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.actorTokenKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "agentd")))) -}}
 {{- end -}}
 {{- $specs | toJson -}}
 {{- end }}
@@ -1562,6 +1624,14 @@ it carries no credentials.
   value: {{ .Values.execution.substrate.controlAddress | quote }}
 - name: KOINON_SUBSTRATE_ROUTER_ADDRESS
   value: {{ .Values.execution.substrate.routerAddress | quote }}
+- name: KOINON_SUBSTRATE_ROUTER_CERT_FILE
+  value: {{ printf "%s/credential-bundle.pem" (include "koinon.substrateRouterDir" .) | quote }}
+- name: KOINON_SUBSTRATE_ROUTER_CA_FILE
+  value: {{ printf "%s/router-ca.pem" (include "koinon.substrateRouterDir" .) | quote }}
+{{- with .Values.execution.substrate.routerServerName }}
+- name: KOINON_SUBSTRATE_ROUTER_SERVER_NAME
+  value: {{ . | quote }}
+{{- end }}
 - name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
   value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
 {{- with .Values.execution.substrate.defaultTier }}
@@ -1597,6 +1667,17 @@ it carries no credentials.
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL
   value: {{ . | quote }}
+{{- end }}
+{{- if include "koinon.egressListener" . }}
+{{- /* Git through the gateway's egress listener (#1086 part C2): agentd mints the actor token with the seed, outside the guest. */}}
+- name: KOINON_EGRESS_URL
+  value: {{ include "koinon.egressURL" . | quote }}
+- name: KOINON_ACTOR_TOKEN_KEY_FILE
+  value: /secrets/actor-token/key
+- name: KOINON_ACTOR_TOKEN_KEY_ID
+  value: {{ .Values.gateway.mcp.koinon.egress.actorToken.keyId | quote }}
+- name: KOINON_ACTOR_TOKEN_ISSUER
+  value: {{ .Values.gateway.mcp.koinon.egress.actorToken.issuer | quote }}
 {{- end }}
 {{- with include "koinon.agentMCPURL" . }}
 {{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}
