@@ -70,28 +70,72 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 				// revision of the pass that applied it (ADR 0097 decision 2.1, #1260): before that a
 				// copy can still refuse the probe key, and the refusal would be recorded as a failure.
 				// The key gate decides it, as for the sandbox work and the forge credential.
-				now, held, rev := r.newKeyGate(ctx, nil).splitProbes(ctx, due)
-				if len(now) > 0 {
-					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, now) })
-				}
-				if len(held) > 0 {
-					// A goroutine, not the loop: the wait for the acks takes up to MCPAckWait, and a copy that
-					// never acks must not stop the interval probes and the other wakes (#1347).
-					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) {
-						if rev > 0 && r.awaitGatewayAcked(ctx, rev) {
-							now, held, _ := r.newKeyGate(ctx, nil).splitProbes(ctx, held)
-							r.probeEach(ctx, now)
-							r.skipProbes(len(held))
-						} else if ctx.Err() == nil {
-							r.skipProbes(len(held)) // held back, not recorded; the interval probe waits for the ack too
-						}
-					})
-				}
+				// A goroutine, not the loop: the split reads the database, and the wait for the acks takes
+				// up to MCPAckWait; a copy that never acks must not stop the interval probes and the other
+				// wakes (#1347).
+				safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeDueNow(ctx, due) })
 			}
 		case <-t.C:
 			safego.Do(r.log, "mcp-probe", func() { r.probeTick(ctx) })
 		}
 	}
+}
+
+// probeDueNow runs the queued probes that the key gate lets go, waits for the acks the others need,
+// and then runs those that may go. A probe still held is not recorded: its key may arrive with a
+// later revision (parkProbes), and the interval probe waits for the acks too.
+func (r *Reconciler) probeDueNow(ctx context.Context, due []dueProbe) {
+	now, held, rev := r.newKeyGate(ctx, nil).splitProbes(ctx, due)
+	if len(held) > 0 && rev > 0 {
+		safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, now) })
+		now = nil
+		if !r.awaitGatewayAcked(ctx, rev) {
+			if ctx.Err() == nil {
+				r.holdProbes(held)
+			}
+			return
+		}
+		now, held, _ = r.newKeyGate(ctx, nil).splitProbes(ctx, held)
+	}
+	r.holdProbes(held)
+	r.probeEach(ctx, now)
+}
+
+// holdProbes counts probes held back for the gateway, and parks those whose key no stored revision
+// holds yet. They are not recorded.
+func (r *Reconciler) holdProbes(held []dueProbe) {
+	if len(held) == 0 {
+		return
+	}
+	r.m.MCPProbesSkipped.Add(float64(len(held)))
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	for _, d := range held {
+		if d.probe.KeyID != "" && r.keyPending(d.probe.KeyID) {
+			if r.probeParked == nil {
+				r.probeParked = map[pgtype.UUID]bool{}
+			}
+			r.probeParked[d.probe.Server] = true
+		}
+	}
+}
+
+// takeParked returns the probes of the parked servers that the plan still probes, and empties the set.
+func (r *Reconciler) takeParked() []gatewayplan.Probe {
+	r.probeMu.Lock()
+	parked := r.probeParked
+	r.probeParked = nil
+	r.probeMu.Unlock()
+	if len(parked) == 0 {
+		return nil
+	}
+	var out []gatewayplan.Probe
+	for _, p := range r.plan.Probes() {
+		if parked[p.Server] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ProbeAll probes every served server once.
@@ -100,34 +144,32 @@ func (r *Reconciler) ProbeAll(ctx context.Context) {
 }
 
 // probeTick is the interval probe. It does not start while a live copy still has to ack the newest
-// stored State revision: a server whose key or target arrived in that revision would get a 401 that
-// is recorded as a failure (#1260). A server whose probe key no acked revision holds yet (the
-// publish failed) is not probed either. The next tick tries again.
+// stored State revision: a server whose key arrived in that revision would get a 401 that is
+// recorded as a failure (#1260). A server whose probe key no stored revision holds yet (the publish
+// failed) is not probed either. When the live copies cannot be read, no probe starts. The next tick
+// tries again.
 func (r *Reconciler) probeTick(ctx context.Context) {
+	probes := r.plan.Probes()
 	g := r.newKeyGate(ctx, nil)
+	if g.liveErr != nil {
+		r.m.MCPProbesSkipped.Add(float64(len(probes)))
+		r.log.Warn("MCP interval probe skipped: the live gateway copies cannot be read", "err", g.liveErr)
+		return
+	}
 	if latest, err := staterev.Latest(ctx, r.pool); err == nil && latest != nil && !g.ackedRev(ctx, latest.GetRevision()) {
 		// Warn, not Debug: a copy whose apply keeps failing stays live and serves an old revision, so
 		// this repeats every interval until the copy applies it or turns unready (#1347).
-		r.m.MCPProbesSkipped.Inc()
+		r.m.MCPProbesSkipped.Add(float64(len(probes)))
 		r.log.Warn("MCP interval probe skipped: not every gateway copy acked the newest State revision; a copy may be stuck on an old revision", "revision", latest.GetRevision())
 		return
 	}
-	probes := r.plan.Probes()
 	due := make([]dueProbe, len(probes))
 	for i, p := range probes {
 		due[i] = dueProbe{probe: p}
 	}
 	now, held, _ := g.splitProbes(ctx, due)
-	r.skipProbes(len(held))
+	r.holdProbes(held)
 	r.probeEach(ctx, now)
-}
-
-// skipProbes counts n probes held back for the gateway acks. They are not recorded.
-func (r *Reconciler) skipProbes(n int) {
-	if n > 0 {
-		r.m.MCPProbesSkipped.Add(float64(n))
-		r.log.Debug("MCP probes held back until every gateway copy serves their key", "probes", n)
-	}
 }
 
 // dueProbe is a queued probe with the State revision whose MCP half it waits for (0: none).
@@ -300,7 +342,7 @@ type keyGate struct {
 func (r *Reconciler) newKeyGate(ctx context.Context, served map[string]bool) *keyGate {
 	live, err := staterev.LiveCopies(ctx, r.pool, 0, gwv1.Half_HALF_MCP)
 	if err != nil {
-		r.log.Warn("reading the live gateway copies failed; sandbox work of agents with a key issued since the start waits", "err", err)
+		r.log.Warn("reading the live gateway copies failed; the work that waits for koinon-gateway (sandbox work with a key issued since the start, forge credentials, MCP probes) waits", "err", err)
 	}
 	return &keyGate{r: r, served: served, live: live, liveErr: err, acked: map[int64]bool{}}
 }
@@ -375,7 +417,9 @@ func (g *keyGate) split(ctx context.Context, items []*work, idx []int) (goNow, w
 // splitProbes returns the probes that may start now, and those that wait with the highest revision
 // they wait for. A probe waits while its key waits (keyWaits) or, when it has one, while a live copy
 // has not acked the revision of the pass that applied its server. A probe whose key no recorded
-// revision holds waits for no revision: only a later stored revision can bring the key.
+// revision holds waits for no revision: only a later stored revision can bring the key. A changed
+// target whose key is acked and whose pass stored no revision (the publish failed) does not wait: the
+// copies then still serve the old target, so the probe can see it, but it gets no 401.
 func (g *keyGate) splitProbes(ctx context.Context, due []dueProbe) (now []gatewayplan.Probe, wait []dueProbe, maxRev int64) {
 	for _, d := range due {
 		keyWait, keyRev := false, int64(0)

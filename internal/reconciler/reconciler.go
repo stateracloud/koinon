@@ -318,6 +318,10 @@ type Reconciler struct {
 	forgeRows map[agentKey]forgeRow
 	probeDue  []dueProbe
 	probeWake chan struct{}
+	// probeParked holds, under probeMu, the servers whose probe was held because no stored revision
+	// held the probe key (the publish failed). The next pass that stores a revision queues them again
+	// (#1260), so they do not wait for the next probe interval.
+	probeParked map[pgtype.UUID]bool
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -904,6 +908,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
 	r.probeSoon(outcome.Probe, stateRev)
+	if pubErr == nil {
+		r.probeSoon(r.takeParked(), stateRev)
+	}
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()

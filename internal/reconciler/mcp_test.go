@@ -500,17 +500,19 @@ var _ = Describe("Org MCP servers", func() {
 				m := reconciler.NewMetrics(nil)
 				rr := probing(ctx, g.host, g.port, fast, func(c *reconciler.Config) {
 					c.StateRevisionDB = failing
-					c.MCPProbeInterval = racescale.D(100 * time.Millisecond)
-					c.Metrics = m
+					c.Metrics = m // the interval stays long: the probe after the next pass is the queued one, not a tick
 				})
 				runProber(rr)
 
 				// The pass applies the server but cannot store the State: no copy gets the probe key.
 				Expect(rr.ReconcileAll(ctx)).To(MatchError(ContainSubstring("store the gateway state revision")))
-				Consistently(g.seen.Load).WithTimeout(racescale.D(1500*time.Millisecond)).Should(BeZero(), "neither the pass nor the interval probes with the key")
+				Consistently(g.seen.Load).WithTimeout(racescale.D(1500*time.Millisecond)).Should(BeZero(), "the pass does not probe with the key")
 				Expect(testutil.ToFloat64(m.MCPProbesSkipped)).To(BeNumerically(">=", 1))
+				rr.ProbeTickForTest(ctx)
+				Expect(g.seen.Load()).To(BeZero(), "the interval probe does not use the key either")
 
-				// The next pass stores the revision that holds the key. The probe waits for the ack of it.
+				// The next pass stores the revision that holds the key and queues the held probe again. It
+				// waits for the ack of that revision.
 				failing.fail.Store(false)
 				Expect(rr.ReconcileAll(ctx)).To(Succeed())
 				latest, err := staterev.Latest(ctx, pool)
