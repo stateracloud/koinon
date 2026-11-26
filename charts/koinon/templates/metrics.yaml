@@ -85,6 +85,36 @@ spec:
       {{- with $sm.interval }}
       interval: {{ . | quote }}
       {{- end }}
+{{- if include "koinon.mcpKoinon" . }}
+{{- /*
+With gateway.mcp.driver=koinon (the default; it needs standalone mode), the monitor also scrapes the
+"stats" port of the mcp-gateway Service (koinon-gateway's /metrics, gateway-koinon-mcp.yaml; issue #1452).
+Its series carry fixed label sets only (reason, path, result, ...), never an org, agent or run ID (ADR 0023).
+Its NetworkPolicy side is networkPolicy.metricsFrom.
+*/}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list . "mcp-gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "mcp-gateway") | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace | quote }}]
+  endpoints:
+    - port: stats
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
 {{- else }}
 ---
 apiVersion: monitoring.coreos.com/v1
