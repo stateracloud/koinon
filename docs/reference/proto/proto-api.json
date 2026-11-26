@@ -528,6 +528,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
+            },
+            {
+              "name": "created_by",
+              "number": 31,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user ID of the person who created the agent; empty when no user did. While the agent is a\ndraft that was never activated, this person may change it with the member role (UpdateAgent)."
             }
           ]
         },

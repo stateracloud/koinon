@@ -43,14 +43,16 @@ function githubWithScopes() {
   })
 }
 
-function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; path?: string; orgTemplates?: Template[]; failTemplate?: boolean; staleDraft?: boolean } = {}) {
+function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; path?: string; orgTemplates?: Template[]; failTemplate?: boolean; staleDraft?: boolean; createdBy?: string; activeVersion?: number } = {}) {
   const creates: CreateAgentFromTemplateRequest[] = []
   const blanks: CreateAgentRequest[] = []
   const activates: ActivateAgentRequest[] = []
   const updates: UpdateAgentRequest[] = []
   const saves: CreateTemplateFromAgentRequest[] = []
   const orgTemplates = [...(opts.orgTemplates ?? [])]
-  let agent = create(AgentSchema, { id: 'a-9', orgId, displayName: 'x', status: AgentStatus.DRAFT, latestVersion: 1 })
+  // A new draft has no creator in the fake until a create call; the creates record the caller, as the server does.
+  const activeVersion = opts.activeVersion ?? 0
+  let agent = create(AgentSchema, { id: 'a-9', orgId, displayName: 'x', status: AgentStatus.DRAFT, latestVersion: activeVersion + 1, activeVersion, createdBy: opts.createdBy ?? '' })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(TemplateService, {
@@ -73,6 +75,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; p
         creates.push(req)
         agent = create(AgentSchema, {
           ...agent,
+          createdBy: 'u-1',
           displayName: req.displayName,
           harness: req.harness,
           templateSlug: 'repo-helper',
@@ -85,7 +88,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; p
       createAgent: (req) => {
         blanks.push(req)
         const d = req.definition
-        agent = create(AgentSchema, { ...agent, displayName: d?.displayName ?? '', instructions: d?.instructions ?? '', harness: d?.harness ?? '', proposedGrants: d?.grants ?? [] })
+        agent = create(AgentSchema, { ...agent, createdBy: 'u-1', displayName: d?.displayName ?? '', instructions: d?.instructions ?? '', harness: d?.harness ?? '', proposedGrants: d?.grants ?? [] })
         return { agent }
       },
       updateAgent: (req) => {
@@ -305,16 +308,51 @@ describe('AgentWizard', () => {
     expect(await screen.findByRole('region', { name: 'Draft summary' })).toHaveTextContent('acme/a, acme/b, acme/c')
   })
 
-  it('lets members create a draft but not activate or edit it', async () => {
-    setup({ role: OrgRole.MEMBER })
+  it('lets a member create a draft and edit its instructions, but not activate it', async () => {
+    const { updates } = setup({ role: OrgRole.MEMBER })
     await toReview()
     await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
     const activation = await screen.findByRole('region', { name: 'Activation' })
     expect(activation).toHaveTextContent('Waiting for an admin to activate.')
     expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Send back/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save as template' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit draft' }))
+    const edit = screen.getByRole('form', { name: 'Edit draft' })
+    await userEvent.type(within(edit).getByLabelText('Instructions'), 'Keep pull requests small.')
+    await userEvent.click(within(edit).getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(updates).toEqual([expect.objectContaining({ agentId: 'a-9', updateMask: expect.objectContaining({ paths: ['instructions'] }) })]))
+  })
+})
+
+describe('Draft editor access', () => {
+  it('shows the editor to the member who created the draft', async () => {
+    setup({ role: OrgRole.MEMBER, path: '/agents/a-9', createdBy: 'u-1' })
+    expect(await screen.findByRole('button', { name: 'Edit draft' })).toBeInTheDocument()
+  })
+
+  it('hides the editor from a member who did not create the draft', async () => {
+    setup({ role: OrgRole.MEMBER, path: '/agents/a-9', createdBy: 'u-2' })
+    expect(await screen.findByRole('heading', { name: 'x' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
+  })
+
+  it('hides the editor from the creator when the draft was activated before', async () => {
+    setup({ role: OrgRole.MEMBER, path: '/agents/a-9', createdBy: 'u-1', activeVersion: 1 })
+    expect(await screen.findByRole('heading', { name: 'x' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
+  })
+
+  it('hides the editor from a viewer, also on their own draft', async () => {
+    setup({ role: OrgRole.VIEWER, path: '/agents/a-9', createdBy: 'u-1' })
+    expect(await screen.findByRole('heading', { name: 'x' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit draft' })).not.toBeInTheDocument()
+  })
+
+  it('shows the editor to an admin on a draft that another person created', async () => {
+    setup({ role: OrgRole.ADMIN, path: '/agents/a-9', createdBy: 'u-2' })
+    expect(await screen.findByRole('button', { name: 'Edit draft' })).toBeInTheDocument()
   })
 })
 
@@ -346,6 +384,32 @@ describe('BlankAgentForm', () => {
     expect(screen.getByText('Write the instructions.')).toBeInTheDocument()
     expect(screen.getByText('Correct the problems above, then create the draft.')).toBeInTheDocument()
     expect(blanks).toEqual([])
+  })
+
+  it('asks for a repository when GitHub access is on, and states the rule before the save', async () => {
+    const { blanks } = setup({ path: '/agents/new/blank' })
+    await userEvent.type(await screen.findByLabelText('Name'), 'Docs fixer')
+    await userEvent.type(screen.getByLabelText('Instructions'), 'Fix typos in the docs.')
+    const gh = screen.getByRole('group', { name: 'GitHub access' })
+    expect(within(gh).queryByText(/needs at least one repository/)).not.toBeInTheDocument()
+    await userEvent.click(within(gh).getByRole('checkbox', { name: 'Give GitHub access' }))
+
+    const repo = within(gh).getByLabelText('GitHub repository 1')
+    expect(repo).toBeRequired()
+    expect(repo).toHaveAccessibleDescription(
+      'A GitHub grant needs at least one repository. The connection must have access to each repository. Koinon checks this when you create the draft.',
+    )
+    expect(repo).not.toBeInvalid()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+    expect(await within(gh).findByText('Choose at least 1 repository.')).toBeInTheDocument()
+    expect(repo).toBeInvalid()
+    expect(blanks).toEqual([])
+
+    await userEvent.type(repo, 'acme/docs')
+    await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+    await waitFor(() => expect(blanks).toHaveLength(1))
+    expect(blanks[0].definition?.grants).toEqual([expect.objectContaining({ connector: 'github', repositories: ['acme/docs'] })])
   })
 
   it('creates a draft with CreateAgent, an admin edits it with UpdateAgent and activates it', async () => {

@@ -215,11 +215,19 @@ export function BlankAgentForm({ orgId, connectorTypes, connections, models, can
                       </label>
                     ))}
                   </fieldset>
-                  <span className="text-sm font-medium">Repositories</span>
+                  <span className="text-sm font-medium">Repositories (required)</span>
+                  {/* The server's rule (bindGrants): a grant on a code host names at least one
+                      repository, and the connection's installation must reach each one. */}
+                  <p id={`${id}-${t.id}-repos-rule`} className="text-muted-foreground text-xs">
+                    A {host.name} grant needs at least one repository. The connection must have access to each repository. Koinon checks this when you create the draft.
+                  </p>
                   {a.repositories.map((r, ri) => (
                     <div key={ri} className="flex gap-2">
                       <RepoPicker
                         aria-label={`${host.name} repository ${ri + 1}`}
+                        aria-describedby={`${id}-${t.id}-repos-rule`}
+                        aria-required={ri === 0}
+                        aria-invalid={showErrors && ri === 0 && a.repositories.every((x) => x.trim() === '')}
                         connectionId={a.connectionId}
                         searchable={!!canListRepos}
                         value={r}

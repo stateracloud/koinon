@@ -88,6 +88,7 @@ Agent is an agent and the definition it runs.
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 | team | 29 | `string` | singular |  | The agent's team label (SetAgentPlacement); empty for no team. |
 | reports_to | 30 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also of a person who left the org since; AgentSummary gives the name and leaves out such a person. |
+| created_by | 31 | `string` | singular |  | The user ID of the person who created the agent; empty when no user did. While the agent is a draft that was never activated, this person may change it with the member role (UpdateAgent). |
 
 ### Message AgentDefinition
 
