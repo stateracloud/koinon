@@ -2,7 +2,7 @@
 
 import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createClient, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -163,11 +163,41 @@ describe('the poll of the agent cards', () => {
     asked.length = 0
     pages[0] = [summary('a-0', 'Bot 0', { runningRuns: 1, lastRunState: RunState.RUNNING })]
     await vi.advanceTimersByTimeAsync(inboxPollMs)
+    // One poll, one request.
+    expect(asked).toEqual([''])
     await waitFor(() => expect(within(screen.getByRole('article', { name: 'Bot 0' })).getByText('Running now')).toBeInTheDocument())
-    await vi.advanceTimersByTimeAsync(inboxPollMs)
-    // Two polls, one request each.
-    expect(asked).toEqual(['', ''])
     expect(screen.getAllByRole('article')).toHaveLength(6)
+  })
+
+  it('retries a failed later page on the next poll', async () => {
+    const asked: string[] = []
+    let fail = true
+    const pages = [[summary('a-0', 'Bot 0')], [summary('a-1', 'Bot 1')]]
+    const inner = transport({ pages, asked })
+    const failing = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, {
+        listAgents: () => ({ agents: [] }),
+        listAgentSummaries: async (req) => {
+          if (req.pageToken === 'p1' && fail) {
+            fail = false
+            asked.push('p1 failed')
+            throw new ConnectError('down', Code.Unavailable)
+          }
+          return createClient(AgentService, inner).listAgentSummaries(req)
+        },
+      })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
+      service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+    })
+    renderApp(failing, '/')
+    await card('Bot 0')
+    await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
+    expect(await screen.findByText('This list may be incomplete.')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(inboxPollMs)
+    await card('Bot 1')
+    expect(asked).toEqual(['', 'p1 failed', '', 'p1'])
+    expect(screen.queryByText('This list may be incomplete.')).not.toBeInTheDocument()
   })
 
   it('loads the later pages again from the new cursor when the first page changes, with no gap', async () => {
@@ -201,6 +231,8 @@ describe('the poll of the agent cards', () => {
     all.unshift(summary('new', 'New bot'))
     await vi.advanceTimersByTimeAsync(inboxPollMs)
     await card('New bot')
+    // The old later pages stay on screen while they load again: no card goes away.
+    expect(screen.getAllByRole('article').length).toBeGreaterThanOrEqual(all.length - 1)
     await waitFor(() => expect(asked).toEqual(['', 'a-98', 'a-198']))
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(all.length))
     expect(screen.queryByRole('button', { name: 'Show more agents' })).not.toBeInTheDocument()

@@ -34,8 +34,11 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
   const restToken = first.data?.nextPageToken ?? ''
   // want is the number of pages after the first that this view asked for.
   const [want, setWant] = useState(0)
-  const cached = queryClient.getQueryData(restKey(transport, orgId)) !== undefined
-  const restEnabled = restToken !== '' && (all || want > 0 || cached)
+  // A later-pages query that follows an older first page stays off until it points at the new token (below), so a
+  // mount does not refetch it from the old cursor first.
+  const restData = queryClient.getQueryData<InfiniteData<ListAgentSummariesResponse, string>>(restKey(transport, orgId))
+  const movedInCache = restToken !== '' && restData !== undefined && restData.pageParams[0] !== restToken
+  const restEnabled = restToken !== '' && (all || want > 0 || restData !== undefined) && !movedInCache
   const rest = useInfiniteQuery(AgentService.method.listAgentSummaries, restInput(orgId, restToken), {
     pageParamKey: 'pageToken',
     getNextPageParam: (last) => last.nextPageToken || undefined,
@@ -49,15 +52,27 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
   // the same query with the old start in pageParams.
   const moved = restPages !== undefined && rest.data?.pageParams[0] !== restToken
 
-  const { hasNextPage, isFetching, fetchNextPage, isError, refetch } = rest
+  const { hasNextPage, isFetching, fetchNextPage, isError, isFetchNextPageError, refetch } = rest
+  const firstFetching = first.isFetching
   useEffect(() => {
-    if (!moved || isFetching) return
-    // A refetch of an infinite query starts at pageParams[0] and loads as many pages as it holds.
+    // Wait for the first page too: an invalidation refetches both, and the first page can move the token again.
+    if (!moved || isFetching || firstFetching) return
+    // A refetch of an infinite query starts at pageParams[0] and loads as many pages as it holds. The new start turns
+    // the query on again (restEnabled), and the stale query then refetches once.
     queryClient.setQueryData<InfiniteData<ListAgentSummariesResponse, string>>(restKey(transport, orgId), (old) =>
       old ? { ...old, pageParams: [restToken, ...old.pageParams.slice(1)] } : old,
     )
-    void refetch()
-  }, [moved, isFetching, restToken, orgId, transport, queryClient, refetch])
+  }, [moved, isFetching, firstFetching, restToken, orgId, transport, queryClient])
+
+  // The later pages do not poll, so each poll of the first page also retries a failed later page: the next page when
+  // only that failed, else the later pages.
+  const firstUpdatedAt = first.dataUpdatedAt
+  useEffect(() => {
+    if (!restEnabled || !isError || isFetching) return
+    void (isFetchNextPageError ? fetchNextPage({ cancelRefetch: false }) : refetch())
+    // Only a new first page starts a retry, not a change of the error state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstUpdatedAt])
 
   // A view that mounts with later pages in the cache (from the other tab) keeps them.
   const target = all ? Infinity : Math.max(want, loaded)
@@ -76,7 +91,7 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
     isError: first.isError || restError,
     error: first.error ?? (restError ? rest.error : null),
     hasMore: restToken !== '' && (restPages === undefined || moved || Boolean(hasNextPage)),
-    isFetchingMore: rest.isLoading || rest.isFetchingNextPage,
+    isFetchingMore: rest.isLoading || rest.isFetchingNextPage || (want > loaded && isFetching),
     loadMore: () => setWant((w) => Math.max(w, loaded) + 1),
   }
 }
