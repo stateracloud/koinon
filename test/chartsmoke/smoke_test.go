@@ -730,10 +730,10 @@ func describeMode(name, valuesFile string) {
 		}, SpecTimeout(3*time.Minute))
 
 		// koinon-gateway (the MCP path, gateway.mcp.driver=koinon). The Docker network has no Service DNS,
-		// so it cannot reach koinon-api's State stream and must stay unready: that is what keeps a rollout
+		// so it cannot reach koinon-api's State stream and must stay unready unless held (issue #1358): that keeps a rollout
 		// from taking old pods away before a new pod can serve. It must still run, answer its liveness
 		// probe and serve /metrics, with the args, the mounts and the environment the chart gives it.
-		It("starts koinon-mcp-gateway, alive but not ready without a config", func(ctx SpecContext) {
+		It("starts koinon-mcp-gateway, alive; ready only when held, without a config", func(ctx SpecContext) {
 			d := r.deployment("koinon-mcp-gateway")
 			if d == nil {
 				Skip("gateway.mcp.driver is not koinon in this values file")
@@ -770,10 +770,10 @@ func describeMode(name, valuesFile string) {
 		}, SpecTimeout(3*time.Minute))
 
 		// koinon-gateway (the model path, gateway.model.driver=koinon). The Docker network has no Service DNS,
-		// so it cannot reach koinon-api's State stream and must stay unready: that is what keeps a rollout
+		// so it cannot reach koinon-api's State stream and must stay unready unless held (issue #1358): that keeps a rollout
 		// from taking old pods away before a new pod can serve. It must still run, answer its liveness
 		// probe and serve /metrics, with the args, the mounts and the environment the chart gives it.
-		It("starts koinon-model-gateway, alive but not ready without a config", func(ctx SpecContext) {
+		It("starts koinon-model-gateway, alive; ready only when held, without a config", func(ctx SpecContext) {
 			d := r.deployment("koinon-model-gateway")
 			if d == nil {
 				Skip("gateway.model.driver is not koinon in this values file")
