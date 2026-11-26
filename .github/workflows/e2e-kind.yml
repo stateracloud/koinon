@@ -76,6 +76,11 @@ on:
         description: 'Also run the run-1 story suite (test/e2e/stories_test.go, go suite only). The nightly run always does; the bisect passes it.'
         type: boolean
         default: false
+      driver:
+        description: 'The execution driver of the quickstart. openshell: the default run. substrate: the Substrate leg (make test-e2e-kind-substrate, gVisor class, issue 1091; advisory, the ref needs that make target). Go suite only.'
+        type: choice
+        options: [openshell, substrate]
+        default: openshell
       commit:
         description: 'Run on this full commit sha instead of the ref (used by hack/e2e-bisect.sh).'
         type: string
@@ -322,6 +327,7 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/e2e
           SUITE: ${{ inputs.suite || 'go' }}
+          E2E_DRIVER: ${{ inputs.driver || 'openshell' }}
           # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
@@ -332,7 +338,7 @@ jobs:
           # sets the job output `stories_red`. A dispatch with stories=true (the bisect) is blocking: it needs pass or fail.
           STORIES_ADVISORY: ${{ github.event_name == 'schedule' && '1' || '0' }}
           # Also run the escape suite's leak guard case from a sandbox against this install (#348).
-          ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
+          ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && inputs.driver != 'substrate' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
           # The harness image the step above pulled (the harnesses job pushed it for this harnesses/ tree). Empty after
@@ -346,7 +352,13 @@ jobs:
           HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
-        run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+        run: |
+          if [[ "$E2E_DRIVER" == substrate ]]; then
+            make -n test-e2e-kind-substrate >/dev/null 2>&1 || { echo "this ref has no test-e2e-kind-substrate target" >&2; exit 1; }
+            make test-e2e-kind-substrate 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          else
+            test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          fi
 
       - name: Story suite verdict
         id: storiesverdict
