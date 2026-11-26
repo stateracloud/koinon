@@ -69,7 +69,8 @@ function ServerContent() {
   const server = servers.data?.servers.find((s) => s.id === serverId)
   const failed = servers.error ?? tools.error
 
-  if (servers.isPending || tools.isPending) return <SkeletonRows label="Loading server…" />
+  // After "Connect server", the cached list can be older than the new server: wait for the refetch.
+  if (servers.isPending || tools.isPending || (!server && servers.isFetching)) return <SkeletonRows label="Loading server…" />
   if (!server) {
     return (
       <>
@@ -138,7 +139,8 @@ function ServerContent() {
         <OutwardSwitch kind={OutwardTargetKind.MCP_SERVER} targetId={s.id} subject={`server ${s.name}`} disabled={s.adminDisabled} />
       </Section>
       {!s.removed && <ServerClass key={`${s.kind}/${s.dataClass.join()}`} server={s} actions={actions} />}
-      <ToolsSection server={s} tools={list} actions={actions} onRefused={feedback.setError} />
+      {/* Without the tool list, "No tools yet" would be wrong: the error above says why it is missing. */}
+      {!tools.error && <ToolsSection server={s} tools={list} actions={actions} onRefused={feedback.setError} />}
     </>
   )
 }

@@ -25,7 +25,7 @@ import { availabilityMinutes } from '@/lib/providers'
 const col = dataTableColumns<ServerRow>()
 
 /** ServerRow is one server of the list with the tools that belong to it. */
-type ServerRow = { server: Server; tools: Tool[] }
+type ServerRow = { server: Server; tools: Tool[] | undefined }
 
 /** ServersPage lists the org's remote MCP servers (ADR 0057, ADR 0126 section 6). Org admins and owners only. */
 export function ServersPage() {
@@ -44,8 +44,8 @@ function ServersContent() {
   const servers = useQuery(McpServerService.method.listServers, { orgId })
   const tools = useQuery(McpServerService.method.listTools, { orgId, serverId: '' })
   const rows = useMemo<ServerRow[]>(() => {
-    const all = tools.data?.tools ?? []
-    return (servers.data?.servers ?? []).map((server) => ({ server, tools: toolsOf(all, server.id) }))
+    const all = tools.data?.tools
+    return (servers.data?.servers ?? []).map((server) => ({ server, tools: all && toolsOf(all, server.id) }))
   }, [servers.data, tools.data])
 
   const columns = useMemo<DataTableColumn<ServerRow>[]>(
@@ -76,13 +76,18 @@ function ServersContent() {
         header: 'Tools',
         cell: (c) => {
           const { server, tools: list } = c.row.original
+          // Without the tool list, a count would be wrong: the error above the table says why it is missing.
+          if (!list) return null
           const waiting = waitingNotice(server, list)
           return (
             <div className="grid gap-1">
               <span className="text-sm">{summaryText(summarizeTools(list))}</span>
               {waiting && (
-                <Badge variant="outline" className="w-fit">
-                  {waiting}
+                // The review is on the server page ("Review all" or one tool at a time, ADR 0125 decision 10).
+                <Badge asChild variant="outline" className="w-fit">
+                  <Link to="/mcp-servers/$serverId" params={{ serverId: server.id }} aria-label={`${waiting}: review the tools of ${server.name}`}>
+                    {waiting}
+                  </Link>
                 </Badge>
               )}
             </div>

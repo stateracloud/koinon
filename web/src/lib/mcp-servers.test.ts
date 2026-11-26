@@ -183,6 +183,8 @@ describe('waitingNotice', () => {
   it('says when the server is at the limit of unreviewed tools', () => {
     const capped = create(ServerSchema, { id: 's', name: 's', unreviewedToolsCappedAt: timestampFromDate(new Date()) })
     expect(waitingNotice(capped, [])).toBe('At the limit of unreviewed tools')
+    const t = create(ToolSchema, { serverId: 's', name: 'a', present: true, toolHash: 'h-a' })
+    expect(waitingNotice(capped, [t])).toBe('1 tool waits for review, at the limit of unreviewed tools')
   })
   it('is empty when nothing waits', () => {
     expect(waitingNotice(server, [create(ToolSchema, { serverId: 's', name: 'a', present: true, toolHash: 'h', approvedHash: 'h' })])).toBe('')

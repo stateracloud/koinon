@@ -57,7 +57,7 @@ export function OutwardSwitch({ kind, targetId, subject, disabled, compact = fal
         <p role="note" className="text-sm">
           <Badge variant="destructive">Switched off</Badge> by {disabled.by}
           {disabled.note ? `: ${disabled.note}` : '.'}
-          {disabled.declared && ' Its declaring Secret says disabled: true.'}
+          {disabled.declared && ' Its declaring Secret says disabled: true; remove that field from the Secret to enable it.'}
         </p>
       )}
       {disabled && !compact && (

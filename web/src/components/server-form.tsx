@@ -66,7 +66,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
 
   return (
     <form onSubmit={(e) => void submit(e)} aria-label={editing ? `Edit server ${server.name}` : 'Connect a remote server'} className="bg-card grid gap-4 rounded-md border p-4" noValidate>
-      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Connect a remote MCP server'}</h2>
+      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Server details'}</h2>
       <div className="grid gap-1.5">
         <Label htmlFor="server-name">Name</Label>
         <Input

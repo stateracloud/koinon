@@ -39,7 +39,7 @@ test('connect the fake MCP server, review a new tool, switch its outward calls o
   const tools = page.getByRole('list', { name: 'Tools of tracker-web' })
   await expect(async () => {
     await page.reload()
-    await expect(tools.getByText('write_item', { exact: true })).toBeVisible({ timeout: 5_000 })
+    await expect(tools.getByRole('button', { name: 'Mark reviewed: write_item' })).toBeVisible({ timeout: 5_000 })
   }).toPass({ timeout: 8 * 60_000, intervals: [5_000] })
 
   // 3. A new tool waits for review: agents do not get it until an admin approves its text (ADR 0125).

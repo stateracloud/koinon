@@ -228,7 +228,7 @@ describe('Servers page', () => {
     const row = (name: string) => within(within(table).getByRole('link', { name }).closest('tr') as HTMLElement)
     expect(row('docs').getByText('Healthy')).toBeInTheDocument()
     expect(row('docs').getByText('UI')).toBeInTheDocument()
-    expect(row('docs').getByText('1 tool waits for review')).toBeInTheDocument()
+    expect(row('docs').getByRole('link', { name: '1 tool waits for review: review the tools of docs' })).toHaveAttribute('href', '/mcp-servers/s-docs')
     expect(row('docs').getByRole('button', { name: 'Switch off outward calls of server docs' })).toBeInTheDocument()
     expect(row('issues').getByText('Unhealthy', { selector: '[data-slot=badge]' })).toBeInTheDocument()
     expect(row('wiki').getByText('Managed by Secret wiki-secret')).toBeInTheDocument()

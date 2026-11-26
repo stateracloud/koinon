@@ -450,8 +450,9 @@ export function summaryText(s: ToolSummary): string {
  */
 export function waitingNotice(server: Server, tools: readonly Tool[]): string {
   const review = tools.filter(waitsForReview).length
-  if (review) return `${review} ${review === 1 ? 'tool waits' : 'tools wait'} for review`
-  if (server.unreviewedToolsCappedAt) return 'At the limit of unreviewed tools'
+  const capped = server.unreviewedToolsCappedAt ? 'at the limit of unreviewed tools' : ''
+  if (review) return `${review} ${review === 1 ? 'tool waits' : 'tools wait'} for review${capped && `, ${capped}`}`
+  if (capped) return 'At the limit of unreviewed tools'
   if (tools.some(absentUnreviewed)) return 'Tools to remove'
   return ''
 }
