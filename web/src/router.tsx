@@ -20,6 +20,8 @@ import { BudgetsPage } from '@/pages/budgets-page'
 import { PlatformBudgetsPage } from '@/pages/platform-budgets-page'
 import { PricesPage } from '@/pages/prices-page'
 import { ProvidersPage } from '@/pages/providers-page'
+import { NewServerPage } from '@/pages/new-server-page'
+import { ServerPage } from '@/pages/server-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { BlankAgentPage, NewAgentPage, TemplateAgentPage } from '@/pages/new-agent-page'
@@ -158,6 +160,8 @@ export const connectionRoute = createRoute({ getParentRoute: () => orgRoute, pat
 export const providersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/providers', component: ProvidersPage })
 export const orgSettingsRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/org', component: OrgSettingsPage })
 export const mcpServersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers', component: ServersPage })
+export const newMcpServerRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers/new', component: NewServerPage })
+export const mcpServerRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers/$serverId', component: ServerPage })
 // The org MCP servers page moved under Settings (ADR 0126 section 6).
 export const serversRedirectRoute = createRoute({
   getParentRoute: () => orgRoute,
@@ -225,6 +229,8 @@ const routeTree = rootRoute.addChildren([
       providersRoute,
       orgSettingsRoute,
       mcpServersRoute,
+      newMcpServerRoute,
+      mcpServerRoute,
       serversRedirectRoute,
       pricesRoute,
       budgetsRoute,

@@ -431,7 +431,7 @@ export type ToolSummary = { total: number; review: number; suggested: number; go
 export function summarizeTools(tools: readonly Tool[]): ToolSummary {
   return {
     total: tools.filter((t) => t.present).length,
-    review: tools.filter((t) => t.reviewReason !== '').length,
+    review: tools.filter(waitsForReview).length,
     suggested: tools.filter(suggestsAuto).length,
     gone: tools.filter((t) => !t.present).length,
   }
@@ -439,9 +439,22 @@ export function summarizeTools(tools: readonly Tool[]): ToolSummary {
 
 export function summaryText(s: ToolSummary): string {
   const parts = [`${s.total} ${s.total === 1 ? 'tool' : 'tools'}`]
-  if (s.review) parts.push(`${s.review} to review`)
+  if (s.review) parts.push(`${s.review} ${s.review === 1 ? 'waits' : 'wait'} for review`)
   if (s.suggested) parts.push(`${s.suggested} suggested read-only`)
   return parts.join(', ')
+}
+
+/**
+ * waitingNotice is the short "tools waiting" text of a server in the list (ADR 0125 decision 10): what
+ * "Review all" on its page would act on. Empty when nothing waits.
+ */
+export function waitingNotice(server: Server, tools: readonly Tool[]): string {
+  const review = tools.filter(waitsForReview).length
+  const capped = server.unreviewedToolsCappedAt ? 'at the limit of unreviewed tools' : ''
+  if (review) return `${review} ${review === 1 ? 'tool waits' : 'tools wait'} for review${capped && `, ${capped}`}`
+  if (capped) return 'At the limit of unreviewed tools'
+  if (tools.some(absentUnreviewed)) return 'Tools to remove'
+  return ''
 }
 
 /** AllowState is one server's checkbox state in the agent's allowlist editor. */
