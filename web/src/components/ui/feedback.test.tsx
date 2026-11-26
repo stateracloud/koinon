@@ -46,8 +46,12 @@ describe('Toaster', () => {
     expect(screen.queryByText('One.')).toBeNull()
     for (const m of ['Two.', 'Three.', 'Four.']) expect(screen.getByText(m)).toBeInTheDocument()
     const status = screen.getByText('Four.').closest('[data-slot="toast"]')!
-    // Radix announces a background toast politely (role=status on its live copy, not an alert).
     expect(status).toHaveAttribute('data-state', 'open')
+    // Radix announces a background toast politely: a status live copy with aria-live=polite, never an alert.
+    await waitFor(() => {
+      const live = screen.getAllByRole('status').find((s) => s.textContent === 'Status message Four.')
+      expect(live).toHaveAttribute('aria-live', 'polite')
+    })
     expect(screen.queryByRole('alert')).toBeNull()
     await user.click(screen.getAllByRole('button', { name: 'Dismiss' })[2])
     await waitFor(() => expect(screen.queryByText('Four.')).toBeNull())

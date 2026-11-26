@@ -131,6 +131,25 @@ describe('API tokens page', () => {
     expect(screen.queryByText('Token root revoked.')).not.toBeInTheDocument()
   })
 
+  it('keeps the rows when a refetch fails', async () => {
+    let fail = false
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.OWNER }) })
+      service(TokenService, {
+        listTokens: () => {
+          if (fail) throw new ConnectError('list is down', Code.Unavailable)
+          return { tokens: [root] }
+        },
+      })
+    })
+    const { queryClient } = renderApp(transport, '/settings/tokens')
+    await screen.findByRole('rowheader', { name: /^root/ })
+    fail = true
+    await queryClient.refetchQueries()
+    expect(await screen.findByRole('alert')).toHaveTextContent('list is down')
+    expect(screen.getByRole('rowheader', { name: /^root/ })).toBeInTheDocument()
+  })
+
   it('shows the empty state when the org has no tokens', async () => {
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.OWNER }) })

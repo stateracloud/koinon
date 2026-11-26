@@ -108,7 +108,7 @@ function TokensContent() {
       <QueryError error={list.isError ? list.error : undefined} />
       {list.isPending ? (
         <SkeletonRows label="Loading tokens…" />
-      ) : list.isError ? null : (
+      ) : list.isError && !list.data ? null : (
         <DataTable
           caption="API tokens"
           columns={columns}

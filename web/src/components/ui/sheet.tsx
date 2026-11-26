@@ -55,7 +55,7 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="focus-visible:ring-ring/50 absolute top-4 right-4 rounded-xs opacity-80 transition-opacity outline-none hover:opacity-100 focus-visible:ring-[3px] disabled:pointer-events-none">
+        <SheetPrimitive.Close className="focus-visible:ring-ring/50 absolute top-4 right-4 rounded-xs outline-none focus-visible:ring-[3px] disabled:pointer-events-none">
           <XIcon aria-hidden className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>

@@ -31,7 +31,7 @@ export function Toaster({ duration = 5000 }: { duration?: number }) {
           <ToastPrimitive.Description className="flex-1">{t.message}</ToastPrimitive.Description>
           <ToastPrimitive.Close
             aria-label="Dismiss"
-            className="focus-visible:ring-ring/50 rounded-xs opacity-80 outline-none hover:opacity-100 focus-visible:ring-[3px]"
+            className="focus-visible:ring-ring/50 rounded-xs outline-none focus-visible:ring-[3px]"
           >
             <XIcon aria-hidden className="size-4" />
           </ToastPrimitive.Close>

@@ -50,7 +50,8 @@ function handlers(opts: { empty?: boolean } = {}): Handlers {
 for (const scheme of ['dark', 'light'] as const) {
   test.describe(`${scheme} theme`, () => {
     test.beforeEach(async ({ page }) => {
-      await page.emulateMedia({ colorScheme: scheme })
+      // Reduced motion: axe scans the toast at rest, not mid-slide.
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
     })
 
     test('the Agents page passes axe with rows and empty', async ({ page }) => {
@@ -80,7 +81,10 @@ for (const scheme of ['dark', 'light'] as const) {
 
       await page.getByRole('button', { name: 'Revoke token root' }).click()
       await page.getByRole('button', { name: 'Revoke token', exact: true }).click()
-      await expect(page.getByText('Token root revoked.')).toBeVisible()
+      // Scoped to the toast: Radix also puts the text in a hidden live copy for a moment.
+      const toast = page.locator('[data-slot="toast"]')
+      await expect(toast.getByText('Token root revoked.', { exact: true })).toBeVisible()
+      await expect(toast).toHaveAttribute('data-state', 'open')
       await expectAccessible(page)
 
       await page.unrouteAll({ behavior: 'ignoreErrors' })
