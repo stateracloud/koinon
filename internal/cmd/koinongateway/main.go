@@ -103,7 +103,7 @@ type config struct {
 	egressAllowedHosts []string
 
 	// restoreHold holds the gateway (ADR 0107, issue #1358): it is ready without a first State revision
-	// (a held reconciler publishes none) and refuses every call on the MCP and model paths.
+	// (a held reconciler publishes none) and refuses every call on the MCP and model paths and every egress request.
 	restoreHold bool
 
 	drain time.Duration
@@ -491,6 +491,8 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 		Log:      log,
 		// Each credential the gateway attaches is masked in its log lines too.
 		Scrub: scrub,
+		// A held gateway is deny-all on the egress listener too (ADR 0107, issue #1390).
+		Held: cfg.restoreHold,
 	})
 	if err != nil {
 		return nil, nil, err
