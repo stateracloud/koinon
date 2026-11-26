@@ -83,11 +83,22 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 
 // probeDueNow runs the queued probes that the key gate lets go, waits for the acks the others need,
 // and then runs those that may go. A probe still held is not recorded: its key may arrive with a
-// later revision (parkProbes), and the interval probe waits for the acks too.
+// later revision (holdProbes), and the interval probe waits for the acks too. A server queued twice
+// (by its pass and again from the parked set) is probed once.
 func (r *Reconciler) probeDueNow(ctx context.Context, due []dueProbe) {
-	now, held, rev := r.newKeyGate(ctx, nil).splitProbes(ctx, due)
+	seen := make(map[pgtype.UUID]bool, len(due))
+	uniq := due[:0:0]
+	for _, d := range due {
+		if !seen[d.probe.Server] {
+			seen[d.probe.Server] = true
+			uniq = append(uniq, d)
+		}
+	}
+	now, held, rev := r.newKeyGate(ctx, nil).splitProbes(ctx, uniq)
 	if len(held) > 0 && rev > 0 {
-		safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, now) })
+		if first := now; len(first) > 0 {
+			safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, first) })
+		}
 		now = nil
 		if !r.awaitGatewayAcked(ctx, rev) {
 			if ctx.Err() == nil {
@@ -101,22 +112,37 @@ func (r *Reconciler) probeDueNow(ctx context.Context, due []dueProbe) {
 	r.probeEach(ctx, now)
 }
 
-// holdProbes counts probes held back for the gateway, and parks those whose key no stored revision
-// holds yet. They are not recorded.
+// holdProbes counts probes held back for the gateway. They are not recorded. A probe held because no
+// stored revision held its key (unstored) is parked while its key is still pending, for the next pass
+// that stores a revision. If such a revision was stored since the split, the pass may already have
+// taken the parked set, so the probe is queued again with that revision. It is queued once: a probe
+// queued with a revision is not unstored again.
 func (r *Reconciler) holdProbes(held []dueProbe) {
 	if len(held) == 0 {
 		return
 	}
 	r.m.MCPProbesSkipped.Add(float64(len(held)))
-	r.probeMu.Lock()
-	defer r.probeMu.Unlock()
+	var park []pgtype.UUID
 	for _, d := range held {
-		if d.probe.KeyID != "" && r.keyPending(d.probe.KeyID) {
-			if r.probeParked == nil {
-				r.probeParked = map[pgtype.UUID]bool{}
-			}
-			r.probeParked[d.probe.Server] = true
+		if !d.unstored {
+			continue
 		}
+		if r.keyPending(d.probe.KeyID) {
+			park = append(park, d.probe.Server)
+		} else if rev, ok := r.keyRev(d.probe.KeyID); ok && rev > 0 {
+			r.probeSoon([]gatewayplan.Probe{d.probe}, rev)
+		}
+	}
+	if len(park) == 0 {
+		return
+	}
+	r.probeMu.Lock() // after keyPending: probeMu is never held while keyRevMu is taken
+	defer r.probeMu.Unlock()
+	if r.probeParked == nil {
+		r.probeParked = map[pgtype.UUID]bool{}
+	}
+	for _, s := range park {
+		r.probeParked[s] = true
 	}
 }
 
@@ -176,6 +202,8 @@ func (r *Reconciler) probeTick(ctx context.Context) {
 type dueProbe struct {
 	probe gatewayplan.Probe
 	rev   int64
+	// unstored is set by splitProbes when the probe waits because no stored revision holds its key.
+	unstored bool
 }
 
 // probeSoon queues probes for the prober to run now, after every live koinon-gateway copy acked the
@@ -431,6 +459,7 @@ func (g *keyGate) splitProbes(ctx context.Context, due []dueProbe) (now []gatewa
 			now = append(now, d.probe)
 			continue
 		}
+		d.unstored = keyWait && keyRev == 0
 		wait = append(wait, d)
 		if keyWait {
 			maxRev = max(maxRev, keyRev)
