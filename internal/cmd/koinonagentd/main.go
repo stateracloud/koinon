@@ -316,7 +316,11 @@ func run(ctx context.Context, cfg config) error {
 	// liveness probe that fails meanwhile gets the pod killed. It stops once the drain is over.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
-	if _, err := serveHealth(healthCtx, ctx, cfg.healthAddr, db, slog.Default()); err != nil {
+	// The schema gate (ADR 0085) keeps /readyz at 503 and, through Hold below, the workers from
+	// claiming runs while the schema is outside the range this build supports (issue 680).
+	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, slog.Default())
+	safego.Go(healthCtx, slog.Default(), "schema-gate", gate.Run)
+	if _, err := serveHealth(healthCtx, ctx, cfg.healthAddr, gate, slog.Default()); err != nil {
 		return err
 	}
 	if cfg.otlpEndpoint != "" {
@@ -343,17 +347,38 @@ func run(ctx context.Context, cfg config) error {
 		safego.Go(ctx, slog.Default(), "install-binding", binding.Run)
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
+	work := pool.Run
 	if cfg.restoreHold {
 		// No worker starts: no run is claimed, no expired lease is taken over, no sandbox is touched and no
 		// checkpoint is written. Only "koinon-api checkpoints resync" is served, because the runbook runs it
 		// before the release. The health listener and /metrics above keep answering.
 		slog.Warn("restore-hold: koinon-agentd claims no run and touches no sandbox until the hold is released (restoreHold=false in the chart); it only serves checkpoints resync")
-		err = pool.RunHeld(ctx)
-	} else {
-		err = pool.Run(ctx)
+		work = pool.RunHeld
 	}
+	err = holdWork(ctx, gate, work, slog.Default())
 	stopHealth()
 	slog.Info("stopping koinon-agentd")
+	return err
+}
+
+// schemaHolder is what holdWork needs of the schema gate.
+type schemaHolder interface {
+	Hold(ctx context.Context, work func(context.Context) error) error
+}
+
+// holdWork runs the pool under the schema gate: no worker or checkpoint loop starts until the schema
+// is supported, and once a check reads an unsupported schema the pool stops as on SIGTERM (no new
+// claims; turns in progress get the drain deadline) and agentd exits with an error. The restarted
+// container waits for the gate again (issue 680).
+func holdWork(ctx context.Context, gate schemaHolder, work func(context.Context) error, log *slog.Logger) error {
+	err := gate.Hold(ctx, work)
+	if errors.Is(err, schemagate.ErrUnsupported) {
+		log.Error("stopped claiming runs: the database schema is not supported by this build; exiting so that the restarted container waits for the schema gate", "err", err)
+		return err
+	}
+	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return nil // stopped while waiting for the gate: a normal shutdown
+	}
 	return err
 }
 
@@ -395,12 +420,10 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 // The listener runs until life ends. term is the termination signal: from then on /readyz answers
 // 503 (the pod leaves the Service) but /healthz keeps answering, because agentd is still draining
 // and the kubelet must not kill a pod that is busy finishing its runs.
-func serveHealth(life, term context.Context, addr string, db schemagate.Querier, log *slog.Logger) (string, error) {
+func serveHealth(life, term context.Context, addr string, gate *schemagate.Gate, log *slog.Logger) (string, error) {
 	if addr == "" {
 		return "", nil
 	}
-	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
-	safego.Go(life, log, "schema-gate", gate.Run)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	ready := gate.ReadyHandler()

@@ -8,20 +8,19 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/jackc/pgx/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/schemagate"
 )
 
-// noDB is a database that is not there: the schema gate never turns ready, which these specs do
-// not need.
-type noDB struct{}
-
-func (noDB) QueryRow(context.Context, string, ...any) pgx.Row { return errRow{} }
-
-type errRow struct{}
-
-func (errRow) Scan(...any) error { return context.DeadlineExceeded }
+// uncheckedGate is a schema gate that never ran a check, so it is never ready, which these specs
+// do not need.
+func uncheckedGate() *schemagate.Gate {
+	return schemagate.NewFunc(func(context.Context) (schemagate.Schema, error) {
+		return schemagate.Schema{}, context.DeadlineExceeded
+	}, schemagate.Range{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
 
 var _ = Describe("Health listener", func() {
 	get := func(addr, path string) int {
@@ -39,7 +38,7 @@ var _ = Describe("Health listener", func() {
 		defer stopLife()
 		term, sigterm := context.WithCancel(context.Background())
 		defer sigterm()
-		addr, err := serveHealth(life, term, "127.0.0.1:0", noDB{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		addr, err := serveHealth(life, term, "127.0.0.1:0", uncheckedGate(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(get(addr, "/healthz")).To(Equal(http.StatusOK))
 
