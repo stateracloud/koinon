@@ -24,7 +24,7 @@ No credential reaches a sandbox or a worker pod: the cache holds none (public up
 {{- $np := .Values.execution.substrate.workerNetworkPolicy }}
 {{- $registries := list }}
 {{- range $c.upstreams }}
-{{- $registries = append $registries (dict "urls" (list .url) "onDemand" true "tlsVerify" true "maxRetries" 2 "retryDelay" "30s" "content" (list (dict "prefix" "**" "destination" (printf "/%s" (lower .host)) "stripPrefix" true))) }}
+{{- $registries = append $registries (dict "urls" (list .url) "onDemand" true "tlsVerify" true "maxRetries" 2 "retryDelay" "30s" "content" (list (dict "prefix" "**" "destination" (printf "/%s" (lower .host | replace ":" "_")) "stripPrefix" true))) }}
 {{- end }}
 {{- $conf := dict "distSpecVersion" "1.1.0"
     "storage" (dict "rootDirectory" "/var/lib/zot" "gc" true "gcDelay" "1h" "gcInterval" "6h")

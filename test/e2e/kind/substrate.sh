@@ -48,7 +48,10 @@ harness() {
   step "substrate overlay of the harness image: $REPO/sandbox-substrate:e2e"
   # The flavor image goes in as an OCI layout: the buildx builder is a container and cannot pull from localhost:5001.
   local flavor_dir
-  flavor_dir=$(mktemp -d "$OUT/flavor-oci.XXXXXX")
+  # Outside $OUT: CI uploads $OUT as an artifact, and the layout holds the whole harness image.
+  flavor_dir=$(mktemp -d "${TMPDIR:-/tmp}/flavor-oci.XXXXXX")
+  # shellcheck disable=SC2064
+  trap "rm -rf '$flavor_dir'" RETURN
   # The default builder (the docker driver) does not read an OCI layout context. Use a builder of its own with the
   # docker-container driver; the run needs no other setup (setup-buildx-action is skipped when the harness is pulled).
   local builder=koinon-substrate
@@ -96,15 +99,20 @@ source_clone() {
 install() {
   local src kc extra=()
   step "koinon-api (host build)"
-  (cd "$root" && go build -o "$OUT/bin/koinon-api" ./cmd/koinon-api)
+  # The binary and the admin kubeconfig of the kind cluster stay outside $OUT: CI uploads $OUT as an artifact (7 days).
+  local work
+  work=$(mktemp -d "${TMPDIR:-/tmp}/substrate-install.XXXXXX")
+  # shellcheck disable=SC2064
+  trap "rm -rf '$work'" RETURN
+  (cd "$root" && go build -o "$work/koinon-api" ./cmd/koinon-api)
   src=$(source_clone)
-  kc="$OUT/substrate-kubeconfig"
+  kc="$work/kubeconfig"
   kind get kubeconfig --name "$CLUSTER" >"$kc"
   chmod 600 "$kc"
   [[ -z ${GVISOR_MIRROR:-} ]] || extra+=(--gvisor-mirror "$GVISOR_MIRROR")
   step "koinon-api substrate install --platform kind (gvisor class only), context $CTX"
   # The probe pods run the koinon-api image from the local registry; the node pulls it (hosts.toml, registry.sh attach).
-  KUBECONFIG=/dev/null "$OUT/bin/koinon-api" substrate install \
+  KUBECONFIG=/dev/null "$work/koinon-api" substrate install \
     --substrate-source "$src" \
     --kubeconfig "$kc" --context "$CTX" \
     --probe-image "$REPO/api:e2e" \

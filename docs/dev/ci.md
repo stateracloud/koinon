@@ -342,12 +342,17 @@ OpenShell run:
   is for a host that cannot reach `storage.googleapis.com`.
 - The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
 
-Not covered yet: the harness contract tests and the restore drill on this leg (`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a message that names #1091), and the CI job. The CI job is a `.github`
-change, so it is a separate pull request (a build-input change and a `.github` change have no merge route in one pull
-request). It starts as an advisory leg in `hack/ci-required.txt` and becomes the required quickstart leg at the switch (#1093,
-no soak). The quickstart reaches an approved pull request on Substrate only after #1086 (gateway routes and the actor
-token); until then the driver's later specs fail on this leg. Step 8 (the missing harness image) is skipped on this leg until its Substrate form is proven (a digest-pinned
-broken image and the cause the driver reports); issue #1091 stays open for that, the contract tests, the restore drill and the CI job.
+What the leg proves: Substrate installs on kind, the provisioner creates the atespace of an org, an actor of the gVisor class
+starts from the digest-pinned overlay through the image cache, and the quickstart reaches an approved pull request (the
+gateway routes and the actor token of #1086 are merged). The image cache is the one image source on this leg too: the
+registry of the kind cluster is its upstream (`imageCache.upstreams` with `allowHTTP`, and `imageCache.egress.extra` for
+the range of the docker network `kind`, which run.sh reads with `docker network inspect`). `kind/values-rewrite.sh` fills the
+placeholders of `kind/substrate-values.yaml`; the registry host `localhost:5001` of the cache upstream stays as it is.
+
+Not covered yet: the harness contract tests, the restore drill (`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a
+message that names #1091), the gVisor-class assertion on the actor, the Substrate escape case and the missing-image step
+(skipped until its Substrate form is proven). Issue #1091 stays open for them. The CI job is a `.github` change that is
+already in `e2e-kind.yml` as the `driver` dispatch input; it becomes a required leg at the switch (#1093, no soak).
 
 ### The N-1 to N upgrade e2e (issue #519)
 

@@ -144,7 +144,13 @@ ln -sfn "$root/charts" "$OUT/quickstart/charts"
 IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
 values_src="$here/kind/koinon-values.yaml"
 [[ $DRIVER != substrate ]] || values_src="$here/kind/substrate-values.yaml"
-sed "s#localhost:5001#$IMAGE_REPO#g" "$values_src" >"$OUT/quickstart/values.yaml"
+# The CIDR of the docker network "kind" (the kind registry's range): the image cache of the Substrate leg needs an egress rule for it.
+KIND_CIDR=""
+if [[ $DRIVER == substrate ]]; then
+  KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)
+  [[ -n $KIND_CIDR ]] || { echo "run.sh: no IPv4 subnet in docker network inspect kind" >&2; exit 1; }
+fi
+"$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -178,6 +184,11 @@ diagnostics() {
     # Substrate: its control plane and the worker pools (the worker namespace is the chart's default, ate-workers).
     "${K[@]}" -n ate-system get pods -o wide >"$d/ate-system-pods.txt" 2>&1 || true
     "${K[@]}" -n ate-workers get pods,deploy,workerpools.ate.dev -o yaml >"$d/ate-workers.yaml" 2>&1 || true
+    # The image cache, the provisioner and the Job that gives atelet the cache CA (the Substrate leg's own parts).
+    for c in imagecache provisioner; do
+      "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
+    done
+    "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=imagecache-ca --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-imagecache-ca.log" 2>&1 || true
     for c in ate-api-server ate-controller atelet; do
       "${K[@]}" -n ate-system logs -l "app.kubernetes.io/name=$c" --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/$c.log" 2>&1 || true
     done

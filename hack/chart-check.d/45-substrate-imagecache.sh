@@ -162,3 +162,9 @@ grep -Eq 'port: 5000, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must n
 grep -Eq 'port: 443, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must keep the 443 rule"
 capacity_refused "an egress.extra entry without a port" "port" "${isub[@]}" "${icache[@]}" --set 'execution.substrate.imageCache.egress.extra[0].cidr=172.18.0.0/16'
 has "an http upstream renders with allowHTTP" '"destination": "/r.example.com"' "${isub[@]}" --set 'execution.substrate.imageCache.upstreams[0].host=r.example.com' --set 'execution.substrate.imageCache.upstreams[0].url=http://r.example.com:5000' --set 'execution.substrate.imageCache.upstreams[0].allowHTTP=true' "${icache[@]}"
+# A host with a port (issue #1091): the mirror key is the real host, and the path segment after the cache host and the Zot
+# destination have no colon (ateapi and atelet refuse a colon in a repository path).
+pp=(--set 'execution.substrate.imageCache.upstreams[0].host=localhost:5001' --set 'execution.substrate.imageCache.upstreams[0].url=http://kind-registry:5000' --set 'execution.substrate.imageCache.upstreams[0].allowHTTP=true')
+has "the mirror key of a host with a port is the real host" '"localhost:5001=koinon-imagecache\.koinon\.svc:[0-9]+/localhost_5001"' "${isub[@]}" "${pp[@]}" "${icfg[@]}"
+lacks "no colon in the mirror path of a host with a port" 'koinon\.svc:[0-9]+/localhost:' "${isub[@]}" "${pp[@]}" "${icfg[@]}"
+has "the Zot destination of a host with a port has no colon" '"destination": "/localhost_5001"' "${isub[@]}" "${pp[@]}" "${icache[@]}"
