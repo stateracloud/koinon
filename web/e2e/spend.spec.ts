@@ -179,7 +179,9 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   const { handlers, seen } = api('ORG_ROLE_ADMIN', true)
   await mockApi(page, handlers)
   await page.goto('/')
-  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Budget ceilings' }).click()
+  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' }).click()
+  await page.getByRole('navigation', { name: 'Usage and cost' }).getByRole('link', { name: 'Budget ceilings' }).click()
+  await expect(page).toHaveURL(/\/platform\/usage\/budgets$/)
   await expect(page.getByRole('heading', { name: 'Platform budget ceilings' })).toBeVisible()
   await expectAccessible(page)
   await expect(page.getByRole('heading', { name: 'Acme' })).toBeVisible()
@@ -192,8 +194,11 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   const other = api('ORG_ROLE_ADMIN', false)
   await page.unroute(/\/koinon\.[^/]+\/[^/]+$/)
   await mockApi(page, other.handlers)
+  // The old URL redirects to the console, and the console sends an org admin to the org area.
   await page.goto('/platform/budgets')
-  await expect(page.getByRole('alert').filter({ hasText: 'Only platform admins' })).toBeVisible()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Platform console' })).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: 'Platform' })).toHaveCount(0)
 })
 
@@ -217,7 +222,7 @@ test('a member sees no price or budget links, no banner, and the pages refuse th
 })
 
 // WCAG 1.4.10 Reflow (AA): at 320 CSS px wide the pages need no horizontal scrolling and still pass axe.
-for (const path of ['/settings/prices', '/settings/budgets', '/platform/budgets']) {
+for (const path of ['/settings/prices', '/settings/budgets', '/platform/usage/budgets']) {
   test(`${path} reflows at 320px`, async ({ page }) => {
     const { handlers } = api('ORG_ROLE_OWNER', true)
     await mockApi(page, handlers)

@@ -388,7 +388,7 @@ func (e *env) task(ctx context.Context, message string) store.Task {
 func (e *env) message(ctx context.Context, t store.Task, text string) {
 	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
-		ActorUserID: e.user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
+		ActorUserID: e.user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)), Prompt: true,
 	})
 	Expect(err).NotTo(HaveOccurred())
 }

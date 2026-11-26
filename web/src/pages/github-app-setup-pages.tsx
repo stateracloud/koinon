@@ -12,8 +12,8 @@ import { describeError } from '@/lib/api-error'
 // The pages GitHub sends the browser to during the guided App setup (issue #1175). The state names
 // the org before its first dot; the server checks the rest.
 
-const createdRoute = getRouteApi('/app/connections/new/github/app-created')
-const installedRoute = getRouteApi('/app/connections/new/github/app-installed')
+const createdRoute = getRouteApi('/app/org/connections/new/github/app-created')
+const installedRoute = getRouteApi('/app/org/connections/new/github/app-installed')
 
 function setupOrg(state: string) {
   return state.split('.')[0] ?? ''

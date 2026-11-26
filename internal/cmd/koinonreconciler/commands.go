@@ -47,6 +47,7 @@ func newRootCommand(run func(context.Context, config) error) *cobra.Command {
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(v, run))
+	root.AddCommand(newProvisionCommand())
 	return root
 }
 
@@ -60,6 +61,8 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"substrate-server-name":                "execution.substrate.serverName",
 	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
 	"substrate-token-file":                 "execution.substrate.tokenFile",
+	"substrate-provisioner-url":            "execution.substrate.provisioner.url",
+	"substrate-provisioner-token-file":     "execution.substrate.provisioner.tokenFile",
 	"substrate-guest-key-file":             "execution.substrate.guestKeyFile",
 	"substrate-runtime-class-tiers":        "execution.substrate.runtimeClassTiers",
 	"substrate-default-tier":               "execution.substrate.defaultTier",

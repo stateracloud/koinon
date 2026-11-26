@@ -86,15 +86,15 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
     },
   })
 
-  await page.goto('/')
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Sign in to Koinon' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Sign in with SSO' })).toHaveAttribute('href', '/auth/oidc/start')
+  await expect(page.getByRole('link', { name: 'Sign in with SSO' })).toHaveAttribute('href', '/auth/oidc/start?return_to=%2Finbox')
   await page.getByLabel('Password').fill('correct-horse-battery')
   await page.getByRole('button', { name: 'Sign in' }).click()
 
   // The inbox is the home screen; chat with agents sits next to it.
   await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
-  await expect(page.getByRole('heading', { level: 2, name: /^Waiting on you/ })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /^Blocked on you/ })).toBeVisible()
   await expect(page.getByRole('heading', { level: 2, name: 'Messages to agents' })).toBeVisible()
   await page.getByLabel('Title').fill('Say hello')
   await page.getByLabel('First message (optional)').fill('Please say hello')
@@ -120,7 +120,8 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
 
   // The board is a secondary view by state.
   await page.getByRole('link', { name: '← Inbox' }).click()
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Board' }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
+  await page.getByRole('tab', { name: 'Board' }).click()
   const working = page.getByRole('region', { name: /^Working/ })
   await expect(working.getByRole('link', { name: 'Say hello' })).toBeVisible()
   await working.getByRole('link', { name: 'Say hello' }).click()

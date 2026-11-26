@@ -81,13 +81,17 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 					}
 				}
 				if len(now) > 0 {
-					safego.Do(r.log, "mcp-probe", func() { r.probeEach(ctx, now) })
+					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, now) })
 				}
 				if len(held) > 0 {
-					safego.Do(r.log, "mcp-probe", func() {
+					// A goroutine, not the loop: the wait for the acks takes up to MCPAckWait, and a copy that
+					// never acks must not stop the interval probes and the other wakes (#1347).
+					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) {
 						if r.awaitGatewayAcked(ctx, rev) {
 							r.probeEach(ctx, held)
-						} // else held back, not recorded; the interval probe waits for the ack too
+						} else if ctx.Err() == nil {
+							r.m.MCPProbesSkipped.Inc() // held back, not recorded; the interval probe waits for the ack too
+						}
 					})
 				}
 			}
@@ -108,7 +112,10 @@ func (r *Reconciler) ProbeAll(ctx context.Context) {
 func (r *Reconciler) probeTick(ctx context.Context) {
 	if latest, err := staterev.Latest(ctx, r.pool); err == nil && latest != nil {
 		if ok, err := r.gatewayAckedNow(ctx, latest.GetRevision()); err == nil && !ok {
-			r.log.Debug("MCP interval probe skipped: not every gateway copy acked the newest State revision", "revision", latest.GetRevision())
+			// Warn, not Debug: a copy whose apply keeps failing stays live and serves an old revision, so
+			// this repeats every interval until the copy applies it or turns unready (#1347).
+			r.m.MCPProbesSkipped.Inc()
+			r.log.Warn("MCP interval probe skipped: not every gateway copy acked the newest State revision; a copy may be stuck on an old revision", "revision", latest.GetRevision())
 			return
 		}
 	}

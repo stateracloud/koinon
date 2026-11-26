@@ -6,7 +6,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { compile } from 'tailwindcss'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ThemeSwitch } from '@/components/theme-switch'
+import { UserMenu } from '@/components/user-menu'
 import { THEME_STORAGE_KEY } from '@/lib/theme'
 
 function prefersLight(light: boolean) {
@@ -26,30 +26,41 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-describe('ThemeSwitch', () => {
+function renderMenu(onSignOut = () => {}) {
+  render(<UserMenu name="Admin" email="admin@example.test" onSignOut={onSignOut} signingOut={false} />)
+}
+
+async function pickTheme(label: string) {
+  await userEvent.click(screen.getByRole('button', { name: 'User menu: Admin' }))
+  await userEvent.click(await screen.findByRole('menuitemradio', { name: label }))
+}
+
+describe('UserMenu theme switch', () => {
   it('System with no preference is dark', () => {
-    render(<ThemeSwitch />)
+    renderMenu()
     expect(theme()).toBe('dark')
   })
 
   it('System follows prefers-color-scheme: light', () => {
     prefersLight(true)
-    render(<ThemeSwitch />)
+    renderMenu()
     expect(theme()).toBe('light')
   })
 
   it('remembers the choice and applies it', async () => {
-    render(<ThemeSwitch />)
-    await userEvent.selectOptions(screen.getByLabelText('Theme'), 'light')
+    renderMenu()
+    await pickTheme('Light')
     expect(theme()).toBe('light')
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
   })
 
-  it('starts from the saved choice', () => {
+  it('starts from the saved choice', async () => {
     localStorage.setItem(THEME_STORAGE_KEY, 'light')
-    render(<ThemeSwitch />)
-    expect(screen.getByLabelText('Theme')).toHaveValue('light')
+    renderMenu()
     expect(theme()).toBe('light')
+    await userEvent.click(screen.getByRole('button', { name: 'User menu: Admin' }))
+    expect(await screen.findByRole('menuitemradio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute('aria-checked', 'false')
   })
 
   it('still works when storage throws', async () => {
@@ -59,10 +70,27 @@ describe('ThemeSwitch', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    render(<ThemeSwitch />)
-    await userEvent.selectOptions(screen.getByLabelText('Theme'), 'light')
+    renderMenu()
+    await pickTheme('Light')
     expect(theme()).toBe('light')
     vi.restoreAllMocks()
+  })
+
+  it('works with the keyboard alone and signs out', async () => {
+    const onSignOut = vi.fn()
+    renderMenu(onSignOut)
+    await userEvent.tab()
+    expect(screen.getByRole('button', { name: 'User menu: Admin' })).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    const dark = await screen.findByRole('menuitemradio', { name: 'Dark' })
+    while (document.activeElement !== dark) await userEvent.keyboard('{ArrowDown}')
+    await userEvent.keyboard('{Enter}')
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
+    await userEvent.keyboard('{Enter}')
+    const signOut = await screen.findByRole('menuitem', { name: 'Sign out' })
+    while (document.activeElement !== signOut) await userEvent.keyboard('{ArrowDown}')
+    await userEvent.keyboard('{Enter}')
+    expect(onSignOut).toHaveBeenCalledOnce()
   })
 })
 

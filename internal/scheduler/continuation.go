@@ -118,6 +118,7 @@ func ContinueAfterTimeLimit(ctx context.Context, q *store.Queries, run store.Run
 				"continue the task where you left off, and wrap up when you are done or cannot go further.",
 				n.ContinuationCount, pol.Max),
 		}),
+		Prompt: true,
 	})
 	return err
 }

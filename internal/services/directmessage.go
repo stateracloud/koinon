@@ -215,6 +215,7 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 	ev, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: in.Org, TaskID: task.ID, Kind: KindMessage, ActorKind: store.TaskActorKindUser, ActorUserID: in.User,
 		Payload: jsonPayload(payload),
+		Prompt:  true,
 	})
 	if err != nil {
 		return pgtype.UUID{}, err

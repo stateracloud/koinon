@@ -203,7 +203,7 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText('acme/gadgets')
 
   // 2. Create an agent from the template and activate it.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByRole('radio', { name: /OpenCode/ })).toBeChecked()

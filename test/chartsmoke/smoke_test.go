@@ -694,6 +694,38 @@ func describeMode(name, valuesFile string) {
 			}
 		}, SpecTimeout(3*time.Minute))
 
+		// The provisioner (ADR 0128, issue 1398) is "koinon-reconciler provision". It must start with the
+		// rendered args, answer /healthz, and be allowed to create a TokenReview: a request with a token
+		// that is not valid makes it review that token, which must end in 401 and never in a Forbidden answer.
+		It("starts koinon-provisioner, answers /healthz and may create a TokenReview", func(ctx SpecContext) {
+			d := r.deployment("koinon-provisioner")
+			if d == nil {
+				Skip("execution.substrate.provisioner is not rendered in this values file")
+			}
+			ws := startDeployment(ctx, rn, r, "koinon-provisioner")
+			ready["koinon-provisioner"] = ws
+			accounted = append(accounted, "koinon-provisioner")
+			Expect(ws).To(HaveLen(1))
+			w := ws[0]
+			port := w.portNumber(intOrName{name: "http"})
+			mapped, err := w.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", port))
+			Expect(err).NotTo(HaveOccurred())
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:"+mapped.Port()+"/v1/atespaces", strings.NewReader(`{"name":"kw-smoke"}`))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer koinon_test_not-a-real-token")
+			resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+			Expect(err).NotTo(HaveOccurred(), "logs:\n%s", w.Logs(ctx))
+			_ = resp.Body.Close()
+			Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), "a token that is not valid is refused; logs:\n%s", w.Logs(ctx))
+			logs := w.Logs(ctx)
+			Expect(logs).To(ContainSubstring("token not accepted"), "the provisioner reviewed the token; logs:\n%s", logs)
+			Expect(logs).To(ContainSubstring("token review: not authenticated"), "the API server answered the review (no transport error); logs:\n%s", logs)
+			Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"), "the provisioner may create a TokenReview; logs:\n%s", logs)
+			expectRunning(ctx, w, "still running; logs:\n%s", logs)
+			// The reconciler started above with the provisioner-token mount and the provisioner url and tokenFile keys.
+			Expect(ready["koinon-reconciler"]).NotTo(BeEmpty())
+		}, SpecTimeout(3*time.Minute))
+
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")

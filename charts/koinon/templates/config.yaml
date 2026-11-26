@@ -83,6 +83,12 @@ data:
         {{- end }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
         guestKeyFile: {{ include "koinon.substrateGuestKeyFile" . | quote }}
+        {{- if include "koinon.provisioner" . }}
+        # The provisioner creates the org atespace (ADR 0128): the reconciler holds no global role in Substrate.
+        provisioner:
+          url: {{ printf "http://%s.%s.svc:%d" (include "koinon.componentName" (list . "provisioner")) .Release.Namespace (int .Values.execution.substrate.provisioner.port) | quote }}
+          tokenFile: {{ printf "%s/token" (include "koinon.provisionerTokenDir" .) | quote }}
+        {{- end }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt
         {{- end }}

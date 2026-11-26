@@ -397,9 +397,11 @@ gateway:
       port: 8080
       # On SIGTERM readiness turns 503 at once and the pod keeps serving for the shutdown delay, so the
       # Service and clients stop sending to it. Then it refuses new requests and lets calls in flight
-      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
+      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30. A tool call is
+      # never retried. It may wait up to 120 seconds for a person's approval and then run for up to 120
+      # seconds (the gateway's call timeout), so the chart refuses a drain timeout below 240 (issue 1347).
       shutdownDelaySeconds: 5
-      drainTimeoutSeconds: 30
+      drainTimeoutSeconds: 270
       podDisruptionBudget:
         maxUnavailable: 1
       resources:
@@ -864,6 +866,20 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
+    # The provisioner (ADR 0128). Substrate lets only its global owner create an atespace, and the reconciler must
+    # not hold that role. The provisioner is a small pod of its own with its own ServiceAccount: it creates the
+    # atespace of each org and writes its access policy (the reconciler gets editor, agentd gets viewer). The
+    # installer (koinon-api substrate install) makes its ServiceAccount an owner in Substrate's global access
+    # policy. Turn it off only when the reconciler's ServiceAccount is a global owner itself (a lab).
+    provisioner:
+      enabled: true
+      port: 8086
+      # Audience of the token that the reconciler sends to the provisioner. The provisioner checks it with a
+      # TokenReview, so its ServiceAccount gets a ClusterRole that creates TokenReviews.
+      tokenAudience: koinon-provisioner
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {memory: 128Mi}
     # Not used. The guest server now runs inside koinon-guest-front, in the harness image's substrate
     # overlay (issue #1309), and the chart reads no separate guest image. Kept so that existing values
     # files still pass the schema; remove it from your values.
@@ -1376,7 +1392,7 @@ oidc:
   # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
   # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
   # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
-  # platform budget ceilings (/platform/budgets).
+  # platform budget ceilings (/platform/usage/budgets).
   platformAdminGroups: []
   # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
   # or hybrid (both).
