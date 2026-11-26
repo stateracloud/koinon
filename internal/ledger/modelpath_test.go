@@ -46,8 +46,10 @@ var _ = Describe("the thinking-token split on Koinon's model path (#78)", func()
 
 	type row struct {
 		Input, Output, Reasoning int64
-		Known                    bool
-		CostOK                   bool
+		// Known is reasoning_known; KnownNull says it is NULL, which only rows from before
+		// migration 00062 may be.
+		Known, KnownNull bool
+		CostOK           bool
 	}
 
 	// setup starts the fake model, the model gateway with its exporter and the ledger receiver,
@@ -143,9 +145,10 @@ var _ = Describe("the thinking-token split on Koinon's model path (#78)", func()
 		var x row
 		Eventually(func() error {
 			// 100 input at $1 and 40 output at $2 per 1M tokens: the thinking is billed once, as output.
-			return db.QueryRow(ctx, `SELECT input_tokens, output_tokens, reasoning_tokens, coalesce(reasoning_known, false),
-				cost_usd = 0.00018 FROM spend_entries WHERE org_id = $1 AND model = $2`, c.org, model).
-				Scan(&x.Input, &x.Output, &x.Reasoning, &x.Known, &x.CostOK)
+			return db.QueryRow(ctx, `SELECT input_tokens, output_tokens, reasoning_tokens, reasoning_known IS TRUE,
+				reasoning_known IS NULL, cost_usd IS NOT DISTINCT FROM 0.00018
+				FROM spend_entries WHERE org_id = $1 AND model = $2`, c.org, model).
+				Scan(&x.Input, &x.Output, &x.Reasoning, &x.Known, &x.KnownNull, &x.CostOK)
 		}).WithTimeout(racescale.D(30 * time.Second)).WithPolling(100 * time.Millisecond).Should(Succeed())
 		return x
 	}
@@ -164,12 +167,12 @@ var _ = Describe("the thinking-token split on Koinon's model path (#78)", func()
 			Expect(entry(ctx, c, thinkModel)).To(Equal(row{Input: 100, Output: 40, Reasoning: 25, Known: true, CostOK: true}),
 				"output_tokens is the provider's total, thinking included; reasoning_tokens is the thinking part")
 		}, SpecTimeout(2*time.Minute))
-	}
 
-	It("keeps the split unknown, not 0, when a Messages answer reports no thinking tokens", func(ctx SpecContext) {
-		c := newEnv(ctx, uniq("org"), "", "100.00")
-		url, material := setup(ctx, c)
-		send(ctx, url, material, plainModel, true)
-		Expect(entry(ctx, c, plainModel)).To(Equal(row{Input: 100, Output: 40, Reasoning: 0, Known: false, CostOK: true}))
-	}, SpecTimeout(2*time.Minute))
+		It("keeps the split unknown, not 0, when "+name+" reports no thinking tokens", func(ctx SpecContext) {
+			c := newEnv(ctx, uniq("org"), "", "100.00")
+			url, material := setup(ctx, c)
+			send(ctx, url, material, plainModel, stream)
+			Expect(entry(ctx, c, plainModel)).To(Equal(row{Input: 100, Output: 40, Reasoning: 0, Known: false, CostOK: true}))
+		}, SpecTimeout(2*time.Minute))
+	}
 })
