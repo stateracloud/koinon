@@ -1128,6 +1128,10 @@ type Querier interface {
 	// (@after_name, @after_id). The org's identity mode applies like ListEffectiveMemberships
 	// (ADR 0004); the highest role wins.
 	ListOrgMembers(ctx context.Context, arg ListOrgMembersParams) ([]ListOrgMembersRow, error)
+	// The live orgs by slug after @after_slug, without counts, for the platform console's lists of org
+	// resources (PlatformResourceService, ADR 0126). Platform admins only. @only_org_id narrows the list
+	// to one org; personal orgs are left out unless @include_personal or @only_org_id is set.
+	ListOrgRefs(ctx context.Context, arg ListOrgRefsParams) ([]ListOrgRefsRow, error)
 	// The live orgs by slug after @after_slug, with member and agent counts, budget and spend since
 	// @since, for the platform console (ADR 0126). Platform admins only. @only_org_id narrows the list
 	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.

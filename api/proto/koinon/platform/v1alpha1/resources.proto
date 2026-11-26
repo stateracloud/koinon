@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.platform.v1alpha1;
+
+import "koinon/mcpserver/v1alpha1/mcpserver.proto";
+import "koinon/org/v1alpha1/org.proto";
+import "koinon/provider/v1alpha1/provider.proto";
+import "koinon/template/v1alpha1/template.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1";
+
+// PlatformResourceService lists the providers, the templates and the MCP servers of every org for the
+// platform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any
+// other caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:
+// changes stay with the per-org services (ProviderService, TemplateService, McpServerService), which
+// a platform admin can call as for any org.
+//
+// Each list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of
+// them, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that
+// one org (personal or team) and has one page.
+service PlatformResourceService {
+  // ListProviders lists the model providers of the orgs. A provider never holds its key here either.
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts
+  // with the platform templates, which have no org.
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // ListMcpServers lists the remote MCP servers of the orgs.
+  rpc ListMcpServers(ListMcpServersRequest) returns (ListMcpServersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// OrgRef names the org that owns a row.
+message OrgRef {
+  string org_id = 1;
+  string slug = 2;
+  string display_name = 3;
+  koinon.org.v1alpha1.OrgKind kind = 4;
+}
+
+message ListProvidersRequest {
+  // org_id narrows the list to one live org. Empty for every org.
+  string org_id = 1;
+  // include_personal also lists the rows of the personal orgs. It has no effect with org_id.
+  bool include_personal = 2;
+  // page_size is the number of orgs that a page covers: 20 by default and at most 100.
+  int32 page_size = 3;
+  // page_token is the next_page_token of the previous page, from a request with the same org_id and
+  // include_personal.
+  string page_token = 4;
+}
+
+// OrgProvider is one provider with the org that owns it.
+message OrgProvider {
+  OrgRef org = 1;
+  koinon.provider.v1alpha1.Provider provider = 2;
+}
+
+message ListProvidersResponse {
+  // providers are by org slug, then in the order of ProviderService.ListProviders.
+  repeated OrgProvider providers = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
+
+message ListTemplatesRequest {
+  // org_id narrows the list to one live org. Empty for every org.
+  string org_id = 1;
+  // include_personal also lists the rows of the personal orgs. It has no effect with org_id.
+  bool include_personal = 2;
+  // page_size is the number of orgs that a page covers: 20 by default and at most 100.
+  int32 page_size = 3;
+  // page_token is the next_page_token of the previous page, from a request with the same org_id and
+  // include_personal.
+  string page_token = 4;
+}
+
+// OrgTemplate is one template with the org that owns it. org is unset on a platform template.
+message OrgTemplate {
+  OrgRef org = 1;
+  koinon.template.v1alpha1.Template template = 2;
+}
+
+message ListTemplatesResponse {
+  // templates are the platform templates by slug (first page only), then the org templates by org
+  // slug and template slug.
+  repeated OrgTemplate templates = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
+
+message ListMcpServersRequest {
+  // org_id narrows the list to one live org. Empty for every org.
+  string org_id = 1;
+  // include_personal also lists the rows of the personal orgs. It has no effect with org_id.
+  bool include_personal = 2;
+  // page_size is the number of orgs that a page covers: 20 by default and at most 100.
+  int32 page_size = 3;
+  // page_token is the next_page_token of the previous page, from a request with the same org_id and
+  // include_personal.
+  string page_token = 4;
+}
+
+// OrgMcpServer is one remote MCP server with the org that owns it.
+message OrgMcpServer {
+  OrgRef org = 1;
+  koinon.mcpserver.v1alpha1.Server server = 2;
+}
+
+message ListMcpServersResponse {
+  // servers are by org slug, then in the order of McpServerService.ListServers.
+  repeated OrgMcpServer servers = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}

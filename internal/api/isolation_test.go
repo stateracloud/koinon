@@ -261,6 +261,23 @@ var isolationCases = map[string]isolationCase{
 			return c.platform.GetOrg(ctx, &platformv1alpha1.GetOrgRequest{OrgId: org})
 		},
 	},
+	// The platform console's lists of org resources (issue #1412): platform admins only, also with the
+	// caller's own org as the filter.
+	platformv1alpha1connect.PlatformResourceServiceListProvidersProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListProviders(ctx, &platformv1alpha1.ListProvidersRequest{OrgId: org})
+		},
+	},
+	platformv1alpha1connect.PlatformResourceServiceListTemplatesProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListTemplates(ctx, &platformv1alpha1.ListTemplatesRequest{OrgId: org})
+		},
+	},
+	platformv1alpha1connect.PlatformResourceServiceListMcpServersProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListMcpServers(ctx, &platformv1alpha1.ListMcpServersRequest{OrgId: org})
+		},
+	},
 
 	// The usage and cost read model (issue #1268): an org call names the org only, so a member of
 	// another org gets NotFound; the platform calls refuse every org role.

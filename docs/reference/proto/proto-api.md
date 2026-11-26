@@ -3519,7 +3519,25 @@ OutwardTargetKind is what kind of target the switch is for.
 
 ## koinon.platform.v1alpha1
 
-Files: `koinon/platform/v1alpha1/platform.proto`
+Files: `koinon/platform/v1alpha1/platform.proto`, `koinon/platform/v1alpha1/resources.proto`
+
+### Service PlatformResourceService
+
+PlatformResourceService lists the providers, the templates and the MCP servers of every org for the
+platform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any
+other caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:
+changes stay with the per-org services (ProviderService, TemplateService, McpServerService), which
+a platform admin can call as for any org.
+
+Each list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of
+them, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that
+one org (personal or team) and has one page.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ListMcpServers | `koinon.platform.v1alpha1.ListMcpServersRequest` | `koinon.platform.v1alpha1.ListMcpServersResponse` | - | ListMcpServers lists the remote MCP servers of the orgs. |
+| ListProviders | `koinon.platform.v1alpha1.ListProvidersRequest` | `koinon.platform.v1alpha1.ListProvidersResponse` | - | ListProviders lists the model providers of the orgs. A provider never holds its key here either. |
+| ListTemplates | `koinon.platform.v1alpha1.ListTemplatesRequest` | `koinon.platform.v1alpha1.ListTemplatesResponse` | - | ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts with the platform templates, which have no org. |
 
 ### Service PlatformService
 
@@ -3545,6 +3563,22 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | org | 1 | `koinon.platform.v1alpha1.OrgSummary` | singular |  |  |
 | month_start | 2 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
 
+### Message ListMcpServersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListMcpServersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| servers | 1 | `koinon.platform.v1alpha1.OrgMcpServer` | repeated |  | servers are by org slug, then in the order of McpServerService.ListServers. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
 ### Message ListOrgsRequest
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -3560,6 +3594,67 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | orgs | 1 | `koinon.platform.v1alpha1.OrgSummary` | repeated |  |  |
 | next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
 | month_start | 3 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
+
+### Message ListProvidersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListProvidersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| providers | 1 | `koinon.platform.v1alpha1.OrgProvider` | repeated |  | providers are by org slug, then in the order of ProviderService.ListProviders. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message ListTemplatesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListTemplatesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| templates | 1 | `koinon.platform.v1alpha1.OrgTemplate` | repeated |  | templates are the platform templates by slug (first page only), then the org templates by org slug and template slug. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message OrgMcpServer
+
+OrgMcpServer is one remote MCP server with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| server | 2 | `koinon.mcpserver.v1alpha1.Server` | singular |  |  |
+
+### Message OrgProvider
+
+OrgProvider is one provider with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| provider | 2 | `koinon.provider.v1alpha1.Provider` | singular |  |  |
+
+### Message OrgRef
+
+OrgRef names the org that owns a row.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| slug | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  |  |
+| kind | 4 | `koinon.org.v1alpha1.OrgKind` | singular |  |  |
 
 ### Message OrgSummary
 
@@ -3578,6 +3673,15 @@ BudgetService writes them.
 | monthly_cap_usd | 8 | `string` | singular |  | monthly_cap_usd is the org's monthly budget; empty when the org has none. |
 | platform_ceiling_usd | 9 | `string` | singular |  | platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none. |
 | created_at | 10 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message OrgTemplate
+
+OrgTemplate is one template with the org that owns it. org is unset on a platform template.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| template | 2 | `koinon.template.v1alpha1.Template` | singular |  |  |
 
 ## koinon.provider.v1alpha1
 

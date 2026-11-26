@@ -132,16 +132,21 @@ func (s *Server) ListTemplates(ctx context.Context, req *templatev1alpha1.ListTe
 			return 1
 		})
 	}
-	res := &templatev1alpha1.ListTemplatesResponse{}
+	return &templatev1alpha1.ListTemplatesResponse{Templates: s.templateProtos(rows)}, nil
+}
+
+// templateProtos converts templates rows in order. It logs and skips a row whose spec does not decode.
+func (s *Server) templateProtos(rows []store.Template) []*templatev1alpha1.Template {
+	out := make([]*templatev1alpha1.Template, 0, len(rows))
 	for _, row := range rows {
 		t, err := decodeTemplate(row)
 		if err != nil {
 			s.log.Error("skipping undecodable template", "err", err)
 			continue
 		}
-		res.Templates = append(res.Templates, templateProto(row, t))
+		out = append(out, templateProto(row, t))
 	}
-	return res, nil
+	return out
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
