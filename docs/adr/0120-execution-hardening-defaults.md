@@ -519,3 +519,33 @@ Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is it
   the command line of a process. The spec runs only the write command, not git or a harness.
 - **Exit (#1386).** A hop outside the guest adds the identity header, and the guest holds no token. Then the
   token file, its command and this amendment are removed, and the escape spec expects to find no token.
+
+## Amendment (2026-11-26, issue #1446): agentd has a router identity, and only agentd
+
+Maintainer decision of 2026-11-26.
+
+- **Fact.** The atenet router of Substrate v1.0.1 serves TLS only. Its Service port 443 goes to container port 8443.
+  It has no plain port and no port 80. A client must show a certificate whose SPIFFE ID is on the router flag
+  `--ingress-allowed-spiffe-ids`. Any allowed ID can reach any actor
+  (`cmd/atenet/internal/router/README.md`, "Ingress client authentication and authorization"). The driver used
+  `atenet-router.<ns>.svc:80` in plain text, so every Exec failed at the connection.
+- **Decision.** koinon-agentd is the ONLY Koinon component with a router identity.
+  - The chart gives the agentd pod a `podCertificate` projected volume (signer `podidentity.podcert.ate.dev/identity`,
+    ECDSA P-256) and a `clusterTrustBundle` volume for the CA of the router's serving certificate (signer
+    `servicedns.podcert.ate.dev/identity`). No other Koinon pod gets either volume. The chart check asserts this.
+  - The driver dials the router on TLS 443, checks the serving certificate against that CA, and presents the pod
+    certificate. It reads both files again when they change, so a kubelet rotation needs no restart.
+  - The installer and the preflight put `spiffe://cluster.local/ns/<koinon namespace>/sa/<agentd service account>` on
+    the router allow-list, next to the atenet client. The preflight also checks that the router Service serves the
+    port of `routerAddress`.
+  - The control ingress for Koinon's namespace in the control-plane namespace opens only TCP 443 and 8443
+    (`workerNetworkPolicy.koinonIngressPorts`), not every port of every control-plane pod.
+- **Why only agentd.** The router allow-list has no per-actor scope: an allowed ID reaches every actor of every org.
+  The reconciler, the API and the provisioner call only the control API and need no router access. One identity
+  keeps this wide grant small. A second consumer needs a new decision, not a list entry.
+- **Cost.** A compromised agentd can reach every actor through the router. Before this amendment it could not reach
+  any actor, because no run worked. Substrate's allow-list cannot narrow this. The narrowing belongs upstream or in a
+  later Koinon routing layer.
+- **Failure behaviour.** When the router connection fails before a stream opens, agentd fails the run at once with
+  the dial error. It does not treat the failure as a lost harness and does not take over the lease: a retry cannot
+  help until an operator fixes the install.

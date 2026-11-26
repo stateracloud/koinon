@@ -132,7 +132,7 @@ grep -q 'openshell.ai/managed-by' <<<"$mcp_ing" || fail "koinon-gateway does not
 grep -q 'app.kubernetes.io/instance: koinon$' <<<"$mcp_ing" || fail "koinon-gateway does not admit Koinon's own pods"
 if grep -q 'ipBlock' <<<"$mcp_ing"; then fail "koinon-gateway ingress admits an ipBlock"; fi
 sub_ing=$(awk '/^  ingress:/{f=1} f' <<<"$(netpol_doc koinon-mcp-gateway --set execution.driver=substrate \
-  --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 \
+  --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 \
   --set execution.substrate.tokenAudience=ateapi --set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev \
   --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)")
 grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"

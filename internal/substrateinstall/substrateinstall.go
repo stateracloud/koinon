@@ -132,8 +132,9 @@ const egressProviderFlag = `--credential-provider={"name":"k8s.io"}`
 
 // SetupArgs are the arguments of the pinned ate-setup for the Koinon profile, with pre-built release
 // images of the pinned tag (never a build from source), the router allow-list for the atenet client of
-// the given namespace, and no developer settings.
-func (p Profile) SetupArgs(namespace string) []string {
+// the given namespace plus the extra identities (agentd's pod certificate, issue #1446), and no developer
+// settings.
+func (p Profile) SetupArgs(namespace string, extraIDs ...string) []string {
 	repo := p.ImageRepo
 	if repo == "" {
 		repo = preflight.SubstratePinnedImageRepo
@@ -144,7 +145,7 @@ func (p Profile) SetupArgs(namespace string) []string {
 		"--namespace=" + namespace,
 		"--storage-bucket-name=" + p.StorageBucket,
 		egressProviderFlag,
-		"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID(namespace),
+		"--ingress-allowed-spiffe-ids=" + strings.Join(append([]string{preflight.SubstrateRouterSPIFFEID(namespace)}, extraIDs...), ","),
 		"--image-repo=" + repo,
 		"--image-tag=" + PinnedVersion,
 	}
@@ -551,7 +552,7 @@ func (i *Installer) Install(ctx context.Context) error {
 			return err
 		}
 	}
-	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
+	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace, i.routerIDs()...),
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, setupEnv, i.Out); err != nil {
 		keepBuild = true
@@ -727,7 +728,11 @@ func (i *Installer) EnsureRouterSPIFFE(ctx context.Context) error {
 			return fmt.Errorf("router Deployment %s has no container %q", where, routerContainer)
 		}
 		ctr := &d.Spec.Template.Spec.Containers[n]
-		if !addSPIFFEID(ctr, preflight.SubstrateRouterSPIFFEID(sub.Namespace)) {
+		changed := false
+		for _, id := range append([]string{preflight.SubstrateRouterSPIFFEID(sub.Namespace)}, i.routerIDs()...) {
+			changed = addSPIFFEID(ctr, id) || changed
+		}
+		if !changed {
 			return nil
 		}
 		if _, err := deployments.Update(ctx, d, metav1.UpdateOptions{}); err != nil {
@@ -736,6 +741,16 @@ func (i *Installer) EnsureRouterSPIFFE(ctx context.Context) error {
 		return nil
 	})
 	return err
+}
+
+// routerIDs are the identities beyond the atenet client that the router allows: agentd's pod certificate, when the
+// Koinon namespace and its ServiceAccount are known. Only agentd gets one (ADR 0120 amendment, issue #1446).
+func (i *Installer) routerIDs() []string {
+	sub := i.Checker.Config.SubstrateOrDefault()
+	if sub.AgentdServiceAccount == "" {
+		return nil
+	}
+	return []string{preflight.SubstrateAgentdSPIFFEID(sub.AgentdNamespace, sub.AgentdServiceAccount)}
 }
 
 // addSPIFFEID makes the flag of the container allow id, in its command or its arguments, and reports

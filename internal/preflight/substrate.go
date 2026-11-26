@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -69,6 +70,13 @@ func SubstrateRouterSPIFFEID(namespace string) string {
 	return "spiffe://cluster.local/ns/" + namespace + "/sa/atenet-client"
 }
 
+// SubstrateAgentdSPIFFEID is the identity of agentd's pod certificate: the router allow-list must hold it, or
+// every Exec of a run fails at the router handshake (issue #1446, ADR 0120 amendment). The pod identity signer
+// issues spiffe://cluster.local/ns/<namespace>/sa/<service account>.
+func SubstrateAgentdSPIFFEID(namespace, serviceAccount string) string {
+	return "spiffe://cluster.local/ns/" + namespace + "/sa/" + serviceAccount
+}
+
 // SubstrateCRDs are the CRDs the preflight requires (plural.group), verified against the Substrate
 // v1.0.1 manifests and the koinon-lab install.
 var SubstrateCRDs = []string{
@@ -98,6 +106,16 @@ type SubstrateConfig struct {
 	APIServerDeployment string
 	// RouterDeployment runs the router whose SPIFFE allow-list is checked.
 	RouterDeployment string
+	// RouterService is the Service of the router (default atenet-router). With RouterPort it is checked.
+	RouterService string
+	// RouterPort is the port of execution.substrate.routerAddress. When set, the router Service must serve it:
+	// a wrong port fails every Exec, and this check finds it in seconds. 0 skips the check.
+	RouterPort int
+	// AgentdNamespace and AgentdServiceAccount name the ServiceAccount of Koinon's agentd, the only Koinon
+	// component with a router identity. When the service account is set, the router allow-list must hold its
+	// SPIFFE ID. Empty skips the check.
+	AgentdNamespace      string
+	AgentdServiceAccount string
 	// WorkerPools maps a tier ("vm", "hardened") to the WorkerPool that must be ready. Empty skips.
 	WorkerPools map[string]string
 	// NodeSelector limits the device probe to the nodes that run workers.
@@ -128,6 +146,9 @@ func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	}
 	if s.RouterDeployment == "" {
 		s.RouterDeployment = "atenet-router"
+	}
+	if s.RouterService == "" {
+		s.RouterService = "atenet-router"
 	}
 	return s
 }
@@ -408,18 +429,66 @@ func (c *Checker) checkSubstrateRouter(ctx context.Context) Result {
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("Deployment %s/%s", sub.Namespace, sub.RouterDeployment), err)
 	}
-	id := SubstrateRouterSPIFFEID(sub.Namespace)
+	want := []string{SubstrateRouterSPIFFEID(sub.Namespace)}
+	if sub.AgentdServiceAccount != "" {
+		want = append(want, SubstrateAgentdSPIFFEID(sub.AgentdNamespace, sub.AgentdServiceAccount))
+	}
+	allowed := routerAllowedIDs(deploy)
+	for _, id := range want {
+		if slices.Contains(allowed, id) {
+			continue
+		}
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B), or agentd cannot reach the actors (every Exec fails)", id),
+			Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, strings.Join(want, ",")),
+		}
+	}
+	if sub.RouterPort > 0 {
+		if r := c.checkRouterPort(ctx, check, *sub); r.Status != Pass {
+			return r
+		}
+	}
+	return Result{Check: check, Status: Pass, Message: "router allows " + strings.Join(want, ", ")}
+}
+
+// routerAllowedIDs are the SPIFFE IDs of the router's allow-list flag, in its command and arguments.
+func routerAllowedIDs(deploy *appsv1.Deployment) []string {
+	var ids []string
 	for _, ctr := range deploy.Spec.Template.Spec.Containers {
 		for _, arg := range slices.Concat(ctr.Command, ctr.Args) {
-			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok && slices.Contains(strings.Split(v, ","), id) {
-				return Result{Check: check, Status: Pass, Message: "router allows " + id}
+			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok {
+				ids = append(ids, strings.Split(v, ",")...)
 			}
 		}
 	}
+	return ids
+}
+
+// checkRouterPort checks that the router Service serves the port of routerAddress. The router has no plain port:
+// Substrate v1.0.1 serves TLS on Service port 443 (container port 8443), so a leftover :80 fails here and not at
+// the first Exec.
+func (c *Checker) checkRouterPort(ctx context.Context, check string, sub SubstrateConfig) Result {
+	dctx, cancel := c.callCtx(ctx)
+	defer cancel()
+	svc, err := c.Kube.CoreV1().Services(sub.Namespace).Get(dctx, sub.RouterService, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return Result{Check: check, Status: Fail, Message: fmt.Sprintf("Service %s/%s not found", sub.Namespace, sub.RouterService), Fix: substrateInstallDoc}
+	case err != nil:
+		return apiFailure(check, fmt.Sprintf("Service %s/%s", sub.Namespace, sub.RouterService), err)
+	}
+	ports := make([]string, 0, len(svc.Spec.Ports))
+	for _, p := range svc.Spec.Ports {
+		if int(p.Port) == sub.RouterPort {
+			return Result{Check: check, Status: Pass}
+		}
+		ports = append(ports, strconv.Itoa(int(p.Port)))
+	}
 	return Result{
 		Check: check, Status: Fail,
-		Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B)", id),
-		Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, id),
+		Message: fmt.Sprintf("Service %s/%s has no port %d (it has %s): every Exec would fail to connect", sub.Namespace, sub.RouterService, sub.RouterPort, strings.Join(ports, ", ")),
+		Fix:     fmt.Sprintf("set execution.substrate.routerAddress to the router Service port (%s)", strings.Join(ports, " or ")),
 	}
 }
 

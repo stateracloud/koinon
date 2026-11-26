@@ -785,6 +785,7 @@
           "properties": {
             "controlAddress": {"type": "string"},
             "routerAddress": {"type": "string"},
+            "routerServerName": {"type": "string"},
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
@@ -919,6 +920,7 @@
               "properties": {
                 "enabled": {"type": "boolean"},
                 "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "koinonIngressPorts": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
                 "apiOnlyApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "imageSource": {
                   "type": "object",

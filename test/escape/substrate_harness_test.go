@@ -37,7 +37,11 @@ import (
 // and to the atenet router only.
 //
 //	KOINON_ESCAPE_SUBSTRATE_CONTROL        ateapi host:port (required)
-//	KOINON_ESCAPE_SUBSTRATE_ROUTER         atenet router host:port (required)
+//	KOINON_ESCAPE_SUBSTRATE_ROUTER         atenet router host:port, the TLS port 443 (required)
+//	KOINON_ESCAPE_SUBSTRATE_ROUTER_CA      CA file of the router's certificate (default: ..._CA)
+//	KOINON_ESCAPE_SUBSTRATE_ROUTER_SERVER_NAME  name checked against it (default: the host of the router address)
+//	KOINON_ESCAPE_SUBSTRATE_ROUTER_CERT    client certificate bundle (key and chain, PEM) whose SPIFFE ID the
+//	                                       router allows; the router refuses a client without one
 //	KOINON_ESCAPE_SUBSTRATE_CA             CA file of ateapi's certificate (default: system roots)
 //	KOINON_ESCAPE_SUBSTRATE_SERVER_NAME    name checked against ateapi's certificate
 //	KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE     ServiceAccount token (ateapi audience) sent as bearer token
@@ -141,6 +145,9 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 	s := cli.Substrate{
 		ControlAddress:    get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
 		RouterAddress:     get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
+		RouterCAFile:      get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CA"),
+		RouterServerName:  get("KOINON_ESCAPE_SUBSTRATE_ROUTER_SERVER_NAME"),
+		RouterCertFile:    get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CERT"),
 		CAFile:            get("KOINON_ESCAPE_SUBSTRATE_CA"),
 		ServerName:        get("KOINON_ESCAPE_SUBSTRATE_SERVER_NAME"),
 		BearerTokenFile:   get("KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE"),
@@ -163,6 +170,7 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 	d, err := substrate.Dial(substrate.Endpoint{
 		ControlAddr: s.ControlAddress, RouterAddr: s.RouterAddress,
 		CAFile: s.CAFile, ServerName: s.ServerName, BearerTokenFile: s.BearerTokenFile,
+		RouterCAFile: s.RouterCAFile, RouterServerName: s.RouterServerName, RouterCertFile: s.RouterCertFile,
 	}, cfg)
 	if err != nil {
 		return nil, nil, err

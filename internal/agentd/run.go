@@ -852,6 +852,12 @@ func (r *runner) execErr(ctx context.Context, what string, err error) error {
 	if errors.As(err, &rq) {
 		return rq
 	}
+	if errors.Is(err, execution.ErrUnreachable) {
+		// The driver cannot connect to the sandbox data path (a wrong address, a failed TLS handshake, a client
+		// certificate the router refuses). Another worker would meet the same refusal and no stream ever opened,
+		// so this is no lost harness connection: fail the run at once with the dial error (issue #1446).
+		return &failure{reason: what + ": " + err.Error()}
+	}
 	if errors.Is(err, execution.ErrUnavailable) || errors.Is(err, execution.ErrFailedPrecondition) ||
 		errors.Is(err, execution.ErrStreamClosed) {
 		// The gateway or the sandbox is not reachable right now: resume later.

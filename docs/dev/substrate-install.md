@@ -153,7 +153,12 @@ Order of the step:
 7. Wait for the CRDs to be Established (applying a `SandboxConfig` right after the CRDs raced in the lab).
 8. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
    installer finds the router container by name (`atenet-router`), reads the flag in its command and
-   arguments, and retries when the Deployment changed during the update.
+   arguments, and retries when the Deployment changed during the update. It also allows agentd's pod
+   certificate, `spiffe://cluster.local/ns/<koinon namespace>/sa/<agentd service account>` (flags
+   `--koinon-namespace` and `--koinon-release` name them). The router serves TLS on Service port 443 and wants
+   a client certificate on this list, so set `execution.substrate.routerAddress` to
+   `atenet-router.<substrate namespace>.svc:443` (issue #1446, ADR 0120 amendment). The preflight fails when the
+   list lacks the agentd identity or the router Service has no such port.
 9. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
    object store" below.
 10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release

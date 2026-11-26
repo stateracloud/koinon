@@ -144,6 +144,9 @@ func (d *Driver) bind(ctx context.Context, op string, k key, uid string) error {
 	var err error
 	for {
 		err = d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{})
+		if derr := d.routerDown(op, err); derr != nil {
+			return derr
+		}
 		if status.Code(err) != codes.Unavailable || time.Now().After(deadline) {
 			break
 		}

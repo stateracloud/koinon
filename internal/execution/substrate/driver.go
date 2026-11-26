@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -150,9 +151,12 @@ type Driver struct {
 	process ateenvv1alpha.ProcessServiceClient
 	files   ateenvv1alpha.FileSystemServiceClient
 	router  grpc.ClientConnInterface // signs every call (signedConn)
-	cfg     Config
-	closers []io.Closer
-	lineage lineages
+	// routerState reports the state of the router connection, or is nil when the connection has none to
+	// report (a test double). routerDown reads it.
+	routerState func() connectivity.State
+	cfg         Config
+	closers     []io.Closer
+	lineage     lineages
 
 	mu    sync.Mutex
 	gates map[key]*gate
@@ -193,6 +197,9 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		resuspends: newResuspends(),
 	}
 	d.router = signedConn{cc: router, d: d}
+	if cc, ok := router.(interface{ GetState() connectivity.State }); ok {
+		d.routerState = cc.GetState
+	}
 	d.process = ateenvv1alpha.NewProcessServiceClient(d.router)
 	d.files = ateenvv1alpha.NewFileSystemServiceClient(d.router)
 	return d
@@ -567,4 +574,17 @@ func (d *Driver) requireSigner(op string) error {
 // fail builds an *execution.Error of a given kind.
 func fail(op string, kind error, format string, args ...any) error {
 	return &execution.Error{Op: op, Kind: kind, Err: fmt.Errorf(format, args...)}
+}
+
+// routerDown maps an Unavailable error of a router call that never reached a guest to
+// [execution.ErrUnreachable]; it returns nil for any other error. A guest that does not listen yet answers through a
+// working connection, which is why the callers retry Unavailable; a connection that cannot be made (a
+// wrong address, a failed handshake, a client certificate the router refuses) is in TRANSIENT_FAILURE
+// and no retry fixes it, so the caller fails with the dial error at once instead of waiting out the
+// guest's start-up time (issue #1446).
+func (d *Driver) routerDown(op string, err error) error {
+	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerState() != connectivity.TransientFailure {
+		return nil
+	}
+	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("cannot connect to the atenet router: %w", err)}
 }

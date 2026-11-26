@@ -799,6 +799,44 @@ ServiceAccount is the only Koinon principal that holds a global role in Substrat
 {{- end }}
 {{- end }}
 
+{{/*
+koinon-agentd's identity for the atenet router (issue #1446): the router serves TLS only and lets a client in by the
+SPIFFE ID of its certificate. A projected volume holds the pod certificate (signer podidentity.podcert.ate.dev/identity,
+which issues spiffe://cluster.local/ns/<namespace>/sa/<ServiceAccount>) and the CA of the router's certificate (the
+ClusterTrustBundle of the servicedns signer, as in Substrate v1.0.1 cmd/atenet/internal/router/README.md "Client in the
+cluster, pod identity CA"). The kubelet rotates both files in place and the driver reads them again. Only agentd mounts
+it: the allow-list has the agentd ServiceAccount and no other Koinon pod, because any allowed ID can reach any actor.
+*/}}
+{{- define "koinon.substrateRouterDir" -}}
+/etc/koinon/substrate-router
+{{- end }}
+
+{{- define "koinon.substrateRouterVolumeMount" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-router
+  mountPath: {{ include "koinon.substrateRouterDir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.substrateRouterVolume" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+- name: substrate-router
+  projected:
+    sources:
+      - podCertificate:
+          signerName: podidentity.podcert.ate.dev/identity
+          keyType: ECDSAP256
+          credentialBundlePath: credential-bundle.pem
+      - clusterTrustBundle:
+          signerName: servicedns.podcert.ate.dev/identity
+          labelSelector:
+            matchLabels:
+              podcert.ate.dev/canarying: live
+          path: router-ca.pem
+{{- end }}
+{{- end }}
+
 {{- define "koinon.substrateVolume" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
@@ -1585,6 +1623,14 @@ it carries no credentials.
   value: {{ .Values.execution.substrate.controlAddress | quote }}
 - name: KOINON_SUBSTRATE_ROUTER_ADDRESS
   value: {{ .Values.execution.substrate.routerAddress | quote }}
+- name: KOINON_SUBSTRATE_ROUTER_CERT_FILE
+  value: {{ printf "%s/credential-bundle.pem" (include "koinon.substrateRouterDir" .) | quote }}
+- name: KOINON_SUBSTRATE_ROUTER_CA_FILE
+  value: {{ printf "%s/router-ca.pem" (include "koinon.substrateRouterDir" .) | quote }}
+{{- with .Values.execution.substrate.routerServerName }}
+- name: KOINON_SUBSTRATE_ROUTER_SERVER_NAME
+  value: {{ . | quote }}
+{{- end }}
 - name: KOINON_SUBSTRATE_ALLOW_UNHARDENED
   value: {{ .Values.execution.substrate.allowUnhardened | default false | quote }}
 {{- with .Values.execution.substrate.defaultTier }}

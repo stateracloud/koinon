@@ -27,7 +27,7 @@ var _ = Describe("Execution", func() {
 	It("needs both Substrate addresses and no OpenShell address for substrate", func() {
 		e := cli.Execution{Driver: cli.DriverSubstrate}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-control-address")))
-		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80"}
+		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:443"}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-guest-key-file is required")))
 		e.Substrate.GuestKeyFile = guestKeyFile()
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-allow-unhardened")))
@@ -41,7 +41,7 @@ var _ = Describe("Execution", func() {
 		Expect(e.Validate("")).To(Succeed())
 	})
 	It("refuses a tier it does not know, a malformed entry and a class listed twice", func() {
-		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
+		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:443", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
 		for _, c := range []struct {
 			s    func(*cli.Substrate)
 			want string

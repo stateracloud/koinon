@@ -33,6 +33,7 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
 {{- $ns := $s.namespace }}
 {{- $wns := $s.workerNamespace }}
 {{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
+{{- if not $np.koinonIngressPorts }}{{- fail "execution.substrate.workerNetworkPolicy.koinonIngressPorts is empty: Koinon's pods would reach neither ateapi nor the router" }}{{- end }}
 {{- if not $np.controlPlaneApps }}{{- fail "execution.substrate.workerNetworkPolicy.controlPlaneApps is empty: the control-plane policy would select no pod" }}{{- end }}
 {{- if not (or $np.atenetEgressSelector.matchLabels $np.atenetEgressSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let workers reach every pod in the control-plane namespace" }}{{- end }}
 {{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $ns $s.gatewayClientNamespaceSelector }}
@@ -93,9 +94,19 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
+    # Koinon's pods reach two things in this namespace: ateapi (the control calls of the reconciler, agentd and the
+    # provisioner) and the atenet router (agentd's guest calls). Only their container ports are open to Koinon's
+    # namespace, not every port of every control-plane pod: atelet's gRPC port and ate-api-server's internal
+    # port stay closed to it (issue #1446; Substrate admits them only from named pods of its own namespace).
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+      ports:
+        {{- range $np.koinonIngressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
   egress:
     - to:
         - podSelector: {}
