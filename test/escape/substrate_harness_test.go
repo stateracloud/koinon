@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -211,9 +212,14 @@ func probeProgram(checks []check) string {
 }
 
 // sandboxSpec is a sleeping sandbox of the rig's tier.
+// It carries the platform's default sizing, as the reconciler's sandbox spec does: Substrate refuses
+// an actor template without resources (issue #1092).
 func (r *substrateRig) sandboxSpec(name string) execution.SandboxSpec {
+	def := sandboxres.DefaultPolicy().Default
 	return execution.SandboxSpec{
 		Name: name, Image: r.image, RuntimeClassName: r.class, Command: []string{"sleep", "infinity"},
+		CPURequest: def.CPU.Request, CPULimit: def.CPU.Limit,
+		MemoryRequest: def.Memory.Request, MemoryLimit: def.Memory.Limit,
 	}
 }
 
