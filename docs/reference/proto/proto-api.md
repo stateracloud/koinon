@@ -4677,13 +4677,34 @@ Files: `koinon/template/v1alpha1/template.proto`
 
 ### Service TemplateService
 
-TemplateService lists the agent templates shipped with Koinon (ADR 0020).
-Templates are platform data: they belong to no org, and every signed-in
-user can list them.
+TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs
+to no org and is read-only; an org template belongs to one org, which saved it from an agent
+(ADR 0126 section 5), and no other org sees it.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
-| ListTemplates | `koinon.template.v1alpha1.ListTemplatesRequest` | `koinon.template.v1alpha1.ListTemplatesResponse` | - | ListTemplates returns the current content of every template. |
+| CreateTemplateFromAgent | `koinon.template.v1alpha1.CreateTemplateFromAgentRequest` | `koinon.template.v1alpha1.CreateTemplateFromAgentResponse` | - | CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as template"). It needs the member role, as creating an agent does. The template keeps the agent's definition (instructions, model, grants without their bindings, limits, triggers, settings) and nothing the agent is bound to: no connection, repository or run data. Promotion to a platform template is not part of this API. |
+| ListTemplates | `koinon.template.v1alpha1.ListTemplatesRequest` | `koinon.template.v1alpha1.ListTemplatesResponse` | - | ListTemplates returns the current content of every platform template and, when the request names an org, the org's own templates. Every signed-in user can list the platform templates; the org's templates need membership of the org. |
+
+### Message CreateTemplateFromAgentRequest
+
+CreateTemplateFromAgentRequest saves an agent as a template of its org.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  | The template's name, 1 to 200 characters. |
+| description | 4 | `string` | singular |  |  |
+| slug | 5 | `string` | singular |  | Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name. |
+
+### Message CreateTemplateFromAgentResponse
+
+CreateTemplateFromAgentResponse is the new org template.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| template | 1 | `koinon.template.v1alpha1.Template` | singular |  |  |
 
 ### Message Grant
 
@@ -4703,13 +4724,16 @@ proposal; activating the agent approves it.
 
 ### Message ListTemplatesRequest
 
-ListTemplatesRequest is empty.
+ListTemplatesRequest names the org whose templates to list with the platform ones.
 
-No fields.
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs the viewer role in the org. |
 
 ### Message ListTemplatesResponse
 
-ListTemplatesResponse lists the templates, sorted by slug.
+ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when
+an org template has the same slug.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -4761,6 +4785,8 @@ Template is one version of an agent template.
 | thinking | 16 | `string` | singular |  | The starting value of the agent's thinking setting, "on" or "off"; empty when the template names none, which is the default, on (ADR 0069 amendment 2026-10-29). |
 | allowed_harnesses | 17 | `string` | repeated |  | Names of the harnesses the agent may run on (ADR 0112), for example "opencode". |
 | default_harness | 18 | `string` | singular |  | The harness an agent gets when the request names none; one of allowed_harnesses. |
+| scope | 19 | `koinon.template.v1alpha1.TemplateScope` | singular |  | Who owns the template. |
+| org_id | 20 | `string` | singular |  | The owning org of an org template; empty on a platform template. |
 
 ### Message Trigger
 
@@ -4810,6 +4836,16 @@ Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
 | PRESET_READ_ONLY | 1 |  |
 | PRESET_STANDARD | 2 |  |
 | PRESET_TRUSTED | 3 |  |
+
+### Enum TemplateScope
+
+TemplateScope says who owns a template.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| TEMPLATE_SCOPE_UNSPECIFIED | 0 |  |
+| TEMPLATE_SCOPE_PLATFORM | 1 | Ships with Koinon; read-only; every signed-in user sees it. |
+| TEMPLATE_SCOPE_ORG | 2 | Saved by an org; only that org sees it. |
 
 ### Enum TriggerType
 

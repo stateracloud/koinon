@@ -87,6 +87,9 @@ var crossOrgQueries = map[string]string{
 	"agents.sql:ListActiveAgentVersionsAllOrgs":             "the trigger scheduler: lists the active triggers of every live org's active agents; read-only",
 	"agents.sql:ListAgentActivationsAllOrgs":                "the schedule trigger: when each live org's active agent version was activated; read-only",
 	"trace.sql:LowerOrgTraceLevels":                         "platform ceiling: lowers every org above the new ceiling in one statement; returns the changed orgs for the audit log",
+	"templates.sql:UpsertTemplate":                          "startup sync: records a platform template (org_id NULL) shipped in the binary",
+	"templates.sql:GetTemplate":                             "reads a template by the ID an agent of the caller's org holds; a request's template ID goes through GetTemplateForOrg",
+	"templates.sql:ListCurrentTemplates":                    "lists the platform templates (org_id IS NULL), shared by every org",
 	"auth.sql:ListEffectiveMemberships":                     "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
@@ -96,7 +99,8 @@ var _ = Describe("org scoping", func() {
 		for _, table := range []string{"agents", "agent_versions", "tasks", "task_events", "runs", "run_events"} {
 			Expect(owned).To(HaveKey(table), "expected %s to be detected as org-owned; detection is broken", table)
 		}
-		Expect(owned).NotTo(HaveKey("templates"), "templates is not org-owned; detection is broken")
+		// templates has a nullable org_id since 00110: platform rows have none, org templates have one.
+		Expect(owned).To(HaveKey("templates"), "templates gained org_id in 00110; detection is broken")
 		Expect(owned).NotTo(HaveKey("orgs"), "orgs is not org-owned; detection is broken")
 
 		files, err := filepath.Glob("*.sql")
@@ -154,6 +158,8 @@ var _ = Describe("org scoping", func() {
 	)
 })
 
+var addOrgColumnRE = regexp.MustCompile(`(?is)ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+org_id\b`)
+
 var renameTableRE = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(\w+)\s+RENAME\s+TO\s+(\w+)`)
 
 func orgOwnedTables(dir string) map[string]bool {
@@ -168,6 +174,10 @@ func orgOwnedTables(dir string) map[string]bool {
 			if orgColumnRE.MatchString(m[2]) {
 				owned[strings.ToLower(m[1])] = true
 			}
+		}
+		// A table that gains its owner column later (00110 gives templates an org_id).
+		for _, m := range addOrgColumnRE.FindAllStringSubmatch(string(data), -1) {
+			owned[strings.ToLower(m[1])] = true
 		}
 		// A renamed table keeps its owner column (migration 00020 renames tickets to tasks).
 		for _, m := range renameTableRE.FindAllStringSubmatch(string(data), -1) {
