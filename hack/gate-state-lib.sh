@@ -15,6 +15,10 @@
 #                       (current, instances, defaults, certs) of ${DOCKER_CONFIG:-~/.docker}/buildx. Only
 #                       client state lives there; the build cache stays in the builder, so nothing is
 #                       rebuilt. The copy is made again each run, so `docker buildx use` still counts.
+#   DOCKER_CONFIG       <gate log dir>/state/docker, with a symbolic link to each entry of ~/.docker
+#                       (config.json, contexts, cli-plugins, ...) except buildx. BuildKit's registry
+#                       auth writes its .token_seed file into this directory on each image pull of a
+#                       build. The links keep the credentials, contexts and plugins in one place.
 #   KOINON_PNPM_STORE   $TMPDIR/koinon-pnpm-store, the store of `make test-opencode-plugin`. It is
 #                       shared by the lanes of one machine. The web gate keeps the default store: its
 #                       node_modules were linked from it and it installs offline from it. pnpm
@@ -54,6 +58,21 @@ gate_state_env() {
 			fi
 		done
 		export BUILDX_CONFIG=$state/buildx
+	fi
+	if [[ -z ${DOCKER_CONFIG:-} ]]; then
+		# Links, not copies: config.json can hold registry credentials, and a link puts no second copy
+		# of them on disk. Made again each run, so an entry removed from ~/.docker goes here too.
+		src=$HOME/.docker
+		rm -rf "${state:?}/docker"
+		mkdir -p "$state/docker" || return 1
+		if [[ -d $src ]]; then
+			for f in "$src"/* "$src"/.[!.]*; do
+				[[ -e $f || -L $f ]] || continue
+				[[ ${f##*/} == buildx || ${f##*/} == .token_seed* ]] && continue
+				ln -s "$f" "$state/docker/${f##*/}" || return 1
+			done
+		fi
+		export DOCKER_CONFIG=$state/docker
 	fi
 	if [[ -z ${KOINON_PNPM_STORE:-} ]]; then
 		export KOINON_PNPM_STORE=${TMPDIR:-/tmp}/koinon-pnpm-store

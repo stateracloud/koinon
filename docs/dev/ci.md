@@ -557,6 +557,10 @@ value that is already set (CI, your shell) wins:
 - `BUILDX_CONFIG` is `<gate log directory>/state/buildx`: a copy, made again each run, of the builder
   selection and client certificates in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
   client state moves; the build cache stays in the builder.
+- `DOCKER_CONFIG` is `<gate log directory>/state/docker`: a directory with a symbolic link to each
+  entry of `~/.docker` (`config.json`, `contexts`, `cli-plugins`), made again each run. BuildKit's
+  registry auth writes its `.token_seed` file there on each image pull of a build. The links keep the
+  registry credentials in one place: nothing is copied.
 - `KOINON_PNPM_STORE` is `$TMPDIR/koinon-pnpm-store`, the store of `make test-opencode-plugin`. The web
   gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
   pnpm links the plugin `node_modules` again when the store changes, so the first gate run in a

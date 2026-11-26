@@ -383,7 +383,7 @@ envtest-assets)
 	sandbox) echo "mkdir /home/x/.local/share/kubebuilder-envtest: operation not permitted" >&2; exit 1 ;;
 	broken) echo "make: *** No rule to make target" >&2; exit 2 ;;
 	esac ;;
-*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} buf=${BUF_CACHE_DIR:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
+*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} buf=${BUF_CACHE_DIR:-unset} docker=${DOCKER_CONFIG:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
 esac
 EOF2
 chmod +x "$tmp/make-state"
@@ -397,13 +397,14 @@ gate_log() { # <gate>: the log path of the gate's line in $out
 mkdir -p "$tmp/home/.docker/buildx/instances"
 echo mybuilder >"$tmp/home/.docker/buildx/current"
 echo '{"Name":"mybuilder"}' >"$tmp/home/.docker/buildx/instances/mybuilder"
-mkdir -p "$tmp/home/.docker/buildx/activity"
-staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR=
+mkdir -p "$tmp/home/.docker/buildx/activity" "$tmp/home/.docker/contexts"
+echo '{"auths":{}}' >"$tmp/home/.docker/config.json"
+staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR= DOCKER_CONFIG=
 expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass' '^gate=opencodeplugin .*verdict=pass'
 st=$(cat "$(gate_log harnesses)")
 total=$((total + 1))
 case $st in
-*"buildx=$tmp/koinon-preflight/"*"/state/buildx pnpm=$tmp/koinon-pnpm-store buf=$tmp/koinon-buf-cache assets=$tmp/assets"*) ;;
+*"buildx=$tmp/koinon-preflight/"*"/state/buildx pnpm=$tmp/koinon-pnpm-store buf=$tmp/koinon-buf-cache docker=$tmp/koinon-preflight/"*"/state/docker assets=$tmp/assets"*) ;;
 *) echo "FAIL: state: buildx, pnpm, buf and envtest paths: $st"; fails=$((fails + 1)) ;;
 esac
 bx=${st#*buildx=}; bx=${bx%% *}
@@ -411,18 +412,28 @@ total=$((total + 1))
 if [[ $(cat "$bx/current" 2>/dev/null) != mybuilder || ! -f $bx/instances/mybuilder || -e $bx/activity ]]; then
 	echo "FAIL: state: the buildx copy has the builder selection and no activity: $(/bin/ls -A "$bx" 2>&1)"; fails=$((fails + 1))
 fi
+dc=${st#*docker=}; dc=${dc%% *}
+total=$((total + 1))
+if [[ $(readlink "$dc/config.json") != "$tmp/home/.docker/config.json" || $(readlink "$dc/contexts") != "$tmp/home/.docker/contexts" || -e $dc/buildx || ! -w $dc ]]; then
+	echo "FAIL: state: the docker config dir links config.json and contexts, not buildx: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
+fi
 # A builder removed after the last run goes from the copy too.
 rm -f "$tmp/home/.docker/buildx/current" && rm -rf "$tmp/home/.docker/buildx/instances"
-staterun STUB_JOBS="harnesses" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE=
+rm -f "$tmp/home/.docker/config.json"
+staterun STUB_JOBS="harnesses" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= DOCKER_CONFIG=
 total=$((total + 1))
 if [[ -e $bx/current || -e $bx/instances ]]; then
 	echo "FAIL: state: a removed builder stays in the buildx copy"; fails=$((fails + 1))
 fi
+total=$((total + 1))
+if [[ -L $dc/config.json || ! -L $dc/contexts ]]; then
+	echo "FAIL: state: the docker config links do not follow ~/.docker: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
+fi
 # A value that is set wins.
-staterun STUB_JOBS="harnesses" BUILDX_CONFIG=/own/buildx KOINON_PNPM_STORE=/own/store BUF_CACHE_DIR=/own/buf
+staterun STUB_JOBS="harnesses" BUILDX_CONFIG=/own/buildx KOINON_PNPM_STORE=/own/store BUF_CACHE_DIR=/own/buf DOCKER_CONFIG=/own/docker
 expect "state: own values win" 0 '^gate=harnesses .*verdict=pass'
 total=$((total + 1))
-grep -q 'buildx=/own/buildx pnpm=/own/store buf=/own/buf' "$(gate_log harnesses)" || { echo "FAIL: state: own values were replaced"; fails=$((fails + 1)); }
+grep -q 'buildx=/own/buildx pnpm=/own/store buf=/own/buf docker=/own/docker' "$(gate_log harnesses)" || { echo "FAIL: state: own values were replaced"; fails=$((fails + 1)); }
 # envtest assets the sandbox cannot fetch: the envtest gates are notrun with the reason, the others run.
 staterun STUB_JOBS="escape harnesses" STUB_ASSETS=sandbox
 expect "state: envtest assets denied is notrun" 3 '^gate=escape rc=0 .*verdict=notrun reason="envtest assets not found \(sandbox denial\); run make envtest-assets once outside the sandbox"' '^gate=harnesses .*verdict=pass'
