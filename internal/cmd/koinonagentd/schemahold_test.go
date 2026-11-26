@@ -59,13 +59,16 @@ var _ = Describe("Schema gate on the worker pool (issue 680)", func() {
 	It("claims no run before the migration Job has run, then starts", func(ctx SpecContext) {
 		schema.set(schemagate.Schema{Version: 9})
 		Expect(gate.Check(ctx)).To(HaveOccurred())
+		hctx, stop := context.WithCancel(ctx)
 		done := make(chan error, 1)
-		go func() { done <- holdWork(ctx, gate, pool, log) }()
+		go func() { done <- holdWork(hctx, gate, pool, log) }()
 		Consistently(claims.Load, 100*time.Millisecond).Should(BeZero())
 
 		schema.set(schemagate.Schema{Version: 12})
 		Expect(gate.Check(ctx)).To(Succeed())
 		Eventually(claims.Load).Should(BeNumerically(">", 0))
+		stop() // the work must be gone before the next spec resets the counter
+		Eventually(done).Should(Receive(BeNil()))
 	})
 
 	It("stops claiming and exits with an error when an older release meets a newer schema", func(ctx SpecContext) {

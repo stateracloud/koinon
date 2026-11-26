@@ -92,7 +92,8 @@ type Gate struct {
 	err     error
 	// rejected counts the checks that read the schema and judged it unsupported (not the checks
 	// that failed to read it); Hold stops its work when it grows. checks is replaced and closed
-	// after every check, so a waiter wakes up and reads the new state.
+	// after every check, so a waiter wakes up and reads the new state. Build a Gate with New or
+	// NewFunc.
 	rejected uint64
 	checks   chan struct{}
 }
@@ -124,7 +125,9 @@ func (g *Gate) Check(ctx context.Context) error {
 	if rejected {
 		g.rejected++
 	}
-	close(g.checks)
+	if g.checks != nil {
+		close(g.checks)
+	}
 	g.checks = make(chan struct{})
 	g.mu.Unlock()
 	switch {

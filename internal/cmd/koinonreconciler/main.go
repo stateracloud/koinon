@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -231,101 +232,114 @@ func serve(ctx context.Context, cfg config) error {
 	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
 		return err
 	}
-	// Everything below converges (passes, the spend settler, the cost reconciliation): it runs only
-	// while the schema is supported (issue 680). The recovery handler above and the restore-hold wait
-	// do not wait for the gate.
+	// One price list for the reconciler and the settler.
+	priceResolver := prices.NewResolver(pricing.Embedded())
+	var supervisor reconciler.SupervisorSource
+	if cfg.openshellConfigMap != "" {
+		supervisor = reconciler.KubeSupervisorImage{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
+	} else {
+		log.Warn("no OpenShell gateway ConfigMap is configured: a new supervisor image does not recreate existing sandboxes")
+	}
+	var gatewayIDs reconciler.GatewayIDSource
+	if cfg.openshellConfigMap != "" {
+		gatewayIDs = reconciler.KubeGatewayID{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
+	}
+	// One egress policy; the GitHub client (and its derived per-CA clients) dials through it.
+	// The guest's resolver follows the cluster's DNS domain (#1054).
+	search := catalog.SubstrateSearchFor(cfg.clusterDomain)
+	urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts), Search: &search}
+	// The forge credential (#1086 part C) is sealed to the gateway key, as koinon-api seals MCP
+	// credentials: only with koinon-gateway, which holds that key. A gateway that does not read the
+	// credential refuses the forge routes (503 credential_unavailable), so no format gate is needed.
+	var (
+		forgeRecipient reconciler.RecipientKeys
+		gatewayKeys    *gatewaykeys.PublicKeys
+	)
+	if cfg.mcpSealed {
+		gatewayKeys = &gatewaykeys.PublicKeys{}
+		forgeRecipient = gatewayKeys
+	}
+	r, err := reconciler.New(pool, backend, driver,
+		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
+		reconciler.Config{
+			Gateway:             endpoint,
+			Egress:              egressEndpoint,
+			MCPGateway:          mcpEndpoint,
+			Prices:              priceResolver,
+			Keys:                keyring,
+			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
+			ProviderKeyDir:      cfg.providerKeysDir,
+			MCPKeys:             mcpKeyStore(kube, cfg),
+			MCPKeyDir:           cfg.mcpKeysDir,
+			MCPSealed:           cfg.mcpSealed,
+			ForgeRecipient:      forgeRecipient,
+			URLPolicy:           urlPolicy,
+			ProviderKeySettle:   cfg.keySettle,
+			Harnesses:           cfg.harnesses(),
+			RuntimeClassName:    cfg.runtimeClass,
+			SandboxResources:    &cfg.sandboxResources,
+			IdleTimeout:         cfg.idleTimeout,
+			ParkWarm:            cfg.parkWarm,
+			ArchiveAfter:        cfg.archiveAfter,
+			SandboxJobs:         cfg.sandboxJobs,
+			KeepWarmPerOrg:      cfg.keepWarmPerOrg,
+			Supervisor:          supervisor,
+			GatewayID:           cfg.openshellGateway,
+			GatewayIDs:          gatewayIDs,
+			MaxRecreatesPerPass: cfg.maxRecreates,
+			ResyncInterval:      cfg.resyncInterval,
+			HomeRetention:       reconciler.Retention(cfg.homeRetention),
+			Checkpoints:         cfg.checkpoints,
+			CheckpointsReadOnly: cfg.checkpointsReadOnly,
+			ToolServers:         cfg.toolServers(),
+			MCPAskURL:           cfg.mcpAskURL,
+			// repo.read grants (plan item C2): tokens minted with the App key opened from the
+			// connection's stored secret fields.
+			GitHub: reconciler.GitHubApps{
+				Keys:   keyring,
+				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.SandboxDialContext(&net.Dialer{Timeout: 5 * time.Second})}),
+			},
+			Observer:      observer,
+			NetworkPolicy: netpol,
+			LimitRange:    limitRange,
+			Logger:        log,
+			Metrics:       reconciler.NewMetrics(reg),
+		})
+	if err != nil {
+		return err
+	}
+	// Responses cut short are settled with their provider's own usage (ADR 0056, amendment
+	// 2026-10-28). It runs on every replica: a settlement is claimed with SKIP LOCKED.
+	settler := &ledger.Settler{DB: pool, Keys: keyring, Prices: priceResolver, Log: log}
+	if err := settler.Validate(); err != nil {
+		return err
+	}
+	// Direct provider keys with a cost API key are reconciled against the provider's cost API once
+	// a day (ADR 0056, amendment 2026-11-06); one replica at a time (an advisory lock).
+	costSources := providerusage.DefaultCosts(nil)
+	costs := &ledger.CostReconciler{
+		DB: pool, Keys: keyring, Sources: costSources, Log: log,
+		Metrics: ledger.NewCostMetrics(reg, costSources.Types()),
+	}
+	// Everything that converges (passes, the spend settler, the cost reconciliation, the gateway public
+	// key reader) starts only while the schema is supported (issue 680); what is built above does no
+	// database work, so a configuration error still fails at once. The recovery handler and the
+	// restore-hold wait above do not wait for the gate. The loops are awaited, so none of them still
+	// runs when the pool closes.
 	err = holdWork(ctx, gate, func(ctx context.Context) error {
-		// One price list for the reconciler and the settler.
-		priceResolver := prices.NewResolver(pricing.Embedded())
-		var supervisor reconciler.SupervisorSource
-		if cfg.openshellConfigMap != "" {
-			supervisor = reconciler.KubeSupervisorImage{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
-		} else {
-			log.Warn("no OpenShell gateway ConfigMap is configured: a new supervisor image does not recreate existing sandboxes")
-		}
-		var gatewayIDs reconciler.GatewayIDSource
-		if cfg.openshellConfigMap != "" {
-			gatewayIDs = reconciler.KubeGatewayID{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
-		}
-		// One egress policy; the GitHub client (and its derived per-CA clients) dials through it.
-		// The guest's resolver follows the cluster's DNS domain (#1054).
-		search := catalog.SubstrateSearchFor(cfg.clusterDomain)
-		urlPolicy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts), Search: &search}
-		// The forge credential (#1086 part C) is sealed to the gateway key, as koinon-api seals MCP
-		// credentials: only with koinon-gateway, which holds that key. A gateway that does not read the
-		// credential refuses the forge routes (503 credential_unavailable), so no format gate is needed.
-		var forgeRecipient reconciler.RecipientKeys
-		if cfg.mcpSealed {
-			gatewayKeys := &gatewaykeys.PublicKeys{}
-			safego.Go(ctx, log, "gateway-public-key", func(ctx context.Context) {
-				gatewayKeys.Run(ctx, pool, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
+		// The loops end with r.Run, also when it returns before ctx ends.
+		ctx, cancel := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		defer func() { cancel(); wg.Wait() }()
+		if gatewayKeys != nil {
+			wg.Go(func() {
+				safego.Do(log, "gateway-public-key", func() {
+					gatewayKeys.Run(ctx, pool, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
+				})
 			})
-			forgeRecipient = gatewayKeys
 		}
-		r, err := reconciler.New(pool, backend, driver,
-			reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
-			reconciler.Config{
-				Gateway:             endpoint,
-				Egress:              egressEndpoint,
-				MCPGateway:          mcpEndpoint,
-				Prices:              priceResolver,
-				Keys:                keyring,
-				ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
-				ProviderKeyDir:      cfg.providerKeysDir,
-				MCPKeys:             mcpKeyStore(kube, cfg),
-				MCPKeyDir:           cfg.mcpKeysDir,
-				MCPSealed:           cfg.mcpSealed,
-				ForgeRecipient:      forgeRecipient,
-				URLPolicy:           urlPolicy,
-				ProviderKeySettle:   cfg.keySettle,
-				Harnesses:           cfg.harnesses(),
-				RuntimeClassName:    cfg.runtimeClass,
-				SandboxResources:    &cfg.sandboxResources,
-				IdleTimeout:         cfg.idleTimeout,
-				ParkWarm:            cfg.parkWarm,
-				ArchiveAfter:        cfg.archiveAfter,
-				SandboxJobs:         cfg.sandboxJobs,
-				KeepWarmPerOrg:      cfg.keepWarmPerOrg,
-				Supervisor:          supervisor,
-				GatewayID:           cfg.openshellGateway,
-				GatewayIDs:          gatewayIDs,
-				MaxRecreatesPerPass: cfg.maxRecreates,
-				ResyncInterval:      cfg.resyncInterval,
-				HomeRetention:       reconciler.Retention(cfg.homeRetention),
-				Checkpoints:         cfg.checkpoints,
-				CheckpointsReadOnly: cfg.checkpointsReadOnly,
-				ToolServers:         cfg.toolServers(),
-				MCPAskURL:           cfg.mcpAskURL,
-				// repo.read grants (plan item C2): tokens minted with the App key opened from the
-				// connection's stored secret fields.
-				GitHub: reconciler.GitHubApps{
-					Keys:   keyring,
-					Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL, DialContext: urlPolicy.SandboxDialContext(&net.Dialer{Timeout: 5 * time.Second})}),
-				},
-				Observer:      observer,
-				NetworkPolicy: netpol,
-				LimitRange:    limitRange,
-				Logger:        log,
-				Metrics:       reconciler.NewMetrics(reg),
-			})
-		if err != nil {
-			return err
-		}
-		// Responses cut short are settled with their provider's own usage (ADR 0056, amendment
-		// 2026-10-28). It runs on every replica: a settlement is claimed with SKIP LOCKED.
-		settler := &ledger.Settler{DB: pool, Keys: keyring, Prices: priceResolver, Log: log}
-		if err := settler.Validate(); err != nil {
-			return err
-		}
-		safego.Go(ctx, log, "spend-settler", settler.Run)
-		// Direct provider keys with a cost API key are reconciled against the provider's cost API once
-		// a day (ADR 0056, amendment 2026-11-06); one replica at a time (an advisory lock).
-		costSources := providerusage.DefaultCosts(nil)
-		costs := &ledger.CostReconciler{
-			DB: pool, Keys: keyring, Sources: costSources, Log: log,
-			Metrics: ledger.NewCostMetrics(reg, costSources.Types()),
-		}
-		safego.Go(ctx, log, "cost-reconciliation", costs.Run)
+		wg.Go(func() { safego.Do(log, "spend-settler", func() { settler.Run(ctx) }) })
+		wg.Go(func() { safego.Do(log, "cost-reconciliation", func() { costs.Run(ctx) }) })
 		return r.Run(ctx)
 	}, log)
 	log.Info("stopping koinon-reconciler")

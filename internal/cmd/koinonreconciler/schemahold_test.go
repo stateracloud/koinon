@@ -59,12 +59,16 @@ var _ = Describe("Schema gate on the reconcile loop (issue 680)", func() {
 	It("runs no pass while the schema is older than the build needs, then starts", func(ctx SpecContext) {
 		schema.set(schemagate.Schema{Version: 9})
 		Expect(gate.Check(ctx)).To(HaveOccurred())
-		go func() { _ = holdWork(ctx, gate, loop, log) }()
+		hctx, stop := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() { done <- holdWork(hctx, gate, loop, log) }()
 		Consistently(passes.Load, 100*time.Millisecond).Should(BeZero())
 
 		schema.set(schemagate.Schema{Version: 12})
 		Expect(gate.Check(ctx)).To(Succeed())
 		Eventually(passes.Load).Should(BeNumerically(">", 0))
+		stop() // the work must be gone before the next spec resets the counter
+		Eventually(done).Should(Receive(BeNil()))
 	})
 
 	It("stops the passes and exits with an error when the schema needs a newer release", func(ctx SpecContext) {
