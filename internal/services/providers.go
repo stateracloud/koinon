@@ -71,7 +71,7 @@ func (s *Server) catalogError(err error) error {
 	switch {
 	case errors.As(err, &inv):
 		ce := connect.NewError(connect.CodeInvalidArgument, inv.Msg)
-		if r, ok := refusalv1.Reason_value[inv.Reason]; ok {
+		if r, ok := refusalv1.Reason_value[inv.Reason]; ok && r != 0 {
 			return withReason(ce, refusalv1.Reason(r))
 		}
 		return ce

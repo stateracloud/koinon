@@ -105,8 +105,10 @@ spec calls each `raises` row with the floor Role and expects that refusal.
 
 The enum is `koinon.refusal.v1.Reason` (`api/proto/koinon/refusal/v1/refusal.proto`, #777). It holds the 8 trace reasons
 (`PLATFORM_ADMIN_REQUIRED` is one), `PRICE_REFRESH_OFF`, `CREDENTIAL_TOO_SHORT` and the four reasons of this ADR: `INVALID`,
-`NOT_FOUND`, `INSTALL_HELD` and `ROLE_TOO_LOW`. The REST schema is `ErrorReason`. The web reads every error through
-`describeError` (`web/src/lib/api-error.ts`).
+`NOT_FOUND`, `INSTALL_HELD` and `ROLE_TOO_LOW`. The REST schema is `ErrorReason`. The web has `describeError`
+(`web/src/lib/api-error.ts`). The trace screens use it first; the other screens move in #778. The REST path sends the
+kind reasons `INVALID`, `NOT_FOUND` and `INSTALL_HELD` now. The Connect path sends them when the entry lands (#772,
+#773); until then a Connect error that has no specific reason carries none.
 
 The details of sections 1, 4 and 5 are as in option A of the 2026-11-19 comment: the table is in Go next to the entry,
 the kind reasons, the add-only reasons and the web fallback.

@@ -303,6 +303,7 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
 	w.WriteHeader(status)
 	body := Error{}
 	body.Error.Code, body.Error.Message = code, msg
+	body.Error.Reason = kindReason(code)
 	_ = jsonEncode(w, body)
 }
 

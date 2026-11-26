@@ -5,9 +5,9 @@ import { ErrorInfoSchema } from '@/gen/google/rpc/error_details_pb'
 import { Reason } from '@/gen/koinon/refusal/v1/refusal_pb'
 
 // The one place that reads an error of the API (ADR 0116 decision 5). A Connect error carries a
-// google.rpc.ErrorInfo whose reason is a name of the enum koinon.refusal.v1.Reason. The web shows
-// describeError(e).message and never reads the raw error text itself: the lint rule forbids `rawMessage`
-// outside this file.
+// google.rpc.ErrorInfo whose reason is a name of the enum koinon.refusal.v1.Reason. A screen shows
+// describeError(e).message and does not read the raw error text itself. The trace screens use it now. The other
+// screens move to it in #778, which adds the lint rule that forbids `rawMessage` outside this file.
 
 /** ReasonName is a name of koinon.refusal.v1.Reason, the wire string of a reason. */
 export type ReasonName = Exclude<keyof typeof Reason, 'REASON_UNSPECIFIED'>

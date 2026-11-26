@@ -64,8 +64,11 @@ func TestReasonsAreEqualInProtoOpenAPIAndGo(t *testing.T) {
 		if !adminapi.ErrorReason(name).Valid() {
 			t.Errorf("the generated Go type has no ErrorReason %q", name)
 		}
-		if _, ok := refusalv1.Reason_value[name]; !ok {
-			t.Errorf("the proto enum has no %q", name)
+	}
+	// Go string reasons (the catalog and MCP validation errors carry them as strings) must be in the enum.
+	for _, name := range []string{mcpservers.ReasonCredentialTooShort} {
+		if n, ok := refusalv1.Reason_value[name]; !ok || n == 0 {
+			t.Errorf("the Go reason %q is not a value of the proto enum", name)
 		}
 	}
 }
