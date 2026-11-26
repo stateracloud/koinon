@@ -256,8 +256,10 @@ func templateFromConfig(cfg agentconfig.Config, a store.Agent, slug, name, descr
 		dst *string
 		src pgtype.Text
 	}{
-		{&res.CPU.Request, a.SandboxCpuRequest}, {&res.CPU.Limit, a.SandboxCpuLimit},
-		{&res.Memory.Request, a.SandboxMemoryRequest}, {&res.Memory.Limit, a.SandboxMemoryLimit},
+		{&res.CPU.Request, a.SandboxCpuRequest},
+		{&res.CPU.Limit, a.SandboxCpuLimit},
+		{&res.Memory.Request, a.SandboxMemoryRequest},
+		{&res.Memory.Limit, a.SandboxMemoryLimit},
 	} {
 		if o.src.Valid && o.src.String != "" {
 			*o.dst = o.src.String
