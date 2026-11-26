@@ -4,6 +4,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
@@ -153,19 +155,35 @@ func exactQuery(q map[string]string) (map[string]string, error) {
 // its forge routes name (#1086 part C). A fault leaves the agent with no route, which closes its gateway
 // egress and opens nothing; it is logged, and the sandbox still gets its OpenShell rules from
 // ensureSandbox. A credential that cannot be sealed leaves the routes without it: they fail closed.
-// forgeErr is set only for an agent with a forge read grant (GitHubReadAccessAt): it says why that agent
-// has no credential, and its run start fails with it (recordForge).
+// forgeErr is set only for an agent that expects a forge credential (codehost.Registry.ReadGrant, the
+// rule koinon-agentd also reads): it says why that agent has no credential, and its run start fails with
+// it (recordForge). So every agent that expects a credential gets a row, served or with its cause.
 func (r *Reconciler) agentEgress(ctx context.Context, w *work) (routes []route.Route, cred *gatewayplan.ForgeCredential, file []byte, forgeErr error) {
 	ref := agentRef(w.org, w.agent.ID)
+	// The agent's git goes through the egress listener only when the install has one (Egress, the same
+	// chart setting that turns on koinon-agentd's egress prefix); without it the driver's own rule serves
+	// git, and no run waits for the credential.
+	_, grant, grantErr := providers.Default().ReadGrant(w.cfg)
+	expects := r.cfg.Egress != nil && (grant || grantErr != nil)
+	w.forgeExpects = expects
+	// fail logs err and returns it as the forge cause when the agent expects a credential.
+	fail := func(what string, err error) error {
+		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
+		if expects {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		return nil
+	}
 	baseURL, err := r.baseURLOf(ctx, w)
 	if err != nil {
-		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil, nil, nil, nil
+		return nil, nil, nil, fail("the agent's code-host connection", err)
 	}
 	read, hasRead, err := GitHubReadAccessAt(w.cfg, baseURL)
 	if err != nil {
-		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		return nil, nil, nil, nil
+		return nil, nil, nil, fail("the agent's code-host grant", err)
+	}
+	if expects && !hasRead {
+		return nil, nil, nil, fail("the agent's code-host grant", errors.New("the grant has no network rules at the connection's host"))
 	}
 	var forge []execution.Endpoint
 	if hasRead {
@@ -173,16 +191,15 @@ func (r *Reconciler) agentEgress(ctx context.Context, w *work) (routes []route.R
 	}
 	routes, err = EgressRoutes(ref, forge, PluginInstallsOn(w.cfg, w.agent.Harness))
 	if err != nil {
-		r.log.Error("the agent has no egress routes", "org", w.org.Slug, "agent", ref.Name, "err", err)
-		if hasRead {
-			return nil, nil, nil, fmt.Errorf("the agent's forge routes: %w", err)
-		}
-		return nil, nil, nil, nil
+		return nil, nil, nil, fail("the agent's forge routes", err)
 	}
 	if !hasRead {
 		return routes, nil, nil, nil
 	}
 	cred, file, err = r.forgeCredential(ctx, w, read, routes)
+	if err == nil && cred == nil && expects {
+		err = errors.New("koinon-reconciler has no key source for gateway credentials, so koinon-gateway refuses the agent's forge routes")
+	}
 	if err != nil {
 		r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
 		r.log.Error("the agent's forge routes have no credential; they fail closed", "org", w.org.Slug, "agent", ref.Name, "err", err)

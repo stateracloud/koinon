@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -21,11 +22,20 @@ const DefaultForgeServeTimeout = 5 * time.Minute
 // forgeWaitKind is the run event recorded when a run starts waiting for its forge credential.
 const forgeWaitKind = "run.waiting_for_forge"
 
+// expectsForge is the rule koinon-reconciler also writes the rows by (codehost.Registry.ReadGrant): the
+// run's agent version has a forge read grant. A grant that cannot be read counts as one: the reconciler
+// then writes the cause.
+func (r *runner) expectsForge() bool {
+	_, ok, err := providers.Default().ReadGrant(r.vcfg)
+	return ok || err != nil
+}
+
 // waitForge waits until koinon-gateway serves the agent's forge credential, so the run's first clone
 // through the egress listener is not refused with 503 credential_unavailable (#1086 part C2).
 // koinon-reconciler is the only component that knows: it records in gateway_agent_forge, for each
 // agent with a forge read grant, the State revision that holds the credential, and when every live
-// copy acked it. No row means the agent expects no credential, and the run starts at once. A row with
+// copy acked it. No row, for an agent whose version has no forge read grant, means the agent expects no
+// credential, and the run starts at once; with a grant, the run waits for a pass to write the row. A row with
 // a failure fails the run with that cause: the reconciler cannot make the credential, and no wait
 // brings it. While the run waits it records run.waiting_for_forge once and NOTIFYs the reconciler every
 // ReconcileNudge. After ForgeServeTimeout the run fails.
@@ -41,7 +51,11 @@ func (r *runner) waitForge(ctx context.Context) error {
 		f, err := r.q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return nil
+			if !r.expectsForge() {
+				return nil
+			}
+			// The agent expects a credential and no pass wrote its row yet (a version with a new grant
+			// that no pass has seen): wait for the pass, as for a row that is not served.
 		case err != nil:
 			if ctx.Err() != nil {
 				return ctx.Err()

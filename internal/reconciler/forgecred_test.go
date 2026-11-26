@@ -74,18 +74,19 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	// newReconcilerWith builds a reconciler with the gateway key source (none when recipient is nil) and
-	// the code-host token minter.
-	newReconcilerWith := func(recipient reconciler.RecipientKeys, tokens reconciler.GitHubTokens) *reconciler.Reconciler {
+	// newReconcilerWith builds a reconciler with the gateway key source (none when recipient is nil), the
+	// code-host token minter and koinon-gateway's egress listener; opts change the config last.
+	newReconcilerWith := func(recipient reconciler.RecipientKeys, tokens reconciler.GitHubTokens, opts ...func(*reconciler.Config)) *reconciler.Reconciler {
 		GinkgoHelper()
 		osg := fakegateway.New()
 		cc, err := osg.Start()
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
-		r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+		cfg := reconciler.Config{
 			KeepWarmPerOrg: 2,
 			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Egress:         &reconciler.Endpoint{Host: "koinon-mcp-gateway.koinon.svc", Port: 8081},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
 			ProviderKeyDir: "/secrets/providers",
@@ -97,7 +98,11 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 			GitHub: tokens, URLPolicy: testPolicy,
 			MCPAckWait: racescale.D(300 * time.Millisecond), MCPAckPoll: 20 * time.Millisecond,
 			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),
-		})
+		}
+		for _, o := range opts {
+			o(&cfg)
+		}
+		r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())
 		return r
 	}
@@ -260,6 +265,9 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 				Expect(name).NotTo(HavePrefix(forgecredfile.SealedPrefix + org.String()))
 			}
 		}
+		row, err := q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: org, AgentID: agent})
+		Expect(err).NotTo(HaveOccurred(), "the agent expects a credential, so its runs fail with the cause")
+		Expect(row.Failure).To(ContainSubstring("no key source for gateway credentials"))
 	})
 
 	Describe("the record that koinon-agentd waits on before the harness starts (#1086 part C2)", func() {
@@ -294,6 +302,14 @@ var _ = Describe("The forge credential of an agent (#1086 part C)", func() {
 			a := newAgent(ctx, org, user)
 			Expect(r.ReconcileAll(ctx)).To(Succeed())
 			_, err := forgeRow(ctx, org, a.ID)
+			Expect(err).To(MatchError(pgx.ErrNoRows))
+		})
+
+		It("writes no row when the install has no egress listener: git then uses the driver's own rule", func(ctx SpecContext) {
+			r := newReconcilerWith(staticRecipient{pub: gk.Public()}, fixedTokens{}, func(c *reconciler.Config) { c.Egress = nil })
+			org, agent := readAgent(ctx)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			_, err := forgeRow(ctx, org, agent)
 			Expect(err).To(MatchError(pgx.ErrNoRows))
 		})
 

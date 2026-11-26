@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -50,6 +51,16 @@ func (r *Reconciler) noteForge(creds []route.Credential, rev int64) {
 	r.forgeRevs = next
 }
 
+// forgeFailure is the stored cause: at most forgeFailureMax bytes, cut on a rune boundary, so the text
+// stays valid UTF-8 for Postgres.
+func forgeFailure(cause string) string {
+	msg := "koinon-reconciler has no forge credential for the agent: " + cause
+	if len(msg) <= forgeFailureMax {
+		return msg
+	}
+	return strings.ToValidUTF8(msg[:forgeFailureMax], "")
+}
+
 // forgeRev is the first stored revision that holds the forge credential name, if one does.
 func (r *Reconciler) forgeRev(name string) (int64, bool) {
 	r.keyRevMu.Lock()
@@ -59,21 +70,19 @@ func (r *Reconciler) forgeRev(name string) (int64, bool) {
 }
 
 // forgeWant is what the active agent w expects of its forge credential, and false when it expects
-// none: it has no forge read grant, or the routes name no credential (no gateway key source). The rule
-// is agentEgress's, which is the one that makes the routes.
+// none. The rule is agentEgress's (forgeExpects): the install has the egress listener and the agent has
+// a forge read grant (codehost.Registry.ReadGrant, which koinon-agentd reads too). An agent that expects
+// a credential and has none gets its cause.
 func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
-	if w.agent.Status != store.AgentStatusActive {
+	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects {
 		return forgeRow{}, false
 	}
-	if w.forgeErr != nil {
-		msg := "koinon-reconciler has no forge credential for the agent: " + w.forgeErr.Error()
-		if len(msg) > forgeFailureMax {
-			msg = msg[:forgeFailureMax]
+	if w.forgeErr != nil || w.forge == nil {
+		cause := "no credential was made"
+		if w.forgeErr != nil {
+			cause = w.forgeErr.Error()
 		}
-		return forgeRow{failure: msg}, true
-	}
-	if w.forge == nil {
-		return forgeRow{}, false
+		return forgeRow{failure: forgeFailure(cause)}, true
 	}
 	rev, ok := r.forgeRev(w.forge.Name)
 	if !ok {
@@ -83,10 +92,11 @@ func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 }
 
 // recordForge writes what each agent of the pass expects of its forge credential (gateway_agent_forge)
-// and marks the rows whose revision every live koinon-gateway copy acked. When a revision is not acked
-// yet it waits for the acks (awaitGatewayAcked, bounded), as the key gate does. An agent that no longer
+// and marks the rows whose revision every live koinon-gateway copy acked. With wait, when a revision is
+// not acked yet it waits for the acks (awaitGatewayAcked, bounded), as the key gate does; the key gate of
+// the same pass usually waited already, and an ack of a later revision counts. An agent that no longer
 // expects a credential loses its row. Only changes go to the database.
-func (r *Reconciler) recordForge(ctx context.Context, items []*work) error {
+func (r *Reconciler) recordForge(ctx context.Context, items []*work, wait bool) error {
 	first := r.forgeRows == nil
 	if first {
 		r.forgeRows = map[agentKey]forgeRow{}
@@ -113,7 +123,7 @@ func (r *Reconciler) recordForge(ctx context.Context, items []*work) error {
 	}
 	var gate *keyGate
 	if maxRev > 0 {
-		if !r.newKeyGate(ctx, nil).ackedRev(ctx, maxRev) {
+		if wait && !r.newKeyGate(ctx, nil).ackedRev(ctx, maxRev) {
 			r.awaitGatewayAcked(ctx, maxRev)
 		}
 		gate = r.newKeyGate(ctx, nil)

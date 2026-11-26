@@ -46,8 +46,8 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 	withEgress := func(c *agentd.Config) {
 		c.ActorTokens, c.EgressURL, c.ActorTokenRefresh = minter(), egressURL, 100*time.Millisecond
 	}
-	// ghesAgent binds the agent to a GitHub connection on ghes.example.test.
-	ghesAgent := func(ctx context.Context) func(e *env) string {
+	// ghesAgentWith binds the agent to a GitHub connection on ghes.example.test, with a grant of scope.
+	ghesAgentWith := func(ctx context.Context, scope string) func(e *env) string {
 		return func(e *env) string {
 			connID := uuid.New()
 			cfg, err := json.Marshal(connections.GitHubConfig{AppID: 1, InstallationID: 2, Site: codehost.Site{BaseURL: "https://ghes.example.test"}})
@@ -58,9 +58,20 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 			})
 			Expect(err).NotTo(HaveOccurred())
 			return `{"instructions":"help","model":"` + model + `",` +
-				`"grants":[{"connector":"github","scopes":["repo.read"],"preset":"standard"}],` +
+				`"grants":[{"connector":"github","scopes":["` + scope + `"],"preset":"standard"}],` +
 				`"bindings":[{"connector":"github","connectionId":"` + connID.String() + `","targets":["acme/widgets"]}]}`
 		}
+	}
+	// ghesAgent has a forge read grant (repo.read): it expects a forge credential.
+	ghesAgent := func(ctx context.Context) func(e *env) string { return ghesAgentWith(ctx, "repo.read") }
+	// record writes the agent's gateway_agent_forge row, as koinon-reconciler does.
+	record := func(ctx context.Context, e *env, rev int64, served bool, failure string) {
+		GinkgoHelper()
+		_, err := db.Exec(ctx, `INSERT INTO gateway_agent_forge (org_id, agent_id, state_revision, served_at, failure)
+			VALUES ($1, $2, NULLIF($3::bigint, 0), CASE WHEN $4::bool THEN now() END, $5)
+			ON CONFLICT (org_id, agent_id) DO UPDATE SET state_revision = EXCLUDED.state_revision,
+			served_at = EXCLUDED.served_at, failure = EXCLUDED.failure`, e.org, e.agent.ID, rev, served, failure)
+		Expect(err).NotTo(HaveOccurred())
 	}
 	tokenOf := func(b []byte) string {
 		GinkgoHelper()
@@ -71,6 +82,7 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 
 	It("writes a valid actor token outside the home, rewrites the code host to the gateway, renews the token and removes it at the end", func(ctx SpecContext) {
 		e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+		record(ctx, e, 1, true, "")
 		// Closing the harness takes two seconds: long enough for several renewals.
 		e.harness.set(func(h *fakeHarness) { h.lingers = true })
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -134,38 +146,57 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 	})
 
 	Describe("the wait for koinon-gateway to serve the agent's forge credential", func() {
-		// record writes the agent's gateway_agent_forge row, as koinon-reconciler does.
-		record := func(ctx context.Context, e *env, rev int64, served bool, failure string) {
-			GinkgoHelper()
-			_, err := db.Exec(ctx, `INSERT INTO gateway_agent_forge (org_id, agent_id, state_revision, served_at, failure)
-				VALUES ($1, $2, NULLIF($3::bigint, 0), CASE WHEN $4::bool THEN now() END, $5)
-				ON CONFLICT (org_id, agent_id) DO UPDATE SET state_revision = EXCLUDED.state_revision,
-				served_at = EXCLUDED.served_at, failure = EXCLUDED.failure`, e.org, e.agent.ID, rev, served, failure)
-			Expect(err).NotTo(HaveOccurred())
-		}
 		waits := func(ctx context.Context, r store.Run) func() []store.RunEvent {
 			return func() []store.RunEvent { return eventOf(events(ctx, r), "run.waiting_for_forge") }
 		}
 
-		It("starts at once without a record; a new credential on the same agent holds the next run until it is served", func(ctx SpecContext) {
+		It("starts at once without a record when the agent has no forge read grant", func(ctx SpecContext) {
+			// pull_request.create has no network rules: koinon-reconciler makes no forge route and no row.
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgentWith(ctx, "pull_request.create"))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress)
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(waits(ctx, r)()).To(BeEmpty(), "no grant and no record: the agent expects no credential")
+			cfg, _ := e.files.get(codehost.SandboxGitConfig)
+			Expect(string(cfg)).To(ContainSubstring("/egress/"), "git still goes through the gateway")
+		})
+
+		It("waits for the pass to write the record of an agent with a forge read grant, then for every copy's ack", func(ctx SpecContext) {
+			// A version with a new grant that no reconciler pass has seen yet: there is no row.
 			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress, func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+			Eventually(waits(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			Expect(payload(waits(ctx, r)()[0])).To(HaveKeyWithValue("reason", "waiting for koinon-gateway to serve the agent's code-host credential"))
+			Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting), "no row yet holds the run")
+
+			record(ctx, e, 0, false, "")
+			record(ctx, e, 7, false, "")
+			Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
+				"a revision that a live copy has not acked holds the run")
+			Expect(waits(ctx, r)()).To(HaveLen(1), "the wait is recorded once")
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(BeEmpty(), "the harness does not start while the run waits")
+
+			record(ctx, e, 7, true, "")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		})
+
+		It("holds the next run of a persistent agent whose credential changed until it is served", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 3, true, "")
 			first := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", withEgress, func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 			Eventually(runState(ctx, first)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
-			Expect(waits(ctx, first)()).To(BeEmpty(), "no record: the agent expects no credential")
+			Expect(waits(ctx, first)()).To(BeEmpty(), "a served record: no wait")
 
-			By("the agent gets a new grant: its ready sandbox stays, the reconciler records the credential as pending")
-			record(ctx, e, 0, false, "")
+			By("a new grant: the ready sandbox stays, and the reconciler records the new revision as pending")
+			record(ctx, e, 9, false, "")
 			execs := len(e.gw.Execs())
 			next := e.enqueue(ctx, e.task(ctx, "again"))
 			Eventually(waits(ctx, next)).WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
-			Expect(payload(waits(ctx, next)()[0])).To(HaveKeyWithValue("reason", "waiting for koinon-gateway to serve the agent's code-host credential"))
-			record(ctx, e, 7, false, "")
-			Consistently(runState(ctx, next)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
-				"a revision that a live copy has not acked holds the run")
-			Expect(waits(ctx, next)()).To(HaveLen(1), "the wait is recorded once")
-
-			record(ctx, e, 7, true, "")
+			Consistently(runState(ctx, next)).WithTimeout(500 * time.Millisecond).Should(Equal(store.RunStateStarting))
+			record(ctx, e, 9, true, "")
 			Eventually(runState(ctx, next)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			Expect(len(e.gw.Execs())).To(BeNumerically(">", execs))
 		})

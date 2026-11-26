@@ -524,6 +524,8 @@ type work struct {
 	forgeFile []byte
 	// forgeErr says why an agent with a forge read grant has no credential (recordForge).
 	forgeErr error
+	// forgeExpects says the agent's run start waits for its forge credential (agentEgress).
+	forgeExpects bool
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -851,6 +853,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// never waits for the queue: a slow call for one agent holds only that agent. koinon-gateway must
 	// serve the key too: an early agent whose key the live copies have not acked waits with the others.
 	early, deferred, _ := r.newKeyGate(ctx, servedKeys).split(ctx, items, plan.Early)
+	// What the run start of each agent waits for on its forge credential (#1086 part C2), before any
+	// sandbox work of this pass: a run must never find no row for an agent that expects one, because
+	// the pass has not written it yet. The rows are marked served at the end of the pass.
+	if err := r.recordForge(ctx, items, false); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	r.submit(q, b, workOf(items, early), workspaces)
 
 	var res gatewayplan.ApplyResult
@@ -953,9 +962,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		}
 	}
 	r.submit(q, b, workOf(items, run), workspaces)
-	// What the run start of each agent waits for on its forge credential (#1086 part C2). It comes after
-	// the submit: the sandbox work does not wait for it, only the harness start in koinon-agentd does.
-	if err := r.recordForge(ctx, items); err != nil {
+	// Mark the forge rows whose revision every live koinon-gateway copy acked. It comes after the submit:
+	// the sandbox work does not wait for it, only the harness start in koinon-agentd does.
+	if err := r.recordForge(ctx, items, true); err != nil {
 		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 		errs = append(errs, err)
 	}
