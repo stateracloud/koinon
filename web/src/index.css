@@ -182,3 +182,15 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Reduced motion (WCAG 2.3.3): menus, dialogs and popovers open and close without the fade and zoom. The
+   duration is near zero, not "none", so Radix still sees animationend and unmounts a closed menu. Loops such
+   as a spinner keep their motion: they carry no data-state. The axe specs emulate reduced motion so that they
+   scan a menu at rest, not mid-fade. */
+@media (prefers-reduced-motion: reduce) {
+  [data-state="open"],
+  [data-state="closed"] {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+}
