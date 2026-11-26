@@ -12,7 +12,18 @@ import { arr, obj, str } from '@/lib/json'
 import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
-  | { key: string; at: number; type: 'message'; actor: ActorKind; actorUserId: string; actorName: string; text: string; runId?: string }
+  | {
+      key: string
+      at: number
+      type: 'message'
+      actor: ActorKind
+      actorUserId: string
+      actorName: string
+      /** The person without a Koinon account who wrote the message in Slack or Teams (ADR 0129). */
+      external?: { platform: string; platformUserId: string }
+      text: string
+      runId?: string
+    }
   | { key: string; at: number; type: 'agent-text'; runId: string; text: string; thought: boolean }
   | { key: string; at: number; type: 'tool'; runId: string; toolCallId: string; title: string; status: string }
   | {
@@ -197,7 +208,9 @@ function taskItem(ev: TaskEvent): TimelineItem {
     case 'message': {
       // A direct message's text carries the trigger's instruction; display is what the person wrote.
       const m = e.value
-      return { key, at, type: 'message', actor: ev.actorKind, actorUserId: ev.actorUserId, actorName: ev.actorDisplayName, text: m.display || m.text, runId }
+      const x = ev.actorKind === ActorKind.EXTERNAL ? ev.actorExternal : undefined
+      const external = x ? { platform: x.platform, platformUserId: x.platformUserId } : undefined
+      return { key, at, type: 'message', actor: ev.actorKind, actorUserId: ev.actorUserId, actorName: ev.actorDisplayName, external, text: m.display || m.text, runId }
     }
     case 'taskCreated':
       return { key, at, type: 'note', text: `Task created: ${e.value.title}`.trim() }

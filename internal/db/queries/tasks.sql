@@ -76,10 +76,10 @@ WITH task AS (
     RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
 )
 INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
-                           actor_agent_id, run_id, payload, payload_version, prompt)
+                           actor_agent_id, actor_external_id, run_id, payload, payload_version, prompt)
 SELECT task.org_id, task.id, task.last_event_seq, @kind, @actor_kind,
-       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(run_id), @payload,
-       @payload_version::smallint, @prompt::boolean
+       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(actor_external_id),
+       sqlc.narg(run_id), @payload, @payload_version::smallint, @prompt::boolean
 FROM task
 RETURNING *;
 
@@ -98,6 +98,21 @@ SELECT u.id, u.display_name
 FROM users u
 WHERE u.id = ANY(@user_ids::uuid[]) AND u.deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = @org_id);
+
+-- name: EnsureExternalActor :one
+-- The row of a person without a Koinon account who writes from a chat platform (ADR 0129): it
+-- creates the row the first time and returns the same row after that. The update on a conflict
+-- changes nothing; it only makes the statement return the row that a concurrent writer committed.
+INSERT INTO external_actors (org_id, platform, team, platform_user_id)
+VALUES (@org_id, @platform, @team, @platform_user_id)
+ON CONFLICT (org_id, platform, team, platform_user_id) DO UPDATE SET platform = EXCLUDED.platform
+RETURNING *;
+
+-- name: ListExternalActors :many
+-- The external actors that the events of a task name, by ID (ADR 0129): what a task read shows
+-- beside each of their messages. The rows hold no name and no profile data.
+SELECT * FROM external_actors
+WHERE org_id = @org_id AND id = ANY(@ids::uuid[]);
 
 -- name: ListTaskMessagesAfter :many
 -- The events on the task after a timeline seq that are part of a run's prompt, in order: what

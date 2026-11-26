@@ -4,7 +4,7 @@ import { create, type JsonObject, type MessageInitShape } from '@bufbuild/protob
 import { timestampFromDate, timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { RunEventSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, TaskEventSchema } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { ActorKind, ExternalActorSchema, TaskEventSchema } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { TimelineEventSchema, type TimelineEvent } from '@/gen/koinon/task/v1alpha1/timeline_pb'
 import { buildTimeline } from '@/lib/timeline'
 
@@ -496,5 +496,16 @@ describe('buildTimeline with purged content', () => {
   it('carries the author of a message', () => {
     const items = buildTimeline([taskEvent(1, 1000, message('Hi'), ActorKind.USER, 'u-2')], {})
     expect(items[0]).toMatchObject({ type: 'message', actor: ActorKind.USER, actorUserId: 'u-2' })
+  })
+})
+
+describe('buildTimeline with a person without a Koinon account (ADR 0129)', () => {
+  it('keeps the platform identity on the message and only on an external message', () => {
+    const external = taskEvent(1, 1000, message('the build is red'), ActorKind.EXTERNAL)
+    external.actorExternal = create(ExternalActorSchema, { platform: 'slack', team: 'T0TEST', platformUserId: 'U0TEST' })
+    const [item, other] = buildTimeline([external, taskEvent(2, 2000, message('on it'), ActorKind.USER, 'u-1')], {})
+    expect(item).toMatchObject({ type: 'message', actor: ActorKind.EXTERNAL, actorName: '', external: { platform: 'slack', platformUserId: 'U0TEST' }, text: 'the build is red' })
+    expect(other).toMatchObject({ type: 'message', actor: ActorKind.USER })
+    expect(other).not.toHaveProperty('external.platform')
   })
 })

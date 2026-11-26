@@ -61,15 +61,16 @@ func statusTo(e store.TaskEvent) (store.TaskState, bool) {
 }
 
 // historyMessage maps a timeline event to an A2A message, or nil when the event is not a
-// conversation entry. Messages of people are user messages; messages of the agent and its
-// questions are agent messages.
+// conversation entry. Messages of people are user messages, also those of a person without a
+// Koinon account (actor kind external, ADR 0129); messages of the agent and its questions are agent
+// messages.
 func historyMessage(thread string, task a2a.TaskID, e store.TaskEvent) *a2a.Message {
 	var (
 		role a2a.MessageRole
 		text string
 	)
 	switch {
-	case e.Kind == kindMessage && e.ActorKind == store.TaskActorKindUser:
+	case e.Kind == kindMessage && (e.ActorKind == store.TaskActorKindUser || e.ActorKind == store.TaskActorKindExternal):
 		role, text = a2a.MessageRoleUser, decode(e.Payload).text()
 	case e.Kind == kindMessage && e.ActorKind == store.TaskActorKindAgent:
 		role, text = a2a.MessageRoleAgent, decode(e.Payload).text()

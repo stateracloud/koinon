@@ -66,8 +66,8 @@ A new table `external_actors` holds one row for each person:
 - `platform_user_id`: the Slack user ID or the Teams user ID.
 - `created_at`.
 
-`(org_id, platform, team, platform_user_id)` is unique. The writer gets the row with an insert that does nothing on a
-conflict, then reads it. The row holds no display name, no email address and no other profile data. Koinon does not
+`(org_id, platform, team, platform_user_id)` is unique. The writer gets the row with one insert that returns the
+existing row on a conflict (`EnsureExternalActor`), so two writers for the same person get the same row. The row holds no display name, no email address and no other profile data. Koinon does not
 store what the platform says about the person.
 
 `task_events` gets the column `actor_external_id`, with a foreign key `(org_id, actor_external_id)` to

@@ -418,6 +418,10 @@ type Querier interface {
 	// A trigger needs the poller of (connection, resource): created due at @now (the pass's clock),
 	// or left as it is.
 	EnsureCodeHostPoller(ctx context.Context, arg EnsureCodeHostPollerParams) error
+	// The row of a person without a Koinon account who writes from a chat platform (ADR 0129): it
+	// creates the row the first time and returns the same row after that. The update on a conflict
+	// changes nothing; it only makes the statement return the row that a concurrent writer committed.
+	EnsureExternalActor(ctx context.Context, arg EnsureExternalActorParams) (ExternalActor, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The leak guard's state (ADR 0084, ADR 0091; old issue 349): sessions per home generation with their legs,
@@ -983,6 +987,9 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	// The external actors that the events of a task name, by ID (ADR 0129): what a task read shows
+	// beside each of their messages. The rows hold no name and no profile data.
+	ListExternalActors(ctx context.Context, arg ListExternalActorsParams) ([]ExternalActor, error)
 	// Price entries with requests Koinon flagged since @since, with how often, why and by how
 	// much: the recomputed cost differs from the gateway's by more than 1% (gateway_diff), the
 	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
