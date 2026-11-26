@@ -73,6 +73,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
+	usagev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1/usagev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
@@ -242,6 +244,31 @@ var isolationCases = map[string]isolationCase{
 	platformv1alpha1connect.PlatformServiceGetOrgProcedure: {
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return c.platform.GetOrg(ctx, &platformv1alpha1.GetOrgRequest{OrgId: org})
+		},
+	},
+
+	// The usage and cost read model (issue #1268): an org call names the org only, so a member of
+	// another org gets NotFound; the platform calls refuse every org role.
+	usagev1alpha1connect.UsageServiceGetOrgUsageProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).GetOrgUsage(ctx, &usagev1alpha1.GetOrgUsageRequest{OrgId: org})
+		},
+	},
+	usagev1alpha1connect.UsageServiceExportOrgUsageProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).ExportOrgUsage(ctx, &usagev1alpha1.ExportOrgUsageRequest{OrgId: org})
+		},
+	},
+	usagev1alpha1connect.UsageServiceGetPlatformUsageProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).GetPlatformUsage(ctx, &usagev1alpha1.GetPlatformUsageRequest{})
+		},
+	},
+	usagev1alpha1connect.UsageServiceExportPlatformUsageProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).ExportPlatformUsage(ctx, &usagev1alpha1.ExportPlatformUsageRequest{})
 		},
 	},
 

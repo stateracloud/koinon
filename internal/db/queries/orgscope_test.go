@@ -55,6 +55,8 @@ var crossOrgQueries = map[string]string{
 	"api_tokens.sql:GetAPITokenByPrefix":                    "admin API: authenticates a bearer token, which names its org only after it is looked up",
 	"connections.sql:ListConnectionsToMigrate":              "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
 	"connections.sql:ListOrgsWithCodeHostConnections":       "the code-host scope refresh: finds every org that has a live code-host connection, to re-read its repositories' visibility",
+	"usage.sql:PlatformUsageByDay":                          "platform admins: the ledger of every org by day, org and model, read per org through the (org_id, occurred_at) index (issue #1268)",
+	"usage.sql:PlatformUsageRunsSince":                      "platform admins: the runs of every org created since a time, counted per org through the (org_id, created_at) index (issue #1268)",
 	"budget.sql:ListOrgBudgetSummaries":                     "platform admins: lists every org with its cap, ceiling and spend",
 	"catalog.sql:ListModelsToRederiveFormat":                "startup: finds the models whose format follows the table, in every org, to re-derive them (ADR 0069)",
 	"platform_prices.sql:ListPriceModelNames":               "the price refresh: the model names of every org, no org, provider or secret, to diff a public price source against the catalog (ADR 0098)",

@@ -5378,3 +5378,152 @@ TestResult is what the last synthetic trace showed.
 | CONTENT_LEVEL_NONE | 1 | NONE: names, IDs, counts, timings, statuses and cost; no content. The default. |
 | CONTENT_LEVEL_REDACTED | 2 | REDACTED: content after the scrubber. |
 | CONTENT_LEVEL_FULL | 3 | FULL: content as is, apart from credentials. Only an org owner may choose it. |
+
+## koinon.usage.v1alpha1
+
+Files: `koinon/usage/v1alpha1/usage.proto`
+
+### Service UsageService
+
+UsageService is the usage and cost read model of the console home and the "Usage and cost" page
+(issue #1268, ADR 0126 section 4). It reads the spend ledger and the runs table in the database,
+never Prometheus. Amounts are USD decimal strings. A day is a UTC day.
+
+Every member of an org reads that org's usage and no other org's. The platform-wide calls are for
+platform admins. The CSV export holds the same rows and the same totals as the matching Get call.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ExportOrgUsage | `koinon.usage.v1alpha1.ExportOrgUsageRequest` | `koinon.usage.v1alpha1.ExportUsageResponse` | - | ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above. |
+| ExportPlatformUsage | `koinon.usage.v1alpha1.ExportPlatformUsageRequest` | `koinon.usage.v1alpha1.ExportUsageResponse` | - | ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only. |
+| GetOrgUsage | `koinon.usage.v1alpha1.GetOrgUsageRequest` | `koinon.usage.v1alpha1.GetOrgUsageResponse` | - | GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and today's runs. Members and above. |
+| GetPlatformUsage | `koinon.usage.v1alpha1.GetPlatformUsageRequest` | `koinon.usage.v1alpha1.GetPlatformUsageResponse` | - | GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's runs. Platform admins only. |
+
+### Message ExportOrgUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| range | 2 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+| agent_id | 3 | `string` | singular |  |  |
+| model | 4 | `string` | singular |  |  |
+| provider_id | 5 | `string` | singular |  |  |
+
+### Message ExportPlatformUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| range | 1 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+
+### Message ExportUsageResponse
+
+ExportUsageResponse is a CSV file: a header row, one row per row of the matching Get call, then
+a final row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| filename | 1 | `string` | singular |  |  |
+| csv | 2 | `string` | singular |  |  |
+
+### Message GetOrgUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| range | 2 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+| agent_id | 3 | `string` | singular |  | agent_id, model and provider_id narrow the rows. Empty means all. |
+| model | 4 | `string` | singular |  |  |
+| provider_id | 5 | `string` | singular |  |  |
+
+### Message GetOrgUsageResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| from | 2 | `google.protobuf.Timestamp` | singular |  | from and to are the rounded period of the rows: from (inclusive) up to to (exclusive). |
+| to | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| rows | 4 | `koinon.usage.v1alpha1.OrgUsageRow` | repeated |  |  |
+| totals | 5 | `koinon.usage.v1alpha1.UsageTotals` | singular |  | totals is the sum of rows. |
+| runs | 6 | `koinon.usage.v1alpha1.RunCounts` | singular |  | runs counts today's runs of the org, whatever the range and the filters. |
+
+### Message GetPlatformUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| range | 1 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+
+### Message GetPlatformUsageResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `google.protobuf.Timestamp` | singular |  |  |
+| to | 2 | `google.protobuf.Timestamp` | singular |  |  |
+| rows | 3 | `koinon.usage.v1alpha1.PlatformUsageRow` | repeated |  |  |
+| totals | 4 | `koinon.usage.v1alpha1.UsageTotals` | singular |  | totals is the sum of rows. |
+| runs | 5 | `koinon.usage.v1alpha1.RunCounts` | singular |  | runs counts today's runs of every org. |
+
+### Message OrgUsageRow
+
+OrgUsageRow is the ledger of one org for one day, principal, agent, model and provider.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day | 1 | `string` | singular |  | day is the UTC day as YYYY-MM-DD. |
+| principal | 2 | `string` | singular |  | principal is "agent" or "system" (a system check of the org, with no agent). |
+| agent_id | 3 | `string` | singular |  |  |
+| agent_name | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  |  |
+| provider_id | 6 | `string` | singular |  | provider_id is empty when the ledger did not record the provider (older entries, or a provider that is deleted); provider_name is then empty too. |
+| provider_name | 7 | `string` | singular |  |  |
+| usage | 8 | `koinon.usage.v1alpha1.UsageTotals` | singular |  |  |
+
+### Message PlatformUsageRow
+
+PlatformUsageRow is the ledger of one org for one day and model.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day | 1 | `string` | singular |  |  |
+| org_id | 2 | `string` | singular |  |  |
+| org_slug | 3 | `string` | singular |  |  |
+| org_name | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  |  |
+| usage | 6 | `koinon.usage.v1alpha1.UsageTotals` | singular |  |  |
+
+### Message RunCounts
+
+RunCounts are the runs created on the current UTC day.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day_start | 1 | `google.protobuf.Timestamp` | singular |  | day_start is the start of today (UTC). |
+| runs_today | 2 | `int64` | singular |  | runs_today counts the runs created since day_start, in any state. |
+| failed_runs_today | 3 | `int64` | singular |  | failed_runs_today counts those of them that are in the state failed now. |
+
+### Message UsageRange
+
+UsageRange is the period of a query: the UTC days from `from` up to, not including, `to`. Both
+are rounded down to the start of their UTC day. With none set, the period is the month to date
+(the first of the month up to the end of today). A period is at most 366 days.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `google.protobuf.Timestamp` | singular |  |  |
+| to | 2 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message UsageTotals
+
+UsageTotals are the sums of a set of ledger rows. The token buckets are disjoint: input_tokens
+does not count the cache tokens, and reasoning_tokens are part of output_tokens.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| requests | 1 | `int64` | singular |  |  |
+| input_tokens | 2 | `int64` | singular |  |  |
+| output_tokens | 3 | `int64` | singular |  |  |
+| cache_read_tokens | 4 | `int64` | singular |  |  |
+| cache_write_tokens | 5 | `int64` | singular |  |  |
+| reasoning_tokens | 6 | `int64` | singular |  |  |
+| cost_usd | 7 | `string` | singular |  | cost_usd is the recorded charge of the requests, estimated usage included. |
+| estimated_usd | 8 | `string` | singular |  | estimated_usd is the part of cost_usd that came from estimated usage. |
+| cache_read_share | 9 | `double` | singular |  | cache_read_share is cache_read_tokens over all the input side (input_tokens + cache_read_tokens + cache_write_tokens), from 0 to 1; 0 when there is none. |
