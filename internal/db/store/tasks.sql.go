@@ -350,6 +350,46 @@ func (q *Queries) LatestUserMessageActor(ctx context.Context, arg LatestUserMess
 	return actor_user_id, err
 }
 
+const listEventActorNames = `-- name: ListEventActorNames :many
+SELECT u.id, u.display_name
+FROM users u
+WHERE u.id = ANY($1::uuid[]) AND u.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = $2)
+`
+
+type ListEventActorNamesParams struct {
+	UserIds []pgtype.UUID
+	OrgID   pgtype.UUID
+}
+
+type ListEventActorNamesRow struct {
+	ID          pgtype.UUID
+	DisplayName string
+}
+
+// Display names of the people who wrote events of this org, by user id: what a task read shows beside
+// each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+// inside the org whose events name the user; a deleted user has no name.
+func (q *Queries) ListEventActorNames(ctx context.Context, arg ListEventActorNamesParams) ([]ListEventActorNamesRow, error) {
+	rows, err := q.db.Query(ctx, listEventActorNames, arg.UserIds, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventActorNamesRow
+	for rows.Next() {
+		var i ListEventActorNamesRow
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskEvents = `-- name: ListTaskEvents :many
 SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
