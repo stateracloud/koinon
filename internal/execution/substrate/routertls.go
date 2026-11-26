@@ -166,13 +166,14 @@ func (c *routerCreds) config() (*tls.Config, error) {
 	}, nil
 }
 
-func (c *routerCreds) ClientHandshake(ctx context.Context, authority string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+func (c *routerCreds) ClientHandshake(ctx context.Context, _ string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	cfg, err := c.config()
 	if err != nil {
 		_ = conn.Close()
 		return nil, nil, err
 	}
-	return credentials.NewTLS(cfg).ClientHandshake(ctx, authority, conn)
+	// Check the router against the pinned name, not the channel authority that grpc passes in.
+	return credentials.NewTLS(cfg).ClientHandshake(ctx, c.name, conn)
 }
 
 func (c *routerCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
@@ -180,7 +181,7 @@ func (c *routerCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.Auth
 }
 
 func (c *routerCreds) Info() credentials.ProtocolInfo {
-	return credentials.ProtocolInfo{SecurityProtocol: "tls", ServerName: c.name}
+	return credentials.ProtocolInfo{SecurityProtocol: "tls"}
 }
 
 func (c *routerCreds) Clone() credentials.TransportCredentials {
