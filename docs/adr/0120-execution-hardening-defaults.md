@@ -551,16 +551,17 @@ it (`no_token`).
    `expiration_seconds: 900`. The rule holds no org host and no credential. The gateway still owns the L7
    rules and the credentials.
 2. **atenet-egress finds the actor from the transport.** In the worker pod, atunnel presents a certificate
-   for the actor. atenet-egress accepts it only for an actor that exists and runs. So the identity comes from
+   for the actor. atenet-egress accepts it only for an actor that is placed on a worker (running or resuming). So the identity comes from
    the connection, not from a value that the guest sets. For a request that carries the header, atenet-egress
    gets a token from ateapi (`MintActorJwt`). It writes the token over the value of the guest
    (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each token until a third of its lifetime remains. Each failure
-   refuses the request (403 or 503). Source: `cmd/atenet/internal/router/egress/credentials.go`
+   refuses the request (403, 503 or 500, `mapActorJWTError`). Source: `cmd/atenet/internal/router/egress/credentials.go`
    (`applyEffects`, `actorJWT`) and `actorjwt/actorjwt.go`.
 3. **The gateway URL of a Substrate guest is `http`.** `replace_headers` works on an `HttpRule`, and an
    `HttpRule` does not match TLS. To replace a header in TLS, Substrate needs an `HttpsRule`. That rule
    decrypts the request with a gateway CA that the guest must trust, and Koinon does not use it. The chart
-   URL is `http` already. `CheckEgressURL` refuses an `https` egress URL with a clear error.
+   URL is `http` already. Today `CheckEgressURL` (`internal/agentd/actortoken.go`) accepts `https`. #1386
+   changes it to refuse an `https` egress URL with a clear error.
 4. **The gateway verifies the Substrate token.** The Substrate verifier replaces the Ed25519 verifier:
    - It trusts exactly one issuer: the `--actor-jwt-issuer` of the Substrate install (the installer default is
      `https://idp.<substrate namespace>.svc`). The value comes from the chart values, never from the `iss` of
@@ -581,14 +582,19 @@ it (`no_token`).
      `route.Request` reads only the first value (`Header.Get`, `internal/gateway/route/route.go`).
 5. **Koinon's own record names the agent.** The gateway does not trust the token for the org or the agent.
    It finds them in Koinon's record of the actor, for each request:
-   - The driver creates the actor in the org's workspace (the atespace, ADR 0002) with the sandbox name. The
-     reconciler records both in `agent_sandboxes` (`workspace`, `sandbox_name`), next to the org and the
-     agent. #1386 adds the column `actor_uid`. The driver writes the UID of each actor that it creates.
+   - The driver creates the actor in the org's workspace (the atespace, ADR 0002). The actor name is the
+     sandbox name plus a generation part (item 6). `agent_sandboxes` records the workspace next to the org and
+     the agent. #1386 adds two columns: `actor_name` and `actor_uid`. The driver writes both for each actor
+     that it creates. A new column is necessary, because the CHECK of `sandbox_name` allows at most 19
+     characters, and `ka-` plus 16 hex characters already uses all 19.
    - The gateway gets this map through the State stream, as it gets the routes. The map gives the org slug,
      because `actortoken.Actor.Org` is the slug, not `org_id`. The `actorUID` of the token must be equal to the
      recorded UID. An actor that is not in the map, or a UID that is not equal, is refused. So an archived or
      deleted sandbox loses its identity at the next State update. The route check (`route.inScope`) does
      not change.
+   - A new actor is not in the map until the next State update. So its first request can be refused. This
+     fails closed. koinon-agentd waits until the gateway knows the actor before it starts the run, as
+     `forgewait.go` waits for the forge credential.
    - The run: `agent_sandboxes` has no run today. The gateway log names the run when the State stream gives
      the run that holds the sandbox. Else the run claim stays empty, as `actortoken.Actor` already allows.
 6. **Each actor gets its own name.** atenet-egress keys its token cache by actor name, and it reuses a token
@@ -596,7 +602,8 @@ it (`no_token`).
    task, for an ephemeral agent, `internal/execution/names.go`). So a new actor can have the name of an old
    one and get a token with the old UID. Item 5 refuses that token, so it fails closed, but the new actor
    cannot reach the gateway for up to 10 minutes. To prevent this, the driver gives each new actor a name
-   that no earlier actor had: the sandbox name plus a short generation part, recorded in `agent_sandboxes`.
+   that no earlier actor had: the sandbox name plus a short generation part, recorded in
+   `agent_sandboxes.actor_name` (item 5).
 7. **Network and install.** The gateway needs a route to the issuer and to its `jwks_uri`. The chart adds
    one NetworkPolicy egress rule from the gateway for this route, and a chart check asserts it. This rule is
    for the verifier. It is not the guest's route to the gateway, which #1444 owns. Substrate's own
@@ -604,9 +611,12 @@ it (`no_token`).
    preflight checks that the gateway can read the discovery document. The gateway does not get a route to
    ateapi.
 8. **No route skips the hop.** The egress listener of the gateway accepts Substrate traffic only from
-   atenet-egress. The chart NetworkPolicy of the gateway admits the egress listener port only from the
-   atenet-egress pods and from Koinon's own pods. A guest that connects to the gateway in a different way gets
-   no answer. A chart check asserts this.
+   atenet-egress. Today the egress listener port admits all pods of the Substrate namespace
+   (`charts/koinon/templates/networkpolicy.yaml`). The chart NetworkPolicy of the gateway then admits that
+   port only from the atenet-egress pods (a `namespaceSelector` and a `podSelector`, no CNI-specific
+   feature). A guest that connects to the gateway in a different way gets no answer. A chart check asserts
+   this. This rule is the second fence of section 2.4. It stops working when `sandboxNetworkPolicy` is off or
+   the CNI does not enforce NetworkPolicy. The first fence is the `EgressPolicy` of #1444.
 
 ### What is removed
 
@@ -617,9 +627,16 @@ it (`no_token`).
 - The refresh loop in koinon-agentd that writes into the guest (`writeActorToken`, `keepActorToken`).
 - The koinon-agentd minter and the Ed25519 path. Today the only user of the minter is the guest token file
   (`internal/agentd/actortoken.go`). The forge-wait probe (`forgewait.go`) reads the database and does not
-  call the gateway. So #1386 removes `Config.ActorTokens`, the coupling check in `actortoken.go`, the
-  koinon-agentd seed in the `actor-token-key` Secret (`_helpers.tpl`) and the Ed25519 verifier of the
-  gateway. The check in `egressGit` (`actortoken.go`) then uses `EgressURL`, not `ActorTokens`.
+  call the gateway. So #1386 removes:
+  - `Config.ActorTokens`, the coupling check in `actortoken.go` and the Ed25519 verifier of the gateway. The
+    check in `egressGit` (`actortoken.go`) then uses `EgressURL`, not `ActorTokens`.
+  - The `actor-token-key` Secret: its seed in `_helpers.tpl`, the ensure-secrets kind `ed25519-key`
+    (`internal/ensuresecrets/ed25519.go`, `ensure-secrets.yaml`) and the value
+    `gateway.mcp.koinon.egress.actorToken.existingSecret`.
+  - The key mounts: `--actor-token-keys-dir` of the gateway (`gateway-koinon-mcp.yaml`) and the mount of
+    koinon-agentd (`deployments.yaml`).
+  - The flags `actorTokenIssuer` and `actorTokenKeyID` of koinon-agentd and koinon-gateway
+    (`cmd/koinonagentd/main.go`, `cmd/koinongateway/main.go`).
 - The git configuration of the guest keeps the `insteadOf` prefix and gets the placeholder header. It holds
   no secret.
 
@@ -642,7 +659,8 @@ it (`no_token`).
   accepts the added token.
 - A control spec: the same request with a token that the guest made itself does not reach the gateway as
   sent. atenet-egress writes over the value, so the gateway sees only the minted token.
-- A control spec: a request with two values of the header is refused.
+- A gateway test (not a guest spec): a request with two values of the header is refused. A guest spec
+  cannot test this, because atenet-egress writes one value over the header.
 - A control spec: a guest of another org sends the same request, and the gateway refuses it.
 - A control spec: after the sandbox is archived, a token of its actor is refused.
 - Section 5.1 holds as written: no credential and no token are in the guest, so no home checkpoint and no
@@ -671,11 +689,13 @@ it (`no_token`).
   upstream NetworkPolicy comment says that it serves the discovery document and the key set. The code of
   #1386 proves this with a spec before it depends on it.
 - Where the key of the actor certificate is on the microVM tier (ADR 0075). It must be outside the guest
-  kernel. The code of #1386 proves this before the amendment is accepted.
+  kernel. The upstream source puts it in the `BrokerCertificateSource` of atunnel, in the ateworker-microvm
+  process on the host side (`internal/atunnel/tunnel.go`). A spec confirms this before the amendment is
+  accepted.
 
 ### Prior art
 
-Main's full research pass of 2026-11-26 (main's research store, `2026-11-26-identity-outside-guest.md`).
+The research of 2026-11-26 (the maintainer's research store, `2026-11-26-identity-outside-guest.md`).
 
 - **Agent Substrate v1.0.1** (commit `20778a6dbb01f13024642851bb592bf67c9fec05`): the per-actor
   certificate of atunnel, and `HttpRuleEffects.replace_headers` with `actor_jwt` in
