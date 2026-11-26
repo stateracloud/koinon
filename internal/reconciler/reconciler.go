@@ -320,6 +320,9 @@ type Reconciler struct {
 	// pass goroutine only).
 	forgeRevs map[string]int64
 	forgeRows map[agentKey]forgeRow
+	// actorRevs maps each Substrate actor in the stored State to the first revision that held it
+	// (noteActors, issue #1386), under keyRevMu.
+	actorRevs map[gatewayplan.Actor]int64
 	probeDue  []dueProbe
 	probeWake chan struct{}
 	// probeParked holds, under probeMu, the servers whose probe was held because no stored revision
@@ -492,6 +495,7 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, 
 			}
 			r.noteKeys(served.Keys, p.Revision, s.Keys)
 			r.noteForge(served.EgressCredentials, p.Revision)
+			r.noteActors(served.EgressActors, p.Revision)
 			return p.Revision, nil
 		}
 		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)
@@ -536,6 +540,9 @@ type work struct {
 	forgeErr error
 	// forgeExpects says the agent's run start waits for its forge credential (agentEgress).
 	forgeExpects bool
+	// actor is the agent's Substrate actor with its recorded UID, nil when it has none (actorOf). The
+	// pass sets it before it submits the sandbox work, which may change sb meanwhile.
+	actor *gatewayplan.Actor
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
 
@@ -579,12 +586,18 @@ func (w *work) setRejection(msg string) bool {
 // IDs (they are not recorded: agentd never needs them).
 func (w *work) names() execution.AgentNames {
 	n := execution.AgentObjectNames(w.org.ID.Bytes, w.agent.ID.Bytes)
-	n.Sandbox, n.Provider, n.KeySecret = w.sb.SandboxName, w.sb.ProviderName, w.sb.KeySecretName
+	// Every driver call names the actor: on Agent Substrate a sandbox gets a new actor name for each new
+	// actor (issue #1386, ActorRef); elsewhere it is the sandbox name.
+	n.Sandbox, n.Provider, n.KeySecret = w.sb.ActorRef(), w.sb.ProviderName, w.sb.KeySecretName
 	return n
 }
 
 func (w *work) logAttrs() []any {
-	return []any{"org", w.org.Slug, "agent", execution.UUIDString(w.agent.ID.Bytes), "sandbox", w.sb.SandboxName}
+	attrs := []any{"org", w.org.Slug, "agent", execution.UUIDString(w.agent.ID.Bytes), "sandbox", w.sb.SandboxName}
+	if w.sb.ActorName.Valid {
+		attrs = append(attrs, "actor", w.sb.ActorName.String)
+	}
+	return attrs
 }
 
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
@@ -761,10 +774,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		if w.forge != nil {
 			egressFiles[w.forge.File] = w.forgeFile
 		}
+		w.actor = r.actorOf(w)
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
 			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
-			Forge: w.forge,
+			Forge: w.forge, Actor: w.actor,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -1443,8 +1457,8 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	// never replaces the sandbox, and a removed one takes the listener away at once (within the data plane's
 	// policy cache TTL). It is not in spec or
 	// hash for that reason.
+	access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
 	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
-		access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
 		if err := s.SetGatewayAccess(ctx, ws, names.Sandbox, access); err != nil {
 			return err
 		}
@@ -1477,6 +1491,15 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationCreate, nil, hash)
 		if err != nil || held {
 			return err
+		}
+		// A new Substrate actor gets a new name, recorded before the create and given its gateway access
+		// first (issue #1386): a name never comes back for another actor.
+		if renamed, err := r.nameNewActor(ctx, w, ws, access); err != nil {
+			release()
+			return err
+		} else if renamed {
+			names = w.names()
+			spec, hash = r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
 		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
@@ -1851,7 +1874,7 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 // for its re-activation. Runs cannot be queued for a draft agent. With no sandbox it drops the
 // agent's GitHub provider and profile (dropDraftGitHub).
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
-	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
+	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.ActorRef())
 	if errors.Is(err, execution.ErrNotFound) {
 		if err := r.dropDraftGitHub(ctx, w); err != nil {
 			return err
@@ -1862,7 +1885,7 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		return err
 	}
 	if sb.Phase == execution.PhaseReady {
-		if sb, err = r.stopSandbox(ctx, w.sb.Workspace, w.sb.SandboxName); err != nil {
+		if sb, err = r.stopSandbox(ctx, w.sb.Workspace, w.sb.ActorRef()); err != nil {
 			return err
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
@@ -1894,7 +1917,7 @@ func (r *Reconciler) dropDraftGitHub(ctx context.Context, w *work) error {
 // provider record and key Secret. The key itself was already revoked: the gateway state of
 // this pass left it out.
 func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
-	ws, name := w.sb.Workspace, w.sb.SandboxName
+	ws, name := w.sb.Workspace, w.sb.ActorRef()
 	final := store.SandboxStateDeleted
 	sb, err := r.backend.GetSandbox(ctx, ws, name)
 	switch {
@@ -1990,6 +2013,9 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
 	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID); err != nil {
+		return err
+	}
+	if err := r.recordActor(ctx, w, sb); err != nil {
 		return err
 	}
 	return r.recordEnforcement(ctx, w, sb.Enforcement)

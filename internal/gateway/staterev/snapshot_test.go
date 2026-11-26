@@ -90,6 +90,10 @@ func richState() gateway.State {
 		{Name: "org/zeta/agent/gamma/codehost", Org: "zeta", Agent: "gamma", File: "/keys/forgev2-z", Scheme: route.SchemeBearer},
 		{Name: "org/acme/agent/alpha/codehost", Org: "acme", Agent: "alpha", File: "/keys/forgev2-a", Scheme: route.SchemeBasic, User: "x-access-token"},
 	}
+	s.EgressActors = []gateway.EgressActor{
+		{Atespace: "ws-zeta", Name: "ka-zeta-0a1b2c3d", UID: "uid-z", Org: "zeta", Agent: "gamma"},
+		{Atespace: "ws-acme", Name: "ka-acme-4e5f6a7b", UID: "uid-a", Org: "acme", Agent: "alpha", Run: "run-1"},
+	}
 	return s
 }
 
@@ -112,12 +116,27 @@ var _ = Describe("Snapshot", func() {
 		Expect(back.EgressRoutes[2].Methods).To(Equal([]string{"GET", "HEAD"}))
 		// Sorted by name.
 		Expect(back.EgressCredentials).To(Equal([]route.Credential{s.EgressCredentials[1], s.EgressCredentials[0]}))
+		// Sorted by workspace, name and UID.
+		Expect(back.EgressActors).To(Equal([]gateway.EgressActor{s.EgressActors[1], s.EgressActors[0]}))
+	})
+
+	It("carries the egress actors without routes or credentials, and differs when an actor UID changes", func() {
+		s := richState()
+		s.EgressRoutes, s.EgressCredentials = nil, nil
+		u := staterev.Snapshot(s)
+		Expect(u.GetEgress().GetActors()).To(HaveLen(2))
+		Expect(staterev.FromProto(u).EgressActors).To(HaveLen(2))
+		b := richState()
+		b.EgressRoutes, b.EgressCredentials = nil, nil
+		b.EgressActors[0].UID = "uid-z2"
+		Expect(proto.Equal(u, staterev.Snapshot(b))).To(BeFalse())
 	})
 
 	It("carries no egress half for a State without egress routes", func() {
 		s := richState()
 		s.EgressRoutes = nil
 		s.EgressCredentials = nil
+		s.EgressActors = nil
 		u := staterev.Snapshot(s)
 		Expect(u.GetEgress()).To(BeNil())
 		Expect(staterev.FromProto(u).EgressRoutes).To(BeEmpty())
@@ -234,6 +253,10 @@ var _ = Describe("secret material", func() {
 		// envelope that only the gateway key opens; the other fields name and scope it.
 		"EgressCredentials[].Agent", "EgressCredentials[].File", "EgressCredentials[].Name",
 		"EgressCredentials[].Org", "EgressCredentials[].Scheme", "EgressCredentials[].User",
+		// The Substrate actors (issue #1386), reviewed 2026-11-26: the actor identity and the org, agent and
+		// run it works for. Names and UIDs only, no token.
+		"EgressActors[].Agent", "EgressActors[].Atespace", "EgressActors[].Name", "EgressActors[].Org",
+		"EgressActors[].Run", "EgressActors[].UID",
 	}
 
 	It("lists every leaf field of State, so a new field is reviewed", func() {

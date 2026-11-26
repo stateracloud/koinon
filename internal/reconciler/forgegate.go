@@ -88,6 +88,15 @@ func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 	if !ok {
 		return forgeRow{}, true
 	}
+	// The gateway knows a Substrate actor only from the revision that carries it (issue #1386): the run
+	// waits for the later of the two revisions.
+	if w.actor != nil {
+		arev, ok := r.actorRev(*w.actor)
+		if !ok {
+			return forgeRow{}, true
+		}
+		rev = max(rev, arev)
+	}
 	return forgeRow{rev: rev}, true
 }
 

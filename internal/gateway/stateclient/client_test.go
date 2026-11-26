@@ -137,10 +137,11 @@ func (m *mcpApplier) ApplyMCP(_ context.Context, c gateway.MCPConfig) (gateway.R
 
 // egressApplier records the org egress routes of each revision.
 type egressApplier struct {
-	mu    sync.Mutex
-	got   [][]route.Route
-	creds [][]route.Credential
-	err   error
+	mu     sync.Mutex
+	got    [][]route.Route
+	creds  [][]route.Credential
+	actors [][]gateway.EgressActor
+	err    error
 }
 
 func (e *egressApplier) ApplyEgress(_ context.Context, st gateway.EgressState) error {
@@ -148,6 +149,7 @@ func (e *egressApplier) ApplyEgress(_ context.Context, st gateway.EgressState) e
 	defer e.mu.Unlock()
 	e.got = append(e.got, st.EgressRoutes)
 	e.creds = append(e.creds, st.EgressCredentials)
+	e.actors = append(e.actors, st.EgressActors)
 	return e.err
 }
 
@@ -162,6 +164,10 @@ func (m *memStore) publishEgress(rev int64, name string, routes []route.Route, c
 	s.MCP = []gateway.MCPTarget{{Name: name, URL: "http://" + name + "/mcp"}}
 	s.EgressRoutes = routes
 	s.EgressCredentials = creds
+	m.publishState(rev, s)
+}
+
+func (m *memStore) publishState(rev int64, s gateway.State) {
 	u := staterev.Snapshot(s)
 	u.Revision = rev
 	m.mu.Lock()
@@ -262,6 +268,22 @@ var _ = Describe("the gateway State client", func() {
 			Eventually(eg.calls, 10*time.Second, 10*time.Millisecond).Should(HaveLen(2))
 			Expect(eg.calls()[1]).To(BeEmpty())
 			Expect(testutil.ToFloat64(m.Applied.WithLabelValues("egress", "ok"))).To(Equal(2.0))
+		})
+
+		It("carries the Substrate actors of a revision to the egress applier (issue #1386)", func() {
+			start(20 * time.Millisecond)
+			eg := &egressApplier{}
+			egress = eg
+			actor := gateway.EgressActor{Atespace: "ws-acme", Name: "ka-acme-0a1b2c3d", UID: "uid-1", Org: "acme", Agent: "a1"}
+			var s gateway.State
+			s.MCP = []gateway.MCPTarget{{Name: "wiki", URL: "http://wiki/mcp"}}
+			s.EgressActors = []gateway.EgressActor{actor}
+			st.publishState(3, s)
+			run(stateclient.NewMetrics(nil))
+			Eventually(eg.calls, 10*time.Second, 10*time.Millisecond).Should(HaveLen(1))
+			eg.mu.Lock()
+			defer eg.mu.Unlock()
+			Expect(eg.actors[0]).To(Equal([]gateway.EgressActor{actor}))
 		})
 
 		It("counts a refused set and still applies and acks the halves", func() {

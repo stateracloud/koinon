@@ -27,6 +27,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
 	"github.com/stateracloud/koinon/internal/guestlaunch"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -58,6 +60,27 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 	advance := func(d time.Duration) {
 		t := time.Now().Add(d)
 		now.Store(&t)
+	}
+	// sandboxRow is the agent's sandbox row; its ActorRef names the current actor (issue #1386).
+	sandboxRow := func(ctx context.Context, agent pgtype.UUID) store.AgentSandbox {
+		GinkgoHelper()
+		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org, AgentID: agent})
+		Expect(err).NotTo(HaveOccurred())
+		return sb
+	}
+	actorOf := func(ctx context.Context, agent pgtype.UUID) string { return sandboxRow(ctx, agent).ActorRef() }
+	// stateActors are the actors of agent in the newest stored gateway State.
+	stateActors := func(ctx context.Context, agent pgtype.UUID) []gateway.EgressActor {
+		GinkgoHelper()
+		u, err := staterev.Latest(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		var mine []gateway.EgressActor
+		for _, a := range staterev.FromProto(u).EgressActors {
+			if a.Agent == execution.UUIDString(agent.Bytes) {
+				mine = append(mine, a)
+			}
+		}
+		return mine
 	}
 
 	BeforeEach(func(ctx SpecContext) {
@@ -107,26 +130,27 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 
 	It("creates an actor, suspends it when idle and resumes it for a run", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
-		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		pass(ctx)
-		Eventually(func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		actor := actorOf(ctx, agent.ID)
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, actor) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		Expect(cl.Calls("CreateActor")).To(Equal(1))
 
 		By("an idle sandbox is suspended")
 		coolDown(ctx, org, agent.ID)
 		advance(9 * time.Minute)
 		pass(ctx)
-		Expect(cl.State(ws, names.Sandbox)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		advance(11 * time.Minute)
 		pass(ctx)
-		Expect(cl.State(ws, names.Sandbox)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+		Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
 
 		By("a queued run resumes it")
 		now.Store(nil)
 		queueRun(ctx, org, user, agent.ID)
 		pass(ctx)
-		Eventually(func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, actor) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		Expect(cl.Calls("CreateActor")).To(Equal(1), "resumed, not re-created")
+		Expect(actorOf(ctx, agent.ID)).To(Equal(actor), "a resume keeps the actor and its name")
 	})
 
 	It("the adapter drops provider records, network rules and a filesystem policy; the plain driver refuses them", func(ctx SpecContext) {
@@ -151,7 +175,6 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 	It("gives the egress listener only to an agent with a code-host grant, and takes it away in place", func(ctx SpecContext) {
 		gw, gwPort, egressPort := fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
 		plain := newAgent(ctx, org, user)
-		plainNames := execution.AgentObjectNames(org.Bytes, plain.ID.Bytes)
 
 		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
@@ -170,17 +193,17 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		}.Marshal()
 		Expect(err).NotTo(HaveOccurred())
 		forge := newAgentWithConfig(ctx, org, user, string(withGrant))
-		forgeNames := execution.AgentObjectNames(org.Bytes, forge.ID.Bytes)
 
 		pass(ctx)
-		for _, n := range []string{plainNames.Sandbox, forgeNames.Sandbox} {
+		plainActor, forgeActor := actorOf(ctx, plain.ID), actorOf(ctx, forge.ID)
+		for _, n := range []string{plainActor, forgeActor} {
 			Eventually(func() ateapiv1.ActorState { return cl.State(ws, n) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		}
 		Expect(cl.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
-		Expect(cl.EgressAllowed(ws, plainNames.Sandbox, gw, gwPort)).To(BeTrue())
-		Expect(cl.EgressAllowed(ws, plainNames.Sandbox, gw, egressPort)).To(BeFalse(), "an actor without a code-host grant has no route to the egress listener")
-		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, gwPort)).To(BeTrue())
-		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, egressPort)).To(BeTrue(), "the agent with the grant")
+		Expect(cl.EgressAllowed(ws, plainActor, gw, gwPort)).To(BeTrue())
+		Expect(cl.EgressAllowed(ws, plainActor, gw, egressPort)).To(BeFalse(), "an actor without a code-host grant has no route to the egress listener")
+		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
+		Expect(cl.EgressAllowed(ws, forgeActor, gw, egressPort)).To(BeTrue(), "the agent with the grant")
 		creates := cl.Calls("CreateActor")
 
 		By("a new version without the grant takes the listener away on the next pass, without a new sandbox")
@@ -189,22 +212,66 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: forge.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx)
-		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, egressPort)).To(BeFalse())
-		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, gwPort)).To(BeTrue())
+		Expect(cl.EgressAllowed(ws, forgeActor, gw, egressPort)).To(BeFalse())
+		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
 		Expect(cl.Calls("CreateActor")).To(Equal(creates), "the grant is not part of the sandbox spec")
 		Expect(cl.Calls("DeleteActor")).To(BeZero())
-		Expect(cl.State(ws, forgeNames.Sandbox)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		Expect(cl.State(ws, forgeActor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	})
 
 	It("recreates nothing on later passes", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
-		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		pass(ctx)
-		Eventually(func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		actor := actorOf(ctx, agent.ID)
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, actor) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		pass(ctx)
 		pass(ctx)
 		Expect(cl.Calls("CreateActor")).To(Equal(1), "the Substrate driver keeps no labels: the spec identity must hold across passes")
 		Expect(cl.Calls("DeleteActor")).To(BeZero())
+		Expect(actorOf(ctx, agent.ID)).To(Equal(actor))
+	})
+
+	// Issue #1386: the gateway maps a Substrate actor JWT to an agent by the actor name and UID, so a name
+	// never comes back for another actor, and the State carries each actor with its UID.
+	It("names each new actor anew, records its UID and carries it in the gateway State", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, user)
+		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		pass(ctx)
+		first := sandboxRow(ctx, agent.ID)
+		Expect(first.SandboxName).To(Equal(names.Sandbox))
+		Expect(first.ActorName.Valid).To(BeTrue())
+		Expect(first.ActorName.String).To(HavePrefix(names.Sandbox + "-"))
+		Expect(first.ActorUid.Valid).To(BeTrue(), "the UID of the created actor is recorded")
+		seen, err := d.GetSandbox(ctx, ws, first.ActorName.String)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first.ActorUid.String).To(Equal(seen.ID), "the UID is the actor's metadata UID")
+		var slug string
+		Expect(pool.QueryRow(ctx, "SELECT slug FROM orgs WHERE id = $1", org).Scan(&slug)).To(Succeed())
+		Expect(cl.State(ws, names.Sandbox)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "no actor under the sandbox name")
+
+		By("the next pass publishes the actor with its org and agent")
+		pass(ctx)
+		Expect(stateActors(ctx, agent.ID)).To(Equal([]gateway.EgressActor{{
+			Atespace: ws, Name: first.ActorName.String, UID: first.ActorUid.String,
+			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
+		}}))
+
+		By("a crashed actor is replaced by one with a new name and a new UID")
+		cl.Crash(ws, first.ActorName.String, "guest kernel panic")
+		Eventually(func(g Gomega) string {
+			g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+			sb := sandboxRow(ctx, agent.ID)
+			g.Expect(sb.ActorUid.Valid).To(BeTrue())
+			return sb.ActorName.String
+		}).ShouldNot(Equal(first.ActorName.String))
+		second := sandboxRow(ctx, agent.ID)
+		Expect(second.ActorUid.String).NotTo(Equal(first.ActorUid.String))
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, second.ActorName.String) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		pass(ctx)
+		Expect(stateActors(ctx, agent.ID)).To(Equal([]gateway.EgressActor{{
+			Atespace: ws, Name: second.ActorName.String, UID: second.ActorUid.String,
+			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
+		}}), "only the current actor")
 	})
 })
 

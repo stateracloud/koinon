@@ -1618,6 +1618,14 @@ type Querier interface {
 	SetAgentPlacement(ctx context.Context, arg SetAgentPlacementParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
+	// Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
+	// The name is new and never used again; the new actor has no observed UID yet.
+	SetAgentSandboxActorName(ctx context.Context, arg SetAgentSandboxActorNameParams) (AgentSandbox, error)
+	// Records the UID of the observed actor actor_name (issue #1386). A new UID also resets the agent's forge
+	// row: its run waits again until every live koinon-gateway copy acked a State revision that holds the
+	// actor (gateway_agent_forge, agentd waitForge). No row: the name is not the recorded one, or the UID is
+	// recorded already.
+	SetAgentSandboxActorUID(ctx context.Context, arg SetAgentSandboxActorUIDParams) (AgentSandbox, error)
 	// The network enforcement mode observed in the sandbox's policy (ADR 0045): enforce, audit, none or
 	// unknown. Kept apart from RecordAgentSandbox, which many paths call without an observed sandbox.
 	SetAgentSandboxEnforcement(ctx context.Context, arg SetAgentSandboxEnforcementParams) error
