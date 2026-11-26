@@ -757,7 +757,12 @@ func describeMode(name, valuesFile string) {
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
-			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			if slices.Contains(c.Args, "--restore-hold") {
+				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
+				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+			} else {
+				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			}
 			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
@@ -788,7 +793,12 @@ func describeMode(name, valuesFile string) {
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
-			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			if slices.Contains(c.Args, "--restore-hold") {
+				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
+				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+			} else {
+				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			}
 			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())

@@ -93,6 +93,10 @@ spec:
             - --state-token-file={{ include "koinon.otlpTokenDir" . }}/token
             - --shutdown-delay={{ $delay }}s
             - --drain-timeout={{ $drain }}s
+            {{- if include "koinon.restoreHold" . }}
+            # Held install (restoreHold, ADR 0107, issue #1358): ready with no State revision, deny-all.
+            - --restore-hold
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
