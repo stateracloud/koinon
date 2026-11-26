@@ -446,6 +446,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
 
 		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		if substrateDriver() {
+			// Substrate has no supervisor pod and no reconciler LimitRange. Its form (issue #1091): the chart makes the worker
+			// namespace with a LimitRange and the default WorkerPool.
+			By("on Substrate: the chart's LimitRange and WorkerPool exist in the worker namespace (the form of #76)")
+			kcs := func(args ...string) string {
+				GinkgoHelper()
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+				return strings.TrimSpace(string(out))
+			}
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "limitrange", "-o", "name")).To(ContainSubstring("worker-limits"))
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "workerpools.ate.dev", "-o", "name")).NotTo(BeEmpty())
+			t.end("4. Task → run streamed → approval pending")
+			return
+		}
 		kc := func(args ...string) string {
 			GinkgoHelper()
 			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
@@ -1120,16 +1135,22 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 
 		By("the reconciler bound the observer role in the workspace namespace, to itself only")
-		orgID, err := uuid.Parse(org)
-		Expect(err).NotTo(HaveOccurred())
-		// This org's own workspace, not any OpenShell namespace: other suites (the escape hook of step 6b)
-		// make workspaces of their own in the same cluster.
-		ws := execution.WorkspaceName(orgID)
-		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
-		Expect(ns).To(Equal("openshell-openshell-" + ws))
-		Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
-			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
-			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
+		if substrateDriver() {
+			// The observer RoleBinding is an OpenShell workspace object. On Substrate the reconciler reads worker pods through the
+			// chart's ClusterRole (get, list, watch on pods and events), so there is no per-workspace binding to read (issue #1091).
+			By("on Substrate: no per-workspace observer RoleBinding; the run's cause is checked below")
+		} else {
+			orgID, err := uuid.Parse(org)
+			Expect(err).NotTo(HaveOccurred())
+			// This org's own workspace, not any OpenShell namespace: other suites (the escape hook of step 6b)
+			// make workspaces of their own in the same cluster.
+			ws := execution.WorkspaceName(orgID)
+			ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+			Expect(ns).To(Equal("openshell-openshell-" + ws))
+			Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
+				"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
+				To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
+		}
 
 		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		// Read without kc, which trims the output: the restore below must write the original bytes back,
@@ -1564,3 +1585,10 @@ func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(con
 	Expect(fetches()[before:]).To(HaveLen(1))
 	Expect(refusedURLRule() - refusedBefore).To(BeNumerically("==", 1))
 }
+
+// substrateWorkerNamespace is the chart's default execution.substrate.workerNamespace.
+const substrateWorkerNamespace = "ate-workers"
+
+// substrateDriver is true when test/e2e/run.sh runs with DRIVER=substrate (issue #1091): the OpenShell objects that some
+// steps read do not exist then, and each such step reads its Substrate form instead.
+func substrateDriver() bool { return os.Getenv("DRIVER") == "substrate" }
