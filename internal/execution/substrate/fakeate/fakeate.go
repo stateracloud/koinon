@@ -45,6 +45,12 @@ type Cluster struct {
 	// and no Bind method. Set it before Start.
 	Unguarded bool
 
+	enforce          bool     // EnforceAuthz
+	bootstrap        []string // the principals that always hold global owner
+	globalPolicy     *ateapiv1.AccessPolicy
+	atespacePolicies map[string]*ateapiv1.AccessPolicy
+	polVersion       int64
+
 	mu        sync.Mutex
 	uid       int
 	atespaces map[string]string // name to uid
@@ -66,17 +72,18 @@ type Cluster struct {
 // New returns an empty cluster.
 func New() *Cluster {
 	return &Cluster{
-		atespaces: map[string]string{},
-		templates: map[key]*ateapiv1.ActorTemplate{},
-		actors:    map[key]*actor{},
-		tags:      map[key]*ateapiv1.Tag{},
-		tagAuth:   map[key]*guestauth.Verifier{},
-		resumes:   map[key]int{},
-		calls:     map[string]int{},
-		holds:     map[key]*getHold{},
-		tagHolds:  map[key]*getHold{},
-		delays:    map[key]*delay{},
-		stop:      make(chan struct{}),
+		atespaces:        map[string]string{},
+		atespacePolicies: map[string]*ateapiv1.AccessPolicy{},
+		templates:        map[key]*ateapiv1.ActorTemplate{},
+		actors:           map[key]*actor{},
+		tags:             map[key]*ateapiv1.Tag{},
+		tagAuth:          map[key]*guestauth.Verifier{},
+		resumes:          map[key]int{},
+		calls:            map[string]int{},
+		holds:            map[key]*getHold{},
+		tagHolds:         map[key]*getHold{},
+		delays:           map[key]*delay{},
+		stop:             make(chan struct{}),
 	}
 }
 
@@ -84,7 +91,7 @@ func New() *Cluster {
 // each. Stop shuts both down.
 func (c *Cluster) Start() (control, router *grpc.ClientConn, err error) {
 	c.ctlLis, c.routerLn = bufconn.Listen(1<<20), bufconn.Listen(1<<20)
-	c.ctl = grpc.NewServer()
+	c.ctl = grpc.NewServer(grpc.UnaryInterceptor(c.checkControlUnary))
 	if c.Unguarded {
 		c.rtr = grpc.NewServer()
 	} else {

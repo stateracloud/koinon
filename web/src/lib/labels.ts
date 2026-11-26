@@ -82,6 +82,9 @@ const harnessLabels: Record<string, string> = {
   opencode: 'OpenCode',
 }
 
+/** The built-in harnesses by name, for a form that offers a harness without a template (ADR 0112). */
+export const builtInHarnesses: readonly string[] = Object.keys(harnessLabels)
+
 export function harnessLabel(name: string): string {
   if (name === '') return 'Default'
   return harnessLabels[name] ?? name

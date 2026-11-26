@@ -24,7 +24,7 @@ import { NewServerPage } from '@/pages/new-server-page'
 import { ServerPage } from '@/pages/server-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
-import { NewAgentPage } from '@/pages/new-agent-page'
+import { BlankAgentPage, NewAgentPage, TemplateAgentPage } from '@/pages/new-agent-page'
 import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
 import { GitHubAppCreatedPage, GitHubAppInstalledPage } from '@/pages/github-app-setup-pages'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
@@ -110,7 +110,10 @@ export const agentsRedirectRoute = createRoute({
     throw redirect({ to: '/', replace: true })
   },
 })
+// New agent (ADR 0126 section 5): the gallery, then a template's wizard or the blank form.
 export const newAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new', component: NewAgentPage })
+export const newBlankAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/blank', component: BlankAgentPage })
+export const newTemplateAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/template/$templateId', component: TemplateAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/$agentId', component: AgentPage })
 
 export const connectionsRoute = createRoute({
@@ -214,6 +217,8 @@ const routeTree = rootRoute.addChildren([
       approvalRoute,
       agentsRedirectRoute,
       newAgentRoute,
+      newBlankAgentRoute,
+      newTemplateAgentRoute,
       agentRoute,
       connectionsRoute,
       newGitHubConnectionRoute,

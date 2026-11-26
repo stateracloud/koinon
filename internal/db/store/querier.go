@@ -1235,9 +1235,10 @@ type Querier interface {
 	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
 	// The input artifacts of a task, without their bodies: the messages the context guard already handled.
 	ListTaskInputArtifacts(ctx context.Context, arg ListTaskInputArtifactsParams) ([]ListTaskInputArtifactsRow, error)
-	// The users' messages on the task after a timeline seq, in order: what
-	// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
-	// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
+	// The events on the task after a timeline seq that are part of a run's prompt, in order: what
+	// agentd sends the harness. The writer marks them (task_events.prompt): the users' messages, and a
+	// system message with a source, such as a trigger's instruction, so a scheduled run sees what it
+	// was scheduled to do.
 	ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error)
 	ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, error)
 	// The tasks in any of the states, oldest first (a board column of the ticket API is a set of

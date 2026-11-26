@@ -28,6 +28,13 @@ service OrgSettingsService {
   // SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
   // off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
   rpc SetApproverNotRequester(SetApproverNotRequesterRequest) returns (SetApproverNotRequesterResponse);
+  rpc GetRunLimits(GetRunLimitsRequest) returns (GetRunLimitsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set
+  // stays as it is; 0 returns it to the default. Runs that are queued but not started get the new
+  // limits when they start. Audited as org.run_limits.set.
+  rpc SetRunLimits(SetRunLimitsRequest) returns (SetRunLimitsResponse);
 }
 
 // RunContentRetention is the org's effective retention of stored run content. Once a finished run is
@@ -107,4 +114,50 @@ message SetApproverNotRequesterRequest {
 
 message SetApproverNotRequesterResponse {
   bool on = 1;
+}
+
+// RunLimit is one run limit of the org. value is the limit in force; it is default_value when the
+// org set none.
+message RunLimit {
+  int32 value = 1;
+  int32 default_value = 2;
+  int32 min = 3;
+  int32 max = 4;
+}
+
+// RunLimits are the org's run limits (DB2, ADR 0066).
+message RunLimits {
+  // max_concurrent_runs is the most runs of the org that start or run at the same time. The other
+  // runs wait in the queue.
+  RunLimit max_concurrent_runs = 1;
+  // trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at
+  // the same time.
+  RunLimit trigger_concurrency = 2;
+  // trigger_rate_per_minute is the most of those items that start in one minute.
+  RunLimit trigger_rate_per_minute = 3;
+  // sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in
+  // one minute.
+  RunLimit sandbox_creations_per_minute = 4;
+}
+
+message GetRunLimitsRequest {
+  string org_id = 1;
+}
+
+message GetRunLimitsResponse {
+  RunLimits limits = 1;
+}
+
+// SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0
+// returns it to the default.
+message SetRunLimitsRequest {
+  string org_id = 1;
+  optional int32 max_concurrent_runs = 2;
+  optional int32 trigger_concurrency = 3;
+  optional int32 trigger_rate_per_minute = 4;
+  optional int32 sandbox_creations_per_minute = 5;
+}
+
+message SetRunLimitsResponse {
+  RunLimits limits = 1;
 }

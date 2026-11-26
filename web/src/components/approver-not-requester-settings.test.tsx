@@ -5,7 +5,6 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
@@ -15,7 +14,6 @@ function setup(role: OrgRole) {
   let gets = 0
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role }) })
-    service(ConnectionService, { listConnections: () => ({ connections: [] }) })
     service(OrgSettingsService, {
       getApproverNotRequester: () => {
         gets++
@@ -28,7 +26,7 @@ function setup(role: OrgRole) {
       },
     })
   })
-  renderApp(transport, '/connections')
+  renderApp(transport, '/settings/org')
   return { sets, gets: () => gets }
 }
 
@@ -47,7 +45,7 @@ describe('ApproverNotRequesterSettings', () => {
 
   it('does not show the rule to a member and sends no request', async () => {
     const { gets } = setup(OrgRole.MEMBER)
-    expect(await screen.findByRole('heading', { name: 'Connections' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Org settings' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: 'The approver must not be the requester' })).toBeNull()
     expect(gets()).toBe(0)
   })

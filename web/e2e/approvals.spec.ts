@@ -205,7 +205,7 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   // 2. Create an agent from the template and activate it.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('region', { name: 'Platform templates' }).getByRole('link', { name: /^Repo helper(?! \(Gitea\))/ }).click()
   await expect(page.getByRole('radio', { name: /OpenCode/ })).toBeChecked()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('combobox', { name: 'Repository 1' }).fill('widg')
