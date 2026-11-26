@@ -31,22 +31,18 @@ export function isEnded(s: TaskState): boolean {
 }
 
 /**
- * taskStateFromName maps the database names in event payloads ("input_required"). Events written
- * before the move from tickets name the old board columns, which map as the migration did.
+ * taskStateFromName maps the database names of a status.changed event ("input_required"). Migration
+ * 00020 renamed the old board columns in those events, so only the task states are left.
  */
-export function taskStateFromName(name: string | undefined): TaskState {
+export function taskStateFromName(name: string): TaskState {
   switch (name) {
     case 'submitted':
-    case 'todo':
       return TaskState.SUBMITTED
     case 'working':
-    case 'in_progress':
       return TaskState.WORKING
     case 'input_required':
-    case 'waiting_on_you':
       return TaskState.INPUT_REQUIRED
     case 'completed':
-    case 'done':
       return TaskState.COMPLETED
     case 'canceled':
       return TaskState.CANCELED
