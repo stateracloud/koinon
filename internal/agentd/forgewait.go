@@ -30,6 +30,30 @@ func (r *runner) expectsForge() bool {
 	return ok || err != nil
 }
 
+// activeExpectsForge applies the same rule to the agent's active version, the one koinon-reconciler
+// renders the forge routes from. A run can be pinned to an older version than the active one
+// (sandbox.go): when only the pinned version has a grant, the reconciler writes no row, and no wait
+// brings one.
+func (r *runner) activeExpectsForge(ctx context.Context) (bool, error) {
+	agent, err := r.q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
+	if err != nil {
+		return false, err
+	}
+	if !agent.ActiveVersionID.Valid || agent.ActiveVersionID == r.run.AgentVersionID {
+		return true, nil
+	}
+	v, err := r.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: r.run.OrgID, ID: agent.ActiveVersionID})
+	if err != nil {
+		return false, err
+	}
+	cfg, err := versionConfig(v.Config)
+	if err != nil {
+		return true, nil // the reconciler writes the cause
+	}
+	_, ok, err := providers.Default().ReadGrant(cfg)
+	return ok || err != nil, nil
+}
+
 // waitForge waits until koinon-gateway serves the agent's forge credential, so the run's first clone
 // through the egress listener is not refused with 503 credential_unavailable (#1086 part C2).
 // koinon-reconciler is the only component that knows: it records in gateway_agent_forge, for each
@@ -47,12 +71,22 @@ func (r *runner) waitForge(ctx context.Context) error {
 		nudged   time.Time
 		poll     = r.p.cfg.Poll
 	)
+	// A run whose version has no forge read grant expects no credential, whatever row the agent has:
+	// a row left from an earlier version neither holds nor fails it.
+	if !r.expectsForge() {
+		return nil
+	}
 	for {
 		f, err := r.q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			if !r.expectsForge() {
-				return nil
+			active, aerr := r.activeExpectsForge(ctx)
+			if aerr == nil && !active {
+				return &failure{reason: "the run's agent version has a code-host read grant, but the agent's active version has none, " +
+					"so koinon-reconciler makes no code-host credential for the agent; run the task again on the active version"}
+			}
+			if aerr != nil && ctx.Err() == nil {
+				r.log.Warn("reading the agent's active version failed", "err", aerr)
 			}
 			// The agent expects a credential and no pass wrote its row yet (a version with a new grant
 			// that no pass has seen): wait for the pass, as for a row that is not served.

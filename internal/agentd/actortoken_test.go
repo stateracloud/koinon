@@ -225,6 +225,38 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 			Expect(args).To(BeEmpty(), "the harness never starts")
 		})
 
+		It("ignores a record left from an earlier version when the run's version has no forge read grant", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgentWith(ctx, "pull_request.create"))
+			record(ctx, e, 0, false, "koinon-reconciler has no forge credential for the agent: a stale cause")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", withEgress)
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(waits(ctx, r)()).To(BeEmpty())
+		})
+
+		It("fails at once a run pinned to a version with a grant when the active version has none", func(ctx SpecContext) {
+			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			// The active version moves to one without a grant before the run starts: koinon-reconciler
+			// renders from the active version, so it writes no row for the agent.
+			v2, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: e.org, AgentID: e.agent.ID, CreatedBy: e.user,
+				Config: []byte(`{"model":"` + model + `","instructions":"Version two."}`),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: e.org, ID: e.agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: e.org, ID: e.agent.ID, VersionID: v2.ID, ActivatedBy: e.user})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getRun(ctx, r).AgentVersionID).NotTo(Equal(v2.ID), "the run stays pinned to the first version")
+
+			e.pool("agentd-a", withEgress)
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+			Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("the agent's active version has none"))
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(BeEmpty(), "the harness never starts")
+		})
+
 		It("does not read the record of an agent that does not clone through the gateway", func(ctx SpecContext) {
 			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
 			record(ctx, e, 0, false, "")

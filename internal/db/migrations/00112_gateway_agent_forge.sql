@@ -3,8 +3,9 @@
 -- When koinon-gateway serves an agent's forge credential (#1086 part C2). koinon-reconciler, the only
 -- writer, keeps a row for each active agent that has a forge read grant and so expects a sealed
 -- code-host credential on its forge routes (GitHubReadAccessAt). koinon-agentd reads the row before the
--- harness starts, the same way it waits for a model: no row, start; a failure, fail the run with it;
--- served_at set, start; else wait. The row never holds a token, only a State revision and a cause.
+-- harness starts, the same way it waits for a model: no forge read grant on the run's version, start;
+-- no row, wait for a pass (or fail when the active version has no grant); a failure, fail the run with
+-- it; served_at set, start; else wait. The row never holds a token, only a State revision and a cause.
 
 -- +goose Up
 
