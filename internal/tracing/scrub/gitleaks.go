@@ -209,8 +209,20 @@ type glAllow struct {
 	target  string
 	regexes []*regexp.Regexp
 	stops   []string // lower-case
-	never   bool     // an AND allowlist with a path or commit criterion
+	// stopsWhole: a stopword drops a candidate only when it is the whole candidate. Gitleaks
+	// itself tests "contains", which is right for the entropy-based generic rule and wrong for a
+	// fixed vendor shape: a real key that holds "abcdefghijklmnopqrstuvwxyz" stayed in the trace
+	// (issue 1337).
+	stopsWhole bool
+	never      bool // an AND allowlist with a path or commit criterion
 }
+
+// gitleaksStopContains lists the rules whose own stopwords keep gitleaks' "contains" test: the
+// generic rule has no fixed shape, so a word inside its candidate shows a name or a placeholder,
+// not a key. Every other rule drops a candidate only on a whole match. The global allowlist does
+// too, and it also applies to the generic rule: a generic candidate that holds the alphabet run is
+// now redacted (more redaction, never less).
+var gitleaksStopContains = map[string]struct{}{"generic-api-key": {}}
 
 // glSet is the compiled rule set.
 type glSet struct {
@@ -241,7 +253,7 @@ func compileGitleaks() *glSet {
 	}
 	g := &glSet{}
 	for _, a := range set.Global {
-		ca, ok := compileAllow(a)
+		ca, ok := compileAllow(a, true)
 		if !ok {
 			g.skipped = append(g.skipped, "global allowlist")
 			continue
@@ -263,7 +275,8 @@ func compileGitleaks() *glSet {
 			cr.entropy = 0
 		}
 		for _, a := range r.Allowlists {
-			ca, ok := compileAllow(a)
+			_, contains := gitleaksStopContains[r.ID]
+			ca, ok := compileAllow(a, !contains)
 			if !ok {
 				g.skipped = append(g.skipped, r.ID)
 				cr.re = nil
@@ -281,14 +294,27 @@ func compileGitleaks() *glSet {
 	return g
 }
 
-func compileAllow(a gitleaksrules.Allowlist) (glAllow, bool) {
-	out := glAllow{and: a.MatchCondition == "AND", target: a.RegexTarget}
+// gitleaksLiteralRE is the global allowlist regex of the pinned set that lacks a group around its
+// alternatives. Upstream writes `(?i)^true|false|null$`, which Go reads as three alternatives:
+// starts with "true", contains "false", ends with "null". A secret that ends in "NULL" (or holds
+// "false" anywhere) was dropped as a literal, whatever rule matched it: a real AWS key ID
+// AKIA…NULL stayed in the trace (issue 1299). The intent is the whole value being a literal.
+const (
+	gitleaksLiteralRE      = `(?i)^true|false|null$`
+	gitleaksLiteralREFixed = `(?i)^(?:true|false|null)$`
+)
+
+func compileAllow(a gitleaksrules.Allowlist, stopsWhole bool) (glAllow, bool) {
+	out := glAllow{and: a.MatchCondition == "AND", target: a.RegexTarget, stopsWhole: stopsWhole}
 	// A trace has no path and no commit. In an AND allowlist such a criterion can never hold, so
 	// the allowlist never matches; in an OR allowlist it simply adds nothing.
 	if out.and && (a.HasPaths || a.HasCommits) {
 		out.never = true
 	}
 	for _, s := range a.Regexes {
+		if s == gitleaksLiteralRE {
+			s = gitleaksLiteralREFixed
+		}
 		re, err := regexp.Compile(s)
 		if err != nil {
 			return out, false
@@ -323,7 +349,7 @@ func (a *glAllow) allows(secret, match, line string) bool {
 	if len(a.stops) > 0 {
 		low := strings.ToLower(secret)
 		for _, w := range a.stops {
-			if strings.Contains(low, w) {
+			if low == w || (!a.stopsWhole && strings.Contains(low, w)) {
 				hitStop = true
 				break
 			}

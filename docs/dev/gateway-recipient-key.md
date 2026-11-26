@@ -13,8 +13,33 @@ yet; that is slice 3.
 
 ## Use this page when
 
-You turn on `gateway.mcp.driver=koinon`. The key is on by default with that driver
-(`gateway.mcp.koinon.recipientKey.enabled`).
+You install or upgrade with `gateway.mcp.driver=koinon`. That driver is the chart default since #1239. The
+key is on by default with that driver (`gateway.mcp.koinon.recipientKey.enabled`).
+
+## Upgrade to the koinon driver default (#1239)
+
+An install that did not set `gateway.mcp.driver` used agentgateway for MCP before #1239. After the upgrade it
+uses koinon-gateway:
+
+- koinon-api sends its approved MCP calls (`KOINON_GATEWAY_MCP_URL`) and the live check of an agent's MCP
+  tools (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway.
+- The agents send their MCP calls to koinon-gateway. koinon-agentd gives the harness
+  `KOINON_AGENT_MCP_URL`, and the OpenShell sandbox profile allows `/mcp` on koinon-gateway's Service only. The model
+  path (`/v1`) stays on agentgateway.
+- The gateway recipient key is on. When a key is active and the write gate is open, koinon-api seals new MCP
+  credentials to it (envelope v2). agentgateway cannot open v2.
+- The reconciler's MCP prober lists tools through koinon-gateway (`gateway.mcpUrl`), so a server with a v2
+  credential is probed as agents see it.
+- koinon-gateway needs `gateway.mode=standalone`. With `gateway.mode=kubernetes` the render fails until you
+  set `gateway.mcp.driver=agentgateway`.
+- koinon-gateway needs its own database login (`postgres.cnpg.existingSecrets.mcpgateway`, or the key
+  `postgres.external.keys.mcpgateway` in external mode) and, with the key on, the key-admin and re-seal logins.
+  With a KMS, the gateway key needs its own KMS key (the policies below). With AWS KMS the render fails
+  until you set `gateway.mcp.koinon.recipientKey.kms.awskms.keyId`.
+
+To keep the old path, set `gateway.mcp.driver=agentgateway`. To move back after koinon-api sealed a
+credential to v2, set each such credential again in the UI or API first: `keys seal-mcp --to-v1` refuses
+today (see below), and agentgateway leaves out a server whose credential it cannot open.
 
 ## What runs
 
@@ -87,6 +112,41 @@ changed meanwhile is skipped and the next run takes it. Use `reseal.dryRun=true`
 Run the re-seal in a later upgrade than the rotation. The Job must see the new key as active. If both Jobs
 run in one upgrade, the re-seal can find the old key still active, move nothing and end. Then change
 `rotationId` to run it again. The Job has no egress except DNS, the database and the KMS.
+
+## Backup and restore
+
+The database holds the public keys and the sealed MCP credentials. Only the Secret
+`<release>-gateway-recipient-key` holds the private keys. Back up the Secret with the KEK and the database
+dump: without it, no stored MCP credential opens again, and koinon-mcp-gateway does not become ready
+after a restore, because the restored rows name keys that it does not have.
+
+The guide's blocks are in `test/e2e/commands/backup-restore.e1`:
+
+1. `backup-gateway-key` writes `koinon-gateway-key-backup.yaml` before `backup-db`. Only its owner can
+   read the file. On `local` it holds the private keys as they are; on `openbao` and `awskms` it holds them
+   wrapped. Keep it as safe as the KEK backup. Never put it in a log or a ticket.
+2. `check-gateway-key`, after `backup-db`, makes sure that the file holds every key that is not retired.
+3. `stop` also scales koinon-mcp-gateway to 0: it has a database login and loads the keys.
+4. `restore-gateway-key`, after `restore-db`, makes the Secret equal to the backup. The new install's own
+   first key goes away, because no restored row names it. The guard lets only the key-admin service
+   account write the Secret, so the block writes it as that account (`kubectl --as`). The person who
+   restores needs the right to impersonate that service account. That right also lets a person write
+   the Secret at any time, so grant it only for the restore and remove it after. The guard stays on.
+   `GWADMIN` names the service account when the chart's names differ (for example a `fullnameOverride`).
+5. `verify-gateway-key` waits until koinon-mcp-gateway is ready. It is ready only when it holds the private
+   key of each key that is not retired and each key matches its public row.
+
+What fails without it:
+
+- Without the Secret: koinon-mcp-gateway stays not ready, and each stored MCP credential is lost. Each
+  org must enter its MCP credentials again.
+- On `openbao` and `awskms`, the target must use the same wrapping key and the same policies (the sections
+  below). With another wrapping key the backup does not open.
+- Do not run `rotate` or `retire` between the backup of the Secret and the dump. If `check-gateway-key`
+  fails, take both again.
+
+`stop` waits for the key-admin Jobs of a new install to finish: a Job that adds a key during the restore
+would leave a key that no restored row names, and the gateway would not become ready.
 
 ## OpenBao policy
 

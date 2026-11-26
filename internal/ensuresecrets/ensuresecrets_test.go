@@ -18,6 +18,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/ensuresecrets"
+	"github.com/stateracloud/koinon/internal/guestauth"
 )
 
 var _ = Describe("Ensure", func() {
@@ -149,6 +150,45 @@ var _ = Describe("Ensure with an AES key", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: "gw-session", Namespace: "koinon"},
 			Data:       map[string][]byte{"key": []byte("short")},
 		}
+		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)
+		Expect(err).To(MatchError(ContainSubstring("not 64 hex characters")))
+	})
+})
+
+var _ = Describe("Ensure with an Ed25519 key", func() {
+	spec := []ensuresecrets.Spec{{Name: "guest-key", Type: corev1.SecretTypeOpaque, Kind: ensuresecrets.KindEd25519Key}}
+
+	It("creates a seed that the guest API signer takes, and never logs it", func(ctx SpecContext) {
+		var out bytes.Buffer
+		client := fake.NewClientset()
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := client.CoreV1().Secrets("koinon").Get(ctx, "guest-key", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		k, err := guestauth.ParseSeed(string(got.Data["key"]))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = guestauth.NewSigner(k)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(out.String()).NotTo(ContainSubstring(string(got.Data["key"])))
+	})
+
+	It("keeps a valid seed (adding only its public key) and rejects a malformed one without changing it", func(ctx SpecContext) {
+		good := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "guest-key", Namespace: "koinon"},
+			Data:       map[string][]byte{"key": []byte("1111111111111111111111111111111111111111111111111111111111111111")},
+		}
+		client := fake.NewClientset(good)
+		var out bytes.Buffer
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, _ := client.CoreV1().Secrets("koinon").Get(ctx, "guest-key", metav1.GetOptions{})
+		// The rc.30 guest key had no public.pem: Ensure adds it from the seed and keeps the seed
+		// (#1086 part C2; ed25519_test.go has the details).
+		Expect(got.Data["key"]).To(Equal(good.Data["key"]))
+		Expect(got.Data).To(HaveKey("public.pem"))
+		Expect(got.Data).To(HaveLen(2))
+		bad := good.DeepCopy()
+		bad.Data["key"] = []byte("short")
 		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)
 		Expect(err).To(MatchError(ContainSubstring("not 64 hex characters")))
 	})

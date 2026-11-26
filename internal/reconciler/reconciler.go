@@ -120,6 +120,11 @@ type Config struct {
 	// sandbox of an agent with a code-host grant gets a rule for the forge routes there (EgressRule).
 	// Nil: no such rule, and git reaches the forge only through the driver's own rule.
 	Egress *Endpoint
+	// MCPGateway is koinon-gateway's MCP listener as sandboxes reach it, when koinon-gateway serves the
+	// agents' MCP path (gateway.mcp.driver=koinon, ADR 0097 decision 5). The sandbox profile then allows
+	// /mcp on it and not on Gateway, and the MCP prober lists tools through it. Zero: agentgateway serves /mcp
+	// on Gateway.
+	MCPGateway Endpoint
 	// Keys opens the provider keys stored in Postgres (the secret store).
 	Keys catalog.Opener
 	// ProviderKeys receives the opened keys for the gateway. Required when any served
@@ -308,9 +313,14 @@ type Reconciler struct {
 
 	// probeMu guards probeDue: the MCP servers a pass newly applied, waiting for the prober (issue
 	// old issue 226). probeWake wakes the prober to take them.
-	probeMu   sync.Mutex
-	probeDue  []dueProbe
-	probeWake chan struct{}
+	probeMu sync.Mutex
+	// keyRevs maps each served key ID to the first State revision that held it, and pendingKeys holds
+	// the keys issued since the start that no stored revision holds yet (keyGate).
+	keyRevMu    sync.Mutex
+	keyRevs     map[string]int64
+	pendingKeys map[string]bool
+	probeDue    []dueProbe
+	probeWake   chan struct{}
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -321,6 +331,9 @@ type Reconciler struct {
 func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway, secrets SecretStore, cfg Config) (*Reconciler, error) {
 	if cfg.Gateway.Host == "" || cfg.Gateway.Port == 0 {
 		return nil, errors.New("reconciler: the agentgateway endpoint is required")
+	}
+	if (cfg.MCPGateway.Host == "") != (cfg.MCPGateway.Port == 0) {
+		return nil, errors.New("reconciler: the MCP gateway endpoint needs both a host and a port")
 	}
 	if cfg.Prices.IsZero() {
 		return nil, errors.New("reconciler: Prices is required (prices.NewResolver)")
@@ -428,35 +441,55 @@ func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
 	return pool
 }
 
-// statePublishTimeout bounds publishState.
-const statePublishTimeout = 5 * time.Second
+// statePublishTimeout bounds one attempt of publishState; statePublishAttempts and
+// statePublishBackoff are its retries inside the pass. On a stuck database a pass waits up to about
+// 16.5 s (three attempts and the backoff) before the store is a pass error.
+const (
+	statePublishTimeout  = 5 * time.Second
+	statePublishAttempts = 3
+	statePublishBackoff  = 500 * time.Millisecond
+)
 
 // publishState stores the state of this pass as a revision of the State stream when it differs from
-// the latest one (ADR 0097 decision 2.1), after the Apply, so the stored revision records what was
-// applied. Nothing reads the stream yet, so a failure is logged and
-// counted and never holds the pass back: the Apply below is what serves the state. The state is the
-// one a driver serves, without the keys of agents whose limit is invalid (WithoutInvalidLimits), so a
-// gateway that follows the stream serves what the agentgateway drivers serve.
+// the latest one (ADR 0097 decision 2.1). koinon-gateway serves the MCP half from the stream, so the
+// revision is the State itself for it: it is stored on its own path, before and whatever the
+// agentgateway Apply does, so an agentgateway outage or a rejected config does not freeze key revokes
+// and grants on koinon-gateway (#1239). The state is the one a driver serves, without the keys of
+// agents whose limit is invalid (WithoutInvalidLimits), so a gateway that follows the stream serves
+// what the agentgateway drivers serve.
 //
 // It returns the stored revision that holds the state (the new one, or the latest when nothing
-// changed), or 0 when nothing was stored. A probe of a new MCP server waits for the ack of this
-// revision (#1260).
-func (r *Reconciler) publishState(ctx context.Context, s gateway.State) int64 {
-	// Its own short deadline: a slow database must not hold the pass.
-	ctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
-	defer cancel()
+// changed). A failure is retried a few times in the pass; then it is a pass error, and the sandbox
+// work of an agent whose key no stored revision holds waits (keyGate). The next pass
+// stores the state again. A probe of a new MCP server waits for the ack of this revision (#1260).
+func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, error) {
 	served, _ := s.WithoutInvalidLimits()
-	p, err := r.states.Publish(ctx, served)
-	if err != nil {
-		r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
-		r.log.Warn("storing the gateway state revision failed; the gateway is applied as before", "err", err)
-		return 0
+	var err error
+	for attempt := range statePublishAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, fmt.Errorf("reconciler: store the gateway state revision: %w", errors.Join(err, ctx.Err()))
+			case <-time.After(statePublishBackoff * time.Duration(attempt)):
+			}
+		}
+		// Its own short deadline: a slow database must not hold the pass.
+		pctx, cancel := context.WithTimeout(ctx, statePublishTimeout)
+		var p staterev.Published
+		p, err = r.states.Publish(pctx, served)
+		cancel()
+		if err == nil {
+			if p.Changed {
+				r.m.StateRevisions.Inc()
+				r.log.Debug("gateway state revision stored", "revision", p.Revision)
+			}
+			r.noteKeys(served.Keys, p.Revision, s.Keys)
+			return p.Revision, nil
+		}
+		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)
 	}
-	if p.Changed {
-		r.m.StateRevisions.Inc()
-		r.log.Debug("gateway state revision stored", "revision", p.Revision)
-	}
-	return p.Revision
+	r.m.PassErrors.WithLabelValues(errKindStateRevision).Inc()
+	return 0, fmt.Errorf("reconciler: store the gateway state revision: %w", err)
 }
 
 // notifySelf wakes the leading reconciler through the same channel the triggers use (#249). The
@@ -556,6 +589,17 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	r.observeSandboxes(ctx)
 	r.observeUnmarked(ctx)
 	return err
+}
+
+// Close stops the pending key-settle wake-ups (notifySelf, #249) and keeps later passes from
+// scheduling more. Each one is a timer that sends a NOTIFY on the shared reconcile channel
+// ProviderKeySettle after a pass wrote a key file, so a reconciler that is dropped without Close
+// wakes whichever leader holds the lock then, long after its own work ended (#1074). Run calls it
+// when it returns; a caller that only uses ReconcileAll calls it when it is done. Close is safe to
+// call more than once, and a pass after it still converges: the next wake-up or resync picks up
+// the end of a settle.
+func (r *Reconciler) Close() {
+	r.plan.Close()
 }
 
 // reconcilePass is one pass over every org and agent, with its metrics, without the gateway count.
@@ -855,25 +899,32 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		r.m.PassErrors.WithLabelValues(kind).Inc()
 		errs = append(errs, pr.Err)
 	}
+	// The State stream first, on its own path (D3 of #1239): koinon-gateway serves the MCP half from
+	// it, whatever the agentgateway Apply below does.
+	// servedKeys are the keys koinon-gateway is to serve (keyGate).
+	servedKeys := map[string]bool{}
+	servedState, _ := plan.State.WithoutInvalidLimits()
+	for _, k := range servedState.Keys {
+		servedKeys[k.ID] = true
+	}
+	stateRev, pubErr := r.publishState(ctx, plan.State)
+	if pubErr != nil {
+		errs = append(errs, pubErr)
+	}
 	// Sandbox work is a per-agent work queue, outside the sequential pass (plan item LT1, practice B4,
 	// issue 573). An agent whose key the gateway already serves does not depend on the Apply below,
 	// which may wait for agentgateway's hot reload for about a minute: its sandbox work is queued now,
 	// concurrently with it. An agent with a new key is queued after the Apply, as before. The pass
-	// never waits for the queue: a slow call for one agent holds only that agent.
-	r.submit(q, b, workOf(items, plan.Early), workspaces)
+	// never waits for the queue: a slow call for one agent holds only that agent. koinon-gateway must
+	// serve the key too: an early agent whose key the live copies have not acked waits with the others.
+	early, deferred, _ := r.newKeyGate(ctx, servedKeys).split(ctx, items, plan.Early)
+	r.submit(q, b, workOf(items, early), workspaces)
 
 	var res gatewayplan.ApplyResult
 	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, plan.State)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
-	// Record what was applied. A gateway that took nothing (unreachable, whole config refused) has
-	// nothing to record; a partial rejection still left the rest live.
-	var applyRej *gateway.RejectedError
-	var stateRev int64
-	if applyErr == nil || errors.As(applyErr, &applyRej) {
-		stateRev = r.publishState(ctx, plan.State)
-	}
 	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
 		// but the objects named, which are reported on their org and do not hold back the others.
@@ -952,7 +1003,23 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		r.recordMessage(ctx, w, errors.New(msg))
 		heldBack++
 	}
-	r.submit(q, b, workOf(items, outcome.Run), workspaces)
+	// Run start waits until koinon-gateway serves the agent's key too (D1 of #1239): agentd's first
+	// MCP call carries it. The wait is bounded (MCPAckWait) and happens only when an agent waits; after
+	// it those agents are held, and the next pass looks again.
+	run := append(append([]int(nil), outcome.Run...), deferred...)
+	if _, wait, maxRev := r.newKeyGate(ctx, servedKeys).split(ctx, items, run); len(wait) > 0 {
+		if maxRev > 0 {
+			r.awaitGatewayAcked(ctx, maxRev)
+		}
+		var held []int
+		run, held, _ = r.newKeyGate(ctx, servedKeys).split(ctx, items, run)
+		for _, w := range workOf(items, held) {
+			r.log.Warn("koinon-gateway does not serve the agent's key yet; its sandbox work waits", w.logAttrs()...)
+			r.recordMessage(ctx, w, errors.New("waiting for koinon-gateway to serve the agent's key"))
+			heldBack++
+		}
+	}
+	r.submit(q, b, workOf(items, run), workspaces)
 	// Each rejected object is reported on its org's agents, after their own work item has recorded its
 	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
@@ -1279,6 +1346,7 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 	}
 	w.sb = sb
 	r.plan.KeyIssued(issued.ID)
+	r.keyIssued(issued.ID)
 	r.log.Info("issued agentgateway key", append(w.logAttrs(), "key_id", issued.ID, "reason", reason)...)
 	return issued.Key, issued.Material, nil
 }

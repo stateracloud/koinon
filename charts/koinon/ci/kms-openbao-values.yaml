@@ -16,6 +16,14 @@ secrets:
         address: https://openbao:8443
         caConfigMap: openbao-ca
         key: koinon-kek
+      # A key move (issue 688, 1298): the old transit key is the read-only second key. The pods start
+      # with the --read-only-* flags; the smoke test never calls the old key.
+      readOnly:
+        backend: openbao
+        openbao:
+          address: https://openbao:8443
+          caConfigMap: openbao-ca
+          key: koinon-kek-old
       keyAdmin:
         addKey: smoke-added-kek
         # The Job runs with the recovery flag (#255); the Secret it just created has a working

@@ -9,6 +9,11 @@
 //	KUBEBUILDER_ASSETS  envtest binaries, from `setup-envtest use 1.37.0 -p path` (required)
 //	HELM                helm binary (default helm on PATH)
 //
+// Labels "substrate" and "contract": the Substrate qualification (issue #1092). The "contract" specs
+// check token audiences and lifetimes and need nothing. The "live" specs need KOINON_ESCAPE_DRIVER=substrate
+// and a cluster with Agent Substrate; the variables are listed in substrate_harness_test.go and the runbook
+// is docs/dev/escape-substrate.md (make test-escape-substrate). v0.1.0 qualifies the gVisor tier only.
+//
 // Label "openshell": sandboxes on a real OpenShell gateway, rendered as the reconciler renders
 // them. Runs on kind (make test-escape-kind, which sets the variables below) and on any other
 // cluster's gateway (make test-escape):

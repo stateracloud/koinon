@@ -251,6 +251,40 @@ openshell:
 		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
 	})
 
+	// gateway.mcp.driver=koinon (#1239): the sandbox profile allows /mcp on koinon-gateway's MCP listener.
+	It("reads koinon-gateway's MCP URL, needs standalone mode for it and leaves it empty by default", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		withMCP := strings.Replace(chartConfig, "  port: 8080\n", "  port: 8080\n  mcpUrl: http://koinon-mcp-gateway.koinon.svc:8080\n", 1)
+		Expect(os.WriteFile(path, []byte(withMCP), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+		}
+		c, err := parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err := c.mcpGatewayEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep).To(Equal(reconciler.Endpoint{Host: "koinon-mcp-gateway.koinon.svc", Port: 8080}))
+
+		env["KOINON_GATEWAY_MCP_URL"] = "koinon-mcp-gateway:8080"
+		_, err = parseConfig(nil, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-mcp-url")))
+
+		env["KOINON_GATEWAY_MCP_URL"] = "http://m:8080"
+		env["KOINON_GATEWAY_MODE"], env["KOINON_GATEWAY_NAME"] = "kubernetes", "koinon-gateway"
+		_, err = parseConfig(nil, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-mcp-url needs standalone mode")))
+
+		Expect(os.WriteFile(path, []byte(chartConfig), 0o600)).To(Succeed())
+		delete(env, "KOINON_GATEWAY_MCP_URL")
+		delete(env, "KOINON_GATEWAY_MODE")
+		delete(env, "KOINON_GATEWAY_NAME")
+		c, err = parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err = c.mcpGatewayEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep).To(Equal(reconciler.Endpoint{}), "agentgateway serves /mcp")
+	})
+
 	It("reads archiveAfter: a negative file value turns the tier off, a flag overrides it, empty leaves the default to the reconciler", func() {
 		base := map[string]string{"DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"}
 		write := func(archiveAfter string) map[string]string {
@@ -446,13 +480,16 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 	parse := func(file, driver string) (config, error) {
 		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
 		Expect(os.WriteFile(path, []byte(file), 0o600)).To(Succeed())
+		// The guest API signing key (#1309), an obviously fake seed.
+		key := filepath.Join(GinkgoT().TempDir(), "guest-key")
+		Expect(os.WriteFile(key, []byte(strings.Repeat("11", 32)), 0o600)).To(Succeed())
 		env := map[string]string{
 			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
 		}
 		return parseConfig([]string{
 			"--execution-driver=" + driver,
 			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
-			"--substrate-allow-unhardened", "--substrate-default-tier=dev",
+			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
 		}, env)
 	}
 

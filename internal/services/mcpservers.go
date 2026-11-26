@@ -50,7 +50,7 @@ func (s *Server) mcpServerProto(org, slug string, m mcpservers.Server) *mcpserve
 		Id: m.ID, Name: m.Name, Url: m.URL, Transport: m.Transport, HasCredential: m.HasCredential,
 		CredentialHeader: m.CredentialHeader, CredentialPrefix: m.CredentialPrefix, Source: m.Source,
 		ManagedBySecret: m.ManagedBySecret, DisabledReason: m.DisabledReason, Removed: m.Removed,
-		CredentialLostAt: optTime(m.CredentialLostAt), AdminDisabled: adminDisabledProto(m.AdminDisabled), Health: healthToProto[m.Health], HealthReason: m.HealthReason,
+		CredentialLostAt: optTime(m.CredentialLostAt), UnreviewedToolsCappedAt: optTime(m.UnreviewedToolsCappedAt), AdminDisabled: adminDisabledProto(m.AdminDisabled), Health: healthToProto[m.Health], HealthReason: m.HealthReason,
 		HealthCheckedAt: optTime(m.HealthCheckedAt), HealthSince: optTime(m.HealthSince), ToolsSyncedAt: optTime(m.ToolsSyncedAt),
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 		GatewayTarget: mcpservers.TargetName(slug, m.Name),
@@ -270,6 +270,27 @@ func (s *Server) AcknowledgeToolReview(ctx context.Context, req *mcpserverv1alph
 		return nil, s.mcpError(err)
 	}
 	return &mcpserverv1alpha1.AcknowledgeToolReviewResponse{Tool: mcpToolProto(t)}, nil
+}
+
+// ReviewAllTools implements McpServerService. Admins and owners.
+func (s *Server) ReviewAllTools(ctx context.Context, req *mcpserverv1alpha1.ReviewAllToolsRequest) (*mcpserverv1alpha1.ReviewAllToolsResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	seen := make([]mcpservers.SeenTool, 0, len(req.GetTools()))
+	for _, t := range req.GetTools() {
+		seen = append(seen, mcpservers.SeenTool{Name: t.GetTool(), ToolHash: t.GetToolHash()})
+	}
+	res, err := s.mcp.ReviewAllTools(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), seen)
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	out := &mcpserverv1alpha1.ReviewAllToolsResponse{Removed: int32(res.Removed)} //nolint:gosec // at most MaxUnreviewedTools rows
+	for _, t := range res.Reviewed {
+		out.Tools = append(out.Tools, mcpToolProto(t))
+	}
+	return out, nil
 }
 
 func allowanceProto(list []mcpservers.Allowance) []*mcpserverv1alpha1.Allowance {

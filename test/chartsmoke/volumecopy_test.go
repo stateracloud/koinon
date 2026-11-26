@@ -51,7 +51,7 @@ func probeVolumeCopy(ctx context.Context, docker *testcontainers.DockerClient, i
 		testcontainers.WithMounts(testcontainers.VolumeMount(name, "/x")),
 		testcontainers.WithWaitStrategy(wait.ForExit()))
 	if reader != nil {
-		defer func() { _ = testcontainers.TerminateContainer(reader) }()
+		defer func() { terminate(reader) }()
 	}
 	if err != nil {
 		return fmt.Errorf("read the volume back: %w", err)

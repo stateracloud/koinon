@@ -177,11 +177,11 @@ func (f failingStore) Backup(ctx context.Context, prefix, pw string, r io.Reader
 	return f.HomeStore.Backup(ctx, prefix, pw, r, m)
 }
 
-func (f failingStore) Restore(ctx context.Context, prefix, pw, snap string, w io.Writer) error {
+func (f failingStore) Restore(ctx context.Context, prefix, pw, snap, digest string, w io.Writer) error {
 	if snap == f.failRestore {
 		return errors.New("the snapshot is corrupt")
 	}
-	return f.HomeStore.Restore(ctx, prefix, pw, snap, w)
+	return f.HomeStore.Restore(ctx, prefix, pw, snap, digest, w)
 }
 
 // blockingStore is a checkpoint store whose restore stages for a long time, as kopia does before it
@@ -191,7 +191,7 @@ type blockingStore struct {
 	stopped chan struct{}
 }
 
-func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer) error {
+func (b blockingStore) Restore(ctx context.Context, _, _, _, _ string, _ io.Writer) error {
 	<-ctx.Done()
 	close(b.stopped)
 	return ctx.Err()
@@ -306,7 +306,7 @@ var _ = Describe("home checkpoints", func() {
 
 		By("the snapshot holds the home, and the repository password was made for the agent")
 		var out bytes.Buffer
-		Expect(writer.Restore(ctx, checkpoint.Prefix(e.org.String(), e.agent.ID.String()), "koinon_test_not-a-real-token", cp.SnapshotID.String, &out)).To(Succeed())
+		Expect(writer.Restore(ctx, checkpoint.Prefix(e.org.String(), e.agent.ID.String()), "koinon_test_not-a-real-token", cp.SnapshotID.String, "", &out)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("remember the milk"))
 
 		By("no second request within the interval")
@@ -682,7 +682,7 @@ var _ = Describe("home checkpoints", func() {
 		Expect(checkpointOf(ctx, newer)().RepositoryEpoch).To(Equal(int32(1)))
 		var out bytes.Buffer
 		Expect(writer.Restore(ctx, checkpoint.EpochPrefix(e.org.String(), e.agent.ID.String(), 1), "koinon_test_not-a-real-token-1",
-			checkpointOf(ctx, newer)().SnapshotID.String, &out)).To(Succeed(), "written to epoch 1's repository, with its password")
+			checkpointOf(ctx, newer)().SnapshotID.String, "", &out)).To(Succeed(), "written to epoch 1's repository, with its password")
 
 		By("the newest checkpoint restores from epoch 1")
 		reconcilerRecreates(ctx, newer)
@@ -773,7 +773,7 @@ var _ = Describe("home checkpoints", func() {
 		By("past its deadline, but the agent's newest restorable home: kept")
 		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse())
 		var out bytes.Buffer
-		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).To(Succeed(), "epoch 0 still restores")
+		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", "", &out)).To(Succeed(), "epoch 0 still restores")
 
 		By("epoch 1's first checkpoint completes: epoch 0 goes")
 		complete(1, s1.SnapshotID)
@@ -782,9 +782,9 @@ var _ = Describe("home checkpoints", func() {
 		Expect(listed()).To(Equal(1), "a deleted repository's checkpoint is not offered to a restore")
 
 		out.Reset()
-		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "epoch 0's blobs are deleted")
+		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed(), "epoch 0's blobs are deleted")
 		out.Reset()
-		Expect(writer.Restore(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID, &out)).To(Succeed(), "epoch 1 under it is untouched")
+		Expect(writer.Restore(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID, "", &out)).To(Succeed(), "epoch 1 under it is untouched")
 		var deleted1 pgtype.Timestamptz
 		Expect(db.QueryRow(ctx, `SELECT deleted_at FROM home_repository_epochs WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID).Scan(&deleted1)).To(Succeed())
 		Expect(deleted1.Valid).To(BeFalse(), "the current epoch is not retired, so not swept")
@@ -828,14 +828,14 @@ var _ = Describe("home checkpoints", func() {
 		By("the stored prefix names another agent's folder: refused, nothing deleted")
 		Consistently(deleted0).WithTimeout(time.Second).Should(BeFalse())
 		var out bytes.Buffer
-		Expect(writer.Restore(ctx, other, "koinon_test_not-a-real-token-other", "", &out)).To(Succeed(), "the other agent's repository is untouched")
+		Expect(writer.Restore(ctx, other, "koinon_test_not-a-real-token-other", "", "", &out)).To(Succeed(), "the other agent's repository is untouched")
 
 		By("with its own prefix, a lost repository goes although no later epoch has a checkpoint")
 		_, err = db.Exec(ctx, `UPDATE home_repositories SET prefix = $3 WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID, e0)
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(deleted0).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
 		out.Reset()
-		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed(), "its blobs are deleted")
+		Expect(writer.Restore(ctx, e0, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed(), "its blobs are deleted")
 	})
 
 	It("counts a refused repository in a gauge on every sweep and logs it once", func(ctx SpecContext) {
@@ -903,6 +903,80 @@ var _ = Describe("home checkpoints", func() {
 		Expect(err).NotTo(HaveOccurred())
 		complete(3)
 		Eventually(deleted0).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
+	})
+
+	// Issue #1090, ADR 0119 D5: a checkpoint carries the digest of its files, recorded in the
+	// database. A restore recomputes it from the snapshot and refuses a mismatch before a byte goes
+	// into the sandbox.
+	It("records a content digest on every complete checkpoint and refuses a restore with a wrong digest (issue #1090)", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		stop()
+
+		take := func(files map[string]string) pgtype.UUID {
+			home.set(files)
+			id := request(ctx, store.CheckpointReasonStop)
+			stopW := e.pool("agentd-w", cps(ctx))
+			Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
+			stopW()
+			return id
+		}
+		older := take(map[string]string{"notes/v.md": "old"})
+		newer := take(map[string]string{"notes/v.md": "new"})
+		Expect(checkpoint.ValidDigest(checkpointOf(ctx, older)().ContentDigest.String)).To(BeTrue(), "the writer records the digest")
+		Expect(checkpointOf(ctx, newer)().ContentDigest.String).NotTo(Equal(checkpointOf(ctx, older)().ContentDigest.String))
+
+		By("a record that does not match the newest snapshot")
+		_, err := db.Exec(ctx, `UPDATE home_checkpoints SET content_digest = $1 WHERE org_id = $2 AND id = $3`,
+			"sha256:"+strings.Repeat("0", 64), e.org, newer)
+		Expect(err).NotTo(HaveOccurred())
+		reconcilerRecreates(ctx, newer)
+		home.set(map[string]string{"notes/v.md": "untouched"})
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b", cps(ctx))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "the newest was refused; the older one restored")
+
+		By("every checkpoint's record is wrong: the run fails and the restore stays owed")
+		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET content_digest = $1 WHERE org_id = $2 AND agent_id = $3`,
+			"sha256:"+strings.Repeat("1", 64), e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		reconcilerRecreates(ctx, newer)
+		prompts0, _, _, _ := e.harness.snapshot()
+		home.set(map[string]string{"notes/v.md": "untouched"})
+		e.message(ctx, t, "third")
+		r3 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r3)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r3).OutcomeReason.String).To(And(ContainSubstring("restoring the home failed"), ContainSubstring("does not match")))
+		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "untouched"), "no byte of a refused snapshot reached the sandbox")
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(Equal(prompts0), "the harness never saw a prompt")
+		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is still owed")
+	})
+
+	It("restores a checkpoint made before digests were recorded", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		stop()
+		home.set(map[string]string{"notes/v.md": "legacy"})
+		id := request(ctx, store.CheckpointReasonRecreate)
+		stopW := e.pool("agentd-w", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
+		stopW()
+		_, err := db.Exec(ctx, `UPDATE home_checkpoints SET content_digest = NULL WHERE org_id = $1 AND id = $2`, e.org, id)
+		Expect(err).NotTo(HaveOccurred())
+		reconcilerRecreates(ctx, id)
+		home.set(nil)
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b", cps(ctx))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "legacy"))
 	})
 
 	It("does not start the harness when the home cannot be restored", func(ctx SpecContext) {

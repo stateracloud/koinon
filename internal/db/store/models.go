@@ -1820,6 +1820,9 @@ type Agent struct {
 	SandboxMemoryRequest pgtype.Text
 	SandboxMemoryLimit   pgtype.Text
 	KeepWarmGranted      bool
+	Team                 string
+	ReportsToAgentID     pgtype.UUID
+	ReportsToUserID      pgtype.UUID
 }
 
 type AgentBudget struct {
@@ -2166,6 +2169,7 @@ type HomeCheckpoint struct {
 	FinishedAt        pgtype.Timestamptz
 	RepositoryEpoch   int32
 	SnapshotMissingAt pgtype.Timestamptz
+	ContentDigest     pgtype.Text
 }
 
 type HomeCheckpointResync struct {

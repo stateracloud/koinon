@@ -369,23 +369,24 @@ gateway:
     nodeSelector: {}
     tolerations: []
     affinity: {}
-  # The MCP path (ADR 0097 step 2, issue #278). agentgateway: agentgateway serves MCP (the default, and the
-  # fallback). koinon: koinon-gateway serves the MCP path as its own Deployment and Service, next to
-  # agentgateway, which keeps the LLM path. It follows the State stream of koinon-api, so it needs gateway.mode
-  # standalone. This switch moves the MCP calls of koinon-api (KOINON_GATEWAY_MCP_URL); the MCP URL an agent
-  # gets, and koinon-api's live check of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL), stay
-  # agentgateway's until the follow-up that moves them (see ADR 0097). The pod has its own database login
+  # The MCP path (ADR 0097 step 2, issues #278 and #1239). koinon (the default): koinon-gateway serves the
+  # MCP path as its own Deployment and Service, next to agentgateway, which keeps the LLM path. It follows the
+  # State stream of koinon-api, so it needs gateway.mode standalone. With koinon, these MCP calls go to
+  # koinon-gateway: the approved calls of koinon-api (KOINON_GATEWAY_MCP_URL), the agents' MCP calls
+  # (koinon-agentd's KOINON_AGENT_MCP_URL, and the sandbox network rule for /mcp), and koinon-api's live check
+  # of an agent's MCP tools (KOINON_GATEWAY_MCP_CHECK_URL). The pod has its own database login
   # (postgres.cnpg.existingSecrets.mcpgateway, postgres.external.keys.mcpgateway) for the leak guard.
-  # Disclosure: agentgateway sends the agent header (X-Koinon-Agent, the org and agent ID) to every MCP server
-  # that it calls, also to a server an org registered. koinon-gateway sends it only to Koinon's own tool
-  # servers (ADR 0097 decision 5, issue #1235). Until issue #1239, an agent's own MCP calls go through
-  # agentgateway with both drivers, so an org's server sees the agent with both drivers. Until then, the driver
-  # koinon removes the header only from the calls that a human approved. With driver agentgateway, all MCP
-  # calls carry it. The reconciler's probe goes through agentgateway with both drivers; issue #1239 does not
-  # move it. Its header names a probe agent, not a real agent.
-  # Do not make this the default before issue #1132 (tools/list pinning) is closed.
+  # agentgateway: the fallback. agentgateway serves all MCP calls, as before #1239. Set it with
+  # gateway.mode kubernetes. agentgateway cannot open the credentials that koinon-api sealed to the gateway key
+  # (recipientKey below, envelope v2). `keys seal-mcp --to-v1` refuses today, so before you move back, set each
+  # such credential again in the UI or API.
+  # Disclosure: koinon-gateway sends the agent header (X-Koinon-Agent, the org and agent ID) only to Koinon's
+  # own tool servers, never to a server an org registered (ADR 0097 decision 5, issue #1235). With driver
+  # koinon, an agent's own MCP calls, the calls that a human approved and the reconciler's probe all go through
+  # koinon-gateway, so an org's server never sees the header. agentgateway sends the header to every MCP
+  # server that it calls: with driver agentgateway, an org's server sees the agent on every call.
   mcp:
-    driver: agentgateway
+    driver: koinon
     koinon:
       image:
         repository: gateway
@@ -427,8 +428,8 @@ gateway:
           # existingSecret to a new Secret, or delete the generated one, and roll koinon-agentd and the gateway.
           issuer: koinon-agentd
           keyId: k1
-          # A Secret with the keys seed (64 hex characters, the Ed25519 seed) and public.pem (its PEM public
-          # key). Empty: the ensure-secrets Job creates <fullname>-actor-token-key once.
+          # A Secret with the keys key (64 lowercase hex characters, the Ed25519 seed) and public.pem (its PEM
+          # public key). Empty: the ensure-secrets Job creates <fullname>-actor-token-key once.
           existingSecret: ""
       # The gateway's recipient key (ADR 0097 decision 12, issue #1151): koinon-api seals each stored MCP
       # credential to the public key, and only koinon-gateway holds the private key. The private key is
@@ -461,7 +462,9 @@ gateway:
             # automatic token). Empty is the API server's default audience.
             audience: ""
           awskms:
-            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). It MUST differ from
+            # The AWS KMS key that wraps the gateway key (symmetric; ARN recommended). Required when the key's KMS
+            # is awskms: with the default driver (koinon) and recipientKey on, the render fails until you set it.
+            # It MUST differ from
             # secrets.kek.kms.awskms.keyId. Policies: the gateway role kms:Decrypt on it; the key-admin role
             # kms:Encrypt and kms:Decrypt. With IRSA set both ARNs, the chart puts each on its ServiceAccount.
             keyId: ""
@@ -639,6 +642,50 @@ secrets:
           keyAdmin: koinon-key-admin
         # Bound on one call to OpenBao, as a Go duration; empty is 5s.
         timeout: ""
+      # The read-only second wrapping key for a key move (issue 688, https://koinon.stateracloud.com/docs/operate/secret-keys/):
+      # the KMS key that you used before the move. koinon-api, the reconciler and the key-admin Job still unwrap the
+      # KEKs it wrapped; nothing new is ever wrapped with it. Set it when you change backend.openbao.key,
+      # backend.awskms.keyId, the transit mount or the backend itself (also back to local), upgrade, then
+      # add, activate, rewrap and retire KEKs (keyAdmin.addKey) and remove this block once `keys status`
+      # no longer warns. It MUST name another key than the primary. A KEK that neither key opens fails
+      # to load (fail closed). Each identity signs in to it as for the primary (no credential here).
+      readOnly:
+        # openbao, awskms or empty (none).
+        backend: ""
+        awskms:
+          # Region and key of the old AWS KMS key (ARN recommended). The IAM role or Pod Identity of
+          # koinon-api, the reconciler and the key-admin Job needs kms:Decrypt on it too; the chart
+          # sets no role for it, except roleArns below.
+          region: ""
+          keyId: ""
+          endpoint: ""
+          stsEndpoint: ""
+          # A ConfigMap in the release namespace with ca.crt for this key's endpoints; empty is the
+          # image's system roots.
+          caConfigMap: ""
+          # IRSA roles, one per identity, used only while the primary backend is not awskms (a move away
+          # from AWS KMS): then the pods still need an AWS identity to unwrap with the old key. While
+          # the primary is awskms, its own roleArns give the identity and these are not used.
+          roleArns:
+            api: ""
+            reconciler: ""
+            keyAdmin: ""
+          timeout: ""
+        openbao:
+          address: ""
+          caConfigMap: ""
+          namespace: ""
+          transitMount: transit
+          key: ""
+          authMount: kubernetes
+          # The Kubernetes auth roles on the OpenBao that holds the old key, one per identity, bound to
+          # the same service accounts as the primary's. They need update on <transitMount>/decrypt/<key>
+          # only: the key never encrypts.
+          roles:
+            api: koinon-api
+            reconciler: koinon-reconciler
+            keyAdmin: koinon-key-admin
+          timeout: ""
       keyAdmin:
         # The ID of a KEK for the key-admin Job to add, wrapped by the KMS, if the key set does not
         # hold it yet (kek-YYYYMMDD-xxxx: lower-case letters, digits and dashes). Set a new ID to
@@ -766,7 +813,9 @@ github:
 # .Chart.AppVersion. Every entry becomes a harness the reconciler can run; an agent whose harness
 # has no entry is reported as a reconcile error. Remove an entry to turn that harness off.
 # With execution.driver=substrate, every entry needs image.digest (sha256:<64 hex digits>): the
-# reconciler refuses to start with a harness image that is not pinned by digest (issue #1192).
+# reconciler refuses to start with a harness image that is not pinned by digest (issue #1192). With
+# substrate, the default repository "sandbox" becomes "sandbox-substrate" (the harness image with the guest
+# server and the guest launcher, issue #1087), so the digest is the one of that image; a repository you set is used as it is.
 harnesses:
   opencode:
     image:
@@ -815,12 +864,20 @@ execution:
     serverName: ""
     # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
     tokenAudience: ""
-    # The guest server image that runs in every actor (`ate-env-guest`, built by the release workflow's
-    # env-guest job from github.com/agent-substrate/env; upstream publishes none). Empty means
-    # <image.registry>/ate-env-guest:<appVersion>. A digest reference (name@sha256:...) is allowed and
-    # is the one to pin. The release's env-guest job prints the digest. The driver reads this value in #1088;
-    # nothing in the chart reads it yet.
+    # Not used. The guest server now runs inside koinon-guest-front, in the harness image's substrate
+    # overlay (issue #1309), and the chart reads no separate guest image. Kept so that existing values
+    # files still pass the schema; remove it from your values.
     guestImage: ""
+    # The Ed25519 key that signs every guest API call of the reconciler and agentd (issue #1309). The
+    # guest front in every actor refuses a call without a valid token, so agent code in the sandbox
+    # cannot use the guest API. The actor template holds only the public key; this Secret never
+    # enters a sandbox. Empty: the ensure-secrets hook Job creates <release>-substrate-guest-key once
+    # (key "key", 64 hex characters: the key's seed) and never changes it. A new key changes every
+    # actor template, so the next start re-creates every sandbox; a key rotation without that is not
+    # supported yet (#1326). Keep the Secret: with a new key, running sandboxes and memory snapshots
+    # made with the old key refuse every call.
+    guestKey:
+      existingSecret: ""
     # Isolation tier (ADR 0075: vm, hardened or dev) of each runtime class a sandbox can name, as
     # class: tier. The driver puts the guest launcher policy of the tier in front of every command, so
     # a class that is not here cannot run one. With substrate, set this or defaultTier. The reconciler
@@ -836,8 +893,8 @@ execution:
     # selector, so it can land on any pool). It cannot see a pool that you make yourself
     # (workerPool.enabled=false or a pool outside the chart): check that one.
     defaultTier: ""
-    # Required true with substrate: the guest image does not yet carry the guest launcher and the
-    # guest server (issue #1088 slice f). Remove when it has merged. A read-only root is not a reason:
+    # Required true with substrate until the substrate overlay of the harness image (sandbox-substrate,
+    # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
     # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic

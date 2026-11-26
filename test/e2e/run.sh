@@ -153,9 +153,11 @@ diagnostics() {
   mkdir -p "$d"
   "${K[@]}" get pods -A -o wide >"$d/pods.txt" 2>&1 || true
   "${K[@]}" get events -A --sort-by=.lastTimestamp >"$d/events.txt" 2>&1 || true
-  for c in api reconciler agentd gateway; do
+  for c in api reconciler agentd gateway mcp-gateway; do
     "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
   done
+  # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
   for c in fakemodel fakegithub fakemcp; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done

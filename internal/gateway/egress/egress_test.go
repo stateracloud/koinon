@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
@@ -513,10 +514,12 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 		path := func(p string) string { return "/egress/" + authority(forgeHost) + p }
 		basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+value))
 		var scrubbed []string
+		var kinds []credkind.Kind
 
 		BeforeEach(func() {
 			opener = &fakeOpener{values: map[string]string{"/keys/forgev2-builder": value}}
 			scrubbed = nil
+			kinds = nil
 			var err error
 			gw, err = egress.New(egress.Options{
 				Verifier: ver,
@@ -525,7 +528,10 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 				},
 				RootCAs: rootsOf(upstream), Metrics: metrics, Log: slog.New(slog.NewJSONHandler(logs, nil)),
 				Credentials: opener,
-				Scrub:       func(_ string, v ...string) { scrubbed = append(scrubbed, v...) },
+				Scrub: func(k credkind.Kind, _ string, v ...string) {
+					kinds = append(kinds, k)
+					scrubbed = append(scrubbed, v...)
+				},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			gwSrv = httptest.NewServer(gw.Handler())
@@ -556,6 +562,8 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(calls[1].Header.Values("Authorization")).To(BeEmpty())
 			Expect(count("forge", "allowed")).To(Equal(2.0))
 			Expect(scrubbed).To(ContainElements(value, basic))
+			// The scrub reads the rule of the kind from the one list (#1221): a Basic route names its kind.
+			Expect(kinds).To(HaveEach(credkind.EgressBasic))
 			Expect(logs.String()).NotTo(ContainSubstring(value))
 		})
 
@@ -565,6 +573,9 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			resp := do("GET", path("/acme/new.git/x"), token(minter, acme), nil)
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			Expect(upstreamCalls()[0].Header.Get("Authorization")).To(Equal("Bearer " + value))
+			Expect(scrubbed).To(ContainElements(value, "Bearer "+value))
+			Expect(kinds).NotTo(BeEmpty())
+			Expect(kinds).To(HaveEach(credkind.EgressBearer))
 		})
 
 		It("never serves the credential to another agent of the org", func() {

@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +22,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 // PasswordKey is the data key that holds the password, and the one a kept Secret must have.
@@ -30,7 +33,7 @@ const PasswordKey = "password"
 // UsernameKey is the data key that holds the login name.
 const UsernameKey = "username"
 
-// KeyKey is the data key that holds a generated AES-256 key (Spec.Kind KindAES256Key).
+// KeyKey is the data key that holds a generated key (Spec.Kind KindAES256Key or KindEd25519Key).
 const KeyKey = "key"
 
 // TokenKey is the data key that holds a generated bearer token (Spec.Kind KindBearerToken).
@@ -44,6 +47,14 @@ const KindBearerToken = "bearer-token"
 // KindAES256Key is Spec.Kind of a Secret that holds a random 256-bit key as 64 hex characters under
 // KeyKey, the form agentgateway's SESSION_KEY takes, instead of a username and a password.
 const KindAES256Key = "aes256-key"
+
+// KindEd25519Key is Spec.Kind of a Secret that holds the 32-byte seed of an Ed25519 private key as
+// 64 hex characters under KeyKey, and its public key under PublicKeyKey. Two keys use it: the key
+// that signs the guest API tokens of the substrate driver (issue #1309, internal/guestauth.ParseSeed)
+// and the key that signs actor tokens (#1086 part C2, internal/gateway/actortoken). A signer mounts
+// KeyKey; a verifier mounts only PublicKeyKey. Ensure adds a missing PublicKeyKey to a kept Secret
+// from its seed (the one change it makes to an existing Secret).
+const KindEd25519Key = "ed25519-key"
 
 // PasswordLength is the length of a generated password.
 const PasswordLength = 32
@@ -73,10 +84,14 @@ type Spec struct {
 type Result struct {
 	Name    string
 	Created bool
+	// PublicKeyAdded: a kept KindEd25519Key Secret had no PublicKeyKey, and Ensure added it from
+	// the seed. Nothing else in the Secret changed.
+	PublicKeyAdded bool
 }
 
 // Ensure makes sure every Spec exists in namespace. A missing Secret is created with a new random
-// password; an existing one is left exactly as it is, but must have a password, and a
+// password; an existing one is left exactly as it is (except that a KindEd25519Key Secret without
+// PublicKeyKey gets it, from its seed), but must have a password, and a
 // kubernetes.io/basic-auth one (a database role's) must also have that type and the spec's username,
 // which is the role CloudNativePG logs in as. A Create that loses a
 // race counts as success. It stops at the first error. Passwords are never logged: progress goes to
@@ -88,11 +103,27 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
-		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindBearerToken && sp.Kind != KindTLS && sp.Kind != KindEd25519Key {
+		if sp.Kind != "" && sp.Kind != KindAES256Key && sp.Kind != KindEd25519Key && sp.Kind != KindBearerToken && sp.Kind != KindTLS {
 			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
 		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
 		switch {
+		case err == nil && sp.Kind == KindEd25519Key:
+			addPublic, cerr := checkEd25519Data(existing.Data)
+			if cerr != nil {
+				return results, fmt.Errorf("the Secret %s/%s exists but %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
+			}
+			if addPublic == nil {
+				results = append(results, Result{Name: sp.Name})
+				_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+				continue
+			}
+			if perr := addEd25519Public(ctx, secrets, existing, addPublic); perr != nil {
+				return results, fmt.Errorf("the Secret %s/%s: add its %q key: %w", namespace, sp.Name, PublicKeyKey, perr)
+			}
+			results = append(results, Result{Name: sp.Name, PublicKeyAdded: true})
+			_, _ = fmt.Fprintf(out, "secret %s: kept, public key added\n", sp.Name)
+			continue
 		case err == nil && sp.Kind == KindAES256Key:
 			if k := string(existing.Data[KeyKey]); !hexKey.MatchString(k) {
 				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not 64 hex characters; fix or delete it (it is not changed here)", namespace, sp.Name, KeyKey)
@@ -103,13 +134,6 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case err == nil && sp.Kind == KindTLS:
 			if cerr := checkTLSData(existing.Data, sp.DNSNames, time.Now()); cerr != nil {
 				return results, fmt.Errorf("the Secret %s/%s exists but is not a usable TLS Secret: %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
-			}
-			results = append(results, Result{Name: sp.Name})
-			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
-			continue
-		case err == nil && sp.Kind == KindEd25519Key:
-			if cerr := checkEd25519Data(existing.Data); cerr != nil {
-				return results, fmt.Errorf("the Secret %s/%s exists but %w; fix or delete it (it is not changed here)", namespace, sp.Name, cerr)
 			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
@@ -212,4 +236,27 @@ func NewPassword() (string, error) {
 		b[i] = alphabet[n.Int64()]
 	}
 	return string(b), nil
+}
+
+// addEd25519Public adds PublicKeyKey to the Secret s with a JSON patch. The patch first tests that
+// KeyKey still holds the seed that was read, so it never pairs a public key with another seed, and it
+// changes nothing else in the Secret.
+func addEd25519Public(ctx context.Context, secrets typedcorev1.SecretInterface, s *corev1.Secret, pub []byte) error {
+	patch, err := json.Marshal([]map[string]any{
+		{"op": "test", "path": "/data/" + KeyKey, "value": s.Data[KeyKey]},
+		{"op": "add", "path": "/data/" + jsonPointerEscape(PublicKeyKey), "value": pub},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = secrets.Patch(ctx, s.Name, types.JSONPatchType, patch, metav1.PatchOptions{FieldManager: "koinon-api"})
+	if apierrors.IsInvalid(err) || apierrors.IsConflict(err) {
+		return errSeedChanged
+	}
+	return err
+}
+
+// jsonPointerEscape escapes a JSON Pointer reference token (RFC 6901).
+func jsonPointerEscape(s string) string {
+	return strings.NewReplacer("~", "~0", "/", "~1").Replace(s)
 }

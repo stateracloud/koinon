@@ -44,6 +44,8 @@ type record struct {
 	// Agent is the X-Koinon-Agent header agentgateway sets. It is empty on Koinon's MCP path, which sends
 	// the header to Koinon's own tool servers only (#1235).
 	Agent string `json:"agent,omitempty"`
+	// UserAgent is the User-Agent header: koinon-api's add-time check sends "koinon-preflight".
+	UserAgent string `json:"userAgent,omitempty"`
 	// ClientAuthorization says an Authorization header arrived that is not the credential (the
 	// gateway must not forward the agent's own key).
 	ClientAuthorization bool `json:"clientAuthorization,omitempty"`
@@ -146,7 +148,7 @@ func run(addr, httpAddr, header, value, certFile, keyFile string, loadTools bool
 		ok := subtle.ConstantTimeCompare([]byte(r.Header.Get(header)), []byte(value)) == 1
 		recs.add(record{
 			Time: time.Now(), Method: r.Method, Path: r.URL.Path, MCPMethod: r.Header.Get("Mcp-Method"), Authorized: ok,
-			Agent: r.Header.Get("X-Koinon-Agent"), ClientAuthorization: r.Header.Get("Authorization") != "",
+			Agent: r.Header.Get("X-Koinon-Agent"), UserAgent: r.UserAgent(), ClientAuthorization: r.Header.Get("Authorization") != "",
 		})
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="fakemcp"`)
@@ -161,7 +163,7 @@ func run(addr, httpAddr, header, value, certFile, keyFile string, loadTools bool
 	mux.HandleFunc("/oauth-mcp", func(w http.ResponseWriter, r *http.Request) {
 		recs.add(record{
 			Time: time.Now(), Method: r.Method, Path: r.URL.Path, Authorized: r.Header.Get(header) == value,
-			Agent: r.Header.Get("X-Koinon-Agent"), ClientAuthorization: r.Header.Get("Authorization") != "",
+			Agent: r.Header.Get("X-Koinon-Agent"), UserAgent: r.UserAgent(), ClientAuthorization: r.Header.Get("Authorization") != "",
 		})
 		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="http://fakemcp/.well-known/oauth-protected-resource"`)
 		http.Error(w, "sign in", http.StatusUnauthorized)

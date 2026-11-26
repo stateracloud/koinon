@@ -39,6 +39,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/staterev"
+	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/harness"
@@ -101,6 +103,8 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, gw,
 			reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg)
 		Expect(err).NotTo(HaveOccurred())
+		// No key-settle wake-up outlives the spec (#1074).
+		DeferCleanup(r.Close)
 		return r
 	}
 	newReconciler := func() *reconciler.Reconciler { return newReconcilerWith(mg) }
@@ -1344,19 +1348,47 @@ var _ = Describe("Reconciler", func() {
 		done := make(chan error, 1)
 		go func() { done <- r.Run(runCtx) }()
 		DeferCleanup(func() { cancel(); Eventually(done).Should(Receive(BeNil())) })
+		// The leader LISTENs before its first pass, so from here on it sees every NOTIFY.
 		Eventually(applies.Load).WithTimeout(racescale.D(10*time.Second)).Should(BeNumerically(">=", 1), "the leader's first pass")
-		// The leader's first pass writes sandbox rows, and a row write can NOTIFY: a second pass may follow
-		// after the 200 ms debounce (#994: the count was 2 where this spec expected 1). Wait until no pass
-		// has come for three debounce periods, and count from there, so that only a wake of the ledger's own
-		// can add a pass between the two requests.
-		var settled int64
-		Eventually(func() bool {
-			before := applies.Load()
-			time.Sleep(racescale.D(600 * time.Millisecond))
-			settled = applies.Load()
-			return settled == before
-		}).WithTimeout(racescale.D(30*time.Second)).Should(BeTrue(), "the leader's own passes end")
 		Expect(revokedAt.Load()).To(BeNil(), "no spend yet: the key is live")
+
+		// The spec does not count passes: any NOTIFY on the reconcile channel starts one, and not
+		// only the ledger sends them (a key-settle timer of an earlier spec's reconciler did, #1074).
+		// It reads the channel itself instead. Postgres delivers the notifications of committed
+		// transactions in commit order, so a marker sent after a request committed arrives after every
+		// NOTIFY of that request: what the ledger sent is known exactly, without a quiet period.
+		watch, err := pool.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		// Closed, not returned to the pool: the LISTEN ends with the connection.
+		DeferCleanup(func() { _ = watch.Conn().Close(context.Background()); watch.Release() })
+		_, err = watch.Exec(ctx, "LISTEN "+reconciler.NotifyChannel)
+		Expect(err).NotTo(HaveOccurred())
+		orgPayload := execution.UUIDString(org.Bytes)
+		marks := 0
+		// notifiedOrg sends a marker and reads the channel up to it. It reports whether a NOTIFY for
+		// this org came before the marker. The marker also wakes the leader: a wake that is not the
+		// ledger's, which the counting spec of #1074 failed on.
+		notifiedOrg := func() bool {
+			GinkgoHelper()
+			marks++
+			mark := fmt.Sprintf("spec-marker-%d", marks)
+			_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", reconciler.NotifyChannel, mark)
+			Expect(err).NotTo(HaveOccurred())
+			found := false
+			for {
+				wctx, wcancel := context.WithTimeout(ctx, racescale.D(10*time.Second))
+				n, err := watch.Conn().WaitForNotification(wctx)
+				wcancel()
+				Expect(err).NotTo(HaveOccurred(), "the marker comes back")
+				switch n.Payload {
+				case mark:
+					return found
+				case orgPayload:
+					found = true
+				}
+			}
+		}
+		notifiedOrg() // what came before the first request does not count
 
 		ing := &ledger.Ingester{DB: pool, Log: cfg.Logger, Prices: prices.NewResolver(pricing.Embedded())}
 		entry := func(cost string) ledger.Entry {
@@ -1365,12 +1397,13 @@ var _ = Describe("Reconciler", func() {
 				Agent: gateway.AgentRef{Org: slug, Name: agent.ID.String()}, InputTokens: 1, OutputTokens: 1, Time: time.Now(),
 			}
 		}
-		_, err := ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{entry("0.03")})
 		Expect(err).NotTo(HaveOccurred())
 		// The ingest below the limit sends no NOTIFY (ledger/ingest.go: only a reserve change or an
-		// enforce crossing does), so no pass can run between the two requests. If a later change adds
-		// a wake, this check fails instead of the measured window silently changing.
-		Consistently(applies.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeEquivalentTo(settled), "no pass runs below the limit")
+		// enforce crossing does). If a later change adds one, this check fails instead of the measured
+		// window silently changing.
+		Expect(notifiedOrg()).To(BeFalse(), "the request below the limit does not wake the reconciler")
+		// The marker's wake runs a pass that reads the ledger after this request: it must keep the key.
 		Consistently(revokedAt.Load).WithTimeout(time.Second).WithPolling(100*time.Millisecond).Should(BeNil(), "below the limit the key stays live")
 
 		By("the request that reaches the limit")
@@ -1380,6 +1413,8 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(revokedAt.Load).WithTimeout(racescale.D(10*time.Second)).WithPolling(10*time.Millisecond).ShouldNot(BeNil(), "the NOTIFY woke the reconciler, which pushed a limit of zero")
 		revoked := *revokedAt.Load()
+		// Read after the revoke, so the marker's own wake is not in the measured window.
+		Expect(notifiedOrg()).To(BeTrue(), "the request that reaches the limit sent the NOTIFY")
 
 		ledgerTx, reconcilePass, total := committed.Sub(start), revoked.Sub(committed), revoked.Sub(start)
 		AddReportEntry("budget overshoot window", fmt.Sprintf("ledger transaction %s + NOTIFY and reconcile pass %s = %s from the crossing request to the revoke", ledgerTx, reconcilePass, total))
@@ -1637,6 +1672,136 @@ var _ = Describe("Reconciler", func() {
 		Eventually(func() string {
 			return osg.Sandbox(wsName, namesA.Sandbox).GetSpec().GetTemplate().GetImage()
 		}).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(image + "-2"))
+	})
+
+	Describe("when koinon-gateway serves MCP from the State stream (#1239)", func() {
+		const copyID = "koinon-gateway-test/boot-1239"
+		BeforeEach(func(ctx SpecContext) {
+			cfg.MCPAckWait = racescale.D(300 * time.Millisecond)
+			cfg.MCPAckPoll = 20 * time.Millisecond
+			Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+			DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
+		})
+
+		It("holds a new agent's sandbox until every live copy acked the revision, then starts it", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(BeZero(), "the live copy has not acked the revision with the key")
+			Expect(sandboxRow(ctx, a.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MODEL)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(BeZero(), "an ack of the model half does not count")
+
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("holds only the agent with a new key: a served key and an archive go on while a copy lags", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			c := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			rowA := sandboxRow(ctx, a.ID)
+			namesA := execution.AgentObjectNames(org.Bytes, a.ID.Bytes)
+
+			By("a new agent and an archive change the State; the copy does not ack the new revision")
+			fresh := newAgent(ctx, org, user)
+			_, err = q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: a.ID})
+			Expect(err).NotTo(HaveOccurred())
+			start := time.Now()
+			pass(ctx, r)
+			Expect(osg.Sandbox(rowA.Workspace, namesA.Sandbox)).To(BeNil(), "the archive is not held")
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateDeleted))
+			Expect(sandboxRow(ctx, c.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"), "c's key is in an acked revision")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2), "no sandbox for the fresh agent yet")
+			Expect(time.Since(start)).To(BeNumerically("<", 20*time.Second), "the pass waited at most the bounded ack wait")
+		})
+
+		It("does not hold a key served before a restart while a copy lags behind the latest revision", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+			fresh := newAgent(ctx, org, user)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway"), "the copy lags")
+
+			By("a new reconciler, with an empty key map, still idle-stops a")
+			coolDown(ctx, org, a.ID)
+			r2 := newReconciler()
+			advance(11 * time.Minute)
+			pass(ctx, r2)
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "a's work was not held")
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+		})
+
+		It("does not hold the work of an agent that went back to draft while a copy lags", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).Message).To(ContainSubstring("waiting for koinon-gateway"), "the copy lags")
+
+			By("a draft keeps its key in the State, but its work does not wait for the copy")
+			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: a.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(osg.Calls("CreateSandbox")).To(BeZero())
+		})
+
+		It("holds a new agent while the State cannot be stored, and not an agent whose key a stored revision holds", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			failing := &flakyStateDB{DB: pool}
+			cfg.StateRevisionDB = failing
+			r := newReconciler()
+			pass(ctx, r)
+			latest, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+
+			failing.fail.Store(true)
+			fresh := newAgent(ctx, org, user)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("store the gateway state revision")))
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for koinon-gateway to serve the agent's key"))
+			Expect(sandboxRow(ctx, a.ID).Message).NotTo(ContainSubstring("waiting for koinon-gateway"))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+		})
+
+		It("stores the revision when agentgateway cannot apply the state, so koinon-gateway still gets key changes", func(ctx SpecContext) {
+			before, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			mg.fail = errors.New("gateway unreachable")
+			newAgent(ctx, org, user)
+			r := newReconciler()
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			after, err := staterev.Latest(ctx, pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after).NotTo(BeNil())
+			if before != nil {
+				Expect(after.Revision).To(BeNumerically(">", before.Revision))
+			}
+			Expect(after.Keys).NotTo(BeEmpty(), "the new agent's key is in the stream")
+			Expect(osg.Calls("CreateSandbox")).To(BeZero())
+		})
 	})
 
 	Describe("the leader lock (#573)", func() {

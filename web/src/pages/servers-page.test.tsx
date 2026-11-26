@@ -19,6 +19,7 @@ import {
   type AcknowledgeToolReviewRequest,
   type CreateServerRequest,
   type DeleteServerRequest,
+  type ReviewAllToolsRequest,
   type Server,
   type SetAgentServersRequest,
   type SetServerClassRequest,
@@ -92,11 +93,12 @@ const tools = [
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
-function setup(opts: { role?: OrgRole; path?: string; failTier?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
+function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; failTier?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
     twos: [] as SetToolTwoApproversRequest[],
     acks: [] as AcknowledgeToolReviewRequest[],
+    reviewAlls: [] as ReviewAllToolsRequest[],
     creates: [] as CreateServerRequest[],
     updates: [] as UpdateServerRequest[],
     deletes: [] as DeleteServerRequest[],
@@ -175,6 +177,24 @@ function setup(opts: { role?: OrgRole; path?: string; failTier?: string; failCre
         current.set(`${req.serverId}/${req.tool}`, t)
         return { tool: t }
       },
+      reviewAllTools: (req) => {
+        calls.reviewAlls.push(req)
+        if (opts.failReviewAll) throw new ConnectError(opts.failReviewAll, Code.Aborted)
+        const out = req.tools.map((r) => {
+          const cur = current.get(`${req.serverId}/${r.tool}`)!
+          const t = create(ToolSchema, { ...cur, reviewReason: '', approvedHash: cur.toolHash })
+          current.set(`${req.serverId}/${r.tool}`, t)
+          return t
+        })
+        let removed = 0
+        for (const [k, t] of current) {
+          if (t.serverId === req.serverId && !t.present && t.approvedHash === '' && t.tierSetBy === '') {
+            current.delete(k)
+            removed++
+          }
+        }
+        return { tools: out, removed }
+      },
       getAgentServers: () => ({ servers: opts.allowed ?? [] }),
       setAgentServers: (req) => {
         calls.allowSets.push(req)
@@ -225,6 +245,34 @@ describe('Servers page', () => {
     expect(within(form).getByLabelText('Token')).toHaveAttribute('type', 'password')
     expect(within(form).getByText(/A credential is stored\. Leave empty to keep it\./)).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('not-a-real-token')
+  })
+
+  it('shows the tools that wait for review and reviews them all at the hashes shown (#1216)', async () => {
+    const calls = setup()
+    const docsCard = within(within(await screen.findByRole('list', { name: 'Servers' })).getByRole('region', { name: 'docs' }))
+    const note = within(docsCard.getByRole('note', { name: 'Tools waiting for review: docs' }))
+    expect(note.getByText(/1 tool waits for review/)).toBeInTheDocument()
+    await userEvent.click(note.getByRole('button', { name: 'Review all tools of docs' }))
+    expect(note.getByText(/approves the current text of 1 tool \(edit\) without changing a tier, and deletes 1 tool that the server no longer lists/)).toBeInTheDocument()
+    await userEvent.click(note.getByRole('button', { name: 'Review all' }))
+    await waitFor(() => expect(calls.reviewAlls).toHaveLength(1))
+    expect(calls.reviewAlls[0]).toMatchObject({ orgId: 'org-1', serverId: 's-docs', tools: [{ tool: 'edit', toolHash: 'hash-edit-new' }] })
+    expect(await screen.findByText('Reviewed 1 tool of docs. Deleted 1.')).toBeInTheDocument()
+    await waitFor(() => expect(docsCard.queryByRole('note', { name: 'Tools waiting for review: docs' })).not.toBeInTheDocument())
+    // A server with nothing waiting shows no notice.
+    expect(screen.queryByRole('note', { name: 'Tools waiting for review: wiki' })).not.toBeInTheDocument()
+  })
+
+  it('says when a server is at the limit of unreviewed tools, and shows a refused review', async () => {
+    const capped = create(ServerSchema, { id: 's-cap', name: 'junk', url: 'https://junk.example.com/mcp', source: 'ui', health: Health.HEALTHY, unreviewedToolsCappedAt: checked })
+    setup({ extraServers: [capped], failReviewAll: 'the tool changed since it was read; read it again and review the new description' })
+    const note = within(await screen.findByRole('note', { name: 'Tools waiting for review: junk' }))
+    expect(note.getByText(/at the limit of tools that no admin reviewed/)).toBeInTheDocument()
+    expect(note.queryByRole('button', { name: /Review all/ })).not.toBeInTheDocument()
+    const docsNote = within(screen.getByRole('note', { name: 'Tools waiting for review: docs' }))
+    await userEvent.click(docsNote.getByRole('button', { name: 'Review all tools of docs' }))
+    await userEvent.click(docsNote.getByRole('button', { name: 'Review all' }))
+    expect(await screen.findByText(/the tool changed since it was read/)).toBeInTheDocument()
   })
 
   it('shows each tool with its tier, description, review flag and missing state', async () => {

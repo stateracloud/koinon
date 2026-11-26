@@ -43,7 +43,7 @@ for f in "${value_files[@]}"; do
 			if grep -qF -- "$absent" <<<"$rendered"; then echo "$name: Substrate preflight hook has OpenShell '$absent'" >&2; exit 1; fi
 		done
 		# kubernetes mode: the GatewayClass check reads agentgateway's controller Deployment.
-		kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --show-only templates/preflight.yaml)
+		kube=$("$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --show-only templates/preflight.yaml)
 		grep -qF -- 'resourceNames: [ate-api-server, atenet-router, agentgateway]' <<<"$kube" ||
 			{ echo "$name: Substrate preflight hook cannot read agentgateway's controller in kubernetes mode" >&2; exit 1; }
 	elif grep -qF -- '--driver=substrate' <<<"$rendered"; then

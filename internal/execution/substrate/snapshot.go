@@ -61,6 +61,16 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 	switch actor.GetStatus().GetState() {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		wasRunning = true
+		// A memory snapshot holds the guest front's pin. Bind sets it to this actor, so a restore
+		// names this actor in koinon_prev (issue #1309). The actor runs, so the call resumes nothing.
+		if d.cfg.SnapshotFidelity == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY {
+			if err := d.learn(ctx, k, actor); err != nil {
+				return execution.Snapshot{}, execution.GRPCError(op, err)
+			}
+			if err := d.bind(ctx, op, k, actor.GetMetadata().GetUid()); err != nil {
+				return execution.Snapshot{}, err
+			}
+		}
 		if _, sent, err := d.suspend(ctx, op, workspace, name); err != nil {
 			if sent { // the suspend may have taken effect: the sandbox must keep running
 				d.resumeOwed(ctx, op, k)
@@ -70,6 +80,15 @@ func (d *Driver) SnapshotSandbox(ctx context.Context, workspace, name string) (e
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 		// An earlier snapshot of a running sandbox could not resume it: this one owes the resume.
 		wasRunning = d.isOwed(k)
+		// The pin in a suspended guest's memory is this actor's only after a Bind to this actor. If
+		// the driver cannot show one (no guest call since a restore, or a driver restart), resume the
+		// actor, bind it and suspend it again: else a restore of the snapshot names this actor in
+		// koinon_prev while the memory holds its source's pin, and the front refuses every call.
+		if d.cfg.SnapshotFidelity == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY && !d.isBound(k, actor.GetMetadata().GetUid()) {
+			if err := d.rebind(ctx, op, k, actor); err != nil {
+				return execution.Snapshot{}, err
+			}
+		}
 	default:
 		return execution.Snapshot{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not ready or suspended", k, phaseOf(actor))
 	}
@@ -139,7 +158,9 @@ func (d *Driver) tag(ctx context.Context, workspace, source string) (*ateapiv1.T
 // from a tag of the same template: spec supplies the name, and its image and resources must be those
 // of the source (the reconciler restores a sandbox of the same agent version). The restored actor
 // gets a fresh identity: its token is minted by Substrate for the new actor, outside the guest, and
-// the template holds no environment variable, so the clone shares no secret with its source.
+// the template holds no secret (only the guest API's public keys), so the clone shares no secret
+// with its source. The guest front of a memory restore has its source's pin; the first guest call
+// names the source in koinon_prev, which moves the pin to the new actor (issue #1309).
 func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap execution.SnapshotRef, spec execution.SandboxSpec) (execution.Sandbox, error) {
 	const op = "RestoreSandbox"
 	if err := d.requireContentDigest(op); err != nil {
@@ -252,3 +273,21 @@ func snapshotFrom(workspace string, tag *ateapiv1.Tag, digest string) execution.
 
 // IsSnapshotTag reports whether a tag name was made by the driver.
 func IsSnapshotTag(name string) bool { return strings.HasPrefix(name, snapshotPrefix) }
+
+// rebind resumes a suspended actor, binds its guest front and suspends it again, for a memory
+// snapshot (issue #1309). On an error after the resume it suspends the actor again where it can.
+func (d *Driver) rebind(ctx context.Context, op string, k key, actor *ateapiv1.Actor) error {
+	if err := d.learn(ctx, k, actor); err != nil {
+		return execution.GRPCError(op, err)
+	}
+	owed := d.isOwed(k)
+	if _, err := d.resume(ctx, op, k.atespace, k.actor); err != nil {
+		return err
+	}
+	d.setOwed(k, owed) // resume clears the debt; the snapshot settles it
+	err := d.bind(ctx, op, k, actor.GetMetadata().GetUid())
+	if _, _, serr := d.suspend(context.WithoutCancel(ctx), op, k.atespace, k.actor); serr != nil && err == nil {
+		err = serr
+	}
+	return err
+}

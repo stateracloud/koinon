@@ -67,6 +67,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"substrate-server-name":                "execution.substrate.serverName",
 	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
 	"substrate-token-file":                 "execution.substrate.tokenFile",
+	"substrate-guest-key-file":             "execution.substrate.guestKeyFile",
 	"substrate-runtime-class-tiers":        "execution.substrate.runtimeClassTiers",
 	"substrate-default-tier":               "execution.substrate.defaultTier",
 	"substrate-image-mirrors":              "execution.substrate.imageMirrors",
@@ -91,6 +92,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"sandbox-limit-range-name":             "sandboxLimitRange.name",
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
+	"gateway-mcp-url":                      "gateway.mcpUrl",
 	"gateway-config-map":                   "gateway.configMap",
 	"gateway-deployment":                   "gateway.deployment",
 	"gateway-stats-url":                    "gateway.statsUrl",
@@ -213,6 +215,15 @@ func (c *config) finish(v *viper.Viper) error {
 	if c.gatewayMode == project.GatewayKubernetes && c.gatewayName == "" {
 		return fmt.Errorf("--gateway-name is required in kubernetes mode")
 	}
+	if c.gatewayMCPURL != "" {
+		// koinon-gateway runs in standalone mode only (ADR 0097 decision 4).
+		if c.gatewayMode != project.GatewayStandalone {
+			return fmt.Errorf("--gateway-mcp-url needs standalone mode")
+		}
+		if _, err := c.mcpGatewayEndpoint(); err != nil {
+			return err
+		}
+	}
 
 	policy, err := sandboxres.FromConfig(func(key string, out any) error { return v.UnmarshalKey(key, out) })
 	if err != nil {
@@ -285,6 +296,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
+	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "koinon-gateway's MCP listener URL as sandboxes reach it (gateway.mcp.driver=koinon): agent sandboxes may send /mcp there and not to agentgateway, and the MCP prober lists tools there; empty: agentgateway serves /mcp")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
 	fs.StringVar(&c.gatewayDeployment, "gateway-deployment", "", "standalone agentgateway Deployment that owns the ConfigMap when the reconciler creates it")
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")

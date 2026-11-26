@@ -14,25 +14,28 @@ import (
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/mcpcredfile"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
-// Credential kinds, as the span and the audit row name them. They are fixed values, never a token.
-const (
-	CredentialNone   = "none"
-	CredentialStatic = "static"
+// Credential kinds, as the span and the audit row name them. They are fixed values, never a token. The one list
+// of kinds, and how the scrub covers each one, is [credkind] (#1221).
+var (
+	CredentialNone   = credkind.None
+	CredentialStatic = credkind.MCPStatic
 	// CredentialError is the kind of a call whose credential could not be read.
-	CredentialError = "error"
+	CredentialError = credkind.Error
 )
 
 // Credential is what the gateway sends to one target for one agent. It exists only between the
 // gateway and the target: an agent never sees it, and no span, log line or audit row carries Value.
 type Credential struct {
 	// Kind names the source: CredentialNone, CredentialStatic, and in later slices the MCP sign-in
-	// token (ADR 0096) and the passport (ADR 0073).
-	Kind string
+	// token (ADR 0096) and the passport (ADR 0073). The scrub covers the value by the rule of its kind
+	// ([credkind.Lookup]); a kind that is not in the list is scrubbed by value.
+	Kind credkind.Kind
 	// Header and Value are set on every request to the target. Both are empty for CredentialNone.
 	Header string
 	Value  string
@@ -142,9 +145,10 @@ func (c StaticCredentials) open(base string, content []byte) (plain []byte, keyI
 // credentialTransport sets the credential on each upstream request. The SDK builds the request, so
 // no header of the agent's request is ever on it.
 //
-// A platform target (Org "": Koinon's own tool servers) also gets gateway.AgentHeader, the agent the key
-// check found (ADR 0097 decision 5, exit criterion 7). Those servers trust it because only the gateway
-// reaches them. An org's server never gets it: it trusts nothing of Koinon's and needs no agent ID.
+// Koinon's own services also get gateway.AgentHeader, the agent the key check found (ADR 0097 decision
+// 5, exit criterion 7): the platform targets (Org "") and the ask targets (the mcpask proxy of an org
+// server's ask-tier tools, #1315). They trust it because only the gateway reaches them. An org's server
+// never gets it: it trusts nothing of Koinon's and needs no agent ID (gateway.MCPTarget.TrustsAgentHeader).
 type credentialTransport struct {
 	base   http.RoundTripper
 	target gateway.MCPTarget
@@ -159,7 +163,7 @@ func (t *credentialTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	// A RoundTripper must not change the SDK's request: every header goes on a clone.
 	req = req.Clone(req.Context())
-	if t.target.Org == "" {
+	if t.target.TrustsAgentHeader() {
 		req.Header.Set(gateway.AgentHeader, t.agent.String())
 	}
 	if cred.Header == "" {

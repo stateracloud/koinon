@@ -9,6 +9,8 @@ import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobu
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { FieldMask, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_field_mask, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { RunState } from "../../run/v1alpha1/run_pb";
+import { file_koinon_run_v1alpha1_run } from "../../run/v1alpha1/run_pb";
 import type { Flavor, Grant, RunLimits, Trigger } from "../../template/v1alpha1/template_pb";
 import { file_koinon_template_v1alpha1_template } from "../../template/v1alpha1/template_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -17,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/agent/v1alpha1/agent.proto.
  */
 export const file_koinon_agent_v1alpha1_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSKSCAoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSNAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvckICGAESEwoLdGVtcGxhdGVfaWQYBiABKAkSFQoNdGVtcGxhdGVfc2x1ZxgHIAEoCRIWCg5sYXRlc3RfdmVyc2lvbhgIIAEoBRIWCg5hY3RpdmVfdmVyc2lvbhgJIAEoBRI4Cg9wcm9wb3NlZF9ncmFudHMYCiADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSOAoPYXBwcm92ZWRfZ3JhbnRzGAsgAygLMh8ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkdyYW50EhQKDGluc3RydWN0aW9ucxgMIAEoCRINCgVtb2RlbBgNIAEoCRI3CgpydW5fbGltaXRzGA4gASgLMiMua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlJ1bkxpbWl0cxIuCgpjcmVhdGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxhY3RpdmF0ZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2FyY2hpdmVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgx1bmhlYWx0aHlfYXQYEiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKEHVuaGVhbHRoeV9yZWFzb24YEyABKAkSPAoRcHJvcG9zZWRfdHJpZ2dlcnMYFCADKAsyIS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlchI8ChFhcHByb3ZlZF90cmlnZ2VycxgVIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEhEKCWVwaGVtZXJhbBgWIAEoCBI3ChNzYW5kYm94X2FyY2hpdmVkX2F0GBcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1tb2RlbF9zZXR0aW5nGBggASgJEkIKEXNhbmRib3hfcmVzb3VyY2VzGBkgASgLMicua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXMSEQoJa2VlcF93YXJtGBogASgIEhkKEWtlZXBfd2FybV9ncmFudGVkGBsgASgIEg8KB2hhcm5lc3MYHCABKAki/QEKHkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLdGVtcGxhdGVfaWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEjQKBmZsYXZvchgEIAEoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3JCAhgBEjMKBmdyYW50cxgFIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HcmFudEJpbmRpbmcSFgoJZXBoZW1lcmFsGAYgASgISACIAQESDwoHaGFybmVzcxgHIAEoCUIMCgpfZXBoZW1lcmFsIk4KDEdyYW50QmluZGluZxIRCgljb25uZWN0b3IYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRIUCgxyZXBvc2l0b3JpZXMYAyADKAkiTgofQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIzCg9HZXRBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIj8KEEdldEFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiIwoRTGlzdEFnZW50c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkIKEkxpc3RBZ2VudHNSZXNwb25zZRIsCgZhZ2VudHMYASADKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiaAoUQWN0aXZhdGVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3ZlcnNpb24YAyABKAUSHQoVYXBwbHlfdG9fb3Blbl90aWNrZXRzGAQgASgIImAKFUFjdGl2YXRlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudBIaChJ0aWNrZXRzX3Jlc3RhcnRpbmcYAiABKAUiNgoSUmVzdW1lQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJCChNSZXN1bWVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjcKE0FyY2hpdmVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIkMKFEFyY2hpdmVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IoYBChdTZXRBZ2VudFRyaWdnZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSFAoMYmFzZV92ZXJzaW9uGAMgASgFEjMKCHRyaWdnZXJzGAQgAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXIiRwoYU2V0QWdlbnRUcmlnZ2Vyc1Jlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjgKFEdldEFnZW50TW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSItCgtTZXJ2ZWRNb2RlbBIMCgRuYW1lGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJIoYCChVHZXRBZ2VudE1vZGVsUmVzcG9uc2USDwoHc2V0dGluZxgBIAEoCRIVCg12ZXJzaW9uX21vZGVsGAIgASgJEhEKCWVmZmVjdGl2ZRgDIAEoCRIyCgZzb3VyY2UYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuTW9kZWxTb3VyY2USDwoHcHJvYmxlbRgFIAEoCRI1CglhdmFpbGFibGUYBiADKAsyIi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2VydmVkTW9kZWwSNgoIdGhpbmtpbmcYByABKAsyJC5rb2lub24uYWdlbnQudjFhbHBoYTEuVGhpbmtpbmdTdGF0ZSKsAQoNVGhpbmtpbmdTdGF0ZRIPCgdzZXR0aW5nGAEgASgJEhcKD3ZlcnNpb25fc2V0dGluZxgCIAEoCRIRCgllZmZlY3RpdmUYAyABKAkSEQoJc3VwcG9ydGVkGAQgASgIEgwKBG1vZGUYBSABKAkSFQoNYWx3YXlzX3RoaW5rcxgGIAEoCBIWCg5vZmZfb3ZlcnJpZGRlbhgHIAEoCBIOCgZub3RpY2UYCCABKAkiRwoUU2V0QWdlbnRNb2RlbFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg0KBW1vZGVsGAMgASgJIlQKFVNldEFnZW50TW9kZWxSZXNwb25zZRI7CgVtb2RlbBgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiTQoXU2V0QWdlbnRUaGlua2luZ1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhAKCHRoaW5raW5nGAMgASgJIlcKGFNldEFnZW50VGhpbmtpbmdSZXNwb25zZRI7CgVtb2RlbBgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudE1vZGVsUmVzcG9uc2UiaAoQU2FuZGJveFJlc291cmNlcxITCgtjcHVfcmVxdWVzdBgBIAEoCRIRCgljcHVfbGltaXQYAiABKAkSFgoObWVtb3J5X3JlcXVlc3QYAyABKAkSFAoMbWVtb3J5X2xpbWl0GAQgASgJIigKDFNhbmRib3hSYW5nZRILCgNtaW4YASABKAkSCwoDbWF4GAIgASgJIvkBCg1TYW5kYm94Qm91bmRzEjgKC2NwdV9yZXF1ZXN0GAEgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZRI2CgljcHVfbGltaXQYAiABKAsyIy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJhbmdlEjsKDm1lbW9yeV9yZXF1ZXN0GAMgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZRI5CgxtZW1vcnlfbGltaXQYBCABKAsyIy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJhbmdlIkMKH0dldEFnZW50U2FuZGJveFJlc291cmNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIqQCChVTYW5kYm94UmVzb3VyY2VzU3RhdGUSOQoIb3ZlcnJpZGUYASABKAsyJy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlcxI5Cgh0ZW1wbGF0ZRgCIAEoCzInLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzEjoKCWVmZmVjdGl2ZRgDIAEoCzInLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzEjQKBmJvdW5kcxgEIAEoCzIkLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94Qm91bmRzEiMKG21lbW9yeV9yZXF1ZXN0X2VxdWFsc19saW1pdBgFIAEoCCJfCiBHZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXNwb25zZRI7CgVzdGF0ZRgBIAEoCzIsLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzU3RhdGUifwofU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSOgoJcmVzb3VyY2VzGAMgASgLMicua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXMiXwogU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVzcG9uc2USOwoFc3RhdGUYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlc1N0YXRlIk4KF1NldEFnZW50S2VlcFdhcm1SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIRCglrZWVwX3dhcm0YAyABKAgiRwoYU2V0QWdlbnRLZWVwV2FybVJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50Ik4KFlJ1bkFnZW50VHJpZ2dlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhIKCnRyaWdnZXJfaWQYAyABKAkiKgoXUnVuQWdlbnRUcmlnZ2VyUmVzcG9uc2USDwoHdGFza19pZBgBIAEoCSL8AQoPQWdlbnREZWZpbml0aW9uEhQKDGRpc3BsYXlfbmFtZRgBIAEoCRIUCgxpbnN0cnVjdGlvbnMYAiABKAkSDQoFbW9kZWwYAyABKAkSDwoHaGFybmVzcxgEIAEoCRIvCgZncmFudHMYBSADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSMwoIdHJpZ2dlcnMYBiADKAsyIS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlchI3CgpydW5fbGltaXRzGAcgASgLMiMua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlJ1bkxpbWl0cyJgChJDcmVhdGVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEjoKCmRlZmluaXRpb24YAiABKAsyJi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnREZWZpbml0aW9uIkIKE0NyZWF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiuQEKElVwZGF0ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSFAoMYmFzZV92ZXJzaW9uGAMgASgFEjoKCmRlZmluaXRpb24YBCABKAsyJi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnREZWZpbml0aW9uEi8KC3VwZGF0ZV9tYXNrGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLkZpZWxkTWFzayJCChNVcGRhdGVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50KncKC0FnZW50U3RhdHVzEhwKGEFHRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKEkFHRU5UX1NUQVRVU19EUkFGVBABEhcKE0FHRU5UX1NUQVRVU19BQ1RJVkUQAhIZChVBR0VOVF9TVEFUVVNfQVJDSElWRUQQAyqSAQoLTW9kZWxTb3VyY2USHAoYTU9ERUxfU09VUkNFX1VOU1BFQ0lGSUVEEAASFgoSTU9ERUxfU09VUkNFX0FHRU5UEAESGAoUTU9ERUxfU09VUkNFX1ZFUlNJT04QAhIcChhNT0RFTF9TT1VSQ0VfT1JHX0RFRkFVTFQQAxIVChFNT0RFTF9TT1VSQ0VfTk9ORRAEMrkOCgxBZ2VudFNlcnZpY2USiAEKF0NyZWF0ZUFnZW50RnJvbVRlbXBsYXRlEjUua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBo2LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlc3BvbnNlEmAKCEdldEFnZW50EiYua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50UmVxdWVzdBonLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlc3BvbnNlIgOQAgESZgoKTGlzdEFnZW50cxIoLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVxdWVzdBopLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVzcG9uc2UiA5ACARJqCg1BY3RpdmF0ZUFnZW50Eisua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXNwb25zZRJzChBTZXRBZ2VudFRyaWdnZXJzEi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VHJpZ2dlcnNSZXF1ZXN0Gi8ua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50VHJpZ2dlcnNSZXNwb25zZRJkCgtSZXN1bWVBZ2VudBIpLmtvaW5vbi5hZ2VudC52MWFscGhhMS5SZXN1bWVBZ2VudFJlcXVlc3QaKi5rb2lub24uYWdlbnQudjFhbHBoYTEuUmVzdW1lQWdlbnRSZXNwb25zZRJvCg1HZXRBZ2VudE1vZGVsEisua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50TW9kZWxSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50TW9kZWxSZXNwb25zZSIDkAIBEmoKDVNldEFnZW50TW9kZWwSKy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRNb2RlbFJlcXVlc3QaLC5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRNb2RlbFJlc3BvbnNlEnMKEFNldEFnZW50VGhpbmtpbmcSLi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRUaGlua2luZ1JlcXVlc3QaLy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRUaGlua2luZ1Jlc3BvbnNlEnMKEFNldEFnZW50S2VlcFdhcm0SLi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRLZWVwV2FybVJlcXVlc3QaLy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRLZWVwV2FybVJlc3BvbnNlEpABChhHZXRBZ2VudFNhbmRib3hSZXNvdXJjZXMSNi5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVxdWVzdBo3LmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXNwb25zZSIDkAIBEosBChhTZXRBZ2VudFNhbmRib3hSZXNvdXJjZXMSNi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVxdWVzdBo3LmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXNwb25zZRJwCg9SdW5BZ2VudFRyaWdnZXISLS5rb2lub24uYWdlbnQudjFhbHBoYTEuUnVuQWdlbnRUcmlnZ2VyUmVxdWVzdBouLmtvaW5vbi5hZ2VudC52MWFscGhhMS5SdW5BZ2VudFRyaWdnZXJSZXNwb25zZRJnCgxBcmNoaXZlQWdlbnQSKi5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVxdWVzdBorLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXNwb25zZRJkCgtDcmVhdGVBZ2VudBIpLmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudFJlcXVlc3QaKi5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRSZXNwb25zZRJkCgtVcGRhdGVBZ2VudBIpLmtvaW5vbi5hZ2VudC52MWFscGhhMS5VcGRhdGVBZ2VudFJlcXVlc3QaKi5rb2lub24uYWdlbnQudjFhbHBoYTEuVXBkYXRlQWdlbnRSZXNwb25zZUJRWk9naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hZ2VudC92MWFscGhhMTthZ2VudHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_field_mask, file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
+  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSLbCAoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSNAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvckICGAESEwoLdGVtcGxhdGVfaWQYBiABKAkSFQoNdGVtcGxhdGVfc2x1ZxgHIAEoCRIWCg5sYXRlc3RfdmVyc2lvbhgIIAEoBRIWCg5hY3RpdmVfdmVyc2lvbhgJIAEoBRI4Cg9wcm9wb3NlZF9ncmFudHMYCiADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSOAoPYXBwcm92ZWRfZ3JhbnRzGAsgAygLMh8ua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkdyYW50EhQKDGluc3RydWN0aW9ucxgMIAEoCRINCgVtb2RlbBgNIAEoCRI3CgpydW5fbGltaXRzGA4gASgLMiMua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlJ1bkxpbWl0cxIuCgpjcmVhdGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxhY3RpdmF0ZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2FyY2hpdmVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgx1bmhlYWx0aHlfYXQYEiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKEHVuaGVhbHRoeV9yZWFzb24YEyABKAkSPAoRcHJvcG9zZWRfdHJpZ2dlcnMYFCADKAsyIS5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVHJpZ2dlchI8ChFhcHByb3ZlZF90cmlnZ2VycxgVIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEhEKCWVwaGVtZXJhbBgWIAEoCBI3ChNzYW5kYm94X2FyY2hpdmVkX2F0GBcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1tb2RlbF9zZXR0aW5nGBggASgJEkIKEXNhbmRib3hfcmVzb3VyY2VzGBkgASgLMicua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXMSEQoJa2VlcF93YXJtGBogASgIEhkKEWtlZXBfd2FybV9ncmFudGVkGBsgASgIEg8KB2hhcm5lc3MYHCABKAkSDAoEdGVhbRgdIAEoCRI5CgpyZXBvcnRzX3RvGB4gASgLMiUua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50UmVwb3J0c1RvIlcKDkFnZW50UmVwb3J0c1RvEhIKCGFnZW50X2lkGAEgASgJSAASEQoHdXNlcl9pZBgCIAEoCUgAEhQKDGRpc3BsYXlfbmFtZRgDIAEoCUIICgZ0YXJnZXQi/QEKHkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLdGVtcGxhdGVfaWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEjQKBmZsYXZvchgEIAEoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3JCAhgBEjMKBmdyYW50cxgFIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HcmFudEJpbmRpbmcSFgoJZXBoZW1lcmFsGAYgASgISACIAQESDwoHaGFybmVzcxgHIAEoCUIMCgpfZXBoZW1lcmFsIk4KDEdyYW50QmluZGluZxIRCgljb25uZWN0b3IYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRIUCgxyZXBvc2l0b3JpZXMYAyADKAkiTgofQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIzCg9HZXRBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIj8KEEdldEFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiSgoRTGlzdEFnZW50c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXBhZ2Vfc2l6ZRgCIAEoBRISCgpwYWdlX3Rva2VuGAMgASgJIlsKEkxpc3RBZ2VudHNSZXNwb25zZRIsCgZhZ2VudHMYASADKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJImgKFEFjdGl2YXRlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd2ZXJzaW9uGAMgASgFEh0KFWFwcGx5X3RvX29wZW5fdGlja2V0cxgEIAEoCCJgChVBY3RpdmF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQSGgoSdGlja2V0c19yZXN0YXJ0aW5nGAIgASgFIjYKElJlc3VtZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiQgoTUmVzdW1lQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCI3ChNBcmNoaXZlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJDChRBcmNoaXZlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCKGAQoXU2V0QWdlbnRUcmlnZ2Vyc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEhQKDGJhc2VfdmVyc2lvbhgDIAEoBRIzCgh0cmlnZ2VycxgEIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyIkcKGFNldEFnZW50VHJpZ2dlcnNSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCI4ChRHZXRBZ2VudE1vZGVsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiLQoLU2VydmVkTW9kZWwSDAoEbmFtZRgBIAEoCRIQCghwcm92aWRlchgCIAEoCSKGAgoVR2V0QWdlbnRNb2RlbFJlc3BvbnNlEg8KB3NldHRpbmcYASABKAkSFQoNdmVyc2lvbl9tb2RlbBgCIAEoCRIRCgllZmZlY3RpdmUYAyABKAkSMgoGc291cmNlGAQgASgOMiIua29pbm9uLmFnZW50LnYxYWxwaGExLk1vZGVsU291cmNlEg8KB3Byb2JsZW0YBSABKAkSNQoJYXZhaWxhYmxlGAYgAygLMiIua29pbm9uLmFnZW50LnYxYWxwaGExLlNlcnZlZE1vZGVsEjYKCHRoaW5raW5nGAcgASgLMiQua29pbm9uLmFnZW50LnYxYWxwaGExLlRoaW5raW5nU3RhdGUirAEKDVRoaW5raW5nU3RhdGUSDwoHc2V0dGluZxgBIAEoCRIXCg92ZXJzaW9uX3NldHRpbmcYAiABKAkSEQoJZWZmZWN0aXZlGAMgASgJEhEKCXN1cHBvcnRlZBgEIAEoCBIMCgRtb2RlGAUgASgJEhUKDWFsd2F5c190aGlua3MYBiABKAgSFgoOb2ZmX292ZXJyaWRkZW4YByABKAgSDgoGbm90aWNlGAggASgJIkcKFFNldEFnZW50TW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgVtb2RlbBgDIAEoCSJUChVTZXRBZ2VudE1vZGVsUmVzcG9uc2USOwoFbW9kZWwYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlc3BvbnNlIk0KF1NldEFnZW50VGhpbmtpbmdSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIQCgh0aGlua2luZxgDIAEoCSJXChhTZXRBZ2VudFRoaW5raW5nUmVzcG9uc2USOwoFbW9kZWwYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlc3BvbnNlImgKEFNhbmRib3hSZXNvdXJjZXMSEwoLY3B1X3JlcXVlc3QYASABKAkSEQoJY3B1X2xpbWl0GAIgASgJEhYKDm1lbW9yeV9yZXF1ZXN0GAMgASgJEhQKDG1lbW9yeV9saW1pdBgEIAEoCSIoCgxTYW5kYm94UmFuZ2USCwoDbWluGAEgASgJEgsKA21heBgCIAEoCSL5AQoNU2FuZGJveEJvdW5kcxI4CgtjcHVfcmVxdWVzdBgBIAEoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmFuZ2USNgoJY3B1X2xpbWl0GAIgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZRI7Cg5tZW1vcnlfcmVxdWVzdBgDIAEoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmFuZ2USOQoMbWVtb3J5X2xpbWl0GAQgASgLMiMua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSYW5nZSJDCh9HZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSKkAgoVU2FuZGJveFJlc291cmNlc1N0YXRlEjkKCG92ZXJyaWRlGAEgASgLMicua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXMSOQoIdGVtcGxhdGUYAiABKAsyJy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlcxI6CgllZmZlY3RpdmUYAyABKAsyJy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlcxI0CgZib3VuZHMYBCABKAsyJC5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveEJvdW5kcxIjChttZW1vcnlfcmVxdWVzdF9lcXVhbHNfbGltaXQYBSABKAgiXwogR2V0QWdlbnRTYW5kYm94UmVzb3VyY2VzUmVzcG9uc2USOwoFc3RhdGUYASABKAsyLC5rb2lub24uYWdlbnQudjFhbHBoYTEuU2FuZGJveFJlc291cmNlc1N0YXRlIn8KH1NldEFnZW50U2FuZGJveFJlc291cmNlc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEjoKCXJlc291cmNlcxgDIAEoCzInLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TYW5kYm94UmVzb3VyY2VzIl8KIFNldEFnZW50U2FuZGJveFJlc291cmNlc1Jlc3BvbnNlEjsKBXN0YXRlGAEgASgLMiwua29pbm9uLmFnZW50LnYxYWxwaGExLlNhbmRib3hSZXNvdXJjZXNTdGF0ZSJOChdTZXRBZ2VudEtlZXBXYXJtUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSEQoJa2VlcF93YXJtGAMgASgIIkcKGFNldEFnZW50S2VlcFdhcm1SZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCJOChZSdW5BZ2VudFRyaWdnZXJSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRISCgp0cmlnZ2VyX2lkGAMgASgJIioKF1J1bkFnZW50VHJpZ2dlclJlc3BvbnNlEg8KB3Rhc2tfaWQYASABKAkiUgoZTGlzdEFnZW50U3VtbWFyaWVzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgFEhIKCnBhZ2VfdG9rZW4YAyABKAkimQEKGkxpc3RBZ2VudFN1bW1hcmllc1Jlc3BvbnNlEjMKBmFnZW50cxgBIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudFN1bW1hcnkSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEi0KCWRheV9zdGFydBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi8QQKDEFnZW50U3VtbWFyeRIQCghhZ2VudF9pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSMgoGc3RhdHVzGAMgASgOMiIua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50U3RhdHVzEg8KB2hhcm5lc3MYBCABKAkSDQoFbW9kZWwYBSABKAkSDAoEdGVhbRgGIAEoCRI5CgpyZXBvcnRzX3RvGAcgASgLMiUua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50UmVwb3J0c1RvEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDHVuaGVhbHRoeV9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNQoObGFzdF9ydW5fc3RhdGUYCiABKA4yHS5rb2lub24ucnVuLnYxYWxwaGExLlJ1blN0YXRlEi8KC2xhc3RfcnVuX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIUCgxydW5uaW5nX3J1bnMYDCABKAUSFwoPc3BlbnRfdG9kYXlfdXNkGA0gASgJEhcKD2RhaWx5X2xpbWl0X3VzZBgOIAEoCRIaChJpbnB1dF90b2tlbnNfdG9kYXkYDyABKAMSHwoXY2FjaGVfcmVhZF90b2tlbnNfdG9kYXkYECABKAMSNQoRbmV4dF9zY2hlZHVsZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKDndhaXRpbmdfb25feW91GBIgASgFIoUBChhTZXRBZ2VudFBsYWNlbWVudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEgwKBHRlYW0YAyABKAkSOQoKcmVwb3J0c190bxgEIAEoCzIlLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudFJlcG9ydHNUbyJIChlTZXRBZ2VudFBsYWNlbWVudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IvwBCg9BZ2VudERlZmluaXRpb24SFAoMZGlzcGxheV9uYW1lGAEgASgJEhQKDGluc3RydWN0aW9ucxgCIAEoCRINCgVtb2RlbBgDIAEoCRIPCgdoYXJuZXNzGAQgASgJEi8KBmdyYW50cxgFIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBIzCgh0cmlnZ2VycxgGIAMoCzIhLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UcmlnZ2VyEjcKCnJ1bl9saW1pdHMYByABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzImAKEkNyZWF0ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSOgoKZGVmaW5pdGlvbhgCIAEoCzImLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudERlZmluaXRpb24iQgoTQ3JlYXRlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCK5AQoSVXBkYXRlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIUCgxiYXNlX3ZlcnNpb24YAyABKAUSOgoKZGVmaW5pdGlvbhgEIAEoCzImLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudERlZmluaXRpb24SLwoLdXBkYXRlX21hc2sYBSABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrIkIKE1VwZGF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQqdwoLQWdlbnRTdGF0dXMSHAoYQUdFTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSQUdFTlRfU1RBVFVTX0RSQUZUEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhkKFUFHRU5UX1NUQVRVU19BUkNISVZFRBADKpIBCgtNb2RlbFNvdXJjZRIcChhNT0RFTF9TT1VSQ0VfVU5TUEVDSUZJRUQQABIWChJNT0RFTF9TT1VSQ0VfQUdFTlQQARIYChRNT0RFTF9TT1VSQ0VfVkVSU0lPThACEhwKGE1PREVMX1NPVVJDRV9PUkdfREVGQVVMVBADEhUKEU1PREVMX1NPVVJDRV9OT05FEAQysRAKDEFnZW50U2VydmljZRKIAQoXQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGUSNS5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXF1ZXN0GjYua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVzcG9uc2USYAoIR2V0QWdlbnQSJi5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRSZXF1ZXN0Gicua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50UmVzcG9uc2UiA5ACARJmCgpMaXN0QWdlbnRzEigua29pbm9uLmFnZW50LnYxYWxwaGExLkxpc3RBZ2VudHNSZXF1ZXN0Gikua29pbm9uLmFnZW50LnYxYWxwaGExLkxpc3RBZ2VudHNSZXNwb25zZSIDkAIBEmoKDUFjdGl2YXRlQWdlbnQSKy5rb2lub24uYWdlbnQudjFhbHBoYTEuQWN0aXZhdGVBZ2VudFJlcXVlc3QaLC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWN0aXZhdGVBZ2VudFJlc3BvbnNlEnMKEFNldEFnZW50VHJpZ2dlcnMSLi5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRUcmlnZ2Vyc1JlcXVlc3QaLy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRUcmlnZ2Vyc1Jlc3BvbnNlEmQKC1Jlc3VtZUFnZW50Eikua29pbm9uLmFnZW50LnYxYWxwaGExLlJlc3VtZUFnZW50UmVxdWVzdBoqLmtvaW5vbi5hZ2VudC52MWFscGhhMS5SZXN1bWVBZ2VudFJlc3BvbnNlEm8KDUdldEFnZW50TW9kZWwSKy5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlcXVlc3QaLC5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRNb2RlbFJlc3BvbnNlIgOQAgESagoNU2V0QWdlbnRNb2RlbBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudE1vZGVsUmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudE1vZGVsUmVzcG9uc2UScwoQU2V0QWdlbnRUaGlua2luZxIuLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRoaW5raW5nUmVxdWVzdBovLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFRoaW5raW5nUmVzcG9uc2UScwoQU2V0QWdlbnRLZWVwV2FybRIuLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudEtlZXBXYXJtUmVxdWVzdBovLmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudEtlZXBXYXJtUmVzcG9uc2USkAEKGEdldEFnZW50U2FuZGJveFJlc291cmNlcxI2LmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXF1ZXN0Gjcua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50U2FuZGJveFJlc291cmNlc1Jlc3BvbnNlIgOQAgESiwEKGFNldEFnZW50U2FuZGJveFJlc291cmNlcxI2LmtvaW5vbi5hZ2VudC52MWFscGhhMS5TZXRBZ2VudFNhbmRib3hSZXNvdXJjZXNSZXF1ZXN0Gjcua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50U2FuZGJveFJlc291cmNlc1Jlc3BvbnNlEnAKD1J1bkFnZW50VHJpZ2dlchItLmtvaW5vbi5hZ2VudC52MWFscGhhMS5SdW5BZ2VudFRyaWdnZXJSZXF1ZXN0Gi4ua29pbm9uLmFnZW50LnYxYWxwaGExLlJ1bkFnZW50VHJpZ2dlclJlc3BvbnNlEmcKDEFyY2hpdmVBZ2VudBIqLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXF1ZXN0Gisua29pbm9uLmFnZW50LnYxYWxwaGExLkFyY2hpdmVBZ2VudFJlc3BvbnNlEn4KEkxpc3RBZ2VudFN1bW1hcmllcxIwLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRTdW1tYXJpZXNSZXF1ZXN0GjEua29pbm9uLmFnZW50LnYxYWxwaGExLkxpc3RBZ2VudFN1bW1hcmllc1Jlc3BvbnNlIgOQAgESdgoRU2V0QWdlbnRQbGFjZW1lbnQSLy5rb2lub24uYWdlbnQudjFhbHBoYTEuU2V0QWdlbnRQbGFjZW1lbnRSZXF1ZXN0GjAua29pbm9uLmFnZW50LnYxYWxwaGExLlNldEFnZW50UGxhY2VtZW50UmVzcG9uc2USZAoLQ3JlYXRlQWdlbnQSKS5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRSZXF1ZXN0Gioua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50UmVzcG9uc2USZAoLVXBkYXRlQWdlbnQSKS5rb2lub24uYWdlbnQudjFhbHBoYTEuVXBkYXRlQWdlbnRSZXF1ZXN0Gioua29pbm9uLmFnZW50LnYxYWxwaGExLlVwZGF0ZUFnZW50UmVzcG9uc2VCUVpPZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYWdlbnQvdjFhbHBoYTE7YWdlbnR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_field_mask, file_google_protobuf_timestamp, file_koinon_run_v1alpha1_run, file_koinon_template_v1alpha1_template]);
 
 /**
  * Agent is an agent and the definition it runs.
@@ -206,6 +208,21 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
    * @generated from field: string harness = 28;
    */
   harness: string;
+
+  /**
+   * The agent's team label (SetAgentPlacement); empty for no team.
+   *
+   * @generated from field: string team = 29;
+   */
+  team: string;
+
+  /**
+   * Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also
+   * of a person who left the org since; AgentSummary gives the name and leaves out such a person.
+   *
+   * @generated from field: koinon.agent.v1alpha1.AgentReportsTo reports_to = 30;
+   */
+  reportsTo?: AgentReportsTo | undefined;
 };
 
 /**
@@ -214,6 +231,45 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
  */
 export const AgentSchema: GenMessage<Agent> = /*@__PURE__*/
   messageDesc(file_koinon_agent_v1alpha1_agent, 0);
+
+/**
+ * AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
+ *
+ * @generated from message koinon.agent.v1alpha1.AgentReportsTo
+ */
+export type AgentReportsTo = Message<"koinon.agent.v1alpha1.AgentReportsTo"> & {
+  /**
+   * @generated from oneof koinon.agent.v1alpha1.AgentReportsTo.target
+   */
+  target: {
+    /**
+     * @generated from field: string agent_id = 1;
+     */
+    value: string;
+    case: "agentId";
+  } | {
+    /**
+     * @generated from field: string user_id = 2;
+     */
+    value: string;
+    case: "userId";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored
+   * in SetAgentPlacement.
+   *
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.AgentReportsTo.
+ * Use `create(AgentReportsToSchema)` to create a new message.
+ */
+export const AgentReportsToSchema: GenMessage<AgentReportsTo> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 1);
 
 /**
  * CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -276,7 +332,7 @@ export type CreateAgentFromTemplateRequest = Message<"koinon.agent.v1alpha1.Crea
  * Use `create(CreateAgentFromTemplateRequestSchema)` to create a new message.
  */
 export const CreateAgentFromTemplateRequestSchema: GenMessage<CreateAgentFromTemplateRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 1);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 2);
 
 /**
  * GrantBinding binds a template grant to one of the org's connections and
@@ -314,7 +370,7 @@ export type GrantBinding = Message<"koinon.agent.v1alpha1.GrantBinding"> & {
  * Use `create(GrantBindingSchema)` to create a new message.
  */
 export const GrantBindingSchema: GenMessage<GrantBinding> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 2);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 3);
 
 /**
  * CreateAgentFromTemplateResponse holds the new draft.
@@ -333,7 +389,7 @@ export type CreateAgentFromTemplateResponse = Message<"koinon.agent.v1alpha1.Cre
  * Use `create(CreateAgentFromTemplateResponseSchema)` to create a new message.
  */
 export const CreateAgentFromTemplateResponseSchema: GenMessage<CreateAgentFromTemplateResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 3);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 4);
 
 /**
  * GetAgentRequest names an agent.
@@ -357,7 +413,7 @@ export type GetAgentRequest = Message<"koinon.agent.v1alpha1.GetAgentRequest"> &
  * Use `create(GetAgentRequestSchema)` to create a new message.
  */
 export const GetAgentRequestSchema: GenMessage<GetAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 4);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 5);
 
 /**
  * GetAgentResponse holds the agent.
@@ -376,10 +432,10 @@ export type GetAgentResponse = Message<"koinon.agent.v1alpha1.GetAgentResponse">
  * Use `create(GetAgentResponseSchema)` to create a new message.
  */
 export const GetAgentResponseSchema: GenMessage<GetAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 5);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 6);
 
 /**
- * ListAgentsRequest names the org.
+ * ListAgentsRequest names the org and the page.
  *
  * @generated from message koinon.agent.v1alpha1.ListAgentsRequest
  */
@@ -388,6 +444,20 @@ export type ListAgentsRequest = Message<"koinon.agent.v1alpha1.ListAgentsRequest
    * @generated from field: string org_id = 1;
    */
   orgId: string;
+
+  /**
+   * page_size is 500 by default and at most 500.
+   *
+   * @generated from field: int32 page_size = 2;
+   */
+  pageSize: number;
+
+  /**
+   * page_token is the next_page_token of the previous page.
+   *
+   * @generated from field: string page_token = 3;
+   */
+  pageToken: string;
 };
 
 /**
@@ -395,10 +465,10 @@ export type ListAgentsRequest = Message<"koinon.agent.v1alpha1.ListAgentsRequest
  * Use `create(ListAgentsRequestSchema)` to create a new message.
  */
 export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 6);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 7);
 
 /**
- * ListAgentsResponse lists the org's agents.
+ * ListAgentsResponse lists one page of the org's agents.
  *
  * @generated from message koinon.agent.v1alpha1.ListAgentsResponse
  */
@@ -407,6 +477,13 @@ export type ListAgentsResponse = Message<"koinon.agent.v1alpha1.ListAgentsRespon
    * @generated from field: repeated koinon.agent.v1alpha1.Agent agents = 1;
    */
   agents: Agent[];
+
+  /**
+   * next_page_token is empty on the last page.
+   *
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
 };
 
 /**
@@ -414,7 +491,7 @@ export type ListAgentsResponse = Message<"koinon.agent.v1alpha1.ListAgentsRespon
  * Use `create(ListAgentsResponseSchema)` to create a new message.
  */
 export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 7);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 8);
 
 /**
  * ActivateAgentRequest names the draft and the version the caller reviewed.
@@ -455,7 +532,7 @@ export type ActivateAgentRequest = Message<"koinon.agent.v1alpha1.ActivateAgentR
  * Use `create(ActivateAgentRequestSchema)` to create a new message.
  */
 export const ActivateAgentRequestSchema: GenMessage<ActivateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 8);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 9);
 
 /**
  * ActivateAgentResponse holds the active agent.
@@ -481,7 +558,7 @@ export type ActivateAgentResponse = Message<"koinon.agent.v1alpha1.ActivateAgent
  * Use `create(ActivateAgentResponseSchema)` to create a new message.
  */
 export const ActivateAgentResponseSchema: GenMessage<ActivateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 9);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
 
 /**
  * ResumeAgentRequest names the agent.
@@ -505,7 +582,7 @@ export type ResumeAgentRequest = Message<"koinon.agent.v1alpha1.ResumeAgentReque
  * Use `create(ResumeAgentRequestSchema)` to create a new message.
  */
 export const ResumeAgentRequestSchema: GenMessage<ResumeAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 11);
 
 /**
  * ResumeAgentResponse holds the agent, healthy again.
@@ -524,7 +601,7 @@ export type ResumeAgentResponse = Message<"koinon.agent.v1alpha1.ResumeAgentResp
  * Use `create(ResumeAgentResponseSchema)` to create a new message.
  */
 export const ResumeAgentResponseSchema: GenMessage<ResumeAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 11);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 12);
 
 /**
  * ArchiveAgentRequest names the agent.
@@ -548,7 +625,7 @@ export type ArchiveAgentRequest = Message<"koinon.agent.v1alpha1.ArchiveAgentReq
  * Use `create(ArchiveAgentRequestSchema)` to create a new message.
  */
 export const ArchiveAgentRequestSchema: GenMessage<ArchiveAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 12);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 13);
 
 /**
  * ArchiveAgentResponse holds the archived agent.
@@ -567,7 +644,7 @@ export type ArchiveAgentResponse = Message<"koinon.agent.v1alpha1.ArchiveAgentRe
  * Use `create(ArchiveAgentResponseSchema)` to create a new message.
  */
 export const ArchiveAgentResponseSchema: GenMessage<ArchiveAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 13);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 14);
 
 /**
  * SetAgentTriggersRequest replaces the triggers of the agent's latest version in a new version.
@@ -606,7 +683,7 @@ export type SetAgentTriggersRequest = Message<"koinon.agent.v1alpha1.SetAgentTri
  * Use `create(SetAgentTriggersRequestSchema)` to create a new message.
  */
 export const SetAgentTriggersRequestSchema: GenMessage<SetAgentTriggersRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 14);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 15);
 
 /**
  * SetAgentTriggersResponse holds the agent with its new proposed version.
@@ -625,7 +702,7 @@ export type SetAgentTriggersResponse = Message<"koinon.agent.v1alpha1.SetAgentTr
  * Use `create(SetAgentTriggersResponseSchema)` to create a new message.
  */
 export const SetAgentTriggersResponseSchema: GenMessage<SetAgentTriggersResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 15);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 16);
 
 /**
  * GetAgentModelRequest names an agent.
@@ -649,7 +726,7 @@ export type GetAgentModelRequest = Message<"koinon.agent.v1alpha1.GetAgentModelR
  * Use `create(GetAgentModelRequestSchema)` to create a new message.
  */
 export const GetAgentModelRequestSchema: GenMessage<GetAgentModelRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 16);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 17);
 
 /**
  * ServedModel is a model the org serves and has a price for.
@@ -673,7 +750,7 @@ export type ServedModel = Message<"koinon.agent.v1alpha1.ServedModel"> & {
  * Use `create(ServedModelSchema)` to create a new message.
  */
 export const ServedModelSchema: GenMessage<ServedModel> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 17);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 18);
 
 /**
  * GetAgentModelResponse is the agent's model setting and what it resolves to.
@@ -734,7 +811,7 @@ export type GetAgentModelResponse = Message<"koinon.agent.v1alpha1.GetAgentModel
  * Use `create(GetAgentModelResponseSchema)` to create a new message.
  */
 export const GetAgentModelResponseSchema: GenMessage<GetAgentModelResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 18);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 19);
 
 /**
  * ThinkingState is the agent's thinking setting and what it resolves to (ADR 0069 amendment
@@ -810,7 +887,7 @@ export type ThinkingState = Message<"koinon.agent.v1alpha1.ThinkingState"> & {
  * Use `create(ThinkingStateSchema)` to create a new message.
  */
 export const ThinkingStateSchema: GenMessage<ThinkingState> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 19);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 20);
 
 /**
  * SetAgentModelRequest sets the agent's model.
@@ -841,7 +918,7 @@ export type SetAgentModelRequest = Message<"koinon.agent.v1alpha1.SetAgentModelR
  * Use `create(SetAgentModelRequestSchema)` to create a new message.
  */
 export const SetAgentModelRequestSchema: GenMessage<SetAgentModelRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 20);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 21);
 
 /**
  * SetAgentModelResponse holds the result, as GetAgentModel would return it.
@@ -860,7 +937,7 @@ export type SetAgentModelResponse = Message<"koinon.agent.v1alpha1.SetAgentModel
  * Use `create(SetAgentModelResponseSchema)` to create a new message.
  */
 export const SetAgentModelResponseSchema: GenMessage<SetAgentModelResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 21);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 22);
 
 /**
  * SetAgentThinkingRequest sets the agent's thinking setting.
@@ -891,7 +968,7 @@ export type SetAgentThinkingRequest = Message<"koinon.agent.v1alpha1.SetAgentThi
  * Use `create(SetAgentThinkingRequestSchema)` to create a new message.
  */
 export const SetAgentThinkingRequestSchema: GenMessage<SetAgentThinkingRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 22);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 23);
 
 /**
  * SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
@@ -910,7 +987,7 @@ export type SetAgentThinkingResponse = Message<"koinon.agent.v1alpha1.SetAgentTh
  * Use `create(SetAgentThinkingResponseSchema)` to create a new message.
  */
 export const SetAgentThinkingResponseSchema: GenMessage<SetAgentThinkingResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 23);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 24);
 
 /**
  * SandboxResources are the four sandbox sizing values, as Kubernetes quantities such as "250m" or
@@ -945,7 +1022,7 @@ export type SandboxResources = Message<"koinon.agent.v1alpha1.SandboxResources">
  * Use `create(SandboxResourcesSchema)` to create a new message.
  */
 export const SandboxResourcesSchema: GenMessage<SandboxResources> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 24);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 25);
 
 /**
  * SandboxRange bounds one value. An empty min or max is unbounded on that side.
@@ -969,7 +1046,7 @@ export type SandboxRange = Message<"koinon.agent.v1alpha1.SandboxRange"> & {
  * Use `create(SandboxRangeSchema)` to create a new message.
  */
 export const SandboxRangeSchema: GenMessage<SandboxRange> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 25);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 26);
 
 /**
  * SandboxBounds are the platform's range for each of the four values (chart sandbox.resources.bounds).
@@ -1003,7 +1080,7 @@ export type SandboxBounds = Message<"koinon.agent.v1alpha1.SandboxBounds"> & {
  * Use `create(SandboxBoundsSchema)` to create a new message.
  */
 export const SandboxBoundsSchema: GenMessage<SandboxBounds> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 26);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 27);
 
 /**
  * GetAgentSandboxResourcesRequest names the agent.
@@ -1027,7 +1104,7 @@ export type GetAgentSandboxResourcesRequest = Message<"koinon.agent.v1alpha1.Get
  * Use `create(GetAgentSandboxResourcesRequestSchema)` to create a new message.
  */
 export const GetAgentSandboxResourcesRequestSchema: GenMessage<GetAgentSandboxResourcesRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 27);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 28);
 
 /**
  * SandboxResourcesState is the agent's sandbox sizing and where it comes from.
@@ -1078,7 +1155,7 @@ export type SandboxResourcesState = Message<"koinon.agent.v1alpha1.SandboxResour
  * Use `create(SandboxResourcesStateSchema)` to create a new message.
  */
 export const SandboxResourcesStateSchema: GenMessage<SandboxResourcesState> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 28);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 29);
 
 /**
  * GetAgentSandboxResourcesResponse holds the state.
@@ -1097,7 +1174,7 @@ export type GetAgentSandboxResourcesResponse = Message<"koinon.agent.v1alpha1.Ge
  * Use `create(GetAgentSandboxResourcesResponseSchema)` to create a new message.
  */
 export const GetAgentSandboxResourcesResponseSchema: GenMessage<GetAgentSandboxResourcesResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 29);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 30);
 
 /**
  * SetAgentSandboxResourcesRequest sets the agent's override.
@@ -1128,7 +1205,7 @@ export type SetAgentSandboxResourcesRequest = Message<"koinon.agent.v1alpha1.Set
  * Use `create(SetAgentSandboxResourcesRequestSchema)` to create a new message.
  */
 export const SetAgentSandboxResourcesRequestSchema: GenMessage<SetAgentSandboxResourcesRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 30);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 31);
 
 /**
  * SetAgentSandboxResourcesResponse holds the result, as GetAgentSandboxResources would return it.
@@ -1147,7 +1224,7 @@ export type SetAgentSandboxResourcesResponse = Message<"koinon.agent.v1alpha1.Se
  * Use `create(SetAgentSandboxResourcesResponseSchema)` to create a new message.
  */
 export const SetAgentSandboxResourcesResponseSchema: GenMessage<SetAgentSandboxResourcesResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 31);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 32);
 
 /**
  * SetAgentKeepWarmRequest sets or withdraws the agent's keep-warm request.
@@ -1176,7 +1253,7 @@ export type SetAgentKeepWarmRequest = Message<"koinon.agent.v1alpha1.SetAgentKee
  * Use `create(SetAgentKeepWarmRequestSchema)` to create a new message.
  */
 export const SetAgentKeepWarmRequestSchema: GenMessage<SetAgentKeepWarmRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 32);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 33);
 
 /**
  * SetAgentKeepWarmResponse holds the agent as GetAgent would return it.
@@ -1195,7 +1272,7 @@ export type SetAgentKeepWarmResponse = Message<"koinon.agent.v1alpha1.SetAgentKe
  * Use `create(SetAgentKeepWarmResponseSchema)` to create a new message.
  */
 export const SetAgentKeepWarmResponseSchema: GenMessage<SetAgentKeepWarmResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 33);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 34);
 
 /**
  * RunAgentTriggerRequest names the trigger to fire.
@@ -1226,7 +1303,7 @@ export type RunAgentTriggerRequest = Message<"koinon.agent.v1alpha1.RunAgentTrig
  * Use `create(RunAgentTriggerRequestSchema)` to create a new message.
  */
 export const RunAgentTriggerRequestSchema: GenMessage<RunAgentTriggerRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 34);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 35);
 
 /**
  * RunAgentTriggerResponse names the task the fire created.
@@ -1245,7 +1322,257 @@ export type RunAgentTriggerResponse = Message<"koinon.agent.v1alpha1.RunAgentTri
  * Use `create(RunAgentTriggerResponseSchema)` to create a new message.
  */
 export const RunAgentTriggerResponseSchema: GenMessage<RunAgentTriggerResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 35);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 36);
+
+/**
+ * ListAgentSummariesRequest names the org and the page.
+ *
+ * @generated from message koinon.agent.v1alpha1.ListAgentSummariesRequest
+ */
+export type ListAgentSummariesRequest = Message<"koinon.agent.v1alpha1.ListAgentSummariesRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * page_size is 50 by default and at most 200.
+   *
+   * @generated from field: int32 page_size = 2;
+   */
+  pageSize: number;
+
+  /**
+   * page_token is the next_page_token of the previous page.
+   *
+   * @generated from field: string page_token = 3;
+   */
+  pageToken: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.ListAgentSummariesRequest.
+ * Use `create(ListAgentSummariesRequestSchema)` to create a new message.
+ */
+export const ListAgentSummariesRequestSchema: GenMessage<ListAgentSummariesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 37);
+
+/**
+ * ListAgentSummariesResponse lists one page of agent cards.
+ *
+ * @generated from message koinon.agent.v1alpha1.ListAgentSummariesResponse
+ */
+export type ListAgentSummariesResponse = Message<"koinon.agent.v1alpha1.ListAgentSummariesResponse"> & {
+  /**
+   * @generated from field: repeated koinon.agent.v1alpha1.AgentSummary agents = 1;
+   */
+  agents: AgentSummary[];
+
+  /**
+   * next_page_token is empty on the last page.
+   *
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+
+  /**
+   * The start of today (UTC) for the spend and token fields.
+   *
+   * @generated from field: google.protobuf.Timestamp day_start = 3;
+   */
+  dayStart?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.ListAgentSummariesResponse.
+ * Use `create(ListAgentSummariesResponseSchema)` to create a new message.
+ */
+export const ListAgentSummariesResponseSchema: GenMessage<ListAgentSummariesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 38);
+
+/**
+ * AgentSummary is what an agent card shows (ADR 0126 section 4).
+ *
+ * @generated from message koinon.agent.v1alpha1.AgentSummary
+ */
+export type AgentSummary = Message<"koinon.agent.v1alpha1.AgentSummary"> & {
+  /**
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: string display_name = 2;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: koinon.agent.v1alpha1.AgentStatus status = 3;
+   */
+  status: AgentStatus;
+
+  /**
+   * @generated from field: string harness = 4;
+   */
+  harness: string;
+
+  /**
+   * The agent's own model setting, else the model of its latest version.
+   *
+   * @generated from field: string model = 5;
+   */
+  model: string;
+
+  /**
+   * @generated from field: string team = 6;
+   */
+  team: string;
+
+  /**
+   * Unset for nobody. A person who is no longer a member of the org does not show.
+   *
+   * @generated from field: koinon.agent.v1alpha1.AgentReportsTo reports_to = 7;
+   */
+  reportsTo?: AgentReportsTo | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 8;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * Set while the agent is unhealthy (ADR 0054).
+   *
+   * @generated from field: google.protobuf.Timestamp unhealthy_at = 9;
+   */
+  unhealthyAt?: Timestamp | undefined;
+
+  /**
+   * The state of the agent's newest run; unspecified when it has no run.
+   *
+   * @generated from field: koinon.run.v1alpha1.RunState last_run_state = 10;
+   */
+  lastRunState: RunState;
+
+  /**
+   * When the newest run finished, else started, else was queued.
+   *
+   * @generated from field: google.protobuf.Timestamp last_run_at = 11;
+   */
+  lastRunAt?: Timestamp | undefined;
+
+  /**
+   * How many runs of the agent start or run now.
+   *
+   * @generated from field: int32 running_runs = 12;
+   */
+  runningRuns: number;
+
+  /**
+   * USD spent today (from day_start), as a decimal string.
+   *
+   * @generated from field: string spent_today_usd = 13;
+   */
+  spentTodayUsd: string;
+
+  /**
+   * The agent's daily limit in USD; empty when it has none.
+   *
+   * @generated from field: string daily_limit_usd = 14;
+   */
+  dailyLimitUsd: string;
+
+  /**
+   * Input tokens today (they include cache reads) and the cache reads among them. The cache read
+   * share is cache_read_tokens_today / input_tokens_today.
+   *
+   * @generated from field: int64 input_tokens_today = 15;
+   */
+  inputTokensToday: bigint;
+
+  /**
+   * @generated from field: int64 cache_read_tokens_today = 16;
+   */
+  cacheReadTokensToday: bigint;
+
+  /**
+   * The next due time of the active version's schedule triggers (ADR 0066); unset when none. The
+   * run starts up to 30 seconds after it (the scheduler's jitter).
+   *
+   * @generated from field: google.protobuf.Timestamp next_scheduled_at = 17;
+   */
+  nextScheduledAt?: Timestamp | undefined;
+
+  /**
+   * The inbox items of the caller for this agent: approvals the caller may decide, questions the
+   * caller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin.
+   *
+   * @generated from field: int32 waiting_on_you = 18;
+   */
+  waitingOnYou: number;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.AgentSummary.
+ * Use `create(AgentSummarySchema)` to create a new message.
+ */
+export const AgentSummarySchema: GenMessage<AgentSummary> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 39);
+
+/**
+ * SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.
+ *
+ * @generated from message koinon.agent.v1alpha1.SetAgentPlacementRequest
+ */
+export type SetAgentPlacementRequest = Message<"koinon.agent.v1alpha1.SetAgentPlacementRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+
+  /**
+   * At most 64 characters, no control characters. Spaces at the ends are removed.
+   *
+   * @generated from field: string team = 3;
+   */
+  team: string;
+
+  /**
+   * @generated from field: koinon.agent.v1alpha1.AgentReportsTo reports_to = 4;
+   */
+  reportsTo?: AgentReportsTo | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SetAgentPlacementRequest.
+ * Use `create(SetAgentPlacementRequestSchema)` to create a new message.
+ */
+export const SetAgentPlacementRequestSchema: GenMessage<SetAgentPlacementRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 40);
+
+/**
+ * SetAgentPlacementResponse holds the agent as GetAgent would return it.
+ *
+ * @generated from message koinon.agent.v1alpha1.SetAgentPlacementResponse
+ */
+export type SetAgentPlacementResponse = Message<"koinon.agent.v1alpha1.SetAgentPlacementResponse"> & {
+  /**
+   * @generated from field: koinon.agent.v1alpha1.Agent agent = 1;
+   */
+  agent?: Agent | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.SetAgentPlacementResponse.
+ * Use `create(SetAgentPlacementResponseSchema)` to create a new message.
+ */
+export const SetAgentPlacementResponseSchema: GenMessage<SetAgentPlacementResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 41);
 
 /**
  * AgentDefinition is what a person sets on an agent without a template, and what UpdateAgent
@@ -1311,7 +1638,7 @@ export type AgentDefinition = Message<"koinon.agent.v1alpha1.AgentDefinition"> &
  * Use `create(AgentDefinitionSchema)` to create a new message.
  */
 export const AgentDefinitionSchema: GenMessage<AgentDefinition> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 36);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 42);
 
 /**
  * CreateAgentRequest names the org and the definition of the new draft.
@@ -1335,7 +1662,7 @@ export type CreateAgentRequest = Message<"koinon.agent.v1alpha1.CreateAgentReque
  * Use `create(CreateAgentRequestSchema)` to create a new message.
  */
 export const CreateAgentRequestSchema: GenMessage<CreateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 37);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 43);
 
 /**
  * CreateAgentResponse holds the new draft.
@@ -1354,7 +1681,7 @@ export type CreateAgentResponse = Message<"koinon.agent.v1alpha1.CreateAgentResp
  * Use `create(CreateAgentResponseSchema)` to create a new message.
  */
 export const CreateAgentResponseSchema: GenMessage<CreateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 38);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 44);
 
 /**
  * UpdateAgentRequest names the agent, the version the change is based on and the fields to change.
@@ -1401,7 +1728,7 @@ export type UpdateAgentRequest = Message<"koinon.agent.v1alpha1.UpdateAgentReque
  * Use `create(UpdateAgentRequestSchema)` to create a new message.
  */
 export const UpdateAgentRequestSchema: GenMessage<UpdateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 39);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 45);
 
 /**
  * UpdateAgentResponse holds the agent with its new latest version.
@@ -1420,7 +1747,7 @@ export type UpdateAgentResponse = Message<"koinon.agent.v1alpha1.UpdateAgentResp
  * Use `create(UpdateAgentResponseSchema)` to create a new message.
  */
 export const UpdateAgentResponseSchema: GenMessage<UpdateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 40);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 46);
 
 /**
  * AgentStatus is the agent lifecycle (ADR 0020).
@@ -1532,7 +1859,7 @@ export const AgentService: GenService<{
     output: typeof GetAgentResponseSchema;
   },
   /**
-   * ListAgents returns the org's agents, oldest first. Viewers and above.
+   * ListAgents returns one page of the org's agents, oldest first. Viewers and above.
    *
    * @generated from rpc koinon.agent.v1alpha1.AgentService.ListAgents
    */
@@ -1679,6 +2006,31 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof ArchiveAgentRequestSchema;
     output: typeof ArchiveAgentResponseSchema;
+  },
+  /**
+   * ListAgentSummaries returns one page of the org's agents that are not archived, as cards
+   * (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what
+   * waits on the caller. The page comes from one database query. Ordered by team (agents with no
+   * team last), then oldest first. Viewers and above.
+   *
+   * @generated from rpc koinon.agent.v1alpha1.AgentService.ListAgentSummaries
+   */
+  listAgentSummaries: {
+    methodKind: "unary";
+    input: typeof ListAgentSummariesRequestSchema;
+    output: typeof ListAgentSummariesResponseSchema;
+  },
+  /**
+   * SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent
+   * parent must be an agent of the same org that is not archived, and must not make a cycle; a
+   * person must be a member of the org. Audited as agent.placement.set. Admins and owners only.
+   *
+   * @generated from rpc koinon.agent.v1alpha1.AgentService.SetAgentPlacement
+   */
+  setAgentPlacement: {
+    methodKind: "unary";
+    input: typeof SetAgentPlacementRequestSchema;
+    output: typeof SetAgentPlacementResponseSchema;
   },
   /**
    * CreateAgent creates a draft agent without a template: the "Blank agent" form (ADR 0126 section

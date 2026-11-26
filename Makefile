@@ -151,24 +151,33 @@ harness-opencode: ## Build the OpenCode harness image (koinon/sandbox:dev-<hash>
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) $(call harness_cache,opencode) $(harness_secret) $$base_args \
 		--build-context common=harnesses/common --tag koinon/sandbox:$(call harness_tag,opencode) harnesses/opencode
 
-# The substrate overlay (ADR 0119, issue #1087): the harness image plus koinon-guest-launcher as its
-# entrypoint wrapper. Only the substrate driver uses it; the OpenShell images above do not change.
+# The substrate overlay (ADR 0119, issue #1087): the harness image plus koinon-guest-front as its
+# entrypoint (the guest API, #1309) and koinon-guest-launcher as the exec prefix of every command. Only the
+# substrate driver uses it; the OpenShell images above do not change.
 .PHONY: guest-launcher
-guest-launcher: ## Build the static guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
+guest-launcher: ## Build the static guest front and guest launcher for linux/amd64 and linux/arm64 into build/guest-launcher
 	for arch in amd64 arm64; do \
 		mkdir -p build/guest-launcher/linux-$$arch && \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
-			-o build/guest-launcher/linux-$$arch/koinon-guest-launcher ./cmd/koinon-guest-launcher || exit 1; \
+		for cmd in koinon-guest-launcher koinon-guest-front; do \
+			CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags='-s -w' \
+				-o build/guest-launcher/linux-$$arch/$$cmd ./cmd/$$cmd || exit 1; \
+		done; \
 	done
 
-# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES. The entry script
-# is /usr/local/bin/koinon-<name> (ADR 0048). A later harness gets an overlay with no Makefile change.
+# The upstream Substrate guest server, from the commit ATE_ENV_VERSION of hack/versions.env (upstream publishes no
+# image). The overlay does not use it: its guest API is koinon-guest-front (#1309).
+.PHONY: env-guest
+env-guest: ## Build the static Substrate guest server (ate-env-guest) for linux/amd64 and linux/arm64 into build/env-guest
+	hack/build-env-guest.sh build/env-guest
+
+# One overlay per harness: make harness-substrate-<name> (not listed by `make help`; harnesses-substrate is) for every name in HARNESSES.
+# The overlay carries the guest front and the launcher, and its ENTRYPOINT is the guest front. The harness entry script
+# (ADR 0048) is started by the driver through the guest, behind the launcher prefix. A later harness gets an overlay with no Makefile change.
 SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
 .PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%
-$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest launcher (koinon/sandbox:<tag>-substrate)
+$(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest front and launcher (koinon/sandbox:<tag>-substrate)
 	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
 		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,$*) \
-		--build-arg ENTRY_SCRIPT=/usr/local/bin/koinon-$* \
 		--build-context launcher=build/guest-launcher \
 		--tag koinon/sandbox:$(call harness_tag,$*)-substrate cmd/koinon-guest-launcher
 
@@ -234,19 +243,39 @@ test-admission: ## Run the escape suite's admission policy cases against envtest
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest,substrate-policy} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
+# The install modes run in shards (issue #1303): CI runs one process per shard, each with the 15 minute
+# budget below. CHART_SMOKE_SHARD picks one (core, external or kms; the groups are in
+# test/chartsmoke/shard_test.go); empty runs every mode serially, which needs about three budgets.
+CHART_SMOKE_SHARD ?=
+# Without a shard the run is serial and gets a longer budget (it took 13 minutes in a lane VM).
+ifneq ($(filter-out all,$(CHART_SMOKE_SHARD)),)
+CHART_SMOKE_BUDGET ?= 15m
+CHART_SMOKE_GO_TIMEOUT ?= 20m
+CHART_SMOKE_LABEL = -$(CHART_SMOKE_SHARD)
+else
+CHART_SMOKE_BUDGET ?= 25m
+CHART_SMOKE_GO_TIMEOUT ?= 30m
+CHART_SMOKE_LABEL =
+endif
+
 .PHONY: test-chart-smoke
-test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go)
+test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go). One shard of the install modes: CHART_SMOKE_SHARD=core|external|kms (default: all, serial)
 	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
-		KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout 20m -v ./test/chartsmoke/ -ginkgo.timeout=15m -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
-		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
+		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
+		$(GO) run ./hack/testverdict -reports reports/chartsmoke -name chart-smoke$(CHART_SMOKE_LABEL) -expect docker,envtest,volumecopy ./test/chartsmoke || rc=1; \
 		exit $$rc; }
 
 .PHONY: test-escape
 test-escape: ## Run the escape suite's OpenShell cases against a gateway you point it at (KOINON_OPENSHELL_*; export KOINON_ESCAPE_CLUSTER_DNS, _API and _INTERNAL from that cluster, else the DNS and deny specs skip)
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
+
+.PHONY: test-escape-substrate
+test-escape-substrate: ## Qualify one Substrate isolation tier (default hardened = gVisor) on a cluster you point it at (KOINON_ESCAPE_SUBSTRATE_*; runbook: docs/dev/escape-substrate.md)
+	KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:+$$KOINON_REQUIRE,}escape-cluster-ips,host-kernel,substrate-targets,substrate-snapshots \
+		$(GO) test -count=1 -v -timeout 45m ./test/escape/ -ginkgo.label-filter=substrate -ginkgo.timeout=40m
 
 .PHONY: test-escape-kind
 test-escape-kind: ## Run the escape suite's OpenShell cases on the kind-koinon-dev gateway (after make dev-kind-up; runc, Kata cases skip; the kind e2e runs them against the chart install)

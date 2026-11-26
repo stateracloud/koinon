@@ -104,11 +104,13 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
-		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1 and <url>/mcp")
+		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1, and <url>/mcp unless --agent-mcp-url is set")
+	fs.StringVar(&c.pool.MCPURL, "agent-mcp-url", "",
+		"the MCP URL harnesses get, as sandboxes reach it (koinon-gateway's /mcp with gateway.mcp.driver=koinon); empty: <gateway-url>/mcp")
 	fs.StringVar(&c.pool.EgressURL, "egress-url", "",
 		"the gateway's egress listener as sandboxes reach it (for example http://koinon-mcp-gateway.koinon.svc:8081); git of runs on a code-host connection goes to <url>/egress/<host>/ with a short-lived actor token; empty: git uses the driver's egress. Requires --actor-token-key-file")
 	fs.StringVar(&c.actorTokenKeyFile, "actor-token-key-file", "",
-		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key seed, mounted read-only); required with --egress-url")
+		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key key, mounted read-only); required with --egress-url")
 	fs.StringVar(&c.actorTokenKeyID, "actor-token-key-id", "k1", "key ID of --actor-token-key-file; the gateway reads the public key as <key-id>.pub")
 	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "koinon-agentd", "issuer of actor tokens; the gateway's --actor-token-issuer must match")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
@@ -183,6 +185,11 @@ func (c *config) validate() error {
 	}
 	if c.pool.GatewayURL == "" {
 		return errors.New("--gateway-url is required")
+	}
+	if c.pool.MCPURL != "" {
+		if err := agentd.CheckSandboxURL("--agent-mcp-url", c.pool.MCPURL); err != nil {
+			return err
+		}
 	}
 	if c.pool.OwnerID == "" {
 		h, err := os.Hostname()

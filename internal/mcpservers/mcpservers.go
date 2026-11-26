@@ -142,6 +142,29 @@ func Unreviewed(t store.McpTool) bool {
 	return !t.ApprovedHash.Valid
 }
 
+// neverReviewed reports whether no admin ever made a decision on the tool: no approved text, and no
+// tier an admin set. Only such a row counts toward MaxUnreviewedTools. A row from before the pin
+// (#1132) has a tier that an admin set and no approved hash; it is Unreviewed until the sync adopts its
+// pin, but an admin decided on it, so the server cannot add more such rows (#1216 point e).
+func neverReviewed(t store.McpTool) bool {
+	return Unreviewed(t) && !t.TierSetBy.Valid
+}
+
+// waitingForReview reports whether a tool already waits for an admin: no admin ever reviewed it, or
+// the sync flagged a change since the last review. A further change of its text updates the stored
+// text, which is what the admin approves, but it is not a new change: the sync writes no audit event
+// for it. A server that changes the text on each probe thus writes no event for each sync (#1216
+// points b and d).
+func waitingForReview(t store.McpTool) bool {
+	return neverReviewed(t) || t.ReviewReason.Valid
+}
+
+// PendingChange reports whether an admin approved the tool's text and the sync recorded other text
+// since. The gateway leaves such a tool out (#1132); the ask proxy does too (#1216 point a).
+func PendingChange(t store.McpTool) bool {
+	return t.ApprovedHash.Valid && t.ToolHash.String != t.ApprovedHash.String
+}
+
 // Reasons a server is disabled.
 const (
 	ReasonShadowed = "shadowed by an MCP server of the same name declared in a Kubernetes Secret"
@@ -198,6 +221,12 @@ var (
 // server tool of this name is not offered in the ask tier.
 const AskStatusTool = "get_approval_status"
 
+// AskToolNote starts the description of each ask-tier tool that the approval proxy (package mcpask)
+// offers. It is Koinon's own fixed text. The gateway's tool-list check adds it to the approved text of
+// the tool, so the agent sees the same text through either driver.
+const AskToolNote = "Needs human approval: returns \"approval requested: id=...\" at once and your run pauses; once approved, " +
+	"Koinon calls the server exactly as given and you get the result when the run resumes. "
+
 // AskSuffix ends the name of the gateway target that offers a server's ask-tier tools.
 const AskSuffix = "-ask"
 
@@ -232,6 +261,9 @@ type Server struct {
 	// forget, ADR 0085 decision 13): the server is not served until the credential is entered again.
 	// CredentialHeader and CredentialPrefix are kept.
 	CredentialLostAt *time.Time `json:"credentialLostAt,omitempty"`
+	// UnreviewedToolsCappedAt is set while the server is at MaxUnreviewedTools: the sync stores no new
+	// tool of it until an admin reviews tools (ReviewAllTools makes room).
+	UnreviewedToolsCappedAt *time.Time `json:"unreviewedToolsCappedAt,omitempty"`
 	// AdminDisabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5).
 	AdminDisabled *outward.Disabled `json:"adminDisabled,omitempty"`
 	// Kind and DataClass are what the server declares it exposes (ADR 0084 decision 8): its kind and
@@ -404,7 +436,7 @@ func toServer(r store.McpServer) Server {
 		HasCredential: len(r.Credential) > 0, CredentialHeader: r.CredentialHeader.String, CredentialPrefix: r.CredentialPrefix,
 		Source: string(r.Source), ManagedBySecret: r.ManagedBySecret.String, DisabledReason: r.DisabledReason.String,
 		CABundle: r.CaBundle, InsecureSkipVerify: r.InsecureSkipVerify,
-		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
+		Removed: r.RemovedAt.Valid, CredentialLostAt: timePtr(r.CredentialLostAt), UnreviewedToolsCappedAt: timePtr(r.UnreviewedToolsCappedAt), AdminDisabled: outward.FromRow(r.AdminDisabledAt, r.AdminDisabledBy, r.AdminDisabledNote), Health: string(r.Health), HealthReason: r.HealthReason.String,
 		HealthCheckedAt: timePtr(r.HealthCheckedAt), HealthSince: timePtr(r.HealthSince), ToolsSyncedAt: timePtr(r.ToolsSyncedAt),
 		CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 		Kind: declarationOf(r).Kind, DataClass: declarationOf(r).Legs, CodeHostConnectionID: declarationOf(r).CodeHostConnection,
@@ -1137,7 +1169,9 @@ func (s *Service) SetTier(ctx context.Context, org pgtype.UUID, actor audit.Acto
 	}
 	var out store.McpTool
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
+		// The server lock comes before the tool lock, as in SyncTools: a sync reads the rows of the server
+		// without a row lock, so an approval that did not wait for it could be written over (#1216).
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
 		}
@@ -1176,7 +1210,9 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 	}
 	var out store.McpTool
 	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
-		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
+		// The server lock comes before the tool lock, as in SyncTools: a sync reads the rows of the server
+		// without a row lock, so an approval that did not wait for it could be written over (#1216).
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
 		if err != nil {
 			return err
 		}
@@ -1201,6 +1237,120 @@ func (s *Service) AcknowledgeReview(ctx context.Context, org pgtype.UUID, actor 
 		return Tool{}, mapErr(err)
 	}
 	return toTool(out), nil
+}
+
+// SeenTool names a tool and the hash of its text (Tool.ToolHash) as an admin read it.
+type SeenTool struct {
+	Name     string
+	ToolHash string
+}
+
+// ReviewAllResult says what ReviewAllTools changed.
+type ReviewAllResult struct {
+	// Reviewed are the tools it approved, as they are now.
+	Reviewed []Tool
+	// Removed is how many absent rows that no admin reviewed it deleted.
+	Removed int
+}
+
+// maxReviewAll bounds one ReviewAllTools request. It is far above what a server can have waiting: at
+// most MaxUnreviewedTools new tools and the changed tools an admin reviewed before.
+const maxReviewAll = 4 * MaxUnreviewedTools
+
+// waitingNow reports whether a tool's current text waits for an admin: the sync flagged a change, or no
+// admin approved the text the sync recorded last.
+func waitingNow(t store.McpTool) bool {
+	return t.ReviewReason.Valid || (t.ToolHash.Valid && t.ToolHash.String != t.ApprovedHash.String)
+}
+
+// ReviewAllTools reviews the waiting tools of one server in one step (#1216 point c, ADR 0125). For each
+// tool in seen it approves the text the sync recorded last, as AcknowledgeReview does, without changing
+// the tier. Each hash must be the one stored: a tool whose text changed since the admin read it, or that
+// the server no longer lists, is ErrToolChanged and nothing changes. A tool in seen that waits for nothing
+// is left as it is. Then it deletes the rows of tools that no admin ever reviewed and that the server no
+// longer lists: they are not served and they count toward MaxUnreviewedTools. When that makes room, the
+// server's mark of the limit goes.
+func (s *Service) ReviewAllTools(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID string, seen []SeenTool) (ReviewAllResult, error) {
+	sid, err := parseID(serverID)
+	if err != nil {
+		return ReviewAllResult{}, err
+	}
+	if len(seen) > maxReviewAll {
+		return ReviewAllResult{}, invalid("tools must name at most %d tools", maxReviewAll)
+	}
+	var res ReviewAllResult
+	err = s.tx(ctx, func(q *store.Queries, b audit.Batch) error {
+		// The server lock makes a sync of the server wait, so the rows read here stay as they are.
+		srv, err := q.LockMCPServerForToolSync(ctx, store.LockMCPServerForToolSyncParams{OrgID: org, ID: sid})
+		if err != nil {
+			return err
+		}
+		done := map[string]bool{}
+		for _, st := range seen {
+			if done[st.Name] {
+				return invalid("tools names %s more than once", st.Name)
+			}
+			done[st.Name] = true
+			cur, err := q.GetMCPToolForUpdate(ctx, store.GetMCPToolForUpdateParams{OrgID: org, ServerID: sid, Name: st.Name})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrToolChanged
+			}
+			if err != nil {
+				return err
+			}
+			if !cur.Present {
+				return ErrToolChanged
+			}
+			if !waitingNow(cur) {
+				continue
+			}
+			if st.ToolHash == "" && cur.ToolHash.Valid {
+				return invalid("toolHash of %s is required: the hash of the tool text you reviewed", st.Name)
+			}
+			if err := checkApproval(cur, st.ToolHash); err != nil {
+				return err
+			}
+			out, err := q.AcknowledgeMCPToolReview(ctx, store.AcknowledgeMCPToolReviewParams{OrgID: org, ServerID: sid, Name: st.Name})
+			if err != nil {
+				return err
+			}
+			b.Org(audit.Event{
+				Org: org, Actor: actor, Action: "mcp_tool.review", TargetKind: "mcp_tool", TargetID: serverID + "/" + st.Name,
+				After: map[string]any{"server": srv.Name, "tool": st.Name, "tier": string(out.Tier), "approvedHash": out.ApprovedHash.String, "reviewAll": true},
+			})
+			res.Reviewed = append(res.Reviewed, toTool(out))
+		}
+		removed, err := q.DeleteAbsentUnreviewedMCPTools(ctx, store.DeleteAbsentUnreviewedMCPToolsParams{OrgID: org, ServerID: sid})
+		if err != nil {
+			return err
+		}
+		res.Removed = len(removed)
+		if res.Removed > 0 {
+			// The count only: the names are the server's own text (as for mcp_server.unreviewed_tools_capped).
+			b.Org(audit.Event{
+				Org: org, Actor: actor, Action: "mcp_server.unreviewed_tools_removed", TargetKind: "mcp_server", TargetID: serverID,
+				After: map[string]any{"server": srv.Name, "removed": res.Removed},
+			})
+		}
+		if !srv.UnreviewedToolsCappedAt.Valid {
+			return nil
+		}
+		rows, err := q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org, ServerID: sid})
+		if err != nil {
+			return err
+		}
+		unreviewed := 0
+		for _, t := range rows {
+			if neverReviewed(t) {
+				unreviewed++
+			}
+		}
+		return markCapped(ctx, q, b, org, srv, 0, unreviewed)
+	})
+	if err != nil {
+		return ReviewAllResult{}, mapErr(err)
+	}
+	return res, nil
 }
 
 // ListedTool is a tool as a server published it.
@@ -1315,12 +1465,12 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 			return err
 		}
 		have := map[string]store.McpTool{}
-		// Every unreviewed row counts, present or absent: a server that lists other names each time
-		// must not make room by dropping the names it listed before.
+		// Every row that no admin ever reviewed counts, present or absent: a server that lists other
+		// names each time must not make room by dropping the names it listed before.
 		unreviewed := 0
 		for _, t := range known {
 			have[t.Name] = t
-			if Unreviewed(t) {
+			if neverReviewed(t) {
 				unreviewed++
 			}
 		}
@@ -1380,6 +1530,22 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 					return err
 				}
 				res.New = append(res.New, lt.Name)
+			case cur.ContentHash != hash && waitingForReview(cur):
+				// The tool already waits for an admin: keep its text current for the review, keep its
+				// review state, and write no event. The declaration still goes back to the default; that
+				// reset is audited only when it changes something, so at most once for each admin action.
+				out, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
+					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
+					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: cur.ReviewReason,
+					DescriptionOriginalLength: int64(rep.OriginalLen), DescriptionCapped: rep.Capped, DescriptionCleaned: rep.Cleaned,
+					ToolJson: toolJSON, ToolHash: pgtype.Text{String: toolHash, Valid: true},
+				})
+				if err != nil {
+					return err
+				}
+				if err := recordToolDeclarationReset(ctx, q, b, org, audit.System("koinon-reconciler:mcp-sync"), srv.Name, cur, out, ReasonContentChanged); err != nil {
+					return err
+				}
 			case cur.ContentHash != hash || pinMoved || legacyExtra:
 				reason := ReviewChanged
 				if cur.Tier == store.McpTierAuto {

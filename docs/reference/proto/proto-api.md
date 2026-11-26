@@ -20,11 +20,13 @@ org it acts in; IDs from another org are not found.
 | GetAgent | `koinon.agent.v1alpha1.GetAgentRequest` | `koinon.agent.v1alpha1.GetAgentResponse` | - | GetAgent returns one agent. Viewers and above. |
 | GetAgentModel | `koinon.agent.v1alpha1.GetAgentModelRequest` | `koinon.agent.v1alpha1.GetAgentModelResponse` | - | GetAgentModel says which model the agent's next run uses and where that choice comes from, and lists the models an admin may pick. Admins and owners only. |
 | GetAgentSandboxResources | `koinon.agent.v1alpha1.GetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.GetAgentSandboxResourcesResponse` | - | GetAgentSandboxResources returns the agent's sandbox CPU and memory sizing: its own override, the template's values, what the next sandbox gets, and the platform bounds an override must stay inside (ADR 0083). Admins and owners only. |
-| ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns the org's agents, oldest first. Viewers and above. |
+| ListAgentSummaries | `koinon.agent.v1alpha1.ListAgentSummariesRequest` | `koinon.agent.v1alpha1.ListAgentSummariesResponse` | - | ListAgentSummaries returns one page of the org's agents that are not archived, as cards (ADR 0126 section 4): the state, the team, "reports to", the runs, today's spend and what waits on the caller. The page comes from one database query. Ordered by team (agents with no team last), then oldest first. Viewers and above. |
+| ListAgents | `koinon.agent.v1alpha1.ListAgentsRequest` | `koinon.agent.v1alpha1.ListAgentsResponse` | - | ListAgents returns one page of the org's agents, oldest first. Viewers and above. |
 | ResumeAgent | `koinon.agent.v1alpha1.ResumeAgentRequest` | `koinon.agent.v1alpha1.ResumeAgentResponse` | - | ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners only. |
 | RunAgentTrigger | `koinon.agent.v1alpha1.RunAgentTriggerRequest` | `koinon.agent.v1alpha1.RunAgentTriggerResponse` | - | RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited. Admins and owners only. |
 | SetAgentKeepWarm | `koinon.agent.v1alpha1.SetAgentKeepWarmRequest` | `koinon.agent.v1alpha1.SetAgentKeepWarmResponse` | - | SetAgentKeepWarm asks for the agent's sandbox to stay up (it is never idle-stopped and starts when found stopped), or withdraws the request. A request, not a promise: the operator caps the keep-warm sandboxes per org (reconciler.keepWarmPerOrg) and the reconciler grants requests oldest agent first; Agent.keep_warm_granted says whether this one was. Like the model it is a setting of the agent, not a new version. Audited, with the old and the new value. Fails with FailedPrecondition on an archived agent. Admins and owners only (ADR 0049 amendment 2026-11-01). |
 | SetAgentModel | `koinon.agent.v1alpha1.SetAgentModelRequest` | `koinon.agent.v1alpha1.SetAgentModelResponse` | - | SetAgentModel sets the agent's model, or clears it with "default". It is a setting of the agent, not a new version: it applies to the agent's next run. The model must be one the org serves and has a price for. Audited, with the old and the new value. Admins and owners only. |
+| SetAgentPlacement | `koinon.agent.v1alpha1.SetAgentPlacementRequest` | `koinon.agent.v1alpha1.SetAgentPlacementResponse` | - | SetAgentPlacement sets the agent's team and whom it reports to (ADR 0126 section 4). An agent parent must be an agent of the same org that is not archived, and must not make a cycle; a person must be a member of the org. Audited as agent.placement.set. Admins and owners only. |
 | SetAgentSandboxResources | `koinon.agent.v1alpha1.SetAgentSandboxResourcesRequest` | `koinon.agent.v1alpha1.SetAgentSandboxResourcesResponse` | - | SetAgentSandboxResources sets the agent's sandbox resource override, or clears the values left empty so the template's value and then the platform default apply. A value outside the platform bounds is refused with INVALID_ARGUMENT and a message that names the bounds. Like the model it is a setting of the agent, not a new version; a change recreates the sandbox at the next run (the size is part of the sandbox spec hash). Audited, with the old and the new override. Admins and owners only. |
 | SetAgentThinking | `koinon.agent.v1alpha1.SetAgentThinkingRequest` | `koinon.agent.v1alpha1.SetAgentThinkingResponse` | - | SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting with an empty value so the version's value (a template's spec.model.thinking) and then the default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old and the new value. Admins and owners only. |
 | SetAgentTriggers | `koinon.agent.v1alpha1.SetAgentTriggersRequest` | `koinon.agent.v1alpha1.SetAgentTriggersResponse` | - | SetAgentTriggers proposes a new version with the given triggers (everything else carried over from the latest version). The triggers fire nothing until ActivateAgent activates that version; an active agent keeps running its active version meanwhile. Audited. Admins and owners only. |
@@ -84,6 +86,8 @@ Agent is an agent and the definition it runs.
 | keep_warm | 26 | `bool` | singular |  | Whether an org admin asked for the agent's sandbox to stay up (SetAgentKeepWarm; ADR 0049 amendment 2026-11-01). A request: the operator caps how many the reconciler grants per org. |
 | keep_warm_granted | 27 | `bool` | singular |  | Whether the reconciler granted the request under the operator's per-org cap (reconciler.keepWarmPerOrg). Only meaningful with keep_warm; false for an archived agent. A new request reads false until the reconciler's next pass. |
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
+| team | 29 | `string` | singular |  | The agent's team label (SetAgentPlacement); empty for no team. |
+| reports_to | 30 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also of a person who left the org since; AgentSummary gives the name and leaves out such a person. |
 
 ### Message AgentDefinition
 
@@ -99,6 +103,41 @@ changes.
 | grants | 5 | `koinon.template.v1alpha1.Grant` | repeated |  | The grants the agent proposes, one per connector type, each with its connection and targets in connection_id and repositories. A grant names a connector type, scopes that the type has, and a preset. targets_min and targets_max are ignored. ActivateAgent approves them. |
 | triggers | 6 | `koinon.template.v1alpha1.Trigger` | repeated |  | The complete list of triggers. They fire nothing until ActivateAgent activates the version. |
 | run_limits | 7 | `koinon.template.v1alpha1.RunLimits` | singular |  | The limits of one run; a zero or empty value takes the platform default. |
+
+### Message AgentReportsTo
+
+AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent_id | 1 | `string` | singular | target |  |
+| user_id | 2 | `string` | singular | target |  |
+| display_name | 3 | `string` | singular |  | The display name of the agent or the person. Output only: set by ListAgentSummaries, ignored in SetAgentPlacement. |
+
+### Message AgentSummary
+
+AgentSummary is what an agent card shows (ADR 0126 section 4).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent_id | 1 | `string` | singular |  |  |
+| display_name | 2 | `string` | singular |  |  |
+| status | 3 | `koinon.agent.v1alpha1.AgentStatus` | singular |  |  |
+| harness | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  | The agent's own model setting, else the model of its latest version. |
+| team | 6 | `string` | singular |  |  |
+| reports_to | 7 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Unset for nobody. A person who is no longer a member of the org does not show. |
+| created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
+| unhealthy_at | 9 | `google.protobuf.Timestamp` | singular |  | Set while the agent is unhealthy (ADR 0054). |
+| last_run_state | 10 | `koinon.run.v1alpha1.RunState` | singular |  | The state of the agent's newest run; unspecified when it has no run. |
+| last_run_at | 11 | `google.protobuf.Timestamp` | singular |  | When the newest run finished, else started, else was queued. |
+| running_runs | 12 | `int32` | singular |  | How many runs of the agent start or run now. |
+| spent_today_usd | 13 | `string` | singular |  | USD spent today (from day_start), as a decimal string. |
+| daily_limit_usd | 14 | `string` | singular |  | The agent's daily limit in USD; empty when it has none. |
+| input_tokens_today | 15 | `int64` | singular |  | Input tokens today (they include cache reads) and the cache reads among them. The cache read share is cache_read_tokens_today / input_tokens_today. |
+| cache_read_tokens_today | 16 | `int64` | singular |  |  |
+| next_scheduled_at | 17 | `google.protobuf.Timestamp` | singular |  | The next due time of the active version's schedule triggers (ADR 0066); unset when none. The run starts up to 30 seconds after it (the scheduler's jitter). |
+| waiting_on_you | 18 | `int32` | singular |  | The inbox items of the caller for this agent: approvals the caller may decide, questions the caller may answer, the caller's tasks that wait on input, and an unhealthy agent for an admin. |
 
 ### Message ArchiveAgentRequest
 
@@ -224,21 +263,44 @@ the targets it is narrowed to.
 | connection_id | 2 | `string` | singular |  | A connection of that type in the org (ConnectionService). |
 | repositories | 3 | `string` | repeated |  | For GitHub: repositories as owner/name. Their number must be within the template grant's targets min and max, and the connection's installation must be able to access each of them. |
 
-### Message ListAgentsRequest
+### Message ListAgentSummariesRequest
 
-ListAgentsRequest names the org.
+ListAgentSummariesRequest names the org and the page.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | org_id | 1 | `string` | singular |  |  |
+| page_size | 2 | `int32` | singular |  | page_size is 50 by default and at most 200. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page. |
+
+### Message ListAgentSummariesResponse
+
+ListAgentSummariesResponse lists one page of agent cards.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agents | 1 | `koinon.agent.v1alpha1.AgentSummary` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+| day_start | 3 | `google.protobuf.Timestamp` | singular |  | The start of today (UTC) for the spend and token fields. |
+
+### Message ListAgentsRequest
+
+ListAgentsRequest names the org and the page.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| page_size | 2 | `int32` | singular |  | page_size is 500 by default and at most 500. |
+| page_token | 3 | `string` | singular |  | page_token is the next_page_token of the previous page. |
 
 ### Message ListAgentsResponse
 
-ListAgentsResponse lists the org's agents.
+ListAgentsResponse lists one page of the org's agents.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | agents | 1 | `koinon.agent.v1alpha1.Agent` | repeated |  |  |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
 
 ### Message ResumeAgentRequest
 
@@ -363,6 +425,25 @@ SetAgentModelResponse holds the result, as GetAgentModel would return it.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | model | 1 | `koinon.agent.v1alpha1.GetAgentModelResponse` | singular |  |  |
+
+### Message SetAgentPlacementRequest
+
+SetAgentPlacementRequest sets both values; an empty team and an unset reports_to clear them.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| team | 3 | `string` | singular |  | At most 64 characters, no control characters. Spaces at the ends are removed. |
+| reports_to | 4 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  |  |
+
+### Message SetAgentPlacementResponse
+
+SetAgentPlacementResponse holds the agent as GetAgent would return it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| agent | 1 | `koinon.agent.v1alpha1.Agent` | singular |  |  |
 
 ### Message SetAgentSandboxResourcesRequest
 
@@ -2339,7 +2420,22 @@ Tier is a scope's risk tier (ADR 0008).
 
 ## koinon.gateway.v1alpha1
 
-Files: `koinon/gateway/v1alpha1/state.proto`
+Files: `koinon/gateway/v1alpha1/approval.proto`, `koinon/gateway/v1alpha1/state.proto`
+
+### Service GatewayApprovalService
+
+GatewayApprovalService is the approval route of Koinon's own gateway (ADR 0097 decision 2.3, #1301):
+when the leak guard in koinon-gateway holds a call for a person, the gateway asks koinon-api to record
+the ADR 0042 approval of that exact call. koinon-api owns the approval tables; the gateway's database
+login has no right on them. It is internal: only a gateway copy calls it, on the listener of the State
+stream and with the same token.
+
+koinon-api does not trust the names in the request: it reads the org, the agent, the server, the
+agent's allowance and the published tool itself, and refuses a call that does not match them.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| RequestApproval | `koinon.gateway.v1alpha1.RequestApprovalRequest` | `koinon.gateway.v1alpha1.RequestApprovalResponse` | - | RequestApproval records the approval request for exactly this call, or returns the one already recorded for the same call in the same run. The gateway refuses the call with the returned text (the agent reads "approval requested: id=..."); Koinon's executor sends it once a person approves. Any error fails the call closed. |
 
 ### Service GatewayStateService
 
@@ -2492,6 +2588,7 @@ where the target's own CA bundle (public certificates) is mounted, empty for the
 | builtin | 10 | `string` | singular |  | builtin names code that runs in koinon-gateway in place of an upstream URL ("a2a", ADR 0123). |
 | remote_agents | 11 | `koinon.gateway.v1alpha1.RemoteAgent` | repeated |  |  |
 | handle_key_file | 12 | `string` | singular |  | handle_key_file holds the key that signs the task and context handles of the built-in target. |
+| ask | 13 | `bool` | singular |  | ask marks Koinon's approval-gated proxy for the ask-tier tools of an org's server (internal/mcpask). The gateway sends it the agent header; an org's own server never gets that header. |
 
 ### Message Model
 
@@ -2566,6 +2663,23 @@ RemoteAgent is one external A2A agent of a built-in "a2a" target (ADR 0123 decis
 | insecure_skip_verify | 8 | `bool` | singular |  |  |
 | card_hash | 9 | `string` | singular |  | card_hash is the pin: the SHA-256 of the canonical agent card, in hex. |
 | agents | 10 | `string` | repeated |  | agents are the names of the Koinon agents that may call this remote agent. |
+
+### Message RequestApprovalRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `string` | singular |  | org is the org slug of the calling agent, as the agent identity names it. |
+| agent_id | 2 | `string` | singular |  | agent_id is the calling agent's id (a UUID). |
+| server_id | 3 | `string` | singular |  | server_id is the id (a UUID) of the org's MCP server that the call addresses. |
+| tool | 4 | `string` | singular |  | tool is the name of the published tool. |
+| arguments | 5 | `bytes` | singular |  | arguments is the call's JSON arguments object, as the agent sent it. |
+| risk | 6 | `bytes` | singular |  | risk is the leak guard's reading of the call as a JSON object (reasons, sink class, destination, legs, match): what the approval card shows. It never holds a credential. |
+
+### Message RequestApprovalResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| text | 1 | `string` | singular |  | text is what the agent reads, for example "approval requested: id=...". |
 
 ### Message StateUpdate
 
@@ -2739,6 +2853,7 @@ be set here. Credentials are write-only; they are never returned.
 | GetAgentServers | `koinon.mcpserver.v1alpha1.GetAgentServersRequest` | `koinon.mcpserver.v1alpha1.GetAgentServersResponse` | - | GetAgentServers returns the servers an agent may use. |
 | ListServers | `koinon.mcpserver.v1alpha1.ListServersRequest` | `koinon.mcpserver.v1alpha1.ListServersResponse` | - |  |
 | ListTools | `koinon.mcpserver.v1alpha1.ListToolsRequest` | `koinon.mcpserver.v1alpha1.ListToolsResponse` | - | ListTools returns the tools of one server, or of all the org's servers when server_id is empty. |
+| ReviewAllTools | `koinon.mcpserver.v1alpha1.ReviewAllToolsRequest` | `koinon.mcpserver.v1alpha1.ReviewAllToolsResponse` | - | ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the text of each tool in the request at the hash the admin saw, without changing its tier, as AcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no longer lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of tools that no admin ever reviewed and that the server no longer lists: they are not served, and they count toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and mcp_server.unreviewed_tools_removed once. |
 | SetAgentServers | `koinon.mcpserver.v1alpha1.SetAgentServersRequest` | `koinon.mcpserver.v1alpha1.SetAgentServersResponse` | - | SetAgentServers replaces the servers an agent may use. |
 | SetServerClass | `koinon.mcpserver.v1alpha1.SetServerClassRequest` | `koinon.mcpserver.v1alpha1.SetServerClassResponse` | - | SetServerClass sets what a server exposes: its kind and the legs of the leak guard (ADR 0084) it carries. It works for declared servers too, which the declaring Secret does not describe. Audited as mcp_server.data_class.set. |
 | SetToolSink | `koinon.mcpserver.v1alpha1.SetToolSinkRequest` | `koinon.mcpserver.v1alpha1.SetToolSinkResponse` | - | SetToolSink declares a tool's sink class, address arguments and result legs (ADR 0091). The request names the content hash of the tool the admin reviewed; if the server republished the tool since, the call fails with ABORTED (HTTP 409) and nothing changes. Audited as mcp_tool.declaration.set. A changed server URL or tool content hash puts the declaration back to the default, audited as mcp_tool.declaration.reset. |
@@ -2840,6 +2955,21 @@ No fields.
 | --- | --- | --- | --- | --- | --- |
 | tools | 1 | `koinon.mcpserver.v1alpha1.Tool` | repeated |  |  |
 
+### Message ReviewAllToolsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| server_id | 2 | `string` | singular |  |  |
+| tools | 3 | `koinon.mcpserver.v1alpha1.ToolReview` | repeated |  | tools are the waiting tools the admin saw, each with the hash of the text the admin saw. A tool that does not wait for review is left as it is. Empty only deletes the absent rows. |
+
+### Message ReviewAllToolsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| tools | 1 | `koinon.mcpserver.v1alpha1.Tool` | repeated |  | tools are the tools the call approved, as they are now. |
+| removed | 2 | `int32` | singular |  | removed is how many absent rows that no admin reviewed the call deleted. |
+
 ### Message Server
 
 Server is a remote MCP server of the org. It never holds the credential.
@@ -2872,6 +3002,7 @@ Server is a remote MCP server of the org. It never holds the credential.
 | admin_disabled | 24 | `koinon.outward.v1alpha1.AdminDisabled` | singular |  | admin_disabled is set while an admin holds the target off (the outward switch, ADR 0110 decision 5): it is not called, probed or offered to runs. Unset otherwise. |
 | ca_bundle | 25 | `string` | singular |  | ca_bundle is the PEM bundle of the one CA that signs this server's certificate. Only this CA is trusted for this server: it replaces the public roots (as curl --cacert does). Empty uses the public roots. It is public (certificates only). |
 | insecure_skip_verify | 26 | `bool` | singular |  | insecure_skip_verify says the server's certificate is NOT verified (as curl -k): TLS is used, but the server's identity is not checked and its credential can be sent to an impostor. https only; never set together with ca_bundle. |
+| unreviewed_tools_capped_at | 27 | `google.protobuf.Timestamp` | singular |  | unreviewed_tools_capped_at is set while the server is at the limit of tools that no admin reviewed (256, ADR 0125): the sync stores no new tool of it. Reviewing its tools (ReviewAllTools) makes room. Unset otherwise. |
 
 ### Message ServerClass
 
@@ -2983,6 +3114,15 @@ ServerClass is what a server declares it exposes (ADR 0084 decision 8).
 | tool_hash | 19 | `string` | singular |  | tool_hash is the hash of the tool text the server published last, as the gateway pins it: every member the model sees (name, title, description, annotations, input and output schema), sanitised. An approval (SetToolTier, AcknowledgeToolReview) approves this text and takes this hash. Empty before the first sync that recorded it. |
 | tool_json | 20 | `string` | singular |  | tool_json is that text, as JSON. The console shows it before an admin approves it. |
 | approved_hash | 21 | `string` | singular |  | approved_hash is the hash of the text an admin approved. Empty while no admin approved one. When tool_hash differs, the text is pending: the gateway does not serve it until an admin approves it. |
+
+### Message ToolReview
+
+ToolReview names a tool and the text of it that the admin saw.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| tool | 1 | `string` | singular |  |  |
+| tool_hash | 2 | `string` | singular |  | tool_hash is the Tool.tool_hash the admin reviewed. Required. |
 
 ### Message ToolSink
 

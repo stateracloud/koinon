@@ -328,7 +328,12 @@ func alwaysShapes(w string) []shape {
 	}
 }
 
-var separators = []string{" ", "\n", "\t", ",", ";", "=", ":", "\"", "'", "/", "(", "{", "[", "&", "?", "%3D", "%2F", `\n`, `\t`, `\"`, `\/`}
+var separators = []string{
+	" ", "\n", "\t", ",", ";", "=", ":", "\"", "'", "/", "(", "{", "[", "&", "?", "%3D", "%2F", `\n`, `\t`, `\"`, `\/`,
+	// Appended after the first release: corpus files hold an index. Two characters in a row, as in
+	// the input of issue 1103 (a quote, then a bracket).
+	`"[`, `["`, `{"`, `("`, `'[`, `":"`, `",`,
+}
 
 // wrap puts the planted text into a wrapper, the ways content reaches the scrubber.
 func wrap(kind int, sep, text string) string {
@@ -359,6 +364,22 @@ func wrap(kind int, sep, text string) string {
 	return "line1\n" + sep + text + "\nline3"
 }
 
+// fuzzSeedLimit bounds the seed string of FuzzAlwaysShapesNeverSurvive in bytes. The test builds
+// the planted secret from the whole seed, and the fuzzer grows a string without a limit. The
+// scrubber is linear in its input (measured: 18 ms for a 4 KiB seed, 0.25 s for 100 KiB, per
+// run of one shape), but the fuzzer grows a seed to 100s of KB, and each execution then takes a
+// second or more. The fuzz run showed 0 execs/sec for 30 s (issue 1337 C). A secret
+// needs at most about 40 characters of the seed, so a longer seed adds only time.
+const fuzzSeedLimit = 256
+
+// boundSeed cuts a fuzz seed to fuzzSeedLimit bytes.
+func boundSeed(seed string) string {
+	if len(seed) > fuzzSeedLimit {
+		return seed[:fuzzSeedLimit]
+	}
+	return seed
+}
+
 func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 	// The seed corpus is fixed: the plain run checks the same inputs every run. The fuzzer
 	// mutates the seed string, which shapes the secret's characters.
@@ -367,6 +388,7 @@ func FuzzAlwaysShapesNeverSurvive(f *testing.F) {
 	}
 	full := scrub.New(scrub.Config{Level: scrub.LevelFull})
 	f.Fuzz(func(t *testing.T, shapeIdx, wrapIdx, sepIdx uint8, seed string) {
+		seed = boundSeed(seed)
 		w := wordFrom(seed, 12)
 		var b strings.Builder
 		for _, c := range seed {

@@ -545,7 +545,7 @@ const markAgentUnhealthy = `-- name: MarkAgentUnhealthy :one
 UPDATE agents
 SET unhealthy_at = now(), unhealthy_reason = $1::text
 WHERE org_id = $2 AND id = $3 AND unhealthy_at IS NULL
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type MarkAgentUnhealthyParams struct {
@@ -584,6 +584,9 @@ func (q *Queries) MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthy
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }
@@ -729,7 +732,7 @@ const resumeAgent = `-- name: ResumeAgent :one
 UPDATE agents
 SET unhealthy_at = NULL, unhealthy_reason = NULL, resumed_at = now()
 WHERE org_id = $1 AND id = $2 AND unhealthy_at IS NOT NULL
-RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted
+RETURNING org_id, id, display_name, status, harness, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking, keep_warm, sandbox_cpu_request, sandbox_cpu_limit, sandbox_memory_request, sandbox_memory_limit, keep_warm_granted, team, reports_to_agent_id, reports_to_user_id
 `
 
 type ResumeAgentParams struct {
@@ -768,6 +771,9 @@ func (q *Queries) ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent
 		&i.SandboxMemoryRequest,
 		&i.SandboxMemoryLimit,
 		&i.KeepWarmGranted,
+		&i.Team,
+		&i.ReportsToAgentID,
+		&i.ReportsToUserID,
 	)
 	return i, err
 }

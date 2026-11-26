@@ -1074,7 +1074,7 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 	for _, s := range pl.servers {
 		state.MCP = append(state.MCP, p.mcpTarget(s))
 		if at := mcpservers.AskTargetName(s.Org.Slug, s.Name); askTarget[at] {
-			state.MCP = append(state.MCP, gateway.MCPTarget{Name: at, URL: strings.TrimRight(p.cfg.MCPAskURL, "/") + "/" + s.Name, Org: s.Org.Slug})
+			state.MCP = append(state.MCP, gateway.MCPTarget{Name: at, URL: strings.TrimRight(p.cfg.MCPAskURL, "/") + "/" + s.Name, Org: s.Org.Slug, Ask: true})
 		}
 		// The prober's key: it lists the server's tools through the gateway, as an agent would.
 		ref := s.probeAgent()

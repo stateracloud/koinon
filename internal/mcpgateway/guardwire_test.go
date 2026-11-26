@@ -100,7 +100,7 @@ var _ = Describe("the guard in the MCP path", func() {
 			Expect(msg.Target).To(Equal("acme-wiki"))
 			Expect(msg.Org).To(Equal("acme"))
 			Expect(msg.Agent).To(Equal(agent))
-			Expect(msg.Credential).To(Equal(mcpgateway.CredentialNone))
+			Expect(msg.Credential).To(Equal(mcpgateway.CredentialNone.String()))
 		}
 	})
 
@@ -137,7 +137,7 @@ var _ = Describe("the guard in the MCP path", func() {
 		Expect(c.Target).To(Equal("acme-wiki"))
 		Expect(c.Org).To(Equal("acme"))
 		Expect(c.Tool).To(Equal("read_item"))
-		Expect(c.Credential).To(Equal(mcpgateway.CredentialNone))
+		Expect(c.Credential).To(Equal(mcpgateway.CredentialNone.String()))
 		Expect(string(c.Arguments)).To(ContainSubstring("hello"))
 
 		// A tool with no grant never reaches the call check.

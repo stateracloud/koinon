@@ -248,7 +248,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			_, err = bk("").CreateSandbox(ctx, orphanWS, execution.SandboxSpec{Name: "ka-orphan", Image: image})
 			Expect(err).NotTo(HaveOccurred())
 			// Another install's object in this database's workspace.
-			theirs := reconciler.GatewayProfile(harness.OpenCode, reconciler.Harness{Binaries: []string{"/bin/x"}}, reconciler.Endpoint{Host: "h", Port: 1}, false)
+			theirs := reconciler.GatewayProfile(harness.OpenCode, reconciler.Harness{Binaries: []string{"/bin/x"}}, reconciler.Endpoint{Host: "h", Port: 1}, reconciler.Endpoint{}, false)
 			theirs.ID = "koinon-theirs"
 			Expect(bk("mark-other").EnsureProvider(ctx, ws, execution.Provider{
 				Name: "kp-theirs", Profile: theirs,
@@ -449,7 +449,7 @@ var _ = Describe("Reconciler install ownership", func() {
 			_, err := bk("").EnsureWorkspace(ctx, ws, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(bk("").EnsureProvider(ctx, ws, execution.Provider{
-				Name: "kp-handmade", Profile: reconciler.GatewayProfile(harness.OpenCode, harnesses[harness.OpenCode], reconciler.Endpoint{Host: "h", Port: 1}, false),
+				Name: "kp-handmade", Profile: reconciler.GatewayProfile(harness.OpenCode, harnesses[harness.OpenCode], reconciler.Endpoint{Host: "h", Port: 1}, reconciler.Endpoint{}, false),
 				Credentials: map[string]string{reconciler.GatewayKeyEnvVar: "koinon_test_not-a-real-token"},
 			})).To(Succeed())
 			reasonOf := func(configured map[string]reconciler.Harness) string {

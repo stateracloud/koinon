@@ -362,3 +362,48 @@ exactly what the backup holds.
   the class `sandbox_unavailable` (it was `fatal`).
 
 Note (2026-11-07): private infrastructure detail removed; maintainer decision 2026-11-07.
+
+## Amendment (2026-11-25, issue #1090): the home on Substrate uses two mechanisms
+
+**Decision (maintainer, 2026-11-25, after the lab trial S4 of issue #1090).** On the Substrate driver the home
+uses both of these:
+
+1. **A Substrate durable directory at `/sandbox`** keeps the home through suspend and resume. The actor
+   template of the driver has one volume, `home`, of kind `durable_dir`, mounted at `/sandbox`
+   (`substrate.HomeVolume`, `substrate.HomeMountPath`). The lab (Substrate v1.0.0, gVisor class) kept the
+   home and a tree hash in 25 of 25 suspend and resume runs at the `VOLUMES`, `ROOTFS` and `MEMORY`
+   fidelities, and in 8 of 8 archive-by-tag runs. A `MEMORY` snapshot holds the home once.
+2. **The Koinon kopia checkpoint stays the archive and the backup copy outside Substrate.** The durable
+   directory does not survive `DeleteActor` without a tag (3 of 3 runs came back with an empty home), and a
+   tag is a full copy in the snapshot store (269 MB became 539 MB). Archive, recreation after a changed spec
+   and restore on another cluster therefore do not depend on Substrate tags. Everything in this ADR about
+   checkpoints, the archive tier and the restore gates stands for the Substrate driver.
+
+What the lab did not show, and what stays open: the `vm` tier (no microVM class on the lab), a home above
+1 GiB, a non-root user (the template has no uid option), survival over a Substrate upgrade, and a full
+snapshot store. The kopia checkpoint path on Substrate is a lab trial that the maintainer runs (issue
+#1090); the Koinon side of it is tested on the fake (`internal/reconciler/substrate_home_test.go`).
+
+**A checkpoint carries a content digest, and a restore with a wrong digest is refused.** This is the
+"Koinon tar checkpoints with digest" of [0119](0119-agent-substrate-execution-layer.md) D5:
+
+- When the writer completes a checkpoint it computes the SHA-256 digest of the staged home
+  (`checkpoint.TreeDigest`: every entry's name, kind and permission bits, a file's size and content, a
+  link's target; no times and no owners) and records it in `home_checkpoints.content_digest`
+  (migration 00109). Koinon's database holds the record, so a write to the bucket cannot change the
+  record too.
+- The writer is not root, and kopia skips a file that its owner cannot read. So the writer first adds the
+  owner read bit to every staged file (and the read and search bits to every directory): a file that its
+  owner cannot read is restored with the owner read bit set. If kopia still skips or cannot read an entry,
+  the checkpoint fails with an error that names the path, and no digest is recorded.
+- A restore stages the snapshot, recomputes the digest and compares it with the record. A mismatch
+  returns `checkpoint.ErrDigestMismatch` before the first byte goes into the sandbox. The restore then
+  follows the rules of HC1: it tries the next older checkpoint, and when none restores, the run fails and
+  the restore stays owed. The harness never starts on a home that did not verify.
+- A checkpoint made before the column existed has no digest (`NULL`). A restore accepts it, because no
+  record exists to compare with. A checkpoint that a resync registers from the bucket has none either.
+  A seeded copy (a new repository epoch) records the digest of the copy.
+- Spec: "records a content digest on every complete checkpoint and refuses a restore with a wrong digest"
+  (`internal/agentd/checkpoint_test.go`) and the writer specs in `internal/checkpoint/writer_test.go`.
+- Not part of this amendment: the digest of a Substrate memory snapshot (tag). That is the snapshot
+  record of [0120](0120-execution-hardening-defaults.md) section 5, which moved to v0.2 on 2026-11-24.

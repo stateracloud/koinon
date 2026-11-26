@@ -74,6 +74,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway/agentgateway"
+	"github.com/stateracloud/koinon/internal/gateway/approvalroute"
 	"github.com/stateracloud/koinon/internal/gateway/stateserver"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/gen/agentgateway/extmcp"
@@ -211,11 +212,12 @@ type config struct {
 
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
-	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
+	// gatewayMCPURL is the MCP endpoint of the driver as koinon-api reaches it, for approved MCP calls:
+	// koinon-gateway with gateway.mcp.driver koinon, agentgateway with the fallback.
 	gatewayMCPURL string
-	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. An agent reaches MCP
-	// through agentgateway until the follow-up that moves it (ADR 0097), so the check must use the URL the agent
-	// uses, which is not always the URL of approved calls. Empty: the check uses gatewayMCPURL.
+	// gatewayMCPCheckURL is the MCP endpoint of the live check of an agent's MCP tools. The check must use the
+	// URL the agent uses (koinon-agentd's KOINON_AGENT_MCP_URL), which the chart sets to the same driver since
+	// #1239. Empty: the check uses gatewayMCPURL.
 	gatewayMCPCheckURL string
 	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
 	gatewayURL string
@@ -356,7 +358,7 @@ func (c *config) serveFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.sealMCPv2, "gateway-mcp-seal-v2", false,
 		"seal a stored MCP credential to the gateway's public key (envelope v2) when a key is active, and as v1 otherwise; set only when koinon-gateway serves every MCP path, because agentgateway reads the credential as plaintext")
 	fs.StringVar(&c.compatExpect, "compat-expect", "", "pods of each component the chart runs, as component=count pairs; with --gateway-mcp-seal-v2 a credential is sealed to the gateway key only when that many pods of every reader report that they read it, and empty keeps sealing off")
-	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
+	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "the MCP endpoint of the driver (koinon-gateway, or agentgateway with the fallback), for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.gatewayMCPCheckURL, "gateway-mcp-check-url", "", "the MCP endpoint agents use, for the live check of an agent's MCP tools; empty: --gateway-mcp-url")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
@@ -959,9 +961,18 @@ func serve(ctx context.Context, cfg config) error {
 			return err
 		}
 		safego.Go(bgCtx, slog.Default(), "gateway-state-stream", stateSrv.Run)
+		// The approval route of Koinon's gateway (#1301): the leak guard in koinon-gateway asks here for the
+		// approval of a call it holds for a person. koinon-api records it with the agentgateway path's code;
+		// the gateway's database login has no right on approvals. Same listener and token as the stream.
+		approvalSrv, err := approvalroute.NewServer(approvalroute.ServerConfig{
+			DB: pool, Approve: asm.Ask.RequestApproval, Auth: gwAuth, Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), traceRouter.Mount()); err != nil {
+			if err := agentgateway.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), gwAuth, stateSrv.Mount(), approvalSrv.Mount(), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}

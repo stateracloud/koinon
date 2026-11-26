@@ -49,7 +49,7 @@ model_np=$(netpol_doc koinon-model-gateway "${model[@]}")
 [ -n "$model_np" ] || fail "model gateway has no NetworkPolicy of its own"
 grep -q '10.0.0.0/8' <<<"$model_np" || fail "model gateway egress does not carve out the private ranges"
 
-if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${model[@]}" --set gateway.mode=kubernetes >/dev/null 2>&1; then
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${model[@]}" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway >/dev/null 2>&1; then
   fail "gateway.model.driver=koinon renders with gateway.mode=kubernetes"
 fi
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" --set gateway.model.driver=other >/dev/null 2>&1; then

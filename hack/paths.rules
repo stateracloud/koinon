@@ -155,7 +155,7 @@ job web ^(web/|api/proto/)
 job generate ^(api/proto/|third_party/openshell/proto/|third_party/substrate/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$|hack/buf\.sh$|hack/tools/buf/|hack/cmd/generatecheck/)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
-job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/versions\.env$)
+job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/cmd/vapcheck/|hack/versions\.env$)
 
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
@@ -242,7 +242,6 @@ script-check - inputs=hack/git-identities.allowed,hack/git-identity-check-test.s
 script-check - inputs=guard hack/git-identity-check.sh range @BASE@ HEAD
 script-check - inputs=hack/koinon-fetch-test.sh,harnesses/common/koinon-fetch hack/koinon-fetch-test.sh
 script-check - inputs=hack/release-harness-test.sh,hack/release-harness.sh hack/release-harness-test.sh
-script-check - inputs=hack/ko-ref-test.sh,hack/ko-ref.sh hack/ko-ref-test.sh
 script-check - inputs=hack/fetch-pinned-test.sh,hack/fetch-pinned.sh hack/fetch-pinned-test.sh
 script-check - inputs=hack/e2e-parts-test.sh,test/e2e/kind/parts.sh hack/e2e-parts-test.sh
 script-check - inputs=hack/apt-retries-test.sh hack/apt-retries-test.sh --self-test

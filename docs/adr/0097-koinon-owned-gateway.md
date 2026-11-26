@@ -271,7 +271,10 @@ Scope:
   shows only the sandbox folder. This holds only because of OpenCode's defaults (it declares no
   sampling, and in ACP mode it cancels MCP elicitations), not because of Koinon, so it is an interim
   fix with its own issue (#269), exit condition: "the step 2 gateway refuses these itself"
-  (decision 5).
+  (decision 5). Exit met (#1239): koinon-gateway, the default MCP driver, refuses sampling and
+  elicitation (form and URL mode) itself and answers `roots/list` with its one fixed folder. The #254
+  spec (`test/harnesses/servermessages_test.go`) now runs against it, and `internal/mcpgateway` has a
+  spec for each refusal. Behind the agentgateway fallback, the client still decides.
 - **The usage record** (decision 3; #273) and the leakage cleanup (decision 2.5).
 - **The guard scans arguments in a canonical form** (#256): keys sorted, each value scanned on its own.
 - **Fix the `gateway.Limit` comment** (`internal/gateway/gateway.go:300-302`): a limit can be overshot
@@ -364,7 +367,10 @@ does today, no more (model path at parity, below).
   MCP path sets an equivalent, Koinon-named header after the key check, and NetworkPolicy keeps the tool
   servers reachable only from the gateway. Without it the tools break when the default driver changes.
 - **An org's MCP server gets no agent header** (maintainer decision 2026-11-24, #1235). Koinon's MCP path
-  sets the agent header only on a platform target (Koinon's own tool servers, `Org ""`;
+  sets the agent header only on Koinon's own services: a platform target (Koinon's own tool servers, `Org ""`)
+  and an ask target (Koinon's approval proxy for the ask-tier tools of an org's server, `internal/mcpask`;
+  #1315). The gateway plan alone marks an ask target (`MCPTarget.Ask`); it keeps the org, for org scoping and
+  tool pins, and carries no credential (`gateway.MCPTarget.TrustsAgentHeader`,
   `internal/mcpgateway/credential.go`). It never sends it to a server an org registered, and there is no
   opt-in for it. An org's server trusts nothing of Koinon's, and the agent ID is internal data. A plain
   header can be forged: server owners would build access checks on it, and a signed credential later
@@ -378,10 +384,10 @@ does today, no more (model path at parity, below).
     deletes that path. The render does not change. The driver selects which calls go through
     agentgateway. With driver `agentgateway` (the default until #1239, and the fallback after it), all MCP
     calls go through it. With driver `koinon`, every call through koinon-gateway gets no agent header on an
-    org's server. Until #1239, an agent's own MCP calls and koinon-api's live check of an agent's tools go
-    through agentgateway with both drivers. Thus before #1239, driver `koinon` removes the header only
-    from the calls that a human approved. The reconciler's probe goes through agentgateway with both
-    drivers; #1239 does not move it. Its header names a probe agent, not a real agent.
+    org's server. Since #1239, an agent's own MCP calls, koinon-api's live check of an agent's tools and
+    the reconciler's probe go through koinon-gateway with driver `koinon`, so an org's server sees no agent
+    header with the default driver. Before #1239, those calls went through agentgateway with both drivers,
+    and driver `koinon` removed the header only from the calls that a human approved.
   - The reason that the render does not change: in Kubernetes mode, a `transformation` on the one MCP
     route sets the header before agentgateway selects the target, so it cannot leave out one target. A
     `transformation` on the Backend runs after agentgateway injects the target's credential; the one that
@@ -430,6 +436,19 @@ long a deleted org's data stays. An ack of a revision covers every earlier one f
 `copy_id` of an ack is unique per process incarnation (for example pod UID plus a boot nonce) and a
 copy never reuses it after a restart. S3 note: LISTEN does not work behind transaction-mode
 PgBouncer, so the stream client also polls the table as a fallback.
+
+Record (2026-11-25, #1239; the choices below are decided): with koinon-gateway as the default MCP driver,
+the stored revision is the State that koinon-gateway serves, not a record of the agentgateway Apply. The
+reconciler stores it on its own path, before the Apply and whatever the Apply does, so an agentgateway
+outage or a refused config does not freeze key revokes and grants on koinon-gateway. A failed store is
+retried in the pass and is then a pass error. The sandbox work of an agent with a key waits until every
+live koinon-gateway copy acked the first revision that held that key (the bounded wait of #1260); after
+the wait the agent is held with a message, and the next pass looks again. An agent that is not active (a draft
+keeps its key), an agent with no key (archived) and an agent whose key the copies already acked never
+wait, so stops and teardowns go on and a change for other agents holds nobody. When the list of live
+copies cannot be read, the gate fails closed. With no live copy (the agentgateway driver) nothing waits. After
+a restart the reconciler does not know which revision first held an old key, so only the keys it issued
+since the start wait; the keys of the first stored revision count as served.
 
 Record (2026-11-12, #279 slice 3; the choices below are decided): the stream is served and consumed,
 with no cut-over. `internal/gateway/stateserver` serves `GatewayStateService` on the internal listener
@@ -912,7 +931,7 @@ claims "koinon-api cannot decrypt" on the `local` backend.
 The gateway cannot open v1: it has no KEK, by design. A job that holds the KEK does the
 move, once.
 
-0. **Gate on the driver.** The default MCP data plane is still agentgateway (`gateway.mcp.driver`), and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). Koinon's gateway is not the default before #1132. So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
+0. **Gate on the driver.** The MCP data plane is chosen by `gateway.mcp.driver`. Since #1239 the default is `koinon`; before it, the default was agentgateway. agentgateway stays the fallback, and it reads the credential file as plaintext (standalone `backendKey`, and the Secret reference in the frozen Kubernetes mode). So koinon-api seals v2, and the move runs, only when every MCP path of the install is `koinon-gateway`. A chart value derives the gate, and `keys seal-mcp` refuses to run otherwise. Until then v1 and the reconciler's plaintext files serve agentgateway, and the old open path stays. Slice 5 waits for the gate too.
 1. **Expand (slice 2 and 3).** Release N adds `gateway_recipient_keys`, the key-admin Job, the writers
    that seal v2 (only when an `active` row exists), the reconciler's copy path for v2, and the gateway's v2 reader. **Release N reads v2 and never writes it.** Writing starts in release N+1, or when an explicit gate says every component is at N or later. The key-admin Job runs while old pods still run, so the active row alone is not that gate. The v1 `keyscli` usage query scans `kek_id` of every envelope into a string, and a v2 row gives NULL. Slice 3 fixes that query, so `keys status` and the key-admin add path work in release N before any v2 value exists. After the first v2 write, a rollback to N-1 leaves v2 credentials unservable. The rollback rule needs the reverse move `keys seal-mcp --to-v1`, which needs the private gateway key. Slice 4 builds the engine only: no command runs it yet (see 12.8 item 2), so a rollback to N-1 after the first v2 write is not supported until a gateway-side command exists. Track it in a follow-up issue. The reconciler still opens v1 and still writes plaintext files for v1 values, and the gateway
    still reads those files (marked by the file name: `mcp-…` plaintext, `mcpv2-…` ciphertext). Nothing
@@ -932,12 +951,14 @@ move, once.
      report before the last old pod has stopped, so koinon-api also requires the gate to stay open for two
      minutes without a break (`formatgate.DefaultHold`, longer than a pod's drain and a report's TTL) before
      it seals. A rollback leaves fresh N rows for up to the TTL; the same hold covers it.
-   - agentgateway still serves the agents' MCP path while the driver is koinon, and it cannot open a sealed
-     credential. The standalone renderer leaves such a target out of agentgateway's config, so no envelope
-     goes upstream. The result is that an agent cannot reach a server with a sealed credential, and koinon-api's
-     live tool check (which goes to agentgateway) cannot list its tools, until the follow-up moves the agent MCP URL
-     and the check to koinon-gateway. Until then, an operator who needs agents to reach every server keeps `gateway.mcp.koinon.recipientKey.enabled` off:
-     with no active key koinon-api writes v1.
+   - Before #1239, agentgateway still served the agents' MCP path while the driver was koinon, and it cannot open
+     a sealed credential. The standalone renderer leaves such a target out of agentgateway's config, so no
+     envelope goes upstream. #1239 moves the agents' MCP calls (koinon-agentd's `KOINON_AGENT_MCP_URL`, and the
+     sandbox profile's `/mcp` rules on a second endpoint, koinon-gateway's Service) and koinon-api's live tool
+     check (`KOINON_GATEWAY_MCP_CHECK_URL`) to koinon-gateway. It also moves the reconciler's MCP prober
+     (`internal/reconciler/mcpprobe.go`, the `gateway.mcpUrl` setting): through agentgateway, which has no target
+     for a server with a sealed credential, the probe would find no tools, mark the server unhealthy, and the
+     plan would then give no agent a grant to it. With the agentgateway driver the prober stays on agentgateway.
    - The reconciler serves a sealed credential only when its `gateway.mcpSealed` setting is on (the chart sets
      it with the koinon driver). Without it the server is left out and the log says why, so a move back to
      agentgateway never sends an envelope upstream. `keys seal-mcp --to-v1` (slice 4) is the way back.
@@ -969,8 +990,7 @@ move, once.
        counts these, so an operator sees a cap that is too low for the credentials in use.
      - **Threat scope.** The scrub is a backstop for a target that echoes its credential by accident. It does not
        stop a target that hides the value on purpose (hex, a hash, a split over two fields): that target already
-       holds the credential. It does not cover the per-agent credential kinds (ADR 0073, ADR 0096); they need their
-       own issue. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
+       holds the credential. One residual stays in one org: an agent can save a credential equal to a guessed text and see if
        its org's audit row of a call changes. Only a reader of that org's audit can see this. Each call of a built-in
        target gets the gateway's recording source as an argument of `Builtin.Call`. Its type is `ScrubbedSource`,
        which only `CredentialScrub.Source` can make (its field is not exported). The outbound clients
@@ -982,6 +1002,28 @@ move, once.
        built-in can make a scrub of its own (`NewCredentialScrub`) and send through it, and it can read a source of
        its own and quote the value or send it with an HTTP client of its own. The card read in koinon-api has no gateway scrub: it uses a scrub
        for that read only. That value is the one the admin saves, and the read does not log it.
+     - **Kinds** (maintainer decision 2026-11-25, #1221). The scrub covers every credential kind the gateway sends
+       upstream, the per-agent kinds too. `internal/gateway/credkind` is the one list: each kind is a value of
+       type `credkind.Kind` with one rule. `Kind` is a struct with an unexported field, so only that package can
+       make a kind. Each opener gives its values to `CredentialScrub.Record` with its kind:
+       the MCP path through `ScrubbedSource` (`Credential.Kind`), the egress path (ADR 0120) and the model path
+       (provider keys). The rules:
+       - **By value**: MCP static, MCP sign-in (ADR 0096), egress bearer and Basic, provider key. The value goes to
+         the value set of its org, as above. A sign-in token keeps the fixed 24 hours after its last open, not its
+         expiry: a longer life only over-scrubs, and one value per server and refresh stays well under the caps.
+       - **By shape**: the passport (ADR 0073). One passport for each run, audience and scope, with a life of
+         minutes, would fill the caps and push out the values of the org. So the scrub does not store it. From the
+         first passport it opens, the gateway removes every JWT with the typ `koinon-passport+jwt` from every
+         text, in every org, also a passport that a tool returns on purpose. A JWT of another typ stays. A passport
+         in a form the shape does not match (base64 of the whole token, a split) is not removed: the threat scope
+         above applies.
+       - **No value**: `none` and `error` carry no value.
+       A kind that is not in the list, or no kind, is scrubbed by value, and a value given with a by-shape kind
+       that does not have the shape, or with a no-value kind, goes to the value set too: a new kind is covered by
+       default. A spec reads the kinds from the source of the package and fails when one has no rule.
+       The scrub covers the texts it sees: MCP results, errors, log lines and spans, and the egress responses (ADR
+       0120). The model path records provider keys for its logs and spans, but it does not scrub the response body
+       that goes back to the agent. An upstream that echoes the key in an error body reaches the agent unchanged.
      - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
        in it until the next rebuild. That rebuild runs at the next change at least one second later, and with traffic
        at most one minute later. Until then the value can only over-scrub a process record. A removal marks a value

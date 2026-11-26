@@ -11,8 +11,9 @@
 #     it. Needing a job from any other required job is no exemption: `if:` without a status function
 #     implies success(), so a failing needed job would make that required job skip, which is green.
 # Every required name (not `external`) must have a job. So a new job cannot be silently advisory, and
-# a required name cannot outlive its job. Matrix jobs are not supported (a matrix fans one job out
-# into several check names) and fail the test.
+# a required name cannot outlive its job. A matrix job fans out into several check names this test
+# cannot name, so it passes only as the parts of a required job that is not a matrix, needs it and reads
+# `needs.<job>.result` (the stable check name); any other matrix job fails the test.
 #
 # Usage:
 #   hack/ci-required-test.sh              the checks above, plus the script's own negative cases
@@ -74,7 +75,7 @@ aggregator_problems() {
 # check YML LIST: print problems, return 1 when there are any.
 check() {
   local yml=$1 list=$2 problems=0 line key name needs matrix n
-  local -A required=() advisory=() aggregator=() jobname=() jobneeds=() isjob=()
+  local -A required=() advisory=() aggregator=() jobname=() jobneeds=() isjob=() jobmatrix=()
   while IFS= read -r line; do
     line=${line%%#*}
     line=$(sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//' <<<"$line")
@@ -95,10 +96,7 @@ check() {
   [[ ${#required[@]} -gt 0 ]] || { echo "FAIL: no required checks in $list"; return 1; }
 
   while IFS=$'\t' read -r key name needs matrix; do
-    if [[ $matrix == 1 ]]; then
-      echo "FAIL: job '$key' uses a matrix; this test cannot name its checks (extend it before adding one)"
-      problems=1
-    fi
+    [[ $matrix == 1 ]] && jobmatrix[$key]=1
     jobname[$key]=$name
     jobneeds[$key]=$needs
     isjob[$name]=1
@@ -117,6 +115,22 @@ check() {
     for n in ${jobneeds[$key]}; do
       if [[ -n ${jobname[$n]:-} ]]; then part[$n]=1; fi
     done
+  done
+  # A matrix fans one job out into checks this test cannot name. It is allowed when a required job that is not a
+  # matrix needs it and reads its result (needs.<key>.result): that job is the stable check, the matrix its parts.
+  for key in "${!jobmatrix[@]}"; do
+    local owned=0 k2 body
+    for k2 in "${!jobname[@]}"; do
+      [[ -z ${jobmatrix[$k2]:-} && -n ${required[${jobname[$k2]}]:-} && " ${jobneeds[$k2]} " == *" $key "* ]] || continue
+      body=$(awk -v k="  $k2:" '$0 == k { on = 1; next } on && /^  [A-Za-z0-9_-]+:[ ]*$/ { on = 0 } on && $0 !~ /^[ ]*#/' "$yml")
+      if grep -qF "needs.$key.result" <<<"$body"; then owned=1; fi
+    done
+    if [[ $owned == 1 ]]; then
+      part[$key]=1
+    else
+      echo "FAIL: job '$key' uses a matrix; no required job that needs it reads needs.$key.result (a matrix is allowed only as the parts of such a job)"
+      problems=1
+    fi
   done
   for name in "${!aggregator[@]}"; do
     if [[ -z ${isjob[$name]:-} ]]; then echo "FAIL: aggregator '$name' has no job"; problems=1; fi
@@ -312,6 +326,13 @@ grep -qF "lacks !cancelled()" <<<"$out" || { echo "FAIL: nocancel: wrong message
 printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n' >"$tmp/m.yml"
 printf 'm\n' >"$tmp/m.txt"
 if check "$tmp/m.yml" "$tmp/m.txt" >/dev/null 2>&1; then echo "FAIL: a matrix job passed"; exit 1; fi
+# A matrix job owned by a required job that needs it and reads its result passes; one that does not read it fails.
+# shellcheck disable=SC2016 # the fixture holds a literal workflow expression, not a shell variable
+printf 'jobs:\n  m:\n    name: m\n    strategy:\n      matrix:\n        a: [1]\n  agg:\n    name: agg\n    needs: [m]\n    steps:\n      - run: echo "${{ needs.m.result }}"\n' >"$tmp/m2.yml"
+printf 'agg\n' >"$tmp/m2.txt"
+check "$tmp/m2.yml" "$tmp/m2.txt" >/dev/null 2>&1 || { echo "FAIL: a matrix job owned by a required job failed"; exit 1; }
+sed -e 's/needs.m.result/x/' "$tmp/m2.yml" >"$tmp/m3.yml"
+if check "$tmp/m3.yml" "$tmp/m2.txt" >/dev/null 2>&1; then echo "FAIL: a matrix job whose owner ignores its result passed"; exit 1; fi
 # A required external workflow without merge_group fails.
 mkdir "$tmp/wf"
 printf 'on:\n  merge_group:\n    types: [checks_requested]\n' >"$tmp/wf/ci.yml"

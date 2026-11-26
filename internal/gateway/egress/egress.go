@@ -54,6 +54,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
+	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
 
@@ -132,9 +133,10 @@ type Options struct {
 	// Credentials opens the credentials that routes name. Nil refuses every credentialed route until
 	// SetCredentials.
 	Credentials CredentialOpener
-	// Scrub, when set, gets each credential value before it is sent, so the scrubbed logger masks it
-	// (org is the route's org). The binary passes the log scrubber of the MCP path.
-	Scrub func(org string, values ...string)
+	// Scrub, when set, gets each credential value and its kind before it is sent, so the scrubbed logger
+	// masks it (org is the route's org). The binary passes the Record of the gateway's credential scrub,
+	// which reads the rule of the kind from the one list (credkind, #1221).
+	Scrub func(kind credkind.Kind, org string, values ...string)
 }
 
 // state is one installed set: the route table and the credentials its routes name. Both change
@@ -298,7 +300,7 @@ func (g *Gateway) credential(st *state, d route.Decision) (attached, bool) {
 		var a attached
 		if a, err = attach(c, v); err == nil {
 			if g.opts.Scrub != nil {
-				g.opts.Scrub(c.Org, v, a.header)
+				g.opts.Scrub(a.kind, c.Org, v, a.header)
 			}
 			return a, true
 		}

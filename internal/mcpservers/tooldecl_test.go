@@ -184,7 +184,11 @@ var _ = Describe("the declaration of a tool (ADR 0091, old issue 350)", func() {
 	Describe("when the tool's content hash changes (the ADR 0057 rule)", func() {
 		It("goes back to the default, audited, while the tool and its neighbours keep what they have", func(ctx SpecContext) {
 			s := serverWithTools(ctx, "forge", "create_issue", "list_issues")
-			_, err := setDecl(ctx, org, actor, s.ID, "create_issue", codeHost)
+			// An admin reviewed the tool: a change of a tool that still waits for review is not a new
+			// change (#1216), but the declaration goes back to the default all the same.
+			_, err := svc.AcknowledgeReview(ctx, org, actor, s.ID, "create_issue", tools(ctx, s)["create_issue"].ToolHash)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = setDecl(ctx, org, actor, s.ID, "create_issue", codeHost)
 			Expect(err).NotTo(HaveOccurred())
 			_, err = setDecl(ctx, org, actor, s.ID, "list_issues", sinkclass.Declaration{Class: sinkclass.None, Derivation: sinkclass.Fixed})
 			Expect(err).NotTo(HaveOccurred())

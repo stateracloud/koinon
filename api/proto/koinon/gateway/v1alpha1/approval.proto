@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.gateway.v1alpha1;
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1;gatewayv1alpha1";
+
+// GatewayApprovalService is the approval route of Koinon's own gateway (ADR 0097 decision 2.3, #1301):
+// when the leak guard in koinon-gateway holds a call for a person, the gateway asks koinon-api to record
+// the ADR 0042 approval of that exact call. koinon-api owns the approval tables; the gateway's database
+// login has no right on them. It is internal: only a gateway copy calls it, on the listener of the State
+// stream and with the same token.
+//
+// koinon-api does not trust the names in the request: it reads the org, the agent, the server, the
+// agent's allowance and the published tool itself, and refuses a call that does not match them.
+service GatewayApprovalService {
+  // RequestApproval records the approval request for exactly this call, or returns the one already
+  // recorded for the same call in the same run. The gateway refuses the call with the returned text
+  // (the agent reads "approval requested: id=..."); Koinon's executor sends it once a person approves.
+  // Any error fails the call closed.
+  rpc RequestApproval(RequestApprovalRequest) returns (RequestApprovalResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message RequestApprovalRequest {
+  // org is the org slug of the calling agent, as the agent identity names it.
+  string org = 1;
+  // agent_id is the calling agent's id (a UUID).
+  string agent_id = 2;
+  // server_id is the id (a UUID) of the org's MCP server that the call addresses.
+  string server_id = 3;
+  // tool is the name of the published tool.
+  string tool = 4;
+  // arguments is the call's JSON arguments object, as the agent sent it.
+  bytes arguments = 5;
+  // risk is the leak guard's reading of the call as a JSON object (reasons, sink class, destination,
+  // legs, match): what the approval card shows. It never holds a credential.
+  bytes risk = 6;
+}
+
+message RequestApprovalResponse {
+  // text is what the agent reads, for example "approval requested: id=...".
+  string text = 1;
+}

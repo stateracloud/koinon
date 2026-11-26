@@ -86,6 +86,7 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	egressEndpoint, err := cfg.egressEndpoint()
+	mcpEndpoint, err := cfg.mcpGatewayEndpoint()
 	if err != nil {
 		return err
 	}
@@ -259,6 +260,7 @@ func serve(ctx context.Context, cfg config) error {
 		reconciler.Config{
 			Gateway:             endpoint,
 			Egress:              egressEndpoint,
+			MCPGateway:          mcpEndpoint,
 			Prices:              priceResolver,
 			Keys:                keyring,
 			ProviderKeys:        reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},

@@ -78,8 +78,8 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
         {{- if include "koinon.mcpKoinon" . }}
-        # koinon-gateway (MCP path) may reach the tools port. The platform tool servers also need the agent header, which
-        # the MCP path sets in #281; until then they work through agentgateway only.
+        # koinon-gateway (MCP path) may reach the tools port. It sets the agent header on these platform targets only
+        # (#281; an org's server gets no agent header, #1235).
         # The guard runs inside the gateway process, so the guard port below has no such rule.
         - podSelector:
             matchLabels:
@@ -215,7 +215,7 @@ spec:
 {{- if include "koinon.mcpKoinon" . }}
 ---
 # koinon-gateway (MCP path). It holds credentials, so its egress is as agentgateway's: DNS, koinon-api's
-# OTLP listener (the State stream), koinon-api's tools port (the platform tool servers, once #281 sets the agent header) and the public
+# OTLP listener (the State stream), koinon-api's tools port (the platform tool servers) and the public
 # internet, with the private ranges carved out. The leak guard runs in this process, so there is no
 # guard-port rule. The guard's database login reaches the Postgres pods on 5432 in cnpg mode; with
 # postgres.mode=external the egress to the database comes from networkPolicy.gatewayEgressTo. The same holds
@@ -265,7 +265,12 @@ spec:
     - ports:
         - port: mcp
       from:
-        # Only koinon-api calls this gateway until agents move to it (and the guard is in place).
+        # Agents' MCP calls (#1239), as for agentgateway's llm port: sandboxes reach it through their OpenShell
+        # supervisor pods; with execution.driver=substrate the actors' traffic arrives through atenet from
+        # Substrate's namespace (execution.substrate.gatewayClientNamespaceSelector).
+        - namespaceSelector:
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+        # Koinon's own pods: koinon-api sends its approved calls and its live tool check here.
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}

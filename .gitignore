@@ -64,3 +64,6 @@ CLAUDE.local.md
 .smart-env/
 /build/
 load-results/
+
+# Local build of the VAP CEL checker (#1313); never commit it.
+/vapcheck

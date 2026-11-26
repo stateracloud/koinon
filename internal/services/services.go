@@ -11,7 +11,7 @@
 //
 //	viewer  Get*, List*, WatchRun (OrgService.ListMembers included)
 //	member  CreateAgentFromTemplate, CreateTask, AppendMessage, CancelTask, CancelRun
-//	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
+//	admin   TraceDestinationService (org calls; the content level full needs an owner; the platform calls need a platform admin), AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent, SetAgentPlacement,
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //

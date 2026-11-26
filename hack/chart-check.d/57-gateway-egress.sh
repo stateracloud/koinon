@@ -16,8 +16,8 @@ lacks "the reconciler adds no egress sandbox rule by default" 'egressUrl' --set 
 
 # Only koinon-gateway opens the sealed forge credentials, so the listener needs the koinon driver.
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" \
-  --set gateway.mcp.koinon.egress.enabled=true >/dev/null 2>&1; then
-  fail "the egress listener renders without gateway.mcp.driver=koinon"
+  --set gateway.mcp.driver=agentgateway --set gateway.mcp.koinon.egress.enabled=true >/dev/null 2>&1; then
+  fail "the egress listener renders with gateway.mcp.driver=agentgateway"
 fi
 if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${eg[@]}" \
   --set gateway.mcp.koinon.egress.port=8080 >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ has "the egress Service port" 'targetPort: egress$' "${eg[@]}" "${eg_gw[@]}"
 has "the gateway mounts the public key as <kid>.pub" 'path: k1.pub$' "${eg[@]}" "${eg_gw[@]}"
 has "a new key ID renames the public key file" 'path: k2.pub$' "${eg[@]}" --set gateway.mcp.koinon.egress.actorToken.keyId=k2 "${eg_gw[@]}"
 has "the gateway mounts public.pem of the key Secret" 'key: public.pem$' "${eg[@]}" "${eg_gw[@]}"
-lacks "the gateway never mounts the seed" 'key: seed' "${eg[@]}" "${eg_gw[@]}"
+lacks "the gateway never mounts the seed" 'key: key$' "${eg[@]}" "${eg_gw[@]}"
 has "the egress dialer allows the platform's internal hosts" '--egress-allowed-hosts=git.example.test:443$' "${eg[@]}" \
   --set 'egress.allowedInternalHosts={git.example.test:443}' "${eg_gw[@]}"
 lacks "no CA file without a bundle" '--egress-ca-file' "${eg[@]}" "${eg_gw[@]}"
@@ -46,12 +46,12 @@ has "a CA bundle is a file for the egress upstreams" '--egress-ca-file=/etc/koin
 has "the CA bundle is a ConfigMap" 'name: koinon-mcp-gateway-egress-ca$' "${eg[@]}" \
   --set-string gateway.mcp.koinon.egress.caBundle=koinon-test-not-a-real-ca "${eg_gw[@]}"
 
-# koinon-agentd: the URL, the seed only, the key ID and the issuer.
+# koinon-agentd: the URL, the seed (data key "key") only, the key ID and the issuer.
 env_is KOINON_EGRESS_URL '"http://koinon-mcp-gateway.koinon.svc.cluster.local:8081"' "${eg[@]}"
-env_is KOINON_ACTOR_TOKEN_KEY_FILE '/secrets/actor-token/seed' "${eg[@]}"
+env_is KOINON_ACTOR_TOKEN_KEY_FILE '/secrets/actor-token/key' "${eg[@]}"
 env_is KOINON_ACTOR_TOKEN_KEY_ID '"k1"' "${eg[@]}"
 env_is KOINON_ACTOR_TOKEN_ISSUER '"koinon-agentd"' "${eg[@]}"
-has "agentd mounts the seed of the key Secret" 'key: seed$' "${eg[@]}" "${eg_agentd[@]}"
+has "agentd mounts the seed of the key Secret" 'key: key$' "${eg[@]}" "${eg_agentd[@]}"
 lacks "agentd never mounts the public key file" 'public.pem' "${eg[@]}" "${eg_agentd[@]}"
 n=$(render "${eg[@]}" | grep -c 'secretName: koinon-actor-token-key$' || true)
 [ "$n" = 2 ] || fail "the actor token key Secret is mounted in $n places, not 2 (agentd and the gateway)"
@@ -60,6 +60,17 @@ n=$(render "${eg[@]}" | grep -c 'secretName: koinon-actor-token-key$' || true)
 has "the ensure-secrets Job makes the actor token key" 'ed25519-key' "${eg[@]}" --show-only templates/ensure-secrets.yaml
 lacks "a supplied actor token Secret is not generated" 'ed25519-key' "${eg[@]}" \
   --set gateway.mcp.koinon.egress.actorToken.existingSecret=mine-actor-key --show-only templates/ensure-secrets.yaml
+# One kind, one layout (the guest key's): ensure-secrets may patch only the Ed25519 key Secrets, by name, to
+# add a missing public.pem. It may never update, and never patch another Secret.
+es=(--show-only templates/ensure-secrets.yaml)
+n=$(render "${eg[@]}" "${es[@]}" | grep -c '^    verbs: \[patch\]$' || true)
+[ "$n" = 1 ] || fail "ensure-secrets has $n patch rules, not 1"
+render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | grep -q '      - koinon-actor-token-key$' ||
+  fail "the patch rule does not name the actor token key Secret"
+render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | grep -Eq 'session|otlp|install-mark' &&
+  fail "the patch rule names a Secret that is not an Ed25519 key"
+lacks "ensure-secrets never updates a Secret" 'update' "${eg[@]}" "${es[@]}"
+lacks "no patch rule without an Ed25519 key Secret" 'patch' --set gateway.mcp.driver=agentgateway "${es[@]}"
 has "a supplied actor token Secret is mounted" 'secretName: mine-actor-key$' "${eg[@]}" \
   --set gateway.mcp.koinon.egress.actorToken.existingSecret=mine-actor-key "${eg_gw[@]}"
 
@@ -70,8 +81,7 @@ has "the reconciler is told the egress URL" 'egressUrl: http://koinon-mcp-gatewa
 has "sandboxes may reach the egress port" '^        - port: egress$' "${eg[@]}" --show-only templates/networkpolicy.yaml
 lacks "no egress port in the network policy by default" 'port: egress$' --set gateway.mcp.driver=koinon --show-only templates/networkpolicy.yaml
 
-# Substrate: the worker namespace reaches koinon-gateway's MCP pods on the egress port only, and only with the listener on.
-has "Substrate workers reach the egress port" 'port: 8081, protocol: TCP}$' "${wsub[@]}" "${eg[@]}" \
+# Substrate: the egress listener needs gateway.mcp.driver=koinon, and with it the worker namespace reaches
+# koinon-gateway's pods (#1239), the egress port too. This PR adds no rule of its own there.
+has "Substrate workers reach koinon-gateway's pods with the listener on" 'component: mcp-gateway$' "${wsub[@]}" "${eg[@]}" \
   --show-only templates/substrate-networkpolicy.yaml
-lacks "Substrate workers do not reach koinon-gateway's MCP pods by default" 'component: mcp-gateway$' "${wsub[@]}" \
-  --set gateway.mcp.driver=koinon --show-only templates/substrate-networkpolicy.yaml

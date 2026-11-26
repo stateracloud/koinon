@@ -28,14 +28,20 @@ var _ = Describe("Execution", func() {
 		e := cli.Execution{Driver: cli.DriverSubstrate}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-control-address")))
 		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80"}
+		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-guest-key-file is required")))
+		e.Substrate.GuestKeyFile = guestKeyFile()
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-allow-unhardened")))
 		e.Substrate.AllowUnhardened = true
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-default-tier")))
 		e.Substrate.DefaultTier = "dev"
 		Expect(e.Validate("")).To(Succeed())
+		// Validate does not read the key: the startup check runs where the Secret is not mounted.
+		// Dial reads it (the next spec).
+		e.Substrate.GuestKeyFile = GinkgoT().TempDir() + "/missing"
+		Expect(e.Validate("")).To(Succeed())
 	})
 	It("refuses a tier it does not know, a malformed entry and a class listed twice", func() {
-		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80", AllowUnhardened: true}
+		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
 		for _, c := range []struct {
 			s    func(*cli.Substrate)
 			want string
@@ -79,8 +85,21 @@ var _ = Describe("Execution", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.ContentDigest).NotTo(BeNil())
 	})
+	It("reads the guest API signing key, or refuses a malformed one", func() {
+		cfg, err := cli.Substrate{GuestKeyFile: guestKeyFile()}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GuestSigner).NotTo(BeNil())
+		Expect(cfg.GuestSigner.PublicKey()).To(Equal(fakeate.Signer().PublicKey()))
+		bad := GinkgoT().TempDir() + "/key"
+		Expect(os.WriteFile(bad, []byte("koinon_test_not-a-real-key\n"), 0o600)).To(Succeed())
+		_, err = cli.Substrate{GuestKeyFile: bad}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("--substrate-guest-key-file")))
+		_, err = cli.Substrate{GuestKeyFile: GinkgoT().TempDir() + "/missing"}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("--substrate-guest-key-file")))
+	})
 	It("gives a substrate Exec the tier of the sandbox's runtime class", func(ctx SpecContext) {
 		cfg, err := cli.Substrate{
+			GuestKeyFile:      guestKeyFile(),
 			RuntimeClassTiers: []string{"kata=vm", "gvisor=hardened"}, DefaultTier: "dev",
 		}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -123,3 +142,10 @@ var _ = Describe("Execution", func() {
 		Expect(c.Collectors).NotTo(BeEmpty())
 	})
 })
+
+// guestKeyFile writes the fake guest API key of fakeate.Signer (an obviously fake seed) to a file.
+func guestKeyFile() string {
+	p := GinkgoT().TempDir() + "/guest-key"
+	Expect(os.WriteFile(p, []byte(strings.Repeat("11", 32)+"\n"), 0o600)).To(Succeed())
+	return p
+}

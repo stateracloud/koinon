@@ -20,8 +20,9 @@ import (
 // gateway calls it in process, so there is no network hop per call.
 //
 //   - CheckCall is the request-side check of a tools/call (Guard.Check: sink class, URL rule, text
-//     match, byte count, the person's approval). A call that needs a person's decision is refused when
-//     the Guard has no Approve function; the gateway has none in this slice, so it fails closed.
+//     match, byte count, the person's approval). A call that needs a person's decision is parked with
+//     the Guard's Approve function: in koinon-gateway it asks koinon-api to record the approval
+//     (package gateway/approvalroute, #1301). Without one, or when it fails, the call is refused.
 //   - Inspect sees every raw message. A tools/call result or error records its legs and fingerprints
 //     (Guard.CheckResult); a message of a kind the guard has no reading for, and a reply it cannot match
 //     to a call, takes both legs on the session (Guard.CheckUnseen, #254). The results of initialize

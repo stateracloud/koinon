@@ -31,7 +31,7 @@ has "reconciler Secret fence covers CREATE UPDATE DELETE" 'operations: \[CREATE,
 has "reconciler Secret fence needs the managed-by label" "koinon-reconciler'" --show-only "$kg"
 # The chart-rendered provider keys Secret carries the label, or the reconciler could not fill it.
 has "provider keys Secret (standalone) is labelled for the fence" 'koinon.dev/managed-by: koinon-reconciler' --show-only templates/gateway-standalone.yaml
-has "provider keys Secret (kubernetes) is labelled for the fence" 'koinon.dev/managed-by: koinon-reconciler' --set gateway.mode=kubernetes --show-only templates/gateway-kubernetes.yaml
+has "provider keys Secret (kubernetes) is labelled for the fence" 'koinon.dev/managed-by: koinon-reconciler' --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --show-only templates/gateway-kubernetes.yaml
 
 lacks "secrets.kek.guard.enabled=false renders no KEK guard" 'name: koinon-koinon-kek-guard' --set secrets.kek.guard.enabled=false
 # The fence has its own switch: it stays rendered with the KEK guard off, and goes with its own.

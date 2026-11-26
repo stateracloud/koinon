@@ -68,7 +68,10 @@ check "only the warm-caches jobs and the harness jobs save a cache (got: $saves)
 total=$(grep -c 'uses: actions/setup-go@' "$wf")
 off=$(awk '/uses: actions\/setup-go@/ { f = 1; next } f && /cache: false/ { n++; f = 0 } f && /^      - / { f = 0 } END { print n + 0 }' "$wf")
 check "every setup-go in ci.yml has cache: false ($off of $total)" test "$total" = "$off"
-for j in generate chart chart-smoke escape-admission scripts harnesses; do
+# The chart smoke job is the one whose run step is `make test-chart-smoke` (a shard matrix job or a plain job).
+chart_smoke_job=$(awk '/^  [a-zA-Z0-9_-]+:/ { job = $1; sub(/:$/, "", job) } /run: make test-chart-smoke/ { print job; exit }' "$wf")
+check "a ci.yml job runs make test-chart-smoke" test -n "$chart_smoke_job"
+for j in generate chart "$chart_smoke_job" escape-admission scripts harnesses; do
   check "$j restores go-ci" has "$(job_body "$wf" "$j")" 'uses: \./\.github/actions/setup-go-cache'
 done
 for j in go-tidy go-lint go-test go-race-serial go-race-parallel; do

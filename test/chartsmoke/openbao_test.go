@@ -174,7 +174,7 @@ func startOpenBao(ctx context.Context, cl *cluster, nwName string, k *kmsSetting
 		testcontainers.WithWaitStrategyAndDeadline(2*time.Minute, wait.ForLog("Development mode should NOT be used").WithStartupTimeout(2*time.Minute)),
 	)
 	if ctr != nil {
-		DeferCleanup(func(context.Context) { _ = testcontainers.TerminateContainer(ctr) })
+		DeferCleanup(func(context.Context) { terminate(ctr) })
 	}
 	Expect(err).NotTo(HaveOccurred())
 	h, err := containerhost.Host(ctx, ctr)

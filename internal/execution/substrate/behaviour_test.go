@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
+	"github.com/stateracloud/koinon/internal/guestauth"
 )
 
 // The behaviour the contract suite cannot know: what Substrate does that the driver must handle.
@@ -422,7 +423,7 @@ var _ = Describe("the Substrate driver", func() {
 	})
 
 	Describe("the template", func() {
-		It("shares a template between equal specs and carries no environment variable", func(ctx SpecContext) {
+		It("shares a template between equal specs and carries only the public guest API key", func(ctx SpecContext) {
 			dd, c := newDriver()
 			for _, n := range []string{"a", "b"} {
 				_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: n, Image: img, CPULimit: "500m", MemoryLimit: "1Gi"})
@@ -436,10 +437,28 @@ var _ = Describe("the Substrate driver", func() {
 			tmpl, ok := c.Template(ws, c.TemplateOf(ws, "a"))
 			Expect(ok).To(BeTrue())
 			Expect(tmpl.Containers).To(HaveLen(1))
-			Expect(tmpl.Containers[0].Env).To(BeEmpty(), "the guest holds no value Koinon could keep secret")
+			// The guest holds no value Koinon could keep secret: the one variable is the public key that
+			// verifies the guest API tokens (issue #1309).
+			Expect(tmpl.Containers[0].Env).To(HaveLen(1))
+			Expect(tmpl.Containers[0].Env[0].Name).To(Equal(guestauth.VerifyKeysEnv))
+			Expect(tmpl.Containers[0].Env[0].Value).To(Equal(guestauth.EncodeKeys(fakeate.Signer().PublicKey())))
 			Expect(tmpl.Resources.Limits.CpuMillicores).To(BeEquivalentTo(500))
 			Expect(tmpl.Resources.Limits.MemoryBytes).To(BeEquivalentTo(1 << 30))
 			Expect(tmpl.SnapshotConfig.PreferredFidelity).To(Equal(ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY))
+		})
+
+		It("mounts a durable directory at the agent's home and no other volume (issue #1090)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img})
+			Expect(err).NotTo(HaveOccurred())
+			tmpl, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(tmpl.Volumes).To(HaveLen(1))
+			Expect(tmpl.Volumes[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Volumes[0].DurableDir).NotTo(BeNil(), "a durable directory, not an external or an image volume")
+			Expect(tmpl.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(tmpl.Containers[0].VolumeMounts[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Containers[0].VolumeMounts[0].MountPath).To(Equal("/sandbox"))
 		})
 
 		It("refuses egress it cannot enforce", func(ctx SpecContext) {

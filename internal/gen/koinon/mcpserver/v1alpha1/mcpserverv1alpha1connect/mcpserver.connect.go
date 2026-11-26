@@ -55,6 +55,9 @@ const (
 	// McpServerServiceAcknowledgeToolReviewProcedure is the procedure name of the McpServerService's
 	// AcknowledgeToolReview RPC.
 	McpServerServiceAcknowledgeToolReviewProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/AcknowledgeToolReview"
+	// McpServerServiceReviewAllToolsProcedure is the procedure name of the McpServerService's
+	// ReviewAllTools RPC.
+	McpServerServiceReviewAllToolsProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/ReviewAllTools"
 	// McpServerServiceGetAgentServersProcedure is the procedure name of the McpServerService's
 	// GetAgentServers RPC.
 	McpServerServiceGetAgentServersProcedure = "/koinon.mcpserver.v1alpha1.McpServerService/GetAgentServers"
@@ -136,6 +139,13 @@ var (
 			Procedure:  McpServerServiceAcknowledgeToolReviewProcedure,
 		}
 	})
+	mcpServerServiceReviewAllToolsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_mcpserver_v1alpha1_mcpserver_proto.Services().ByName("McpServerService").Methods().ByName("ReviewAllTools"),
+			Procedure:  McpServerServiceReviewAllToolsProcedure,
+		}
+	})
 	mcpServerServiceGetAgentServersSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -182,6 +192,14 @@ type McpServerServiceClient interface {
 	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
+	// ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the
+	// text of each tool in the request at the hash the admin saw, without changing its tier, as
+	// AcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no
+	// longer lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of
+	// tools that no admin ever reviewed and that the server no longer lists: they are not served, and they
+	// count toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and
+	// mcp_server.unreviewed_tools_removed once.
+	ReviewAllTools(context.Context, *v1alpha1.ReviewAllToolsRequest) (*v1alpha1.ReviewAllToolsResponse, error)
 	// GetAgentServers returns the servers an agent may use.
 	GetAgentServers(context.Context, *v1alpha1.GetAgentServersRequest) (*v1alpha1.GetAgentServersResponse, error)
 	// SetAgentServers replaces the servers an agent may use.
@@ -224,6 +242,14 @@ type McpServerServiceHandler interface {
 	SetToolSink(context.Context, *v1alpha1.SetToolSinkRequest) (*v1alpha1.SetToolSinkResponse, error)
 	// AcknowledgeToolReview clears a tool's review flag without changing its tier.
 	AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error)
+	// ReviewAllTools reviews the waiting tools of one server in one step (#1216, ADR 0125). It approves the
+	// text of each tool in the request at the hash the admin saw, without changing its tier, as
+	// AcknowledgeToolReview does. A tool whose text changed since (another hash) or that the server no
+	// longer lists fails the call with ABORTED (HTTP 409), and nothing changes. It also deletes the rows of
+	// tools that no admin ever reviewed and that the server no longer lists: they are not served, and they
+	// count toward the limit of unreviewed tools. Audited as mcp_tool.review for each tool and
+	// mcp_server.unreviewed_tools_removed once.
+	ReviewAllTools(context.Context, *v1alpha1.ReviewAllToolsRequest) (*v1alpha1.ReviewAllToolsResponse, error)
 	// GetAgentServers returns the servers an agent may use.
 	GetAgentServers(context.Context, *v1alpha1.GetAgentServersRequest) (*v1alpha1.GetAgentServersResponse, error)
 	// SetAgentServers replaces the servers an agent may use.
@@ -245,6 +271,7 @@ func RegisterMcpServerServiceHandler(server *connect.Server, svc McpServerServic
 		connect.Method{Spec: mcpServerServiceSetToolTwoApproversSpec(), Handler: adapter.setToolTwoApprovers},
 		connect.Method{Spec: mcpServerServiceSetToolSinkSpec(), Handler: adapter.setToolSink},
 		connect.Method{Spec: mcpServerServiceAcknowledgeToolReviewSpec(), Handler: adapter.acknowledgeToolReview},
+		connect.Method{Spec: mcpServerServiceReviewAllToolsSpec(), Handler: adapter.reviewAllTools},
 		connect.Method{Spec: mcpServerServiceGetAgentServersSpec(), Handler: adapter.getAgentServers},
 		connect.Method{Spec: mcpServerServiceSetAgentServersSpec(), Handler: adapter.setAgentServers},
 	)
@@ -291,6 +318,10 @@ func (UnimplementedMcpServerServiceHandler) SetToolSink(context.Context, *v1alph
 
 func (UnimplementedMcpServerServiceHandler) AcknowledgeToolReview(context.Context, *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.AcknowledgeToolReview is not implemented")
+}
+
+func (UnimplementedMcpServerServiceHandler) ReviewAllTools(context.Context, *v1alpha1.ReviewAllToolsRequest) (*v1alpha1.ReviewAllToolsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.mcpserver.v1alpha1.McpServerService.ReviewAllTools is not implemented")
 }
 
 func (UnimplementedMcpServerServiceHandler) GetAgentServers(context.Context, *v1alpha1.GetAgentServersRequest) (*v1alpha1.GetAgentServersResponse, error) {
@@ -380,6 +411,14 @@ func (c *mcpServerServiceClient) SetToolSink(ctx context.Context, req *v1alpha1.
 func (c *mcpServerServiceClient) AcknowledgeToolReview(ctx context.Context, req *v1alpha1.AcknowledgeToolReviewRequest) (*v1alpha1.AcknowledgeToolReviewResponse, error) {
 	var res v1alpha1.AcknowledgeToolReviewResponse
 	if err := c.client.CallUnary(ctx, mcpServerServiceAcknowledgeToolReviewSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *mcpServerServiceClient) ReviewAllTools(ctx context.Context, req *v1alpha1.ReviewAllToolsRequest) (*v1alpha1.ReviewAllToolsResponse, error) {
+	var res v1alpha1.ReviewAllToolsResponse
+	if err := c.client.CallUnary(ctx, mcpServerServiceReviewAllToolsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -517,6 +556,18 @@ func (h mcpServerServiceHandler) acknowledgeToolReview(ctx context.Context, _ co
 		return err
 	}
 	res, err := h.svc.AcknowledgeToolReview(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h mcpServerServiceHandler) reviewAllTools(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ReviewAllToolsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ReviewAllTools(ctx, &req)
 	if err != nil {
 		return err
 	}

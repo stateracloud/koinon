@@ -100,11 +100,12 @@ func refuse(w http.ResponseWriter, status int, text string) {
 	http.Error(w, text, status)
 }
 
-// serverFor builds the server of one request. It registers no tool: its middleware answers
-// tools/list and tools/call from the agent's view of the targets.
+// serverFor builds the server of one request. It registers no tool and no prompt: its middleware
+// answers tools/list and tools/call from the agent's view of the targets, and prompts/list and
+// prompts/get with the readiness prompt only (prompts.go).
 func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "koinon-gateway", Version: "0"}, &mcp.ServerOptions{
-		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
+		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}, Prompts: &mcp.PromptCapabilities{}},
 		Logger:       g.o.Logger,
 	})
 	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -121,6 +122,14 @@ func (g *Gateway) serverFor(agent gateway.AgentRef) *mcp.Server {
 					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad tools/call"}
 				}
 				return g.o.Scrub.Result(agent.Org, g.callTool(ctx, agent, r.Params)), nil
+			case "prompts/list":
+				return g.listPrompts(ctx, agent), nil
+			case "prompts/get":
+				r, ok := req.(*mcp.GetPromptRequest)
+				if !ok {
+					return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: "bad prompts/get"}
+				}
+				return g.getPrompt(ctx, agent, r.Params)
 			}
 			return next(ctx, method, req)
 		}
@@ -274,7 +283,7 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 
 	s := g.snapOf(ctx)
 	// The row and the span carry names only after the grant check: a caller's text is never recorded.
-	row.Target, row.Tool, row.CredKind = "unknown", "unknown", CredentialNone
+	row.Target, row.Tool, row.CredKind = "unknown", "unknown", CredentialNone.String()
 	target, tool, ok := splitToolName(p.Name)
 	if !ok {
 		finish(OutcomeRefusedGrant)
@@ -309,9 +318,9 @@ func (g *Gateway) callTool(ctx context.Context, agent gateway.AgentRef, p *mcp.C
 		return refusedResult(reason)
 	}
 	if c, err := g.creds.Credential(ctx, t, agent); err == nil {
-		row.CredKind, row.RecipientKeyID = c.Kind, c.RecipientKeyID
+		row.CredKind, row.RecipientKeyID = c.Kind.String(), c.RecipientKeyID
 	} else {
-		row.CredKind = CredentialError
+		row.CredKind = CredentialError.String()
 		var oe *OpenError
 		if errors.As(err, &oe) {
 			row.RecipientKeyID = oe.KeyID

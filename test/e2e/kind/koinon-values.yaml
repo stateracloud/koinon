@@ -18,10 +18,10 @@ postgres:
 
 gateway:
   mode: standalone
-  # koinon-gateway serves the MCP path and its egress listener (ADR 0097, #1086 part C2): an agent with a code-host
-  # connection sends git to <gateway>/egress/<host>/, and the gateway attaches the forge credential.
+  # koinon-gateway (the default gateway.mcp.driver, #1239) also serves its egress listener (ADR 0097, #1086 part
+  # C2): an agent with a code-host connection sends git to <gateway>/egress/<host>/, and the gateway attaches the
+  # forge credential.
   mcp:
-    driver: koinon
     koinon:
       egress:
         enabled: true

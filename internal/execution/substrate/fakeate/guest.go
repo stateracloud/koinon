@@ -10,6 +10,7 @@ import (
 	"io"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -183,11 +184,45 @@ func (g *guestServer) run(a *actor, p *fproc) {
 		g.c.mu.Unlock()
 		p.exit(0)
 	case "tar":
+		if slices.Contains(args, "-cf") {
+			g.tarc(a, p, args)
+			return
+		}
 		g.untar(a, p, args)
 	default:
 		p.update(func() { p.stderr = append(p.stderr, []byte(p.argv[0]+": not found\n")...) })
 		p.exit(127)
 	}
+}
+
+// tarc is `tar -C DIR [--exclude=...] -cf - .`: every file below DIR, as "./name" entries, on stdout.
+// It leaves out nothing: the fake home holds no cache, and Koinon's writer applies its own list.
+func (g *guestServer) tarc(a *actor, p *fproc, args []string) {
+	dir := "/"
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-C" {
+			dir = args[i+1]
+		}
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	g.c.mu.Lock()
+	names := make([]string, 0, len(a.files))
+	for name := range a.files {
+		if rel, ok := strings.CutPrefix(name, strings.TrimSuffix(dir, "/")+"/"); ok {
+			names = append(names, rel)
+		}
+	}
+	sort.Strings(names)
+	for _, rel := range names {
+		body := a.files[path.Join(dir, rel)]
+		_ = tw.WriteHeader(&tar.Header{Name: "./" + rel, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
+		_, _ = tw.Write(body)
+	}
+	g.c.mu.Unlock()
+	_ = tw.Close()
+	p.update(func() { p.stdout = append(p.stdout, buf.Bytes()...) })
+	p.exit(0)
 }
 
 // untar is `tar -x -f FILE -C DIR`.

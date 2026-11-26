@@ -9,10 +9,12 @@
 #   1. note the install: the install ID, the number of tasks and runs, the keys and what they wrap;
 #   2. back up the keys and the database (the guide's backup blocks) and read the dump back;
 #   3. change the install after the backup: add a marker table, and delete the KEK Secret (the guard refuses, then is set to Audit once);
+#      with the gateway recipient key on, replace its Secret by a new install's key (as the key-admin service account);
 #   4. stop, hold, restore the database, restore the keys, start held, resync (the guide's restore
 #      blocks), check that nothing acts while held, verify the keys, release (issue #462);
 #   5. verify: the marker is gone, the install ID, the task and run counts and the keys are the ones of
-#      step 1, the KEK Secret is back, and the key tool reports no warning.
+#      step 1, the KEK Secret is back, the key tool reports no warning, and the gateway key Secret is the
+#      backup's and koinon-mcp-gateway is ready with it.
 #
 # It needs the kubectl wrapper that run.sh puts in $OUT/bin (pinned to the kind context), and nothing
 # outside the kind cluster. Run by run.sh when BACKUP_RESTORE=1 (the nightly run, and a dispatch that
@@ -29,6 +31,9 @@ NS=koinon
 COMMANDS=$root/test/e2e/commands/backup-restore.e1
 work="$OUT/backup-restore"
 mkdir -p "$work"
+# The key backups hold key material (test keys, but still keys): run.sh uploads $OUT as a CI artifact, so they
+# do not stay after this script. The dump and the notes stay for diagnostics.
+trap 'rm -f "$work/koinon-kek-backup.yaml" "$work/koinon-gateway-key-backup.yaml"' EXIT
 K=("$OUT/bin/kubectl")
 [[ -x ${K[0]} ]] || { echo "$OUT/bin/kubectl is missing: run test/e2e/run.sh first" >&2; exit 2; }
 
@@ -74,9 +79,38 @@ step "back up the keys and the database"
 blk backup-keys
 blk check-keys
 blk note-keys
+blk backup-gateway-key
 blk backup-db
 blk verify-dump
+blk check-gateway-key
 [[ -s $work/koinon.dump && -s $work/koinon-kek-backup.yaml ]] || fail "a backup file is empty"
+# The gateway recipient key (gateway.mcp.driver=koinon only): its Secret is backed up next to the KEK, readable by
+# its owner only. Compared by a digest of the data, so no key reaches this log.
+GWKEY=koinon-gateway-recipient-key
+# shellcheck disable=SC2016 # a go-template: $k and $v are template variables, not shell ones
+gwdata='{{range $k, $v := .data}}{{$k}}={{$v}};{{end}}'
+gwdigest() { "${K[@]}" -n "$NS" get secret "$GWKEY" -o go-template="$gwdata" | sha256sum; }
+# The chart renders the key-admin ServiceAccount exactly when it expects the Secret (gateway.mcp.driver=koinon, the
+# default, with recipientKey.enabled). Then the Secret is required: a missing one fails here, it is not skipped.
+gwwant=0
+if "${K[@]}" -n "$NS" get serviceaccount koinon-gateway-key-admin >/dev/null 2>&1; then
+  gwwant=1
+fi
+gwon=0
+if (( gwwant )) && ! "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
+  fail "the install uses the koinon MCP driver and has no gateway key Secret $GWKEY"
+fi
+if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
+  gwon=1
+  gwfile=$work/koinon-gateway-key-backup.yaml
+  [[ -s $gwfile ]] || fail "the install has a gateway key Secret and backup-gateway-key wrote no file"
+  [[ $(stat -c %a "$gwfile") == 600 ]] || fail "the gateway key backup is readable by others: $(stat -c %a "$gwfile")"
+  gw_before=$(gwdigest)
+  backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template="$gwdata" | sha256sum)
+  [[ $backup_digest == "$gw_before" ]] || fail "the gateway key backup differs from the Secret"
+elif [[ -e $work/koinon-gateway-key-backup.yaml ]]; then
+  fail "backup-gateway-key wrote a file on an install without a gateway key Secret"
+fi
 
 step "change the install after the backup"
 # Something the restore must undo (a table the dump does not have) and the loss it must repair
@@ -109,12 +143,25 @@ fresh_id="kek-$(date -u +%Y%m%d)-e2e0"
 "${K[@]}" -n "$NS" create secret generic koinon-kek --from-literal="$fresh_id=$(head -c 32 /dev/urandom | base64)" --from-literal=active="$fresh_id" >/dev/null \
   || fail "could not create the fresh KEK Secret"
 
+if (( gwon )); then
+  # The loss of the gateway key: a new install has its own first key, which no restored row names. The Secret is
+  # guarded (gateway-key-guard): kubectl is refused, and only the key-admin service account writes it.
+  if "${K[@]}" -n "$NS" delete secret "$GWKEY" 2>"$work/gwkey-delete.err"; then
+    fail "the gateway key Secret was deleted: gateway-key-guard is not enforced"
+  fi
+  grep -q 'only the gateway key-admin Job may write' "$work/gwkey-delete.err" || fail "the gateway key delete was refused, but not by gateway-key-guard: $(cat "$work/gwkey-delete.err")"
+  gwadmin=system:serviceaccount:$NS:koinon-gateway-key-admin
+  "${K[@]}" -n "$NS" delete secret "$GWKEY" --as="$gwadmin" >/dev/null || fail "the key-admin service account could not delete the gateway key Secret"
+  "${K[@]}" -n "$NS" create secret generic "$GWKEY" --as="$gwadmin" --from-literal=gk-00000000000000e2=koinon_test_not-a-real-token >/dev/null ||
+    fail "could not stand in for a new install's gateway key Secret"
+fi
 step "restore"
 t_restore=$(date +%s)
 blk stop
 blk hold
 blk restore-db
 blk restore-keys
+blk restore-gateway-key
 blk start
 blk resync
 # Held: every component says so, and the schedule and run machinery is off. The restored install has a
@@ -131,6 +178,7 @@ claimed=$(sql "SELECT count(*) FROM runs WHERE owner_id IS NOT NULL AND state IN
 [[ $claimed == 0 ]] || fail "$claimed run(s) hold a live lease while the install is held"
 blk compare-keys
 blk verify-keys
+blk verify-gateway-key
 blk release
 for c in koinon-api koinon-reconciler koinon-agentd; do
   envs=$("${K[@]}" -n "$NS" get "deploy/$c" -o jsonpath='{.spec.template.spec.containers[0].env[*].name}')
@@ -158,6 +206,13 @@ ks=$(keys_status)
 if grep -qiE 'warning|missing' <<<"$ks"; then
   printf '%s\n' "$ks" >&2
   fail "keys status warns after the restore"
+fi
+if (( gwon )); then
+  [[ $(gwdigest) == "$gw_before" ]] || fail "the gateway key Secret is not the one that was backed up"
+  if "${K[@]}" -n "$NS" annotate secret "$GWKEY" e2e-probe=1 --overwrite 2>/dev/null; then
+    fail "kubectl changed the gateway key Secret: gateway-key-guard is not enforced after the restore"
+  fi
+  "${K[@]}" -n "$NS" rollout status deploy/koinon-mcp-gateway --timeout=2m || fail "koinon-mcp-gateway is not ready with the restored gateway keys"
 fi
 # The migration role must still own its schema: this is what the next helm upgrade Job runs as.
 sql "SET ROLE koinon_migrate; CREATE TABLE public.e2e_migrate_probe (); DROP TABLE public.e2e_migrate_probe" >/dev/null

@@ -108,6 +108,22 @@ rewritten by koinon.imageRef.
 {{- include "koinon.imageRef" (list $ctx $ref) }}
 {{- end }}
 
+{{/*
+Harness image reference: koinon.harnessImage (list $ $f.image). Like koinon.image, but with execution.driver=substrate
+the default repository "sandbox" becomes "sandbox-substrate", the harness image with the guest server and the
+guest launcher (release job harness-substrate, issue #1087). The substrate driver runs the guest server as the
+actor's process, so the plain harness image cannot serve it. Any other repository is used as set. The digest of
+the entry must be the digest of the image it names.
+*/}}
+{{- define "koinon.harnessImage" -}}
+{{- $ctx := index . 0 -}}
+{{- $img := index . 1 -}}
+{{- if and (eq (include "koinon.substrate" $ctx) "true") (eq $img.repository "sandbox") }}
+{{- $img = set (deepCopy $img) "repository" "sandbox-substrate" }}
+{{- end }}
+{{- include "koinon.image" (list $ctx $img) }}
+{{- end }}
+
 {{- define "koinon.podSecurityContext" -}}
 runAsNonRoot: true
 runAsUser: 65532
@@ -292,7 +308,7 @@ true
 {{- printf "http://%s:%d" (include "koinon.mcpGatewayHost" .) (int .Values.gateway.mcp.koinon.egress.port) -}}
 {{- end }}
 
-{{/* The Secret with the actor token key: seed (koinon-agentd only) and public.pem (koinon-gateway only). */}}
+{{/* The Secret with the actor token key (ensure-secrets kind ed25519-key): key, the seed (koinon-agentd only), and public.pem (koinon-gateway only). */}}
 {{- define "koinon.actorTokenKeyName" -}}
 {{- .Values.gateway.mcp.koinon.egress.actorToken.existingSecret | default (include "koinon.componentName" (list . "actor-token-key")) -}}
 {{- end }}
@@ -307,18 +323,31 @@ true
 {{- end }}
 
 {{/*
-The URL koinon-api uses for its live check of an agent's MCP tools. An agent still reaches MCP through
-agentgateway while the driver is koinon (ADR 0097), so the check goes to the URL the agent uses, and not
-to koinon-gateway, which serves koinon-api's approved calls (koinon.gatewayMCPURL).
+The URL koinon-api uses for its live check of an agent's MCP tools: the gateway that serves the agents'
+MCP path (koinon.agentMCPURL as koinon-api reaches it). With driver koinon that is koinon-gateway
+(koinon.gatewayMCPURL); with agentgateway it is agentgateway's /mcp (ADR 0097 decision 5, #1239).
 */}}
 {{- define "koinon.gatewayMCPCheckURL" -}}
-{{- printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) -}}
+{{- include "koinon.gatewayMCPURL" . -}}
+{{- end }}
+
+{{/*
+The MCP URL an agent's harness gets (koinon-agentd's KOINON_AGENT_MCP_URL). Only with driver koinon:
+koinon-gateway's /mcp. With agentgateway the chart sets nothing, and koinon-agentd uses <KOINON_GATEWAY_URL>/mcp
+as before (agentd.gatewayURL can name another agentgateway address). The model path (/v1) stays on
+agentgateway in both cases.
+*/}}
+{{- define "koinon.agentMCPURL" -}}
+{{- if include "koinon.mcpKoinon" . -}}
+{{- include "koinon.gatewayMCPURL" . -}}
+{{- end -}}
 {{- end }}
 
 {{/*
 The Secret that holds the MCP credential files and CA bundles the reconciler opens (mcp-<id>-<hash>,
 mcpca-<id>-<hash>). It is separate from the provider keys Secret, so koinon-gateway mounts no LLM key
-(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both while agents reach MCP through it.
+(ADR 0097 decision 5). Standalone mode only; agentgateway mounts both (it serves MCP with the agentgateway driver,
+and with either driver its config keeps the MCP targets whose credential it can open).
 */}}
 {{- define "koinon.gatewayMCPKeysName" -}}
 {{- include "koinon.componentName" (list . "gateway-mcp-keys") }}
@@ -404,7 +433,7 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ include "koinon.gatewayMCPURL" . | quote }}
-# The live check of an agent's MCP tools uses the MCP URL the agent uses: agentgateway's, also when koinon-gateway serves the approved calls.
+# The live check of an agent's MCP tools uses the gateway the agents use: koinon-gateway with driver koinon, else agentgateway.
 - name: KOINON_GATEWAY_MCP_CHECK_URL
   value: {{ include "koinon.gatewayMCPCheckURL" . | quote }}
 # kubernetes mode cannot render a server's own CA or a skipped certificate check; the API refuses them (#278).
@@ -412,8 +441,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
   value: {{ .Values.gateway.mode | quote }}
 {{- if include "koinon.mcpKoinon" . }}
 # koinon-api seals a stored MCP credential to the gateway's public key once a key is active (ADR 0097 decision
-# 12.5 step 0). With agentgateway it seals v1, which agentgateway can read. agentgateway still serves the
-# agents' MCP path with this driver and leaves a sealed target out of its config (see the ADR known limits).
+# 12.5 step 0). With this driver koinon-gateway serves every MCP path of the agents and of koinon-api, and
+# opens v2. With agentgateway koinon-api seals v1, which agentgateway can read. agentgateway leaves a sealed
+# target out of its config; with this driver the reconciler's MCP prober lists tools through koinon-gateway.
 - name: KOINON_GATEWAY_MCP_SEAL_V2
   value: "true"
 # Sealing starts only when this many pods of every component report that they read the sealed format
@@ -706,11 +736,27 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
 /var/run/koinon/substrate
 {{- end }}
 
-{{/* ateapi's token and CA for the components that call Agent Substrate (execution.driver=substrate). */}}
+{{/*
+The Secret with the key that signs the guest API tokens (issue #1309): key "key", the hex seed of an
+Ed25519 key. Only koinon-reconciler and koinon-agentd mount it. Never mounted into a sandbox: the
+actor template carries only the public key.
+*/}}
+{{- define "koinon.substrateGuestKeyName" -}}
+{{- .Values.execution.substrate.guestKey.existingSecret | default (include "koinon.componentName" (list . "substrate-guest-key")) }}
+{{- end }}
+
+{{- define "koinon.substrateGuestKeyFile" -}}
+/secrets/substrate-guest-key/key
+{{- end }}
+
+{{/* ateapi's token and CA, and the guest API key, for the components that call Agent Substrate (execution.driver=substrate). */}}
 {{- define "koinon.substrateVolumeMount" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
   mountPath: {{ include "koinon.substrateTokenDir" . }}
+  readOnly: true
+- name: substrate-guest-key
+  mountPath: /secrets/substrate-guest-key
   readOnly: true
 {{- if .Values.execution.substrate.caSecret }}
 - name: substrate-ca
@@ -729,6 +775,13 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
           audience: {{ required "execution.substrate.tokenAudience is required with execution.driver=substrate" .Values.execution.substrate.tokenAudience | quote }}
           expirationSeconds: 3600
           path: token
+- name: substrate-guest-key
+  secret:
+    secretName: {{ include "koinon.substrateGuestKeyName" . }}
+    defaultMode: 0440
+    items:
+      - key: key
+        path: key
 {{- if .Values.execution.substrate.caSecret }}
 - name: substrate-ca
   secret:
@@ -801,6 +854,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end -}}
 {{- if and (include "koinon.imageCache" .) (not .Values.execution.substrate.imageCache.tls.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.imageCache.tlsSecret" .) "type" "kubernetes.io/tls" "kind" "tls" "dnsNames" (include "koinon.imageCache.dnsNames" . | fromJsonArray) "labels" (fromYaml (include "koinon.generatedLabels" (list . "imagecache")))) -}}
+{{- end -}}
+{{- if and (eq (include "koinon.substrate" .) "true") (not .Values.execution.substrate.guestKey.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.substrateGuestKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
 {{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
@@ -1048,6 +1104,131 @@ pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads st
   value: /etc/koinon/awskms-ca/ca.crt
 {{- end }}
 {{- end }}
+{{- include "koinon.kmsReadOnlyEnv" (dict "root" .root "role" .role) }}
+{{- end }}
+
+{{/*
+The read-only second wrapping key (values secrets.kek.kms.readOnly, issue 688 and 1298), as the KOINON_
+forms of the --read-only-* flags: the KMS key that you used before a key move. It only unwraps; nothing new is
+ever wrapped with it. It renders with any primary, local too (a move back to local). Each identity
+signs in with its own service account token as its own role; nothing here is a credential. The key
+must differ from the primary: koinon-api refuses to start with the same key twice, and the chart
+refuses to render it.
+*/}}
+{{- define "koinon.kmsReadOnlyEnv" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- $ro := $kms.readOnly | default dict }}
+{{- $b := $ro.backend | default "" }}
+{{- if eq $b "openbao" }}
+{{- $o := $ro.openbao }}
+{{- if not (and $o.address $o.key) }}{{ fail "secrets.kek.kms.readOnly.openbao.address and key are required with readOnly.backend openbao" }}{{ end }}
+{{- if and (eq (include "koinon.kms" .root) "openbao") (eq ($o.transitMount | default "transit") ($kms.openbao.transitMount | default "transit")) (eq $o.key $kms.openbao.key) }}
+{{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another transit mount or key name" }}
+{{- end }}
+{{- if and (hasPrefix "http://" $o.address) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $o.address)) }}
+{{- fail "secrets.kek.kms.readOnly.openbao.address must be https: the KEKs travel to OpenBao (plain http only on a loopback address)" }}
+{{- end }}
+- name: KOINON_READ_ONLY_KEK_BACKEND
+  value: openbao
+- name: KOINON_READ_ONLY_OPENBAO_ADDRESS
+  value: {{ $o.address | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_TRANSIT_MOUNT
+  value: {{ $o.transitMount | default "transit" | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_KEY
+  value: {{ $o.key | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_AUTH_MOUNT
+  value: {{ $o.authMount | default "kubernetes" | quote }}
+- name: KOINON_READ_ONLY_OPENBAO_ROLE
+  value: {{ index $o.roles .role | quote }}
+{{- with $o.namespace }}
+- name: KOINON_READ_ONLY_OPENBAO_NAMESPACE
+  value: {{ . | quote }}
+{{- end }}
+{{- with $o.timeout }}
+- name: KOINON_READ_ONLY_OPENBAO_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $o.caConfigMap }}
+- name: KOINON_READ_ONLY_OPENBAO_CA_FILE
+  value: /etc/koinon/ro-openbao-ca/ca.crt
+{{- end }}
+{{- else if eq $b "awskms" }}
+{{- $a := $ro.awskms }}
+{{- if not (and $a.region $a.keyId) }}{{ fail "secrets.kek.kms.readOnly.awskms.region and keyId are required with readOnly.backend awskms" }}{{ end }}
+{{- if and (eq (include "koinon.kms" .root) "awskms") (eq $a.keyId $kms.awskms.keyId) }}
+{{- fail "secrets.kek.kms.readOnly must name another key than the primary: set another AWS key ARN" }}
+{{- end }}
+{{- if hasPrefix "alias/aws/" $a.keyId }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId names an AWS managed key, whose key policy cannot limit who decrypts: use a customer managed key" }}
+{{- end }}
+{{- if and (hasPrefix "arn:" $a.keyId) (not (contains (printf ":kms:%s:" $a.region) $a.keyId)) }}
+{{- fail "secrets.kek.kms.readOnly.awskms.keyId is a key ARN in another region than secrets.kek.kms.readOnly.awskms.region" }}
+{{- end }}
+{{- range $what, $e := dict "endpoint" $a.endpoint "stsEndpoint" $a.stsEndpoint }}
+{{- if and (hasPrefix "http://" $e) (not (regexMatch "^http://(127\\.[0-9.]+|localhost|\\[::1\\])(:[0-9]+)?/?$" $e)) }}
+{{- fail (printf "secrets.kek.kms.readOnly.awskms.%s must be https: the KEKs and signed requests travel to it (plain http only on a loopback address)" $what) }}
+{{- end }}
+{{- end }}
+{{- /* Same as the primary: no credential and no AWS_* variable. The pod's one identity (IRSA role or
+Pod Identity) needs kms:Decrypt on this key too. */}}
+- name: KOINON_READ_ONLY_KEK_BACKEND
+  value: awskms
+- name: KOINON_READ_ONLY_AWSKMS_REGION
+  value: {{ $a.region | quote }}
+- name: KOINON_READ_ONLY_AWSKMS_KEY_ID
+  value: {{ $a.keyId | quote }}
+{{- with $a.endpoint }}
+- name: KOINON_READ_ONLY_AWSKMS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.stsEndpoint }}
+- name: KOINON_READ_ONLY_AWSKMS_STS_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- with $a.timeout }}
+- name: KOINON_READ_ONLY_AWSKMS_TIMEOUT
+  value: {{ . | quote }}
+{{- end }}
+{{- if $a.caConfigMap }}
+- name: KOINON_READ_ONLY_AWSKMS_CA_FILE
+  value: /etc/koinon/ro-awskms-ca/ca.crt
+{{- end }}
+{{- else if $b }}
+{{- fail (printf "secrets.kek.kms.readOnly.backend must be openbao or awskms (or empty), not %q" $b) }}
+{{- end }}
+{{- end }}
+
+{{/*
+The ConfigMap with the read-only key's CA when values name one, as name=ConfigMap, and its mount and
+volume. Only the pods that start with the read-only flags (koinon-api, the reconciler, the key-admin
+Job, the run-evidence Job) include these, next to the primary's.
+*/}}
+{{- define "koinon.kmsReadOnlyCA" -}}
+{{- $ro := .Values.secrets.kek.kms.readOnly | default dict }}
+{{- if and (eq ($ro.backend | default "") "openbao") $ro.openbao.caConfigMap }}ro-openbao-ca={{ $ro.openbao.caConfigMap }}
+{{- else if and (eq ($ro.backend | default "") "awskms") $ro.awskms.caConfigMap }}ro-awskms-ca={{ $ro.awskms.caConfigMap }}
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kmsReadOnlyVolumeMount" -}}
+{{- with include "koinon.kmsReadOnlyCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
+  mountPath: /etc/koinon/{{ index $v 0 }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kmsReadOnlyVolume" -}}
+{{- with include "koinon.kmsReadOnlyCA" . }}
+{{- $v := splitList "=" . }}
+- name: {{ index $v 0 }}
+  configMap:
+    name: {{ index $v 1 }}
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
 {{- end }}
 
 {{/* The ConfigMap with the KMS's CA when values name one (a CA is not secret), and its volume name. */}}
@@ -1082,11 +1263,18 @@ pod its identity (AWS_ROLE_ARN and a token file), and the adapter never reads st
 {{/*
 The annotations of an identity's ServiceAccount (dict root, role: api, reconciler or keyAdmin): with
 the awskms backend and an IRSA role for it, eks.amazonaws.com/role-arn, which makes EKS's webhook give
-the pod that role's web identity. Empty otherwise.
+the pod that role's web identity. While the primary is not awskms but the read-only key is (a move
+away from AWS KMS), the read-only key's roleArns give it, so the pod can still unwrap. Empty otherwise.
 */}}
 {{- define "koinon.kmsServiceAccountAnnotations" -}}
+{{- $kms := .root.Values.secrets.kek.kms }}
+{{- $ro := $kms.readOnly | default dict }}
 {{- if eq (include "koinon.kms" .root) "awskms" }}
-{{- with index .root.Values.secrets.kek.kms.awskms.roleArns .role }}
+{{- with index $kms.awskms.roleArns .role }}
+eks.amazonaws.com/role-arn: {{ . | quote }}
+{{- end }}
+{{- else if eq ($ro.backend | default "") "awskms" }}
+{{- with index ($ro.awskms.roleArns | default dict) .role }}
 eks.amazonaws.com/role-arn: {{ . | quote }}
 {{- end }}
 {{- end }}
@@ -1285,7 +1473,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the guest image does not yet carry the guest launcher (issue #1088 slice f). The gVisor tiers keep a writable root (issue #1150)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
 {{- end }}
 {{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
 {{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
@@ -1374,6 +1562,8 @@ it carries no credentials.
   value: {{ include "koinon.substrateTiers" . | quote }}
 - name: KOINON_SUBSTRATE_TOKEN_FILE
   value: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
+- name: KOINON_SUBSTRATE_GUEST_KEY_FILE
+  value: {{ include "koinon.substrateGuestKeyFile" . | quote }}
 {{- if .Values.execution.substrate.caSecret }}
 - name: KOINON_SUBSTRATE_CA_FILE
   value: /etc/koinon/substrate-ca/ca.crt
@@ -1403,11 +1593,16 @@ it carries no credentials.
 - name: KOINON_EGRESS_URL
   value: {{ include "koinon.egressURL" . | quote }}
 - name: KOINON_ACTOR_TOKEN_KEY_FILE
-  value: /secrets/actor-token/seed
+  value: /secrets/actor-token/key
 - name: KOINON_ACTOR_TOKEN_KEY_ID
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.keyId | quote }}
 - name: KOINON_ACTOR_TOKEN_ISSUER
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.issuer | quote }}
+{{- end }}
+{{- with include "koinon.agentMCPURL" . }}
+{{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}
+- name: KOINON_AGENT_MCP_URL
+  value: {{ . | quote }}
 {{- end }}
 - name: KOINON_WORKERS
   value: {{ .Values.agentd.workers | default 8 | quote }}
@@ -1489,8 +1684,8 @@ spec:
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml .ka.resources | nindent 8 }}
-      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
-      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) (include "koinon.kmsReadOnlyVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) (include "koinon.kmsReadOnlyVolume" $) | join "\n" | trim }}
       {{- with $mounts }}
       volumeMounts:
         {{- . | nindent 8 }}
@@ -1554,8 +1749,8 @@ spec:
       terminationMessagePolicy: FallbackToLogsOnError
       resources:
         {{- toYaml $re.resources | nindent 8 }}
-      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) | join "\n" | trim }}
-      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) | join "\n" | trim }}
+      {{- $mounts := list (include "koinon.dbVolumeMount" $) (include "koinon.kmsVolumeMount" $) (include "koinon.kmsReadOnlyVolumeMount" $) | join "\n" | trim }}
+      {{- $volumes := list (include "koinon.dbVolume" $) (include "koinon.kmsVolume" $) (include "koinon.kmsReadOnlyVolume" $) | join "\n" | trim }}
       {{- with $mounts }}
       volumeMounts:
         {{- . | nindent 8 }}

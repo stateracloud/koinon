@@ -61,6 +61,9 @@ exec)
     file=$(sed -n "s/.*cat > '\(.*\)'.*/\1/p" <<<"$*")
     mkdir -p "$STATE/node$(dirname "$file")"
     cat >"$STATE/node$file"
+  elif [[ $3 == ls ]]; then
+    # The marker read back through the daemon: the upload exists only in the registry that the host reached.
+    [[ -e $STATE/uploads/${4##*/} ]] || exit 1
   fi ;;
 esac
 SH
@@ -74,7 +77,18 @@ cat >"$tmp/bin/kubectl" <<'SH'
 echo "kubectl $*" >>"$STATE/calls.log"
 cat >"$STATE/configmap.yaml"
 SH
-printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/bin/curl"
+# curl: answers /v2/ with success. A POST of an upload session prints a Location header and records the session
+# unless state/otherport exists (another registry holds the host port: the daemon never sees the session).
+cat >"$tmp/bin/curl" <<'SH'
+#!/usr/bin/env bash
+echo "curl $*" >>"$STATE/calls.log"
+if [[ " $* " == *" POST "* ]]; then
+  id=up$RANDOM$RANDOM
+  [[ -e $STATE/otherport ]] || { mkdir -p "$STATE/uploads"; touch "$STATE/uploads/$id"; }
+  printf 'HTTP/1.1 202 Accepted\r\nLocation: http://127.0.0.1:5001/v2/koinon-port-check/blobs/uploads/%s?_state=x\r\n\r\n' "$id"
+fi
+exit 0
+SH
 chmod +x "$tmp/bin/"*
 export STATE=$tmp/state PATH=$tmp/bin:$PATH
 
@@ -93,6 +107,10 @@ check "caches publish no port" bash -c "! grep '^docker run .*kind-proxy-' '$STA
 check "the cache for ghcr.io has the upstream and ttl 0" grep -q 'kind-proxy-ghcr-io.*REGISTRY_PROXY_REMOTEURL=https://ghcr.io.*REGISTRY_PROXY_TTL=0' "$STATE/calls.log"
 check "the registry image is pinned by digest" grep -q 'registry:3@sha256:[0-9a-f]\{64\}' "$STATE/calls.log"
 
+# #1350: start checks that host 127.0.0.1:5001 reaches the registry container it just ran.
+check "start opens a marker upload on the host port" grep -q '^curl .*-X POST .*127.0.0.1:5001/v2/koinon-port-check/blobs/uploads/' "$STATE/calls.log"
+check "start reads the marker back through the daemon" grep -q '^docker exec kind-registry ls /var/lib/registry/.*/koinon-port-check/_uploads/' "$STATE/calls.log"
+check "start removes the marker upload, with the _state of its Location" grep -q '^curl .*-X DELETE .*koinon-port-check/blobs/uploads/[^ ]*?_state=' "$STATE/calls.log"
 # #956: the containers join the kind network at start, before any push; attach has nothing to connect, because
 # a `docker network connect` in the middle of a push makes the published port refuse it.
 check "start creates the kind network" grep -q '^docker network create .* kind$' "$STATE/calls.log"
@@ -148,6 +166,16 @@ check "stop --force stops them anyway" bash -c "'$reg' stop --force && grep -q '
 rm "$STATE/clusters"
 : >"$STATE/calls.log"
 check "stop with no cluster left removes the registry and the caches" bash -c "'$reg' stop && grep -q '^docker rm -f kind-registry kind-proxy-ghcr-io kind-proxy-registry-k8s-io' '$STATE/calls.log'"
+
+touch "$STATE/otherport"
+rm -f "$STATE/calls.log"
+t0=$(date +%s)
+if "$reg" start >"$tmp/other.out" 2>&1; then rc=0; else rc=$?; fi
+check "start fails when another registry holds the host port" test "$rc" != 0
+check "the failure names the port and what to check" bash -c "grep -q '127.0.0.1:5001 answers, but it is not the kind-registry container' '$tmp/other.out' && grep -q 'lsof -nP -iTCP:5001' '$tmp/other.out'"
+check "the failure comes in about a second" test "$(( $(date +%s) - t0 ))" -le 3
+check "a failed start does not report the registry up" bash -c "! grep -q 'registry: localhost' '$tmp/other.out'"
+rm "$STATE/otherport"
 
 ((fail == 0)) || exit 1
 echo "kind-registry-test: all passed"
