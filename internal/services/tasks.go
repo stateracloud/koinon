@@ -206,8 +206,8 @@ type taskView struct {
 	events []store.TaskEvent
 	// names maps the events' authors to display names (eventActorNames).
 	names map[string]string
-	runs   []*runv1alpha1.Run
-	cost   *runv1alpha1.Cost
+	runs  []*runv1alpha1.Run
+	cost  *runv1alpha1.Cost
 }
 
 func (s *Server) loadTask(ctx context.Context, c caller, id pgtype.UUID) (taskView, error) {

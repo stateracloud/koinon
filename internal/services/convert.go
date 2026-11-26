@@ -157,14 +157,14 @@ func taskProto(t store.Task) *taskv1alpha1.Task {
 func taskEventProto(e store.TaskEvent, names map[string]string) *taskv1alpha1.TaskEvent {
 	return &taskv1alpha1.TaskEvent{
 		ActorDisplayName: names[idString(e.ActorUserID)],
-		Seq:          e.Seq,
-		Kind:         e.Kind,
-		ActorKind:    actorKindToProto[e.ActorKind],
-		ActorUserId:  idString(e.ActorUserID),
-		ActorAgentId: idString(e.ActorAgentID),
-		RunId:        idString(e.RunID),
-		Payload:      payloadProto(e.Payload),
-		CreatedAt:    tsProto(e.CreatedAt),
+		Seq:              e.Seq,
+		Kind:             e.Kind,
+		ActorKind:        actorKindToProto[e.ActorKind],
+		ActorUserId:      idString(e.ActorUserID),
+		ActorAgentId:     idString(e.ActorAgentID),
+		RunId:            idString(e.RunID),
+		Payload:          payloadProto(e.Payload),
+		CreatedAt:        tsProto(e.CreatedAt),
 	}
 }
 
