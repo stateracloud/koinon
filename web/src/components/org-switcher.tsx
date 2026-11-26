@@ -39,12 +39,12 @@ export function OrgSwitcher({ platformAdmin }: { platformAdmin: boolean }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
-        <DropdownMenuLabel className="text-muted-foreground text-xs">Orgs</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs">Orgs</DropdownMenuLabel>
         <DropdownMenuRadioGroup aria-label="Orgs" value={org.orgId} onValueChange={setOrgId}>
           {memberships.map((m) => (
             <DropdownMenuRadioItem key={m.orgId} value={m.orgId}>
               <span className="truncate">{orgName(m)}</span>
-              <span className="text-muted-foreground ml-auto text-xs">{orgRoleLabel(m.role)}</span>
+              <span className="ml-auto text-xs">{orgRoleLabel(m.role)}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

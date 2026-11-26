@@ -37,10 +37,10 @@ export function UserMenu({ name, email, onSignOut, signingOut }: { name: string;
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel className="grid font-normal">
           <span className="font-semibold">{name}</span>
-          {email && email !== name && <span className="text-muted-foreground truncate text-xs">{email}</span>}
+          {email && email !== name && <span className="truncate text-xs">{email}</span>}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-muted-foreground text-xs">Theme</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs">Theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           aria-label="Theme"
           value={theme}

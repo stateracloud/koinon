@@ -23,7 +23,7 @@ export function OverviewPage() {
       <PageHeader title="Overview" description={orgName(org)} actions={<NewAgentButton />} />
       <p className="text-sm">
         {waiting === 0 ? 'Nothing waits on you.' : waiting === 1 ? '1 item waits on you.' : `${waiting} items wait on you.`}{' '}
-        <Link to="/inbox" className="text-link hover:underline">
+        <Link to="/inbox" className="text-link underline">
           Open inbox
         </Link>
       </p>
