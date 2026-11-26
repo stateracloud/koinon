@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest'
-import { amountError, formatPico, parsePico, percent, remaining } from '@/lib/money'
+import { amountError, formatPico, parseLedgerPico, parsePico, percent, remaining } from '@/lib/money'
 
 describe('parsePico and formatPico', () => {
   it.each([
@@ -16,6 +16,16 @@ describe('parsePico and formatPico', () => {
 
   it.each(['', '-1', '1e3', '1.1234567890123', '12345678', 'abc', '1,5'])('refuses %j', (s) => {
     expect(parsePico(s)).toBeUndefined()
+  })
+})
+
+describe('parseLedgerPico', () => {
+  it('reads a ledger amount of any size, which parsePico refuses above 7 whole digits', () => {
+    expect(parsePico('12345678.5')).toBeUndefined()
+    expect(parseLedgerPico('12345678.5')).toBe(12_345_678_500_000_000_000n)
+    expect(parseLedgerPico('0.000000000001')).toBe(1n)
+    expect(parseLedgerPico('-1')).toBeUndefined()
+    expect(parseLedgerPico('1.0000000000001')).toBeUndefined()
   })
 })
 

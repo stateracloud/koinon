@@ -4,12 +4,21 @@ import { create } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { OrgSummarySchema, PlatformService } from '@/gen/koinon/platform/v1alpha1/platform_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import {
+  PlatformUsageRowSchema,
+  RunCountsSchema,
+  UsageService,
+  UsageTotalsSchema,
+  type ExportPlatformUsageRequest,
+  type GetPlatformUsageRequest,
+} from '@/gen/koinon/usage/v1alpha1/usage_pb'
+import { usdToPico } from '@/lib/usage'
 import { agent, membership, renderApp, whoAmI } from '@/test-utils'
 
 // The platform console of ADR 0126 section 4 (issue #1278): its own sidebar, the Orgs table, opening an org as
@@ -28,6 +37,35 @@ const summary = (orgId: string, name: string, extra: Partial<{ members: number; 
     monthlyCapUsd: extra.cap ?? '',
   })
 
+const usageRow = (day: string, orgId: string, model: string, costUsd: string, requests: bigint, read = 0n, input = 0n) => {
+  const o = orgs.find((x) => x.orgId === orgId)!
+  return create(PlatformUsageRowSchema, {
+    day,
+    orgId,
+    orgSlug: o.slug,
+    orgName: o.displayName,
+    model,
+    usage: create(UsageTotalsSchema, { requests, costUsd, inputTokens: input, cacheReadTokens: read, outputTokens: 10n }),
+  })
+}
+
+// A seeded month: the totals are the sums of the rows, as the server sends them (issue #1268).
+const seededRows = () => [
+  usageRow('2026-11-01', 'org-9', 'claude-sonnet', '30.00', 3n, 300n, 100n),
+  usageRow('2026-11-02', 'org-9', 'gpt-mini', '10.00', 2n, 0n, 100n),
+  usageRow('2026-11-02', 'org-1', 'claude-sonnet', '12.50', 5n, 100n, 200n),
+  usageRow('2026-11-03', 'org-8', 'gpt-mini', '0.000000000001', 1n),
+]
+const seededTotals = create(UsageTotalsSchema, {
+  requests: 11n,
+  costUsd: '52.500000000001',
+  estimatedUsd: '2.00',
+  inputTokens: 400n,
+  cacheReadTokens: 400n,
+  outputTokens: 40n,
+  cacheReadShare: 0.5,
+})
+
 // In the server order: by slug.
 const orgs = [
   summary('org-9', 'Acme Research', { members: 7, agents: 4, spent: '40.00' }),
@@ -35,8 +73,8 @@ const orgs = [
   summary('org-1', 'Default', { members: 3, agents: 2, spent: '12.50', cap: '100.00' }),
 ]
 
-function setup(who: Who = { platformAdmin: true }, opts: { getOrgFails?: boolean } = {}) {
-  const calls = { listOrgs: 0, agentOrgs: [] as string[] }
+function setup(who: Who = { platformAdmin: true }, opts: { getOrgFails?: boolean; noUsage?: boolean } = {}) {
+  const calls = { listOrgs: 0, agentOrgs: [] as string[], usage: [] as GetPlatformUsageRequest[], exports: [] as ExportPlatformUsageRequest[] }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI(who) })
     service(PlatformService, {
@@ -57,6 +95,17 @@ function setup(who: Who = { platformAdmin: true }, opts: { getOrgFails?: boolean
     })
     service(TaskService, { listTasks: () => ({ tasks: [] }) })
     service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+    service(UsageService, {
+      getPlatformUsage: (req) => {
+        calls.usage.push(req)
+        if (opts.noUsage) return { totals: create(UsageTotalsSchema, { costUsd: '0.00', estimatedUsd: '0.00' }), runs: create(RunCountsSchema, {}) }
+        return { rows: seededRows(), totals: seededTotals, runs: create(RunCountsSchema, { runsToday: 14n, failedRunsToday: 2n }) }
+      },
+      exportPlatformUsage: (req) => {
+        calls.exports.push(req)
+        return { filename: 'koinon-usage-2026-11.csv', csv: 'day,org\ntotal,52.500000000001\n' }
+      },
+    })
   })
   return { calls, transport }
 }
@@ -84,7 +133,7 @@ describe('the platform console', () => {
     const { history } = renderApp(transport, '/platform')
     expect(await screen.findByRole('heading', { level: 1, name: 'Platform console' })).toBeInTheDocument()
     expect(linkNames(screen.getByRole('navigation', { name: 'Platform console' }))).toEqual(['Home', 'Orgs'])
-    expect(linkNames(screen.getByRole('navigation', { name: 'Usage and cost' }))).toEqual(['Budget ceilings', 'Prices'])
+    expect(linkNames(screen.getByRole('navigation', { name: 'Usage and cost' }))).toEqual(['Usage', 'Budget ceilings', 'Prices'])
     expect(linkNames(screen.getByRole('navigation', { name: 'Org resources' }))).toEqual(['Providers', 'Templates', 'MCP servers'])
     expect(linkNames(screen.getByRole('navigation', { name: 'Platform settings' }))).toEqual(['Observability'])
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
@@ -93,12 +142,100 @@ describe('the platform console', () => {
     expect(await screen.findByRole('button', { name: /^Org: Default/ })).toBeInTheDocument()
   })
 
-  it('shows the orgs on the home page with a link to all of them', async () => {
+  it('shows the platform totals of this month in tiles', async () => {
+    const { calls, transport } = setup()
+    renderApp(transport, '/platform')
+    const tile = (label: string) => screen.getByText(label, { selector: 'dt' }).closest('dl')!
+    await waitFor(() => expect(tile('Spend this month')).toHaveTextContent('$52.500000000001'))
+    expect(tile('Spend this month')).toHaveTextContent('50% of input tokens from the cache')
+    expect(tile('Orgs')).toHaveTextContent('3')
+    expect(tile('Active agents')).toHaveTextContent('6')
+    expect(tile('Runs today')).toHaveTextContent('14')
+    expect(tile('Runs today')).toHaveTextContent('2 failed')
+    // The home asks for the month to date: no range.
+    expect(calls.usage[0].range).toBeUndefined()
+  })
+
+  it('lists the orgs with the highest spend this month, with links to usage and to all orgs', async () => {
     const { transport } = setup()
     renderApp(transport, '/platform')
-    const list = await screen.findByRole('list', { name: 'Orgs' })
-    expect(within(list).getAllByRole('listitem').map((li) => li.querySelector('.font-medium')?.textContent)).toEqual(['Acme Research', 'Beta Labs', 'Default'])
+    const list = await screen.findByRole('list', { name: 'Orgs with the highest spend' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items.map((li) => li.querySelector('.font-medium')?.textContent)).toEqual(['Acme Research', 'Default', 'Beta Labs'])
+    expect(items[0]).toHaveTextContent('$40.00 this month · Not a member')
+    expect(within(items[0]).getByRole('button', { name: 'Open as platform admin: Acme Research' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View all orgs' })).toHaveAttribute('href', '/platform/orgs')
+    expect(screen.getByRole('link', { name: 'Usage and cost' })).toHaveAttribute('href', '/platform/usage')
+  })
+
+  it('says so when no org spent anything this month', async () => {
+    const { transport } = setup(undefined, { noUsage: true })
+    renderApp(transport, '/platform')
+    expect(await screen.findByText('No spend this month yet.')).toBeInTheDocument()
+  })
+})
+
+describe('the Usage and cost page', () => {
+  const created: Blob[] = []
+  beforeEach(() => {
+    created.length = 0
+    URL.createObjectURL = vi.fn((b: Blob) => {
+      created.push(b)
+      return 'blob:usage'
+    })
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  const costs = (table: HTMLElement) =>
+    within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => r.querySelectorAll('td')[3]?.textContent ?? '')
+
+  it('shows totals equal to the API, and groups that add up to them by org, model and day', async () => {
+    const { calls, transport } = setup()
+    renderApp(transport, '/platform/usage')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Usage and cost' })).toBeInTheDocument()
+    const spend = (await screen.findByText('Spend', { selector: 'dt' })).closest('dl')!
+    expect(spend).toHaveTextContent('$52.500000000001')
+    expect(spend).toHaveTextContent('$2.00 of it estimated')
+
+    const sum = (list: string[]) => list.reduce((s, c) => s + usdToPico(c.replace(/[$,]/g, '')), 0n)
+    const byOrg = screen.getByRole('table', { name: 'Usage by org' })
+    expect(within(byOrg).getAllByRole('rowheader').map((h) => h.querySelector('.font-medium')?.textContent)).toEqual(['Acme Research', 'Default', 'Beta Labs'])
+    expect(sum(costs(byOrg))).toBe(usdToPico(seededTotals.costUsd))
+
+    await userEvent.click(screen.getByRole('tab', { name: 'By model' }))
+    const byModel = await screen.findByRole('table', { name: 'Usage by model' })
+    expect(within(byModel).getByRole('rowheader', { name: 'claude-sonnet' }).closest('tr')).toHaveTextContent('$42.50')
+    expect(sum(costs(byModel))).toBe(usdToPico(seededTotals.costUsd))
+
+    await userEvent.click(screen.getByRole('tab', { name: 'By day' }))
+    const byDay = await screen.findByRole('table', { name: 'Usage by day' })
+    expect(within(byDay).getAllByRole('rowheader').map((h) => h.textContent)).toEqual(['2026-11-03', '2026-11-02', '2026-11-01'])
+    expect(sum(costs(byDay))).toBe(usdToPico(seededTotals.costUsd))
+
+    // The page asks for one whole UTC month.
+    const r = calls.usage.at(-1)!.range!
+    expect(r.from).toBeDefined()
+    expect(r.to).toBeDefined()
+  })
+
+  it('exports the same period as the page shows', async () => {
+    const { calls, transport } = setup()
+    renderApp(transport, '/platform/usage')
+    const month = await screen.findByRole('combobox', { name: 'Month' })
+    const options = within(month).getAllByRole('option')
+    await userEvent.selectOptions(month, options[1])
+    await waitFor(() => expect(calls.usage.length).toBeGreaterThan(1))
+    await userEvent.click(await screen.findByRole('button', { name: 'Export CSV' }))
+    await waitFor(() => expect(calls.exports).toHaveLength(1))
+    expect(calls.exports[0].range).toEqual(calls.usage.at(-1)!.range)
+    expect(calls.exports[0].range).not.toEqual(calls.usage[0].range)
+    await waitFor(() => expect(created).toHaveLength(1))
+    expect(await created[0].text()).toBe('day,org\ntotal,52.500000000001\n')
   })
 })
 
