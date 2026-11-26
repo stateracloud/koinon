@@ -144,13 +144,7 @@ ln -sfn "$root/charts" "$OUT/quickstart/charts"
 IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
 values_src="$here/kind/koinon-values.yaml"
 [[ $DRIVER != substrate ]] || values_src="$here/kind/substrate-values.yaml"
-# The CIDR of the docker network "kind" (the kind registry's range): the image cache of the Substrate leg needs an egress rule for it.
-KIND_CIDR=""
-if [[ $DRIVER == substrate ]]; then
-  KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)
-  [[ -n $KIND_CIDR ]] || { echo "run.sh: no IPv4 subnet in docker network inspect kind" >&2; exit 1; }
-fi
-"$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
+"$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -273,6 +267,11 @@ if [[ $DRIVER == substrate ]]; then
   step "Substrate: harness overlay and install (kind/substrate.sh)"
   digest=$(OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" harness | tail -n1)
   [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest for the substrate overlay (got '$digest')" >&2; exit 1; }
+  # The CIDR of the docker network "kind" (the kind registry's range): the image cache needs an egress rule for it. The network
+  # exists only after kind/up.sh, so the values file is written again here with the range filled in.
+  KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)
+  [[ -n $KIND_CIDR ]] || { echo "run.sh: no IPv4 subnet in docker network inspect kind" >&2; exit 1; }
+  "$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
   sed -i.bak "s#sha256:0\{64\}#$digest#" "$OUT/quickstart/values.yaml"
   grep -q "$digest" "$OUT/quickstart/values.yaml" || { echo "the harness digest was not put into values.yaml" >&2; exit 1; }
   OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" install 2>&1 | tee "$OUT/substrate-install.log"
