@@ -73,7 +73,8 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 const img = "img" + digest
 
 func spec(name string) execution.SandboxSpec {
-	return execution.SandboxSpec{Name: name, Image: img}
+	// Substrate refuses an actor template without resources (issue #1092).
+	return execution.SandboxSpec{Name: name, Image: img, CPULimit: "500m", MemoryLimit: "512Mi"}
 }
 
 // ready creates a sandbox and waits until it is ready.
