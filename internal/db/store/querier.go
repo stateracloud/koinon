@@ -882,11 +882,6 @@ type Querier interface {
 	// Agents that are not archived and whose active or latest version binds the connection
 	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
 	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
-	// Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
-	// with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
-	// the agent to change status from one the reconciler claims. The row's own sandbox and provider names
-	// are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
-	ListAgentsForUnmarked(ctx context.Context) ([]ListAgentsForUnmarkedRow, error)
 	// One page of the org's agents, oldest first, after the cursor (created_at, id) when it is set.
 	ListAgentsPage(ctx context.Context, arg ListAgentsPageParams) ([]Agent, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
@@ -1125,10 +1120,6 @@ type Querier interface {
 	// to one org (GetOrg); personal orgs are left out unless @include_personal or @only_org_id is set.
 	// member_count applies the org's identity mode like ListEffectiveMemberships (ADR 0004).
 	ListOrgSummaries(ctx context.Context, arg ListOrgSummariesParams) ([]ListOrgSummariesRow, error)
-	// The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
-	// unmarked list command (issue 511). An org that is deleted counts as not in the database: the
-	// reconciler does not walk it.
-	ListOrgWorkspacesForUnmarked(ctx context.Context) ([]ListOrgWorkspacesForUnmarkedRow, error)
 	// Orgs whose default model migration 00045 left for BackfillDefaults.
 	ListOrgsPendingDefaultModel(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
