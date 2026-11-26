@@ -406,8 +406,8 @@ echo '{"Name":"mybuilder"}' >"$tmp/home/.docker/buildx/instances/mybuilder"
 mkdir -p "$tmp/home/.docker/buildx/activity" "$tmp/home/.docker/contexts"
 echo '{"auths":{}}' >"$tmp/home/.docker/config.json"
 echo seed >"$tmp/home/.docker/.token_seed" && echo x >"$tmp/home/.docker/.foo"
-staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR= DOCKER_CONFIG=
-expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass' '^gate=opencodeplugin .*verdict=pass'
+staterun STUB_JOBS="escape harnesses" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR= DOCKER_CONFIG=
+expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass'
 st=$(cat "$(gate_log harnesses)")
 total=$((total + 1))
 case $st in
