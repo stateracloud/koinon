@@ -757,7 +757,7 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		AddReportEntry("enqueued at backup", enqueued)
 
 		marks.DumpStart = time.Now()
-		for _, b := range []string{"backup-keys", "check-keys", "note-keys", "backup-db", "verify-dump"} {
+		for _, b := range []string{"backup-keys", "check-keys", "note-keys", "backup-gateway-key", "backup-db", "check-gateway-key", "verify-dump"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, src.in.Namespace, src.in.Release)
 			must(err, out)
 		}
@@ -805,9 +805,16 @@ var _ = Describe("the restore drill", Ordered, ContinueOnFailure, func() {
 		renamed, err := drill.RenameKEKSecret(readFile(file), src.name("kek"), dst.name("kek"))
 		must(err, "rename the KEK Secret in the export")
 		must(os.WriteFile(file, []byte(renamed), 0o600), "write the export")
+		// The gateway key backup names its Secret the same way, and restore-gateway-key refuses another name. The
+		// koinon driver is the default, so the source has the Secret and the file exists (issue #1358).
+		gwFile := filepath.Join(workDir, "koinon-gateway-key-backup.yaml")
+		Expect(gwFile).To(BeARegularFile(), "backup-gateway-key wrote no file: the drill installs the koinon MCP driver")
+		gwRenamed, err := drill.RenameGatewayKeySecret(readFile(gwFile), src.name("gateway-recipient-key"), dst.name("gateway-recipient-key"))
+		must(err, "rename the gateway key Secret in the backup")
+		must(os.WriteFile(gwFile, []byte(gwRenamed), 0o600), "write the gateway key backup")
 		// The blocks run in the guide's order: resync follows start and runs while the install is held. The
 		// request persists in home_checkpoint_resyncs; agentd answers it after the release (the archive check).
-		for _, b := range []string{"stop", "restore-db", "restore-keys", "start", "resync", "compare-keys"} {
+		for _, b := range []string{"stop", "restore-db", "restore-keys", "restore-gateway-key", "start", "verify-gateway-key", "resync", "compare-keys"} {
 			out, err := kube.GuideBlock(ctx, repoRoot, workDir, b, dst.in.Namespace, dst.in.Release)
 			must(err, out)
 			if b == "resync" {
@@ -1474,7 +1481,7 @@ spec:
 		block("pipe-keys", true)
 		_, err = kube.Kubectl(ctx, "-n", src.in.Namespace, "scale", "deployment/"+src.name("api"), "--replicas=0")
 		must(err, "stop the source api again")
-		for _, b := range []string{"start", "compare-keys", "verify-keys"} {
+		for _, b := range []string{"start", "verify-gateway-key", "compare-keys", "verify-keys"} {
 			block(b, false)
 		}
 		// Compared while held: after the release the schedule fires a catch-up and the recovered queue adds runs.
