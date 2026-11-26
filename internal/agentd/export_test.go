@@ -3,9 +3,13 @@
 package agentd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -163,3 +167,14 @@ func WorkingWithDataSaved(tools ...string) string { return workingWithDataFor(to
 
 // ToolName is the name a tool call is traced under.
 var ToolName = toolName
+
+// SweepLocks exposes the per-agent sweep locks (sweeplock.go) to the external test package.
+type SweepLocks = sweepLocks
+
+// NewSweepLocks returns the sweep locks of a pool on db.
+var NewSweepLocks = newSweepLocks
+
+// With runs fn in a transaction that holds agent's sweep lock.
+func (l *sweepLocks) With(ctx context.Context, agent pgtype.UUID, fn func(pgx.Tx) error) error {
+	return l.with(ctx, agent, fn)
+}

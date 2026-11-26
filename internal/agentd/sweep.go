@@ -99,13 +99,11 @@ func holdsSlot(cur store.Run, epoch int64) bool {
 //
 // When the run no longer holds the slot the worker is fenced and errFenced comes back without a
 // sweep. The lock is a transaction lock: it goes with the transaction, also when the worker dies.
+// A sweep that waits for the lock holds no pool connection (sweeplock.go, old issue 1375).
 func (r *runner) sweepSlot(ctx context.Context, workspace, sandbox string) (string, []string, error) {
 	var main string
 	var ended []string
-	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('agentd.sweep:' || $1::uuid::text, 0))`, r.run.AgentID); err != nil {
-			return err
-		}
+	err := r.p.sweeps.with(ctx, r.run.AgentID, func(tx pgx.Tx) error {
 		cur, err := r.q.WithTx(tx).GetRun(ctx, store.GetRunParams{OrgID: r.run.OrgID, ID: r.run.ID})
 		if err != nil {
 			return err
