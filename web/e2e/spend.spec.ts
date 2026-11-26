@@ -38,6 +38,18 @@ function api(role: string, platformAdmin = false) {
         memberships: [{ orgId: org, orgSlug: 'default', orgDisplayName: 'Default', role }],
       }),
       'koinon.budget.v1alpha1.PriceService/ListPrices': () => ({ prices }),
+      'koinon.budget.v1alpha1.PriceService/ExplainOrgPrices': () => ({
+        models: [
+          {
+            providerName: 'router', providerType: 'openrouter', model: 'anthropic/claude-sonnet-4', source: 'org', priceRef: 'org#pv-1',
+            entry: { id: 'sonnet-mine', rates: { input: '3', output: '15' }, maxOutput: 64000 },
+            replaces: { source: 'platform', priceRef: 'platform@3#sonnet', entry: { id: 'sonnet', rates: { input: '4', output: '18' } } },
+          },
+          { providerName: 'router', providerType: 'openrouter', model: 'openai/gpt-6', source: 'platform', priceRef: 'platform@3#gpt-6', entry: { id: 'gpt-6', rates: { input: '4', output: '20' }, maxOutput: 32000 } },
+          { providerName: 'openai-main', providerType: 'openai', model: 'gpt-5', source: 'default', priceRef: 'default@2026-10-24.1#openai-gpt', entry: { id: 'openai-gpt', rates: { input: '2', output: '8' }, maxOutput: 32000 } },
+          { providerName: 'home', providerType: 'ollama', model: 'local/q', unpricedReason: 'no_price' },
+        ],
+      }),
       'koinon.budget.v1alpha1.PriceService/GetDefaultPrices': () => ({
         version: '2026-10-24.1',
         entries: [
@@ -109,11 +121,13 @@ test('owner reads prices, adds one with a tier, and the page passes axe in each 
   await expect(page.getByRole('heading', { name: 'Prices', level: 1 })).toBeVisible()
   await expect(page.getByText('Changed since your last upgrade: rates.input')).toBeVisible()
   await expect(page.getByRole('link', { name: 'https://openai.com/api/pricing/' })).toBeVisible()
-  await expect(page.getByText('openai/gpt-6')).toBeVisible()
+  const flagged = page.getByRole('region', { name: /Flagged/ })
+  await expect(flagged.getByText('openai/gpt-6')).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Prices in use' }).getByRole('rowheader', { name: 'openai/gpt-6' })).toBeVisible()
   await expectAccessible(page)
 
   await page.getByLabel('Reason', { exact: true }).selectOption('usage_missing')
-  await expect(page.getByText('openai/gpt-6')).toHaveCount(0)
+  await expect(flagged.getByText('openai/gpt-6')).toHaveCount(0)
   await expect(page.getByText('local/qwen')).toBeVisible()
   await expectAccessible(page)
   await page.getByLabel('Reason', { exact: true }).selectOption('')

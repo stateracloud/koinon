@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from '@connectrpc/connect-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { ConfirmAction } from '@/components/confirm-action'
@@ -96,7 +96,7 @@ function PricesContent() {
         </Alert>
       )}
 
-      <PricesInUse orgId={orgId} actions={actions} onSaved={saved} />
+      <PricesInUse orgId={orgId} actions={actions} takenNames={groups.map((g) => g.name)} onSaved={saved} />
 
       <section aria-labelledby="org-prices" className="grid gap-3">
         <h2 id="org-prices" className="text-lg font-semibold">
@@ -193,10 +193,15 @@ function PricesContent() {
  * in use. Edit and Remove of an override in the table wait for a decision (ADR 0126 section 7); "Your prices" below
  * has them.
  */
-function PricesInUse({ orgId, actions, onSaved }: { orgId: string; actions: ReturnType<typeof usePriceActions>; onSaved: (name: string, warnings: string[]) => void }) {
+function PricesInUse({ orgId, actions, takenNames, onSaved }: { orgId: string; actions: ReturnType<typeof usePriceActions>; takenNames: string[]; onSaved: (name: string, warnings: string[]) => void }) {
   const explained = useQuery(PriceService.method.explainOrgPrices, { orgId })
   const rows = useMemo(() => (explained.data?.models ?? []).map(rowFromModel), [explained.data])
   const [overriding, setOverriding] = useState<PriceRow>()
+  const formBox = useRef<HTMLDivElement>(null)
+  // The override form opens above the table: move focus into it, so a keyboard user does not stay on the row button.
+  useEffect(() => {
+    if (overriding) formBox.current?.querySelector<HTMLElement>('input:not([disabled])')?.focus()
+  }, [overriding])
   return (
     <section aria-labelledby="prices-in-use" className="grid gap-3">
       <h2 id="prices-in-use" className="text-lg font-semibold">
@@ -209,15 +214,17 @@ function PricesInUse({ orgId, actions, onSaved }: { orgId: string; actions: Retu
         </Alert>
       )}
       {overriding && (
-        <PriceForm
-          key={overriding.id}
-          orgId={orgId}
-          initial={overrideForm(overriding)}
-          title={`Override the price of ${overriding.model}`}
-          actions={actions}
-          onDone={() => setOverriding(undefined)}
-          onSaved={onSaved}
-        />
+        <div ref={formBox}>
+          <PriceForm
+            key={overriding.id}
+            orgId={orgId}
+            initial={overrideForm(overriding, takenNames)}
+            title={`Override the price of ${overriding.model}`}
+            actions={actions}
+            onDone={() => setOverriding(undefined)}
+            onSaved={onSaved}
+          />
+        </div>
       )}
       {explained.isPending ? (
         <SkeletonRows label="Loading prices in use…" />

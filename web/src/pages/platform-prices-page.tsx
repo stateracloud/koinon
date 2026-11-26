@@ -15,7 +15,7 @@ import { SkeletonRows } from '@/components/ui/skeleton'
 import { PriceService, type PlatformPriceVersion, type PriceProposal, type PriceProvenance } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePlatformPriceActions } from '@/hooks/use-spend-actions'
 import { describeError } from '@/lib/api-error'
-import { rowFromPlatformEntry } from '@/lib/price-table'
+import { platformVersionInUse, rowFromPlatformEntry } from '@/lib/price-table'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
@@ -102,24 +102,36 @@ function PlatformPrices() {
  * both. A platform price changes through proposals and versions below, so the table has no "Override".
  */
 function PlatformPricesInUse() {
-  const current = useQuery(PriceService.method.getPlatformPriceVersion, { version: 0n })
+  // The same request as <Versions>, so the cache is shared. A version can start later: getPlatformPriceVersion with
+  // 0 returns the newest written version, so ask for the newest version that applies now.
+  const list = useQuery(PriceService.method.listPlatformPriceVersions, { limit: 50 })
+  const [now] = useState(() => new Date())
+  const { inUse, upcoming } = useMemo(() => platformVersionInUse(list.data?.versions ?? [], now), [list.data, now])
+  const current = useQuery(PriceService.method.getPlatformPriceVersion, { version: inUse?.version ?? 0n }, { enabled: !!inUse })
   const none = current.error && describeError(current.error).code === Code.NotFound
-  const rows = useMemo(() => (current.data?.version?.entries ?? []).map(rowFromPlatformEntry), [current.data])
+  const rows = useMemo(() => (inUse ? (current.data?.version?.entries ?? []) : []).map(rowFromPlatformEntry), [current.data, inUse])
+  const error = list.error ?? (none ? undefined : current.error)
+  const pending = list.isPending || (!!inUse && current.isPending)
   return (
     <section aria-labelledby="platform-in-use" className="grid gap-3">
       <h2 id="platform-in-use" className="text-lg font-semibold">
         Platform prices in use
       </h2>
       <PriceLegend sources={['platform', 'default']} />
-      {current.data?.version && <p className="text-muted-foreground text-sm">Version {String(current.data.version.version)}. Models that no entry here matches use the default list.</p>}
-      {current.error && !none && (
+      {current.data?.version && inUse && <p className="text-muted-foreground text-sm">Version {String(current.data.version.version)}. Models that no entry here matches use the default list.</p>}
+      {upcoming && inUse && (
+        <p className="text-muted-foreground text-sm">
+          Version {String(upcoming.version)} starts {formatWhen(upcoming.validFrom)}; the table shows version {String(inUse.version)}, in use now.
+        </p>
+      )}
+      {error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{describeError(current.error).message}</AlertDescription>
+          <AlertDescription>{describeError(error).message}</AlertDescription>
         </Alert>
       )}
-      {current.isPending ? (
+      {pending ? (
         <SkeletonRows label="Loading platform prices…" />
-      ) : current.error && !none ? null : (
+      ) : error ? null : (
         <PriceTable caption="Platform prices in use" searchId="platform-price-search" rows={rows} emptyTitle="No platform prices yet. Every model uses the default list." />
       )}
     </section>

@@ -51,7 +51,7 @@ const explained = [
 const bad = create(PriceEntrySchema, { id: 'bad-link', provider: '*', match: { glob: 'x' }, validFrom: '2026-10-01', rates: { input: '1', output: '1' }, sourceUrl: 'javascript:alert(1)' })
 
 function setup(role = OrgRole.OWNER, warnings: string[] = []) {
-  const calls = { sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[], gate: undefined as Promise<void> | undefined }
+  const calls = { explained: 0, sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[], gate: undefined as Promise<void> | undefined }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role }) })
     service(PriceService, {
@@ -61,7 +61,10 @@ function setup(role = OrgRole.OWNER, warnings: string[] = []) {
         return { prices: [mine, migrated] }
       },
       getDefaultPrices: () => ({ version: '2026-10-24.1', entries: [gpt, bad] }),
-      explainOrgPrices: () => ({ models: explained }),
+      explainOrgPrices: () => {
+        calls.explained++
+        return { models: explained }
+      },
       getDefaultPriceChanges: () => ({
         fromVersion: '2026-10-23.1',
         toVersion: '2026-10-24.1',
@@ -104,7 +107,7 @@ describe('Prices page', () => {
     const org = rowOf(table, 'anthropic/claude-sonnet-4')
     expect(within(org).getByText('Org override')).toBeInTheDocument()
     const struck = org.querySelectorAll('del')
-    expect([...struck].map((d) => d.textContent)).toEqual(['was $3', 'was $15'])
+    expect([...struck].map((d) => d.textContent)).toEqual(['Platform price was $3', 'Platform price was $15'])
     expect(org).toHaveTextContent('$2.5')
     expect(org).toHaveTextContent('$12')
     expect(within(org).queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
@@ -154,18 +157,20 @@ describe('Prices page', () => {
     const table = await screen.findByRole('table', { name: 'Prices in use' })
     await userEvent.click(within(rowOf(table, 'openai/gpt-6')).getByRole('button', { name: /Override/ }))
     const form = screen.getByRole('form', { name: 'Override the price of openai/gpt-6' })
-    expect(within(form).getByLabelText('Name')).toHaveValue('openai-gpt-6')
+    expect(form.contains(document.activeElement)).toBe(true)
+    expect(within(form).getByLabelText('Name')).toHaveValue('openrouter-openai-gpt-6')
     expect(within(form).getByLabelText('Model pattern')).toHaveValue('openai/gpt-6')
     await userEvent.clear(within(form).getByLabelText('Input'))
     await userEvent.type(within(form).getByLabelText('Input'), '3.5')
     await userEvent.click(within(form).getByRole('button', { name: 'Add price' }))
     await waitFor(() => expect(calls.sets).toHaveLength(1))
     expect(calls.sets[0]).toMatchObject({
-      orgId: 'org-1', name: 'openai-gpt-6', provider: 'openrouter', match: { glob: 'openai/gpt-6' }, rates: { input: '3.5', output: '20' },
+      orgId: 'org-1', name: 'openrouter-openai-gpt-6', provider: 'openrouter', match: { glob: 'openai/gpt-6' }, rates: { input: '3.5', output: '20' },
       maxOutput: 32000, tokenizer: 'tiktoken:o200k_base', ratio: '4.0', tiers: [{ contextOver: 200000n, rates: { input: '8' } }],
     })
-    expect(await screen.findByText(/Saved openai-gpt-6/)).toBeInTheDocument()
+    expect(await screen.findByText(/Saved openrouter-openai-gpt-6/)).toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Override the price of openai/gpt-6' })).not.toBeInTheDocument()
+    await waitFor(() => expect(calls.explained).toBeGreaterThanOrEqual(2))
   })
 
   it('lists the org prices, the default list with source links and change markers, and flagged requests', async () => {

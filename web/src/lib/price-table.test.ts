@@ -4,7 +4,7 @@ import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 import { ModelPriceSourceSchema, PlatformPriceEntrySchema } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { validatePrice } from '@/lib/prices'
-import { matchesPriceSearch, overrideForm, overrideMatch, overrideName, rateSortValue, rateText, rowFromModel, rowFromPlatformEntry, unpricedText } from '@/lib/price-table'
+import { matchesPriceSearch, overrideForm, overrideMatch, overrideName, uniqueOverrideName, rateSortValue, rateText, rowFromModel, rowFromPlatformEntry, unpricedText } from '@/lib/price-table'
 
 describe('price table rows', () => {
   it('takes the source and the replaced rates of an org model', () => {
@@ -77,10 +77,20 @@ describe('override', () => {
     )
     const f = overrideForm(r)
     expect(f).toMatchObject({
-      name: 'openai-gpt-6', provider: 'openrouter', matchKind: 'glob', pattern: 'openai/gpt-6', rates: { input: '4', output: '20', cacheRead: '0.4', cacheWrite: '' },
+      name: 'openrouter-openai-gpt-6', provider: 'openrouter', matchKind: 'glob', pattern: 'openai/gpt-6', rates: { input: '4', output: '20', cacheRead: '0.4', cacheWrite: '' },
       maxOutput: '32000', tokenizer: 'tiktoken:o200k_base', ratio: '4.0', toolOverhead: '12', hiddenThinking: true,
     })
     expect(validatePrice(f)).toEqual({})
+  })
+
+  it('names an override by provider type and model, and never reuses a name the org has', () => {
+    const row = (providerType: string) => rowFromModel(create(ModelPriceSourceSchema, { providerName: 'p', providerType, model: 'gpt-6', source: 'default', entry: { rates: { input: '1', output: '2' } } }))
+    expect(overrideForm(row('openai')).name).toBe('openai-gpt-6')
+    expect(overrideForm(row('openrouter')).name).toBe('openrouter-gpt-6')
+    expect(overrideForm(row('openai'), ['openai-gpt-6']).name).toBe('openai-gpt-6-2')
+    expect(overrideForm(row('openai'), ['openai-gpt-6', 'openai-gpt-6-2']).name).toBe('openai-gpt-6-3')
+    expect(uniqueOverrideName('x', 'm'.repeat(300), []).length).toBeLessThanOrEqual(128)
+    expect(uniqueOverrideName('x', 'm'.repeat(300), [uniqueOverrideName('x', 'm'.repeat(300), [])]).length).toBeLessThanOrEqual(128)
   })
 
   it('starts from empty rates for a model with no price', () => {

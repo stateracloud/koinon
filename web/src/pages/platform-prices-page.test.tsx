@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
+import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -42,10 +43,11 @@ function proposal(id: string, model: string, klass: string, maxOutput = 8192) {
   })
 }
 
-function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof proposal>[]; noPlatformVersion?: boolean } = {}) {
+function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof proposal>[]; noPlatformVersion?: boolean; futureVersion?: boolean } = {}) {
   const calls = { accepts: [] as AcceptPriceProposalRequest[], dismisses: [] as string[], rollbacks: [] as bigint[], checks: 0 }
   let proposals = opts.proposals ?? []
   const versions = [
+    ...(opts.futureVersion ? [create(PlatformPriceVersionSchema, { version: 3n, validFrom: timestampFromDate(new Date(Date.now() + 86_400_000 * 3)), actor: 'cli prices import', reason: 'later' })] : []),
     create(PlatformPriceVersionSchema, { version: 2n, actor: 'system koinon-api:price-refresh', reason: 'auto', ruleSetVersion: 'rules-1' }),
     create(PlatformPriceVersionSchema, { version: 1n, actor: 'cli prices import', reason: 'first' }),
   ]
@@ -65,12 +67,12 @@ function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof pr
         proposals = proposals.filter((remaining) => remaining.id !== req.id)
         return {}
       },
-      listPlatformPriceVersions: () => ({ versions }),
+      listPlatformPriceVersions: () => ({ versions: opts.noPlatformVersion ? [] : versions }),
       getPlatformPriceVersion: (req) => {
-        if (req.version === 0n && opts.noPlatformVersion) throw new ConnectError('no platform price version yet', Code.NotFound)
-        const version = req.version === 0n ? 2n : req.version
+        if (req.version === 0n) throw new ConnectError('no platform price version yet', Code.NotFound)
+        const version = req.version
         const entries = [create(PlatformPriceEntrySchema, { entry: entry('gpt-x', '4', '20'), priceRef: `platform@${version}#gpt-x`, provenance: prov })]
-        if (req.version === 0n) {
+        if (version === 2n) {
           entries.push(create(PlatformPriceEntrySchema, { entry: { ...entry('anthropic/claude-*', '3', '15'), provider: 'openrouter' }, priceRef: `platform@${version}#claude`, provenance: prov }))
         }
         return { version: create(PlatformPriceVersionSchema, { version, entries }) }
@@ -187,6 +189,14 @@ describe('Platform prices page', () => {
     expect(within(table).queryByRole('button', { name: /Override/ })).not.toBeInTheDocument()
     await userEvent.type(screen.getByLabelText('Search models'), 'openrouter')
     expect(heads()).toEqual(['anthropic/claude-*'])
+  })
+
+  it('shows the version in use now when a newer version starts later', async () => {
+    setup({ futureVersion: true })
+    const table = await screen.findByRole('table', { name: 'Platform prices in use' })
+    expect(within(table).getByRole('rowheader', { name: 'gpt-x' })).toBeInTheDocument()
+    expect(screen.getByText(/^Version 2\. Models that no entry here matches/)).toBeInTheDocument()
+    expect(screen.getByText(/Version 3 starts .*; the table shows version 2, in use now\./)).toBeInTheDocument()
   })
 
   it('says every model uses the default list when no platform version exists', async () => {

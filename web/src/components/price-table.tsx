@@ -57,13 +57,15 @@ function RateCell({ row, k }: { row: PriceRow; k: RateKey }) {
   if (!row.source) return null
   const now = row.rates?.[k]
   const was = row.replaced?.[k]
+  const replacedLabel = row.replacedSource ? sourceLabels[row.replacedSource] : ''
+  const replacedTitle = replacedLabel ? `${replacedLabel} price: ${rateText(was)}` : undefined
   const changed = row.replaced !== undefined && (was ?? '') !== (now ?? '')
   return (
     <span className="whitespace-nowrap tabular-nums">
       {changed && (
         <>
-          <del className="text-muted-foreground mr-1.5">
-            <span className="sr-only">was </span>
+          <del className="text-muted-foreground mr-1.5" title={replacedTitle}>
+            <span className="sr-only">{replacedLabel ? `${replacedLabel} price was ` : 'was '}</span>
             {rateText(was)}
           </del>
           <span className="sr-only">, now </span>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelPriceSource, PlatformPriceEntry, PriceEntry, Rates } from '@/gen/koinon/budget/v1alpha1/price_pb'
+import type { ModelPriceSource, PlatformPriceEntry, PlatformPriceVersion, PriceEntry, Rates } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { matchLabel, type PriceFormValues, type RateFields } from '@/lib/prices'
 
 // The row model of <PriceTable> (components/price-table.tsx): the model prices table with three source badges
@@ -104,14 +104,28 @@ export function unpricedText(reason: string | undefined): string {
   return reason === 'unusable_price' ? 'Its price cannot be used' : 'No price'
 }
 
-/** overrideName derives a valid price name from a model: lowercase, other characters as "-", at most 128. */
-export function overrideName(model: string): string {
-  const s = model
+/** overrideName derives a valid price name from text: lowercase, other characters as "-", at most 128. */
+export function overrideName(text: string): string {
+  const s = text
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[^a-z0-9]+/, '')
     .slice(0, 128)
   return s || 'override'
+}
+
+/**
+ * uniqueOverrideName makes the name of an override from the provider type and the model. It adds -2, -3, ... when the
+ * org already has a price with that name, because a name that exists would add a version to that price.
+ */
+export function uniqueOverrideName(providerType: string, model: string, taken: Iterable<string>): string {
+  const used = new Set(taken)
+  const base = overrideName(`${providerType || 'any'}-${model}`).slice(0, 120)
+  if (!used.has(base)) return base
+  for (let n = 2; ; n++) {
+    const name = `${base}-${n}`
+    if (!used.has(name)) return name
+  }
 }
 
 /**
@@ -125,15 +139,16 @@ export function overrideMatch(model: string): Pick<PriceFormValues, 'matchKind' 
 
 /**
  * overrideForm fills the price form to override the price of one row for the org: the same model and provider type,
- * and the rates and estimate settings in use now, so the admin changes only what differs.
+ * and the rates and estimate settings in use now, so the admin changes only what differs. The name is new: it
+ * differs from every name in takenNames.
  */
-export function overrideForm(r: PriceRow): PriceFormValues {
+export function overrideForm(r: PriceRow, takenNames: Iterable<string> = []): PriceFormValues {
   const e = r.entry
   const rates = (x?: Rates): RateFields => ({
     input: x?.input ?? '', output: x?.output ?? '', cacheRead: x?.cacheRead ?? '', cacheWrite: x?.cacheWrite ?? '', reasoning: x?.reasoning ?? '',
   })
   return {
-    name: overrideName(r.model),
+    name: uniqueOverrideName(r.providerType, r.model, takenNames),
     provider: r.providerType || '*',
     ...overrideMatch(r.model),
     rates: rates(r.rates),
@@ -145,4 +160,25 @@ export function overrideForm(r: PriceRow): PriceFormValues {
     maxOutput: e?.maxOutput ? String(e.maxOutput) : '',
     validFrom: '',
   }
+}
+
+/**
+ * platformVersionInUse picks, from the list of platform versions, the newest one that applies now (its start is not
+ * in the future; a missing start counts as in use) and the newest one that starts later, if there is one. A version
+ * can start in the future, so the newest written version is not always the one in use.
+ */
+export function platformVersionInUse(
+  versions: readonly PlatformPriceVersion[],
+  now = new Date(),
+): { inUse?: PlatformPriceVersion; upcoming?: PlatformPriceVersion } {
+  const nowSec = BigInt(Math.floor(now.getTime() / 1000))
+  const started = (v: PlatformPriceVersion) => !v.validFrom || v.validFrom.seconds <= nowSec
+  const newest = (a?: PlatformPriceVersion, b?: PlatformPriceVersion) => (a && b ? (a.version >= b.version ? a : b) : (a ?? b))
+  let inUse: PlatformPriceVersion | undefined
+  let later: PlatformPriceVersion | undefined
+  for (const v of versions) {
+    if (started(v)) inUse = newest(inUse, v)
+    else later = newest(later, v)
+  }
+  return { inUse, upcoming: later && (!inUse || later.version > inUse.version) ? later : undefined }
 }
