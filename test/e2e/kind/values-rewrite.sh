@@ -24,7 +24,7 @@ cidr=${3:-}
 if [[ $(basename "$file") == substrate-values.yaml ]]; then
   out=$(sed "s#^\\( *registry: \\)localhost:5001\$#\\1$repo#" "$file")
   if [[ -n $cidr ]]; then
-    out=$(sed "s#172\\.18\\.0\\.0/16#$cidr#g" <<<"$out")
+    out=${out//172.18.0.0\/16/$cidr}
   fi
   printf '%s\n' "$out"
 else
