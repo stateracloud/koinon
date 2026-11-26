@@ -211,13 +211,16 @@ func probeProgram(checks []check) string {
 	return fmt.Sprintf("import json\nCHECKS = json.loads(bytes.fromhex(%q))\n%s", hex.EncodeToString(cfg), probeScript)
 }
 
-// sandboxSpec is a sleeping sandbox of the rig's tier.
+// sandboxSpec is a sandbox of the rig's tier. It sets no Command: the image ENTRYPOINT (the guest
+// front) must stay PID 1, because Substrate takes a template Command as an override of ENTRYPOINT and
+// CMD, and the driver then reaches no front (issue #1092). A spec that needs a process starts it
+// through Exec.
 // It carries the platform's default sizing, as the reconciler's sandbox spec does: Substrate refuses
 // an actor template without resources (issue #1092).
 func (r *substrateRig) sandboxSpec(name string) execution.SandboxSpec {
 	def := sandboxres.DefaultPolicy().Default
 	return execution.SandboxSpec{
-		Name: name, Image: r.image, RuntimeClassName: r.class, Command: []string{"sleep", "infinity"},
+		Name: name, Image: r.image, RuntimeClassName: r.class,
 		CPURequest: def.CPU.Request, CPULimit: def.CPU.Limit,
 		MemoryRequest: def.Memory.Request, MemoryLimit: def.Memory.Limit,
 	}

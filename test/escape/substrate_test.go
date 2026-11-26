@@ -292,7 +292,6 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			// actors are on it. The second actor listens on 8099 in the atespace of org B.
 			other := fmt.Sprintf("kesb-%d", suffix())
 			spec := rig.sandboxSpec(other)
-			spec.Command = []string{"python3", "-m", "http.server", "8099", "--bind", "0.0.0.0"}
 			_, err := rig.driver.CreateSandbox(ctx, rig.otherWorkspace, spec)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func(ctx context.Context) error {
@@ -304,6 +303,11 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(sb.Phase).To(Equal(execution.PhaseReady), "%s: %s", sb.Reason, sb.Message)
 			}).WithContext(ctx).WithTimeout(racescale.D(5 * time.Minute)).WithPolling(2 * time.Second).Should(Succeed())
+			// The front stays PID 1 (a template Command would replace it, issue #1092): the listener is a
+			// background process that Exec starts.
+			_, stderr0, code0 := rig.exec(ctx, rig.otherWorkspace, other, "", "sh", "-c",
+				"setsid nohup python3 -m http.server 8099 --bind 0.0.0.0 >/dev/null 2>&1 </dev/null &")
+			Expect(code0).To(Equal(0), stderr0)
 			Eventually(func() any {
 				return rig.probeIn(ctx, rig.otherWorkspace, other, check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099})["local"]
 			}).WithContext(ctx).WithTimeout(racescale.D(90*time.Second)).WithPolling(2*time.Second).Should(Equal("open"), "control: the listener of org B is up")
