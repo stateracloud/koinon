@@ -3,7 +3,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect, type RouterHistory } from '@tanstack/react-router'
 import { AgentPage } from '@/pages/agent-page'
-import { AgentsPage } from '@/pages/agents-page'
 import { AppLayout } from '@/pages/app-layout'
 import { ApprovalPage } from '@/pages/approval-page'
 import { InboxPage } from '@/pages/inbox-page'
@@ -96,7 +95,14 @@ export const ticketRedirectRoute = createRoute({
 
 export const approvalRoute = createRoute({ getParentRoute: () => appRoute, path: '/approvals/$approvalId', component: ApprovalPage })
 
-export const agentsRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents', component: AgentsPage })
+// The agent list became the Agents tab of the overview (issue #1274): the cards by team replace the table.
+export const agentsRedirectRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/agents',
+  beforeLoad: () => {
+    throw redirect({ to: '/', replace: true })
+  },
+})
 export const newAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new', component: NewAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/$agentId', component: AgentPage })
 
@@ -170,7 +176,7 @@ const routeTree = rootRoute.addChildren([
     taskRoute,
     ticketRedirectRoute,
     approvalRoute,
-    agentsRoute,
+    agentsRedirectRoute,
     newAgentRoute,
     agentRoute,
     connectionsRoute,

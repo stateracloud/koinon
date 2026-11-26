@@ -16,6 +16,7 @@ import { isApprover } from '@/lib/approvals'
 import { OrgProvider } from '@/lib/org'
 import { teamMemberships, useOrg } from '@/lib/org-context'
 import { useSignOut } from '@/hooks/use-sign-out'
+import { cn } from '@/lib/utils'
 import { ChangePasswordPage } from '@/pages/change-password-page'
 import { FirstLoginPage } from '@/pages/first-login-page'
 
@@ -117,6 +118,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   const { org } = useOrg()
   const { signOut, signingOut } = useSignOut()
   const admin = isApprover(org.role)
+  // The agents live on the overview (its Agents and Chart tabs), so an agent page and the new-agent flow are in the
+  // Overview section: the item shows as current with aria-current="true", not "page" (issue #1274).
+  const inAgents = useLocation().pathname.startsWith('/agents/')
   // The same polled queries the inbox page uses: one request serves both.
   const waiting = useInbox().items.length
   useDocumentTitle(waiting)
@@ -132,7 +136,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         </Link>
         <OrgSwitcher platformAdmin={who.platformAdmin} />
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
-          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={active}>
+          <Link to="/" className={navLink} activeOptions={{ exact: true, includeSearch: false }} activeProps={active} {...(inAgents ? section : {})}>
             Overview
           </Link>
           <Link to="/inbox" className={navLink} activeProps={active}>
@@ -190,6 +194,8 @@ const skipLink = 'bg-raised sr-only z-50 rounded-md px-3 py-1.5 text-sm focus:no
 const sidebar = 'bg-card flex w-full shrink-0 flex-col gap-3 border-b p-3 md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto md:border-r md:border-b-0'
 const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
 const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
+/** A section item: the current page is under it (an agent page under Overview). It looks like `active`. */
+const section = { 'aria-current': true as const, className: cn(navLink, 'bg-accent font-medium') }
 
 /** The Settings group of the org sidebar, in the order of ADR 0126 section 4. Only org admins and owners see it. */
 const settingsItems = [
