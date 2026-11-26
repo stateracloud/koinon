@@ -64,11 +64,13 @@ func handshake(t *testing.T, cert tls.Certificate, cfg *tls.Config) error {
 	defer func() { _ = l.Close() }()
 	go func() {
 		if c, err := l.Accept(); err == nil {
-			_ = c.(*tls.Conn).Handshake()
+			_ = c.(*tls.Conn).HandshakeContext(context.Background())
 			_ = c.Close()
 		}
 	}()
-	c, err := tls.Dial("tcp", l.Addr().(*net.TCPAddr).String(), cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := (&tls.Dialer{Config: cfg}).DialContext(ctx, "tcp", l.Addr().(*net.TCPAddr).String())
 	if err == nil {
 		_ = c.Close()
 	}
