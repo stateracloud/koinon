@@ -565,6 +565,23 @@ All ten questions are answered. The numbers stay, because the decisions above re
 10. **People from outside the org.** Decided as proposed: `Drop(external_user)` for now. A later decision can add an
     admin switch (decision 2).
 
+**Further choices** (PR #1392, comment 7192630687). The maintainer decided these on 2026-11-26 and accepted the option
+that this ADR describes:
+
+- Messages that Koinon cannot act on are dropped with a metric: a thread that stays busy for 5 tries
+  (`Drop(thread_busy)`, decision 4); a message from an unlinked person before the `external` issue lands
+  (`Drop(unlinked_actor)`, decision 2); an edit or a delete (`Drop(edit_ignored)`, decision 2); and a message from an
+  unlinked person to a completed task (`Drop(task_ended)`, decision 5).
+- Channel claims (decision 3): a claim lives while a trigger of the org names the channel; a trigger save fails when
+  another org has an open thread in the channel; a channel without a claim belongs to no org, and only a mention of a
+  bot reaches an org there.
+- Triggers (decision 5): among triggers of the same scope, the oldest wins; a trigger for the whole workspace cannot be
+  widened to all messages.
+
+The main session decided three technical choices on the same day: the Socket Mode slots with `pg_try_advisory_lock`
+(decision 3), the sweep of body rows after the dedupe window (decision 8) and the separate queue `koinon.chat-apply`
+(decision 4).
+
 ## Upstream verification
 
 - 2026-11-26: hydro-project/infinity, `main` branch. The workspace `Cargo.toml` lists `crates/infinity-slack-dataflow`
