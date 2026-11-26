@@ -69,7 +69,7 @@ func (l *sweepLocks) with(ctx context.Context, agent pgtype.UUID, fn func(pgx.Tx
 			return &requeued{reason: "end the processes left in the sandbox: the agent's sweep lock stayed busy for " + l.wait.String()}
 		}
 		// Jitter, so the waiters of one agent do not try at the same moment.
-		t := time.NewTimer(wait/2 + rand.N(wait/2+1))
+		t := time.NewTimer(wait/2 + rand.N(wait/2+1)) //nolint:gosec // jitter, not a secret
 		select {
 		case <-ctx.Done():
 			t.Stop()

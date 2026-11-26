@@ -16,6 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -91,7 +92,7 @@ var _ = Describe("sweep locks", func() {
 		Consistently(func(g Gomega) {
 			otherWorkGetsAConnection(ctx, g)
 			g.Expect(entered.Load()).To(Equal(int32(1)))
-		}).WithTimeout(2 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
+		}).WithTimeout(racescale.D(2 * time.Second)).WithPolling(100 * time.Millisecond).Should(Succeed())
 		// A waiter does not keep a place to sweep either: a sweep of another agent runs now.
 		other := make(chan error, 1)
 		go func() { other <- locks.With(ctx, newAgent(), func(pgx.Tx) error { return nil }) }()
@@ -125,7 +126,7 @@ var _ = Describe("sweep locks", func() {
 		Consistently(func(g Gomega) {
 			otherWorkGetsAConnection(ctx, g)
 			g.Expect(entered.Load()).To(Equal(int32(poolSize / 2)))
-		}).WithTimeout(time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
+		}).WithTimeout(racescale.D(time.Second)).WithPolling(100 * time.Millisecond).Should(Succeed())
 
 		release()
 		wg.Wait()
