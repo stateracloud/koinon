@@ -9,30 +9,20 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
-import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { PriceService, type PlatformPriceVersion, type PriceProposal, type PriceProvenance } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePlatformPriceActions } from '@/hooks/use-spend-actions'
 import { describeError } from '@/lib/api-error'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
- * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's
- * versions and where each price came from, rolls back, reads the fetch log and checks the sources
- * (ADR 0098). Others get a notice.
+ * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's versions and where
+ * each price came from, rolls back, reads the fetch log and checks the sources (ADR 0098). The platform console lets in
+ * only platform admins (PlatformLayout).
  */
 export function PlatformPricesPage() {
-  const who = useQuery(AuthService.method.whoAmI, {})
   return (
     <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)] gap-6">
-      {who.isPending ? (
-        <p role="status">Loading…</p>
-      ) : who.data?.platformAdmin ? (
-        <PlatformPrices />
-      ) : (
-        <Alert role="alert">
-          <AlertDescription>Only platform admins can manage the platform prices.</AlertDescription>
-        </Alert>
-      )}
+      <PlatformPrices />
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect, type RouterHistory } from '@tanstack/react-router'
 import { AgentPage } from '@/pages/agent-page'
-import { AppLayout } from '@/pages/app-layout'
+import { AppLayout, OrgArea } from '@/pages/app-layout'
 import { ApprovalPage } from '@/pages/approval-page'
 import { InboxPage } from '@/pages/inbox-page'
 import { OrgSettingsPage } from '@/pages/org-settings-page'
@@ -11,6 +11,8 @@ import { OverviewPage } from '@/pages/overview-page'
 import { parseInboxTab, type InboxTab } from '@/lib/inbox'
 import { parseOverviewTab, type OverviewTab } from '@/lib/overview'
 import { PlatformConsolePage } from '@/pages/platform-console-page'
+import { PlatformLayout } from '@/pages/platform-layout'
+import { PlatformOrgsPage } from '@/pages/platform-orgs-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
 import { type GitHubLinkResult, parseGitHubLinkResult } from '@/lib/github-link'
@@ -48,9 +50,12 @@ export const loginRoute = createRoute({
 // The pathless app route requires a session: AppLayout checks WhoAmI.
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', component: AppLayout })
 
+/** The org area: the org sidebar and the pages of one org (ADR 0126 section 4). */
+const orgRoute = createRoute({ getParentRoute: () => appRoute, id: 'org', component: OrgArea })
+
 // The org home (ADR 0126 section 4). The inbox was the home until then: its link is on the overview and in the sidebar.
 export const overviewRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/',
   validateSearch: (s: Record<string, unknown>): { tab?: OverviewTab } => {
     const tab = parseOverviewTab(s.tab)
@@ -60,7 +65,7 @@ export const overviewRoute = createRoute({
 })
 
 export const inboxRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/inbox',
   validateSearch: (s: Record<string, unknown>): { tab?: InboxTab } => {
     const tab = parseInboxTab(s.tab)
@@ -71,7 +76,7 @@ export const inboxRoute = createRoute({
 
 // The board became the Board tab of the overview (ADR 0126 section 4).
 export const boardRedirectRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/board',
   beforeLoad: () => {
     throw redirect({ to: '/', search: { tab: 'board' }, replace: true })
@@ -79,38 +84,38 @@ export const boardRedirectRoute = createRoute({
 })
 
 export const taskRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/tasks/$taskId',
   component: TaskPage,
 })
 
 // Tickets became tasks with the same ids (ADR 0065): old links keep working.
 export const ticketRedirectRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/tickets/$ticketId',
   beforeLoad: ({ params }) => {
     throw redirect({ to: '/tasks/$taskId', params: { taskId: params.ticketId }, replace: true })
   },
 })
 
-export const approvalRoute = createRoute({ getParentRoute: () => appRoute, path: '/approvals/$approvalId', component: ApprovalPage })
+export const approvalRoute = createRoute({ getParentRoute: () => orgRoute, path: '/approvals/$approvalId', component: ApprovalPage })
 
 // The agent list became the Agents tab of the overview (issue #1274): the cards by team replace the table.
 export const agentsRedirectRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/agents',
   beforeLoad: () => {
     throw redirect({ to: '/', replace: true })
   },
 })
 // New agent (ADR 0126 section 5): the gallery, then a template's wizard or the blank form.
-export const newAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new', component: NewAgentPage })
-export const newBlankAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new/blank', component: BlankAgentPage })
-export const newTemplateAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new/template/$templateId', component: TemplateAgentPage })
-export const agentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/$agentId', component: AgentPage })
+export const newAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new', component: NewAgentPage })
+export const newBlankAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/blank', component: BlankAgentPage })
+export const newTemplateAgentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/new/template/$templateId', component: TemplateAgentPage })
+export const agentRoute = createRoute({ getParentRoute: () => orgRoute, path: '/agents/$agentId', component: AgentPage })
 
 export const connectionsRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/connections',
   // github_link is the result of the GitHub link callback (internal/githublink).
   validateSearch: (s: Record<string, unknown>): { github_link?: GitHubLinkResult } => {
@@ -120,20 +125,20 @@ export const connectionsRoute = createRoute({
   component: ConnectionsPage,
 })
 export const newGitHubConnectionRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/connections/new/github',
   component: NewGitHubConnectionPage,
 })
 const searchString = (v: unknown) => (typeof v === 'string' && v.length <= 512 ? v : undefined)
 // GitHub sends the browser here during the guided App setup (issue #1175).
 export const githubAppCreatedRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/connections/new/github/app-created',
   validateSearch: (s: Record<string, unknown>): { code?: string; state?: string } => ({ code: searchString(s.code), state: searchString(s.state) }),
   component: GitHubAppCreatedPage,
 })
 export const githubAppInstalledRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/connections/new/github/app-installed',
   validateSearch: (s: Record<string, unknown>): { installation_id?: string; setup_action?: string; state?: string } => ({
     // A router may parse a numeric parameter as a number.
@@ -144,64 +149,89 @@ export const githubAppInstalledRoute = createRoute({
   component: GitHubAppInstalledPage,
 })
 export const newGiteaConnectionRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/connections/new/gitea',
   component: NewGiteaConnectionPage,
 })
-export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
+export const connectionRoute = createRoute({ getParentRoute: () => orgRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
-export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
-export const orgSettingsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/org', component: OrgSettingsPage })
-export const mcpServersRoute = createRoute({ getParentRoute: () => appRoute, path: '/mcp-servers', component: ServersPage })
+export const providersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/providers', component: ProvidersPage })
+export const orgSettingsRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/org', component: OrgSettingsPage })
+export const mcpServersRoute = createRoute({ getParentRoute: () => orgRoute, path: '/mcp-servers', component: ServersPage })
 // The org MCP servers page moved under Settings (ADR 0126 section 6).
 export const serversRedirectRoute = createRoute({
-  getParentRoute: () => appRoute,
+  getParentRoute: () => orgRoute,
   path: '/servers',
   beforeLoad: () => {
     throw redirect({ to: '/mcp-servers', replace: true })
   },
 })
-export const platformConsoleRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform', component: PlatformConsolePage })
-export const pricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/prices', component: PricesPage })
-export const budgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/budgets', component: BudgetsPage })
-export const platformBudgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/budgets', component: PlatformBudgetsPage })
-export const observabilityRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/observability', component: ObservabilityPage })
-export const platformPricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/prices', component: PlatformPricesPage })
-export const platformObservabilityRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/observability', component: PlatformObservabilityPage })
-export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/tokens', component: TokensPage })
+export const pricesRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/prices', component: PricesPage })
+export const budgetsRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/budgets', component: BudgetsPage })
+export const observabilityRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/observability', component: ObservabilityPage })
+export const tokensRoute = createRoute({ getParentRoute: () => orgRoute, path: '/settings/tokens', component: TokensPage })
+
+/** The platform console: its own area with its own sidebar, for platform admins only (ADR 0126 section 4). */
+export const platformRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform', component: PlatformLayout })
+export const platformHomeRoute = createRoute({ getParentRoute: () => platformRoute, path: '/', component: PlatformConsolePage })
+export const platformOrgsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/orgs', component: PlatformOrgsPage })
+export const platformBudgetsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/budgets', component: PlatformBudgetsPage })
+export const platformPricesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/usage/prices', component: PlatformPricesPage })
+export const platformObservabilityRoute = createRoute({
+  getParentRoute: () => platformRoute,
+  path: '/settings/observability',
+  component: PlatformObservabilityPage,
+})
+/** The platform pages had these URLs before the console had its own area; old links and bookmarks still work. */
+const platformRedirects = (
+  [
+    ['/budgets', '/platform/usage/budgets'],
+    ['/prices', '/platform/usage/prices'],
+    ['/observability', '/platform/settings/observability'],
+    ['/usage', '/platform/usage/budgets'],
+    ['/settings', '/platform/settings/observability'],
+  ] as const
+).map(([path, to]) =>
+  createRoute({
+    getParentRoute: () => platformRoute,
+    path,
+    beforeLoad: () => {
+      throw redirect({ to, replace: true })
+    },
+  }),
+)
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
-    overviewRoute,
-    inboxRoute,
-    boardRedirectRoute,
-    taskRoute,
-    ticketRedirectRoute,
-    approvalRoute,
-    agentsRedirectRoute,
-    newAgentRoute,
-    newBlankAgentRoute,
-    newTemplateAgentRoute,
-    agentRoute,
-    connectionsRoute,
-    newGitHubConnectionRoute,
-    githubAppCreatedRoute,
-    githubAppInstalledRoute,
-    newGiteaConnectionRoute,
-    connectionRoute,
-    providersRoute,
-    orgSettingsRoute,
-    mcpServersRoute,
-    serversRedirectRoute,
-    platformConsoleRoute,
-    pricesRoute,
-    budgetsRoute,
-    platformBudgetsRoute,
-    observabilityRoute,
-    platformPricesRoute,
-    platformObservabilityRoute,
-    tokensRoute,
+    orgRoute.addChildren([
+      overviewRoute,
+      inboxRoute,
+      boardRedirectRoute,
+      taskRoute,
+      ticketRedirectRoute,
+      approvalRoute,
+      agentsRedirectRoute,
+      newAgentRoute,
+      newBlankAgentRoute,
+      newTemplateAgentRoute,
+      agentRoute,
+      connectionsRoute,
+      newGitHubConnectionRoute,
+      githubAppCreatedRoute,
+      githubAppInstalledRoute,
+      newGiteaConnectionRoute,
+      connectionRoute,
+      providersRoute,
+      orgSettingsRoute,
+      mcpServersRoute,
+      serversRedirectRoute,
+      pricesRoute,
+      budgetsRoute,
+      observabilityRoute,
+      tokensRoute,
+    ]),
+    platformRoute.addChildren([platformHomeRoute, platformOrgsRoute, platformBudgetsRoute, platformPricesRoute, platformObservabilityRoute, ...platformRedirects]),
   ]),
 ])
 

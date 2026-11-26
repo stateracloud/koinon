@@ -34,8 +34,8 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
   }
   if (!loaded) return <p role="status">Loading the continuation cap…</p>
   return (
-    <section aria-labelledby="continuation-cap" className="grid gap-3">
-      <h2 id="continuation-cap" className="text-lg font-semibold">
+    <section aria-labelledby="continuation-cap" className="bg-card grid gap-3 rounded-lg border p-4 text-sm">
+      <h2 id="continuation-cap" className="font-semibold">
         Task spend cap for continuations
       </h2>
       <p className="text-muted-foreground text-sm">

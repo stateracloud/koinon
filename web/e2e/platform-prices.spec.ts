@@ -55,7 +55,7 @@ function api() {
 test('platform admin accepts, confirms by typing and rolls back; the page passes axe', async ({ page }) => {
   const { handlers, seen } = api()
   await mockApi(page, handlers)
-  await page.goto('/platform/prices')
+  await page.goto('/platform/usage/prices')
   await expect(page.getByRole('heading', { name: 'Platform prices', level: 1 })).toBeVisible()
   await expect(page.getByText('input $3 → $4')).toBeVisible()
   await expectAccessible(page)

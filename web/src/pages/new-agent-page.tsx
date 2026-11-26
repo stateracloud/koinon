@@ -19,7 +19,7 @@ import { isApprover } from '@/lib/approvals'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
 
-const templateRoute = getRouteApi('/app/agents/new/template/$templateId')
+const templateRoute = getRouteApi('/app/org/agents/new/template/$templateId')
 
 /** Shell is the frame of the three new-agent pages: the way back, the title and the viewer check. */
 function Shell({ back, title, description, children }: { back: { to: '/' | '/agents/new'; label: string }; title: string; description?: ReactNode; children: ReactNode }) {

@@ -82,7 +82,7 @@ function setup(opts: { platformAdmin?: boolean; proposals?: ReturnType<typeof pr
       },
     })
   })
-  renderApp(transport, '/platform/prices')
+  renderApp(transport, '/platform/usage/prices')
   return calls
 }
 
@@ -94,9 +94,10 @@ function listItemOf(heading: HTMLElement): HTMLElement {
 }
 
 describe('Platform prices page', () => {
-  it('is for platform admins only', async () => {
+  it('is for platform admins only: any other user goes to the org area', async () => {
     setup({ platformAdmin: false })
-    expect(await screen.findByText('Only platform admins can manage the platform prices.')).toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Platform prices' })).not.toBeInTheDocument()
   })
 
   it('shows a proposal with its diff and provenance, and accepts a needs-review one', async () => {

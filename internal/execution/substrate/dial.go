@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+
+	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 )
 
 // Endpoint is how to reach Substrate: the control API (ateapi, TLS with a pod certificate) and the
@@ -34,10 +36,19 @@ type Endpoint struct {
 	BearerTokenFile string
 }
 
-// Dial connects to Substrate. Close releases the connections.
-func Dial(ep Endpoint, cfg Config, opts ...grpc.DialOption) (*Driver, error) {
-	if ep.ControlAddr == "" || ep.RouterAddr == "" {
-		return nil, errors.New("substrate: ControlAddr and RouterAddr are required")
+// DialControl connects to the control API (ateapi) only, with the bearer token of ep. Close the returned
+// connection when done. The provisioner uses it: it has no use for the router.
+func DialControl(ep Endpoint, opts ...grpc.DialOption) (ateapiv1.ControlClient, io.Closer, error) {
+	conn, err := dialControlConn(ep, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ateapiv1.NewControlClient(conn), conn, nil
+}
+
+func dialControlConn(ep Endpoint, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	if ep.ControlAddr == "" {
+		return nil, errors.New("substrate: ControlAddr is required")
 	}
 	tlsCfg := &tls.Config{ServerName: ep.ServerName, MinVersion: tls.VersionTLS12}
 	if ep.CAFile != "" {
@@ -58,6 +69,18 @@ func Dial(ep Endpoint, cfg Config, opts ...grpc.DialOption) (*Driver, error) {
 	control, err := grpc.NewClient(ep.ControlAddr, copts...)
 	if err != nil {
 		return nil, fmt.Errorf("substrate: connect to %s: %w", ep.ControlAddr, err)
+	}
+	return control, nil
+}
+
+// Dial connects to Substrate. Close releases the connections.
+func Dial(ep Endpoint, cfg Config, opts ...grpc.DialOption) (*Driver, error) {
+	if ep.ControlAddr == "" || ep.RouterAddr == "" {
+		return nil, errors.New("substrate: ControlAddr and RouterAddr are required")
+	}
+	control, err := dialControlConn(ep, opts...)
+	if err != nil {
+		return nil, err
 	}
 	ropts := append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, opts...)
 	router, err := grpc.NewClient(ep.RouterAddr, ropts...)

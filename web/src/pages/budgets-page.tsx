@@ -6,7 +6,6 @@ import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { AmountForm } from '@/components/amount-form'
 import { ConfirmAction } from '@/components/confirm-action'
-import { OrgContinuationCap } from '@/components/org-continuation-cap'
 import { RequireAdmin } from '@/components/require-admin'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -51,7 +50,6 @@ function BudgetsContent() {
       )}
       {budget.isPending ? <p role="status">Loading the budget…</p> : budget.data?.budget && <OrgCap budget={budget.data.budget} actions={actions} />}
       <AgentLimits loading={agents.isPending} list={agents.data?.budgets ?? []} actions={actions} />
-      <OrgContinuationCap orgId={orgId} />
       <Notices orgId={orgId} actions={actions} agents={agents.data?.budgets ?? []} />
     </>
   )

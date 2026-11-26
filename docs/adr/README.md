@@ -149,3 +149,4 @@ are in [0046](0046-adr-conventions.md).
 | [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |
 | [0125](0125-hide-unreviewed-mcp-tools.md) | Hide MCP tools that no admin reviewed | Proposed (needs main: ADR number) |
 | [0126](0126-web-ui-v2.md) | Web UI v2: brand look, org home, platform console and new-agent flow | Accepted (maintainer decisions of 2026-11-24; mockups approved: "Mocks lgtm") |
+| [0128](0128-substrate-provisioner.md) | A provisioner holds the global Substrate role | Accepted (decided by the maintainer on 2026-11-26) |

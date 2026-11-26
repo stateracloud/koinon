@@ -29,7 +29,7 @@ import { agentStatusLabel, harnessLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/agents/$agentId')
+const route = getRouteApi('/app/org/agents/$agentId')
 
 /**
  * AgentPage shows an agent and, for a draft, the grants it proposes. An org
