@@ -346,7 +346,8 @@ Not covered yet: the harness contract tests and the restore drill on this leg, a
 change, so it is a separate pull request (a build-input change and a `.github` change have no merge route in one pull
 request). It starts as an advisory leg in `hack/ci-required.txt` and becomes the required quickstart leg at the switch (#1093,
 no soak). The quickstart reaches an approved pull request on Substrate only after #1086 (gateway routes and the actor
-token); until then the driver's later specs fail on this leg.
+token); until then the driver's later specs fail on this leg. Step 8 (the missing harness image) is skipped on this leg until its Substrate form is proven (a digest-pinned
+broken image and the cause the driver reports); issue #1091 stays open for that, the contract tests, the restore drill and the CI job.
 
 ### The N-1 to N upgrade e2e (issue #519)
 

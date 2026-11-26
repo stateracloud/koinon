@@ -1125,6 +1125,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 	// runs, and the spec puts the config back at its end (the story suite runs next in the same cluster).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
+		if substrateDriver() {
+			// The Substrate driver refuses an image that is not pinned by digest before any pull (internal/execution/substrate/
+			// imageref.go RequireDigest, #1192), so a tag-only broken image fails at a different place than this spec checks. The
+			// pod reason (ErrImagePull) and the sandbox observer metrics are OpenShell-only: sandboxObserver is off on this leg and
+			// the driver reports the cause from the actor (phase.go Observe). Whether the run.failed payload then carries
+			// sandboxCause image_pull on Substrate is not proven. Exit condition: a digest-pinned missing image on Substrate is
+			// proven to reach the sandbox wait with the cause image_pull; then port this spec (issue #1091 keeps it open).
+			Skip("issue #1091: the missing-image spec needs a Substrate form (digest-pinned broken image, actor cause); not ported yet")
+		}
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
 		kc := func(args ...string) string {
@@ -1135,22 +1144,16 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 
 		By("the reconciler bound the observer role in the workspace namespace, to itself only")
-		if substrateDriver() {
-			// The observer RoleBinding is an OpenShell workspace object. On Substrate the reconciler reads worker pods through the
-			// chart's ClusterRole (get, list, watch on pods and events), so there is no per-workspace binding to read (issue #1091).
-			By("on Substrate: no per-workspace observer RoleBinding; the run's cause is checked below")
-		} else {
-			orgID, err := uuid.Parse(org)
-			Expect(err).NotTo(HaveOccurred())
-			// This org's own workspace, not any OpenShell namespace: other suites (the escape hook of step 6b)
-			// make workspaces of their own in the same cluster.
-			ws := execution.WorkspaceName(orgID)
-			ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
-			Expect(ns).To(Equal("openshell-openshell-" + ws))
-			Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
-				"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
-				To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
-		}
+		orgID, err := uuid.Parse(org)
+		Expect(err).NotTo(HaveOccurred())
+		// This org's own workspace, not any OpenShell namespace: other suites (the escape hook of step 6b)
+		// make workspaces of their own in the same cluster.
+		ws := execution.WorkspaceName(orgID)
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell,openshell.ai/sandbox-workspace="+ws, "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(Equal("openshell-openshell-" + ws))
+		Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
+			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
+			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
 
 		By("pointing the harness at an image nobody can pull, and shortening the sandbox wait cap")
 		// Read without kc, which trims the output: the restore below must write the original bytes back,
