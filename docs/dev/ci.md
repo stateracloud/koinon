@@ -548,6 +548,27 @@ session and prints a verdict file path at once (next to it: `pid`, and `rc` when
 and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
 looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
 
+**Tool state in the sandbox (#1296).** A lane runs `lane-gates.sh` in the Claude Code sandbox, which
+lets a process write only to the worktree, `$TMPDIR` and the `allowWrite` entries of the settings. The
+tools under the gates wrote state outside those paths, so a sandboxed run got `operation not permitted`
+in place of a verdict. `hack/gate-state-lib.sh` now gives each tool a path the sandbox allows, and a
+value that is already set (CI, your shell) wins:
+
+- `BUILDX_CONFIG` is `<gate log directory>/state/buildx`: a copy, made again each run, of the builder
+  selection in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
+  client state moves; the build cache stays in the builder.
+- `KOINON_PNPM_STORE` is `$TMPDIR/koinon-pnpm-store`, the store of `make test-opencode-plugin`. The web
+  gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
+- The envtest binaries: lane-gates runs `make envtest-assets` once, before the gates start, and passes
+  the directory to `make test-chart-smoke` and `make test-admission` as `KOINON_ENVTEST_ASSETS`.
+  setup-envtest only reads a store that has the version, so run `make envtest-assets` once outside the
+  sandbox. If the sandbox denies the download, the envtest gates are `notrun` with that reason.
+- The envtest port locks stay in `os.UserCacheDir()/kubebuilder-envtest` (`~/Library/Caches` on macOS),
+  because all envtest processes of a machine must share them, and on macOS only `$HOME` moves them. If
+  that directory exists and the sandbox denies writes to it, the envtest gates are `notrun` with
+  `sandbox denial: the envtest port locks ... are not writable`. If it does not exist, controller-runtime
+  uses `$TMPDIR/kubebuilder-envtest`.
+
 **Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
 to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs
 `gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .` (a new branch scans what the
