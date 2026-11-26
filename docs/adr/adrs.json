@@ -3631,7 +3631,7 @@
     "number": "0128",
     "file": "0128-substrate-provisioner.md",
     "title": "A provisioner holds the global Substrate role",
-    "status": "proposed",
+    "status": "accepted",
     "date": "2026-11-26",
     "area": "runtime-sandbox",
     "tags": [

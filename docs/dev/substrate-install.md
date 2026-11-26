@@ -249,7 +249,9 @@ small pod of its own, the provisioner, holds that role. The reconciler and agent
   ServiceAccount. Pass the namespace and the release name of your `helm install`.
 - The installer acts as `ate-client`, the default bootstrap owner: it mints a short-lived token and calls ateapi
   through a port-forward to the api server pod. If your install names other bootstrap owners, pass a token of a
-  global owner with `--api-token-file`.
+  global owner with `--api-token-file`. The installer checks the api server certificate before it sends the token.
+  It reads the CA from the ClusterTrustBundle of Substrate's `servicedns.podcert.ate.dev/identity` signer; give another
+  CA with `--api-ca-file`. When no CA is found, the install stops.
 - **The chart** renders the provisioner (`execution.substrate.provisioner`, on by default): a Deployment of the
   reconciler image in `provision` mode, its own ServiceAccount, a ClusterRole that only creates TokenReviews, a
   Service and a NetworkPolicy that admits only the reconciler. The reconciler asks it for an org atespace only when

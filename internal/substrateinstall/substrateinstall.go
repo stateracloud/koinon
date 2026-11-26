@@ -222,6 +222,9 @@ type Installer struct {
 	// APITokenFile is a token of a principal that holds the global owner role, for an install whose bootstrap
 	// owners are not ate-client. Empty mints a token for ate-client.
 	APITokenFile string
+	// APICAFile is a PEM CA file that verifies ate-api-server's serving certificate. Empty reads the CA from
+	// Substrate's ClusterTrustBundle.
+	APICAFile string
 	// Control opens the control API as a global owner; nil is the port-forward of openControl. For the tests.
 	Control ControlDialer
 }

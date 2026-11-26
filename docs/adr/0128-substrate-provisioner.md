@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-26
 area: runtime-sandbox
 tags: [sandbox, security, identity, kubernetes]
@@ -7,7 +7,7 @@ relates: ["0002", "0075", "0119", "0120"]
 ---
 # 0128. A provisioner holds the global Substrate role
 
-- Status: Proposed (decided by the maintainer on 2026-11-26; needs main: ADR number)
+- Status: Accepted (decided by the maintainer on 2026-11-26)
 - Date: 2026-11-26
 - Area: runtime-sandbox
 - Tags: sandbox, security, identity, kubernetes
@@ -90,8 +90,11 @@ rewrite the global policy, and control the atespaces of another product on a sha
    policy.
 9. **The installer's identity.** The installer acts as `ate-client`, the default bootstrap owner of the install:
    it mints a short-lived token for that ServiceAccount (audience `api.ate-system.svc`) and calls ateapi through a
-   port-forward to the api server pod. An install whose bootstrap owners are another principal passes a token
-   file instead (`--api-token-file`).
+   port-forward to the api server pod. The installer checks the api server's certificate before it sends the token:
+   the CA is the ClusterTrustBundle of Substrate's servicedns signer (`servicedns.podcert.ate.dev/identity`, label
+   `podcert.ate.dev/canarying=live`), and the name checked is `api.<namespace>.svc`. `--api-ca-file` replaces the
+   bundle. No CA is an error: the installer never skips the check. An install whose bootstrap owners are another
+   principal passes a token file instead (`--api-token-file`).
 
 ## Threat model
 
@@ -106,8 +109,7 @@ rewrite the global policy, and control the atespaces of another product on a sha
 - **What is left:** the provisioner can still delete or rewrite anything in Substrate if it is compromised. The
   traffic to the provisioner is plain HTTP inside the cluster: a projected token that is replayed works only
   against the provisioner, for the reconciler's name, and the call only creates an atespace. The installer's
-  port-forward does not verify the api server certificate when no CA file is given. The destination is chosen
-  through the Kubernetes API and the token lives for ten minutes.
+  port-forward verifies the api server certificate. The token lives for ten minutes.
 
 ## Consequences
 

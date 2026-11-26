@@ -5,6 +5,7 @@ package substrateinstall
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"strings"
@@ -32,6 +33,10 @@ const (
 	apiServerPort = 443
 	// apiTokenSeconds is the life of the token the installer mints: the grant takes seconds.
 	apiTokenSeconds = 600
+	// apiCASigner and apiCABundleLabel select the ClusterTrustBundle that holds the CA of ate-api-server's serving
+	// certificate (Substrate manifests/ate-install/ate-api-server.yaml, volume servicedns).
+	apiCASigner      = "servicedns.podcert.ate.dev/identity"
+	apiCABundleLabel = "podcert.ate.dev/canarying=live"
 )
 
 // ControlDialer opens a connection to Substrate's control API as a principal that holds the global owner role.
@@ -108,9 +113,9 @@ func (bearer) RequireTransportSecurity() bool { return true }
 // of the install (or with the token in APITokenFile when the install names other bootstrap owners). The
 // NetworkPolicy of ate-system admits only Substrate's own pods, and a port-forward is not ingress to the pod.
 //
-// The api server's certificate is not verified, because the install has no CA to check it with: the destination
-// is a pod that the installer chose through the Kubernetes API, the tunnel is the API server's, and the token is
-// short-lived and for the api server's audience only.
+// The installer verifies the api server's serving certificate before it sends the token (apiServerTLS): the
+// CA comes from the Kubernetes API, and the name checked is the Service DNS name that the certificate carries.
+// It fails closed: no CA, no connection.
 func (i *Installer) openControl(ctx context.Context) (ateapiv1.ControlClient, func(), error) {
 	ns := i.Checker.Config.SubstrateOrDefault().Namespace
 	var token string
@@ -150,18 +155,56 @@ func (i *Installer) openControl(ctx context.Context) (ateapiv1.ControlClient, fu
 	if err != nil {
 		return nil, nil, fmt.Errorf("load the kubeconfig for the port-forward: %w", err)
 	}
+	tlsCfg, err := i.apiServerTLS(ctx, ns)
+	if err != nil {
+		return nil, nil, err
+	}
 	local, stop, err := forwardPod(ctx, cfg, i.Kube, ns, pod.Name, apiServerPort)
 	if err != nil {
 		return nil, nil, status.Errorf(codes.Unavailable, "port-forward to %s: %v", apiServerName, err)
 	}
 	conn, err := grpc.NewClient(fmt.Sprintf("127.0.0.1:%d", local),
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})), //nolint:gosec // see the comment above
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
 		grpc.WithPerRPCCredentials(bearer(token)))
 	if err != nil {
 		stop()
 		return nil, nil, err
 	}
 	return ateapiv1.NewControlClient(conn), func() { _ = conn.Close(); stop() }, nil
+}
+
+// apiServerTLS is the TLS configuration that checks ate-api-server's serving certificate. Substrate's
+// servicedns signer issues that certificate with the DNS name of the Service (api.<namespace>.svc) and publishes
+// its CA as a ClusterTrustBundle (signer servicedns.podcert.ate.dev/identity, label podcert.ate.dev/canarying=live):
+// the bundle that the pods of Substrate mount to verify the same certificate. A port-forward ends at the pod,
+// so the name to check is the Service name and not 127.0.0.1. APICAFile replaces the bundle. No CA is an error.
+func (i *Installer) apiServerTLS(ctx context.Context, ns string) (*tls.Config, error) {
+	pool := x509.NewCertPool()
+	switch {
+	case i.APICAFile != "":
+		b, err := os.ReadFile(i.APICAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read --api-ca-file: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(b) {
+			return nil, fmt.Errorf("--api-ca-file %s holds no PEM certificate", i.APICAFile)
+		}
+	default:
+		list, err := i.Kube.CertificatesV1().ClusterTrustBundles().List(ctx, metav1.ListOptions{LabelSelector: apiCABundleLabel})
+		if err != nil {
+			return nil, fmt.Errorf("list the ClusterTrustBundles of signer %s: %w", apiCASigner, err)
+		}
+		found := false
+		for k := range list.Items {
+			if list.Items[k].Spec.SignerName == apiCASigner && pool.AppendCertsFromPEM([]byte(list.Items[k].Spec.TrustBundle)) {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("no ClusterTrustBundle of signer %s with label %s holds a CA: the installer will not send a token to a server whose certificate it cannot verify (pass the CA with --api-ca-file)", apiCASigner, apiCABundleLabel)
+		}
+	}
+	return &tls.Config{RootCAs: pool, ServerName: fmt.Sprintf("api.%s.svc", ns), MinVersion: tls.VersionTLS12}, nil
 }
 
 func podReady(p *corev1.Pod) bool {

@@ -46,7 +46,7 @@ func newSubstrateCommand() *cobra.Command {
 		source  string
 		// koinonNamespace, koinonRelease and apiTokenFile name the provisioner's ServiceAccount and the token of the
 		// grant (ADR 0128).
-		koinonNamespace, koinonRelease, apiTokenFile string
+		koinonNamespace, koinonRelease, apiTokenFile, apiCAFile string
 		// platform is the value of --platform; kind is the deprecated --kind.
 		platform string
 		kind     bool
@@ -103,6 +103,7 @@ func newSubstrateCommand() *cobra.Command {
 				SourceRepo: source, Kubeconfig: c.kubeconfig, Context: c.kubeContext, Profile: profile, Out: cmd.OutOrStdout(),
 				ProvisionerNamespace: koinonNamespace, ProvisionerServiceAccount: substrateauthz.ComponentServiceAccount(koinonRelease, "provisioner"),
 				APITokenFile: apiTokenFile,
+				APICAFile:    apiCAFile,
 			}).Install(cmd.Context())
 		},
 	}
@@ -128,6 +129,7 @@ func newSubstrateCommand() *cobra.Command {
 	f.StringVar(&profile.SnapshotTransferGSAName, "snapshot-transfer-gsa-name", "", "gke platform: Google service account that snapshot transfers run as (ate-setup --snapshot-transfer-gsa-name); default SNAPSHOT_TRANSFER_GSA_NAME of the environment")
 	f.StringVar(&koinonNamespace, "koinon-namespace", "koinon", "namespace of the Koinon release: the installer makes its provisioner an owner in Substrate's global access policy (ADR 0128)")
 	f.StringVar(&koinonRelease, "koinon-release", "koinon", "name of the Koinon Helm release, which names the provisioner's ServiceAccount (<release>-provisioner, or <release>-koinon-provisioner when the release name has no \"koinon\" in it)")
+	f.StringVar(&apiCAFile, "api-ca-file", "", "PEM CA that verifies ate-api-server's certificate; default is the ClusterTrustBundle of Substrate's servicedns signer")
 	f.StringVar(&apiTokenFile, "api-token-file", "", "token of a principal that holds the global owner role in Substrate, for an install whose bootstrap owners are not ate-client; default is a token minted for ate-client")
 	mustRequire(install, "substrate-source")
 	mustRequire(install, "kubeconfig")
