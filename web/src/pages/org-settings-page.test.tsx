@@ -41,9 +41,18 @@ function setup(opts: { role?: OrgRole; limits?: Partial<Limits>; memberPages?: {
         calls.settingGets++
         return { retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }
       },
-      getHomeBackupRetention: () => ({ retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }),
-      getApproverNotRequester: () => ({ on: false }),
-      getRunLimits: () => view(),
+      getHomeBackupRetention: () => {
+        calls.settingGets++
+        return { retention: { days: 7, defaultDays: 7, minDays: 1, maxDays: 90 } }
+      },
+      getApproverNotRequester: () => {
+        calls.settingGets++
+        return { on: false }
+      },
+      getRunLimits: () => {
+        calls.settingGets++
+        return view()
+      },
       setRunLimits: (req) => {
         calls.runLimitSets.push(req)
         for (const k of Object.keys(defaults) as (keyof Limits)[]) {
