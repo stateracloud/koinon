@@ -16,7 +16,8 @@ export type ServerFormProps = {
   server?: Server
   actions: Pick<McpActions, 'createServer' | 'updateServer'>
   onDone: () => void
-  onSaved?: (name: string) => void
+  /** Called with the server's name, and its id (the new id for a new server). */
+  onSaved?: (name: string, serverId: string) => void
 }
 
 /**
@@ -46,9 +47,10 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
     const typed = f.value
     set({ value: '' }) // the secret leaves this page with the request
     try {
+      let id = server?.id ?? ''
       if (server) await actions.updateServer(server.id, buildUpdateRequest(server, f))
-      else await actions.createServer(buildCreateRequest(f))
-      onSaved?.(server?.name ?? f.name)
+      else id = (await actions.createServer(buildCreateRequest(f))).server?.id ?? ''
+      onSaved?.(server?.name ?? f.name, id)
       onDone()
     } catch (e2) {
       const message = describeError(e2).message
@@ -63,8 +65,8 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
   const describe = (id: string, ...extra: (string | undefined | false)[]) => [`${id}-help`, ...extra.filter(Boolean)].join(' ')
 
   return (
-    <form onSubmit={(e) => void submit(e)} aria-label={editing ? `Edit server ${server.name}` : 'Add server'} className="bg-card grid gap-4 rounded-md border p-4" noValidate>
-      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Add a remote MCP server'}</h2>
+    <form onSubmit={(e) => void submit(e)} aria-label={editing ? `Edit server ${server.name}` : 'Connect a remote server'} className="bg-card grid gap-4 rounded-md border p-4" noValidate>
+      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Connect a remote MCP server'}</h2>
       <div className="grid gap-1.5">
         <Label htmlFor="server-name">Name</Label>
         <Input
@@ -283,7 +285,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           Cancel
         </Button>
         <Button type="submit" disabled={pending}>
-          {editing ? 'Save server' : 'Add server'}
+          {editing ? 'Save server' : 'Connect server'}
         </Button>
       </div>
     </form>

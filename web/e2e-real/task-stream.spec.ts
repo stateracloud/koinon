@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomBytes } from 'node:crypto'
-
 import { expect, test } from '@playwright/test'
+
+import { signIn } from './session.ts'
 
 // W1 acceptance (old issue 50): create a task and watch the run in the browser, against the real
 // koinon-api, reconciler, agentd, Postgres, OpenShell (runc on kind) and the fake model server.
@@ -10,8 +10,6 @@ import { expect, test } from '@playwright/test'
 // test/fakemodel/scripts/repo-helper.yaml) and the fake GitHub App API.
 
 const fakeGitHub = process.env.KOINON_E2E_FAKEGITHUB_URL
-const bootstrapPassword = process.env.KOINON_E2E_PASSWORD
-const newPassword = 'e2e-browser-' + randomBytes(8).toString('hex')
 // The fake model server in the cluster (test/e2e/run.sh passes the address the gateway reaches it by).
 const fakeModelURL = process.env.KOINON_E2E_FAKEMODEL_URL
 const repository = 'koinon-demo/hello'
@@ -19,19 +17,10 @@ const title = 'Add hello.md'
 
 test('sign in, create an agent and a task, watch the reply stream, approve, run succeeds', async ({ page, request }) => {
   expect(fakeGitHub, 'KOINON_E2E_FAKEGITHUB_URL').toBeTruthy()
-  expect(bootstrapPassword, 'KOINON_E2E_PASSWORD').toBeTruthy()
   expect(fakeModelURL, 'KOINON_E2E_FAKEMODEL_URL').toBeTruthy()
 
-  // 1. Bootstrap admin: sign in, replace the one-time password.
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Sign in to Koinon' })).toBeVisible()
-  await page.getByLabel('Password').fill(bootstrapPassword!)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible()
-  await page.getByLabel('Current password').fill(bootstrapPassword!)
-  await page.getByLabel('New password', { exact: true }).fill(newPassword)
-  await page.getByLabel('Repeat new password').fill(newPassword)
-  await page.getByRole('button', { name: 'Change password' }).click()
+  // 1. Bootstrap admin: sign in (the first sign-in of the install replaces the one-time password).
+  await signIn(page)
   // The home screen is the inbox; the board is its secondary view, at /board.
   await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
   await expect(page.getByRole('tab', { name: /^Blocked on you/ })).toBeVisible()
