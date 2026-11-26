@@ -125,7 +125,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		DeferCleanup(router.Close)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-			GatewayRoutes: []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
+			GatewayRoutes:     []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
 			GuestSigner:       fakeate.Signer(),
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
