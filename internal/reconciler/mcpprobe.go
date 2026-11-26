@@ -99,7 +99,6 @@ func (r *Reconciler) probeDueNow(ctx context.Context, due []dueProbe) {
 		if first := now; len(first) > 0 {
 			safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, first) })
 		}
-		now = nil
 		if !r.awaitGatewayAcked(ctx, rev) {
 			if ctx.Err() == nil {
 				r.holdProbes(held)
