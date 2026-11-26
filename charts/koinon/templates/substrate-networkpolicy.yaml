@@ -113,8 +113,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
-        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database.
-        {{- range list "gateway" "api" }}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database. In kubernetes
+        # mode the gateway is not a chart pod: see the proxy rule below.
+        {{- range (eq .Values.gateway.mode "standalone" | ternary (list "gateway" "api") (list "api")) }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
@@ -122,6 +123,22 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list $ .) | nindent 14 }}
         {{- end }}
+{{- if eq .Values.gateway.mode "kubernetes" }}
+    # Kubernetes mode (issue #1469): the agentgateway controller runs the proxy of Koinon's Gateway. Its pods have the
+    # label gateway.networking.k8s.io/gateway-name, not Koinon's selector labels (ADR 0058). atenet-egress sends the
+    # actors' model and MCP calls there. Only the Gateway's listener port, the port that the proxy policy admits
+    # (networkpolicy.yaml); the stats port (15020) stays closed (issue #1372). The port is a number: the controller,
+    # not the chart, names the proxy's container ports.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
+      ports:
+        - {port: {{ .Values.gateway.kubernetes.port }}, protocol: TCP}
+{{- end }}
 {{- if include "koinon.mcpKoinon" . }}
     # With gateway.mcp.driver=koinon also koinon-gateway's MCP pods: the actors' MCP calls go there (#1239). Only the
     # ports that an actor needs, by the container port names (not numbers): "mcp" and, with the egress listener, "egress".
