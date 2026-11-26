@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useInfiniteQuery } from '@connectrpc/connect-query'
-import { useEffect, useMemo } from 'react'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import type { Transport } from '@connectrpc/connect'
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query'
+import { createConnectQueryKey, useInfiniteQuery, useQuery, useTransport } from '@connectrpc/connect-query'
+import { useEffect, useMemo, useState } from 'react'
+import { AgentService, type AgentSummary, type ListAgentSummariesResponse } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { inboxPollMs } from '@/hooks/use-inbox'
 
 /** The page size of ListAgentSummaries on the org home (the server allows at most 200). */
@@ -11,34 +13,94 @@ export const agentSummaryPageSize = 100
 /**
  * useAgentSummaries reads the org's agent cards page by page (ListAgentSummaries, ADR 0126 section 4). The Agents tab
  * asks for the next page with `loadMore`; the Chart tab passes `all` because a reports-to tree needs every agent of a
- * team. Both tabs share one query, so a switch of tab does not load the pages again. The cards poll like the inbox:
- * "running now" and "waiting on you" change without a reload.
+ * team. Both tabs share the queries, so a switch of tab does not start from the first page again.
+ *
+ * Only the first page polls (like the inbox: "running now" and "waiting on you" change without a reload), so one poll
+ * is one request whatever the number of loaded pages (issue #1411). The later pages are one infinite query that starts
+ * at the first page's next_page_token and does not poll. They load again on demand: when the view mounts, when an
+ * AgentService change invalidates them, and when the first page's next_page_token changes (an agent added or removed
+ * early in the order: the token is a cursor after the first page's last agent). Then the same number of later pages
+ * loads again from the new token, with the old pages on screen until it ends.
  */
 export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}) {
-  const list = useInfiniteQuery(
+  const all = options.all ?? false
+  const queryClient = useQueryClient()
+  const transport = useTransport()
+  const first = useQuery(
     AgentService.method.listAgentSummaries,
     { orgId, pageSize: agentSummaryPageSize, pageToken: '' },
-    {
-      pageParamKey: 'pageToken',
-      getNextPageParam: (last) => last.nextPageToken || undefined,
-      refetchInterval: inboxPollMs,
-    },
+    { refetchInterval: inboxPollMs },
   )
-  const { hasNextPage, isFetching, fetchNextPage, isError } = list
-  const all = options.all ?? false
-  useEffect(() => {
-    if (all && hasNextPage && !isFetching && !isError) void fetchNextPage({ cancelRefetch: false })
-  }, [all, hasNextPage, isFetching, isError, fetchNextPage])
+  const restToken = first.data?.nextPageToken ?? ''
+  // want is the number of pages after the first that this view asked for.
+  const [want, setWant] = useState(0)
+  const cached = queryClient.getQueryData(restKey(transport, orgId)) !== undefined
+  const restEnabled = restToken !== '' && (all || want > 0 || cached)
+  const rest = useInfiniteQuery(AgentService.method.listAgentSummaries, restInput(orgId, restToken), {
+    pageParamKey: 'pageToken',
+    getNextPageParam: (last) => last.nextPageToken || undefined,
+    enabled: restEnabled,
+    // The first page polls; the later pages load again only on demand.
+    refetchOnWindowFocus: false,
+  })
+  const restPages = restToken === '' ? undefined : rest.data?.pages
+  const loaded = restPages?.length ?? 0
+  // The later pages follow an older first page: the infinite query key leaves the page token out, so a new token is
+  // the same query with the old start in pageParams.
+  const moved = restPages !== undefined && rest.data?.pageParams[0] !== restToken
 
-  const pages = list.data?.pages
-  const agents = useMemo(() => pages?.flatMap((p) => p.agents), [pages])
+  const { hasNextPage, isFetching, fetchNextPage, isError, refetch } = rest
+  useEffect(() => {
+    if (!moved || isFetching) return
+    // A refetch of an infinite query starts at pageParams[0] and loads as many pages as it holds.
+    queryClient.setQueryData<InfiniteData<ListAgentSummariesResponse, string>>(restKey(transport, orgId), (old) =>
+      old ? { ...old, pageParams: [restToken, ...old.pageParams.slice(1)] } : old,
+    )
+    void refetch()
+  }, [moved, isFetching, restToken, orgId, transport, queryClient, refetch])
+
+  // A view that mounts with later pages in the cache (from the other tab) keeps them.
+  const target = all ? Infinity : Math.max(want, loaded)
+  useEffect(() => {
+    if (restEnabled && !moved && loaded > 0 && loaded < target && hasNextPage && !isFetching && !isError) {
+      void fetchNextPage({ cancelRefetch: false })
+    }
+  }, [restEnabled, moved, loaded, target, hasNextPage, isFetching, isError, fetchNextPage])
+
+  const firstAgents = first.data?.agents
+  const agents = useMemo(() => (firstAgents ? dedupe([firstAgents, ...(restPages ?? []).map((p) => p.agents)]) : undefined), [firstAgents, restPages])
+  const restError = restEnabled && isError
   return {
     agents,
-    isPending: list.isPending,
-    isError: list.isError,
-    error: list.error,
-    hasMore: Boolean(hasNextPage),
-    isFetchingMore: list.isFetchingNextPage,
-    loadMore: () => void fetchNextPage({ cancelRefetch: false }),
+    isPending: first.isPending,
+    isError: first.isError || restError,
+    error: first.error ?? (restError ? rest.error : null),
+    hasMore: restToken !== '' && (restPages === undefined || moved || Boolean(hasNextPage)),
+    isFetchingMore: rest.isLoading || rest.isFetchingNextPage,
+    loadMore: () => setWant((w) => Math.max(w, loaded) + 1),
   }
+}
+
+function restInput(orgId: string, pageToken: string) {
+  return { orgId, pageSize: agentSummaryPageSize, pageToken }
+}
+
+/** restKey is the key of the later pages' infinite query. It leaves the page token out, as connect-query does. */
+function restKey(transport: Transport, orgId: string) {
+  return createConnectQueryKey({
+    schema: AgentService.method.listAgentSummaries,
+    input: restInput(orgId, ''),
+    transport,
+    cardinality: 'infinite',
+    pageParamKey: 'pageToken',
+  })
+}
+
+/**
+ * dedupe joins the pages and keeps the first card of each agent. A later page can repeat an agent of the first page
+ * until the later pages load again from a new first-page token.
+ */
+function dedupe(pages: AgentSummary[][]) {
+  const seen = new Set<string>()
+  return pages.flat().filter((a) => !seen.has(a.agentId) && seen.add(a.agentId))
 }
