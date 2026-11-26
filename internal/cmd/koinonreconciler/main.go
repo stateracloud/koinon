@@ -86,6 +86,9 @@ func serve(ctx context.Context, cfg config) error {
 		return err
 	}
 	egressEndpoint, err := cfg.egressEndpoint()
+	if err != nil {
+		return err
+	}
 	mcpEndpoint, err := cfg.mcpGatewayEndpoint()
 	if err != nil {
 		return err

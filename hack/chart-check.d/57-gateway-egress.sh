@@ -65,9 +65,9 @@ lacks "a supplied actor token Secret is not generated" 'ed25519-key' "${eg[@]}" 
 es=(--show-only templates/ensure-secrets.yaml)
 n=$(render "${eg[@]}" "${es[@]}" | grep -c '^    verbs: \[patch\]$' || true)
 [ "$n" = 1 ] || fail "ensure-secrets has $n patch rules, not 1"
-render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | grep -q '      - koinon-actor-token-key$' ||
+render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | hit '      - koinon-actor-token-key$' ||
   fail "the patch rule does not name the actor token key Secret"
-render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | grep -Eq 'session|otlp|install-mark' &&
+render "${eg[@]}" "${es[@]}" | awk '/^  - apiGroups/{r=""} {r=r $0 "\n"} /verbs: \[patch\]/{printf "%s", r}' | hit -E 'session|otlp|install-mark' &&
   fail "the patch rule names a Secret that is not an Ed25519 key"
 lacks "ensure-secrets never updates a Secret" 'update' "${eg[@]}" "${es[@]}"
 lacks "no patch rule without an Ed25519 key Secret" 'patch' --set gateway.mcp.driver=agentgateway "${es[@]}"

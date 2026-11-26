@@ -125,7 +125,7 @@ var _ = Describe("Ensure with an Ed25519 key and its public key (#1086 part C2)"
 
 	It("refuses a bad Secret, with or without a public key, and never changes it or logs the key", func(ctx SpecContext) {
 		for name, data := range map[string]map[string][]byte{
-			`short "key", no public key`:     {"key": []byte("0101")},
+			`short "key", no public key`:      {"key": []byte("0101")},
 			`upper-case "key", no public key`: {"key": []byte(strings.Repeat("AB", 32))},
 			`short "key"`:                     {"key": []byte("0101"), "public.pem": pemOf(fakeSeed("01"))},
 			`"public.pem" not a key`:          {"key": fakeSeed("01"), "public.pem": []byte("not a key")},
