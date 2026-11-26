@@ -89,6 +89,12 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if spec.Image == "" {
 		return nil, errors.New("sandbox image is empty")
 	}
+	// The guest front is the image ENTRYPOINT and every call goes through it. Substrate takes a template
+	// command as an override of ENTRYPOINT and CMD, so a Command would replace the front and every
+	// call would fail with connection refused (issue #1092). Processes start through Exec.
+	if len(spec.Command) > 0 {
+		return nil, errors.New("sandbox command is set: it would replace the guest front (the image entrypoint); start processes through Exec")
+	}
 	// A tag can move; a digest cannot (issue #1192). The rewrite below keeps the digest.
 	if err := RequireDigest(spec.Image); err != nil {
 		return nil, err
@@ -109,7 +115,6 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		Containers: []*ateapiv1.Container{{
 			Name:         AgentContainer,
 			Image:        image,
-			Command:      spec.Command,
 			Env:          []*ateapiv1.EnvVar{{Name: guestauth.VerifyKeysEnv, Value: keys}},
 			VolumeMounts: []*ateapiv1.VolumeMount{{Name: HomeVolume, MountPath: HomeMountPath}},
 		}},
