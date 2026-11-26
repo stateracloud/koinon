@@ -16,6 +16,7 @@
 //	        approvers are admins and owners)
 //
 // PlatformService (ListOrgs, GetOrg) and PlatformResourceService are for platform admins only: an org role does not count.
+// Every platform-scope RPC calls requirePlatformAdmin first and is listed in platformAdminRPCs (platformadmin.go).
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
 // probed; a member without the required role gets PermissionDenied.

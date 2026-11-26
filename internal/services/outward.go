@@ -11,10 +11,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
 	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
-	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	"github.com/stateracloud/koinon/internal/outward"
 	"github.com/stateracloud/koinon/internal/restorehold"
 )
@@ -47,12 +45,9 @@ func (s *Server) SetOutwardTargetDisabled(ctx context.Context, req *outwardv1alp
 		actor audit.Actor
 	)
 	if kind.Platform() {
-		p, ok := auth.PrincipalFrom(ctx)
-		if !ok {
-			return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-		}
-		if !p.PlatformAdmin {
-			return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), refusalv1.Reason_PLATFORM_ADMIN_REQUIRED)
+		p, err := requirePlatformAdmin(ctx)
+		if err != nil {
+			return nil, err
 		}
 		actor = audit.User(p.UserID)
 	} else {
