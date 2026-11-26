@@ -13,9 +13,10 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
-// koinon-agentd's sweep script (internal/agentd/sweep.sh) on three PID 1s: the OpenShell
-// supervisor, whose first child is the sandbox's main process; the contract suite's stand-in,
-// whose PID 1 is; and one it does not know, where it must end nothing.
+// koinon-agentd's sweep script (internal/agentd/sweep.sh) on four PID 1s: the OpenShell
+// supervisor, whose first child is the sandbox's main process; the Substrate guest front,
+// whose PID 1 is; the contract suite's stand-in, whose PID 1 is; and one it does not know,
+// where it must end nothing.
 var _ = Describe("koinon-agentd's sandbox sweep", func() {
 	var script string
 
@@ -64,6 +65,24 @@ var _ = Describe("koinon-agentd's sandbox sweep", func() {
 		Expect(stdout).To(ContainSubstring("main: " + main + "\n"))
 		Expect(stdout).To(MatchRegexp(`ended: .*\b` + job + `\b`))
 		Expect(running(ctx, name, main)).To(BeTrue(), "the main process runs")
+		Expect(running(ctx, name, job)).To(BeFalse(), "the job is ended")
+	})
+
+	It("keeps the Substrate guest front's PID 1 and ends the rest", func(ctx SpecContext) {
+		// PID 1 named koinon-guest-front, with a child (an exec the front started) beside the job.
+		// PID 1 waits on a FIFO with the `read` builtin: it must not exit when the sweep ends its
+		// child (as `wait` would) and must not start new children (as a `while sleep` loop would).
+		name, job := container(ctx, `mkfifo /tmp/f && cp /bin/dash /tmp/koinon-guest-front && `+
+			`exec /tmp/koinon-guest-front -c "sleep 100000 & read _ </tmp/f"`)
+		child := strings.TrimSpace(docker(ctx, "exec", name, "sh", "-c",
+			`for d in /proc/[0-9]*; do grep -q '^PPid:\s*1$' $d/status && grep -q sleep $d/comm && echo ${d#/proc/}; done; true`))
+		Expect(child).NotTo(BeEmpty())
+		Expect(running(ctx, name, child)).To(BeTrue(), "the child runs before the sweep")
+		stdout, stderr, code := tryExec(ctx, name, "/bin/sh", "-c", script, "sweep")
+		Expect(code).To(BeZero(), stderr)
+		Expect(stdout).To(ContainSubstring("main: 1\n"))
+		Expect(running(ctx, name, "1")).To(BeTrue(), "PID 1 runs")
+		Expect(running(ctx, name, child)).To(BeFalse(), "the child is ended")
 		Expect(running(ctx, name, job)).To(BeFalse(), "the job is ended")
 	})
 
