@@ -19661,6 +19661,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Why a newer queued run replaced this one."
+            },
+            {
+              "name": "max_model_requests",
+              "number": 17,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The request limit of a run that stopped at it."
             }
           ]
         },
@@ -20263,7 +20272,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": "The typed event. It is not set for a kind that this server does not know."
+              "description": "The typed event. It is not set for a kind that this server does not know, or for a payload that\nit cannot read."
             }
           ]
         },

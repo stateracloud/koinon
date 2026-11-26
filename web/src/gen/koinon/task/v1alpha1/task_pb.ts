@@ -241,7 +241,8 @@ export type TaskEvent = Message<"koinon.task.v1alpha1.TaskEvent"> & {
   actorDisplayName: string;
 
   /**
-   * The typed event. It is not set for a kind that this server does not know.
+   * The typed event. It is not set for a kind that this server does not know, or for a payload that
+   * it cannot read.
    *
    * @generated from field: koinon.task.v1alpha1.TimelineEvent event = 10;
    */

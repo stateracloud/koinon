@@ -3,6 +3,7 @@
 package tasks_test
 
 import (
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -150,6 +151,27 @@ var fixtures = []legacyFixture{
 	})},
 }
 
+// variants are other payloads of a kind, one per writer whose keys the fixture above does not have.
+var variants = []legacyFixture{
+	{"message", `{"text":"run the report","source":"schedule","fire":"manual","firedBy":"u1"}`, ev(func(e *taskv1alpha1.TimelineEvent) {
+		e.Event = &taskv1alpha1.TimelineEvent_Message{Message: &taskv1alpha1.TimelineMessage{Text: "run the report", Source: "schedule", Fire: "manual", FiredBy: "u1"}}
+	})},
+	{"message", `{"text":"Fix CI\n\nrun the checks","display":"Fix CI","source":"direct_message","message_id":"m1"}`, ev(func(e *taskv1alpha1.TimelineEvent) {
+		e.Event = &taskv1alpha1.TimelineEvent_Message{Message: &taskv1alpha1.TimelineMessage{Text: "Fix CI\n\nrun the checks", Display: "Fix CI", Source: "direct_message", MessageId: "m1"}}
+	})},
+	{"run.canceled", `{"reason":"model request limit reached (50 of 50 requests)","limit":"requests","max_model_requests":50,"model_requests":50}`, ev(func(e *taskv1alpha1.TimelineEvent) {
+		e.Event = &taskv1alpha1.TimelineEvent_RunCanceled{RunCanceled: &taskv1alpha1.RunEnded{
+			Reason: "model request limit reached (50 of 50 requests)", Limit: "requests", MaxModelRequests: 50, ModelRequests: 50,
+		}}
+	})},
+	// A scope without an expiry: the writer stores the zero time.Time.
+	{"approval.approved", `{` + approvalBase + `,"scope_id":"s1","scope_kind":"org","scope_expires_at":"0001-01-01T00:00:00Z","scope_created_by":"u1","scope_task_id":""}`, ev(func(e *taskv1alpha1.TimelineEvent) {
+		e.Event = &taskv1alpha1.TimelineEvent_ApprovalApproved{ApprovalApproved: changed(func(c *taskv1alpha1.ApprovalChanged) {
+			c.Scope = &taskv1alpha1.ApprovalScope{Id: "s1", Kind: "org", ExpiresAt: timestamppb.New(time.Time{}), CreatedBy: "u1"}
+		})}
+	})},
+}
+
 func equalProto(want proto.Message) OmegaMatcher {
 	return WithTransform(func(got proto.Message) bool { return proto.Equal(got, want) }, BeTrue())
 }
@@ -169,6 +191,10 @@ var _ = Describe("Decode", func() {
 	for _, f := range fixtures {
 		legacy = append(legacy, Entry(f.kind, f))
 		trips = append(trips, Entry(f.kind, f))
+	}
+	for i, f := range variants {
+		legacy = append(legacy, Entry(f.kind+" variant "+strconv.Itoa(i), f))
+		trips = append(trips, Entry(f.kind+" variant "+strconv.Itoa(i), f))
 	}
 
 	DescribeTable("reads a version 0 payload as its writer stores it",

@@ -4699,6 +4699,7 @@ RunEnded records a run that failed or was canceled.
 | window_start | 14 | `string` | singular |  |  |
 | model_requests | 15 | `int64` | singular |  |  |
 | requeue_reason | 16 | `string` | singular |  | Why a newer queued run replaced this one. |
+| max_model_requests | 17 | `int64` | singular |  | The request limit of a run that stopped at it. |
 
 ### Message RunParked
 
@@ -4820,7 +4821,7 @@ TaskEvent is one entry of the task timeline: a message, a state change or a run 
 | payload | 7 | `google.protobuf.Struct` | singular |  | The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old rows too. |
 | created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
 | actor_display_name | 9 | `string` | singular |  | The display name of actor_user_id, for a person's event; empty for other actors, an unnamed user or a deleted user. Never an email address. Any role that can read the task sees it. |
-| event | 10 | `koinon.task.v1alpha1.TimelineEvent` | singular |  | The typed event. It is not set for a kind that this server does not know. |
+| event | 10 | `koinon.task.v1alpha1.TimelineEvent` | singular |  | The typed event. It is not set for a kind that this server does not know, or for a payload that it cannot read. |
 
 ### Message TaskNote
 

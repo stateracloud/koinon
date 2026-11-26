@@ -168,6 +168,8 @@ message RunEnded {
   int64 model_requests = 15;
   // Why a newer queued run replaced this one.
   string requeue_reason = 16;
+  // The request limit of a run that stopped at it.
+  int64 max_model_requests = 17;
 }
 
 // SessionChanged records a new harness session.

@@ -144,7 +144,8 @@ message TaskEvent {
   // The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
   // user or a deleted user. Never an email address. Any role that can read the task sees it.
   string actor_display_name = 9;
-  // The typed event. It is not set for a kind that this server does not know.
+  // The typed event. It is not set for a kind that this server does not know, or for a payload that
+  // it cannot read.
   TimelineEvent event = 10;
 }
 

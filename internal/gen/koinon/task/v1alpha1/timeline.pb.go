@@ -974,8 +974,10 @@ type RunEnded struct {
 	ModelRequests int64  `protobuf:"varint,15,opt,name=model_requests,json=modelRequests,proto3" json:"model_requests,omitempty"`
 	// Why a newer queued run replaced this one.
 	RequeueReason string `protobuf:"bytes,16,opt,name=requeue_reason,json=requeueReason,proto3" json:"requeue_reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The request limit of a run that stopped at it.
+	MaxModelRequests int64 `protobuf:"varint,17,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RunEnded) Reset() {
@@ -1118,6 +1120,13 @@ func (x *RunEnded) GetRequeueReason() string {
 		return x.RequeueReason
 	}
 	return ""
+}
+
+func (x *RunEnded) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
 }
 
 // SessionChanged records a new harness session.
@@ -2001,7 +2010,7 @@ const file_koinon_task_v1alpha1_timeline_proto_rawDesc = "" +
 	"\tRunParked\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12!\n" +
 	"\fapproval_ids\x18\x02 \x03(\tR\vapprovalIds\x12!\n" +
-	"\fquestion_ids\x18\x03 \x03(\tR\vquestionIds\"\xab\x04\n" +
+	"\fquestion_ids\x18\x03 \x03(\tR\vquestionIds\"\xd9\x04\n" +
 	"\bRunEnded\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12#\n" +
 	"\rfailure_class\x18\x02 \x01(\tR\ffailureClass\x12\x18\n" +
@@ -2019,7 +2028,8 @@ const file_koinon_task_v1alpha1_timeline_proto_rawDesc = "" +
 	"\tspent_usd\x18\r \x01(\tR\bspentUsd\x12!\n" +
 	"\fwindow_start\x18\x0e \x01(\tR\vwindowStart\x12%\n" +
 	"\x0emodel_requests\x18\x0f \x01(\x03R\rmodelRequests\x12%\n" +
-	"\x0erequeue_reason\x18\x10 \x01(\tR\rrequeueReason\"y\n" +
+	"\x0erequeue_reason\x18\x10 \x01(\tR\rrequeueReason\x12,\n" +
+	"\x12max_model_requests\x18\x11 \x01(\x03R\x10maxModelRequests\"y\n" +
 	"\x0eSessionChanged\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12.\n" +
 	"\x13previous_session_id\x18\x02 \x01(\tR\x11previousSessionId\x12\x1d\n" +

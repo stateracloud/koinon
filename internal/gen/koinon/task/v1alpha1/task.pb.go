@@ -474,7 +474,8 @@ type TaskEvent struct {
 	// The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
 	// user or a deleted user. Never an email address. Any role that can read the task sees it.
 	ActorDisplayName string `protobuf:"bytes,9,opt,name=actor_display_name,json=actorDisplayName,proto3" json:"actor_display_name,omitempty"`
-	// The typed event. It is not set for a kind that this server does not know.
+	// The typed event. It is not set for a kind that this server does not know, or for a payload that
+	// it cannot read.
 	Event         *TimelineEvent `protobuf:"bytes,10,opt,name=event,proto3" json:"event,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
