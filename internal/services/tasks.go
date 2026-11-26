@@ -193,7 +193,9 @@ func eventActorNames(ctx context.Context, q *store.Queries, org pgtype.UUID, eve
 		return nil, err
 	}
 	for _, r := range rows {
-		if r.DisplayName != "" {
+		// OIDC sign-in can store an email address as the display name (no name claim); the name on
+		// an event is never an email, so a name with "@" is left out.
+		if r.DisplayName != "" && !strings.Contains(r.DisplayName, "@") {
 			names[idString(r.ID)] = r.DisplayName
 		}
 	}

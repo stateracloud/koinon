@@ -83,7 +83,14 @@ var _ = Describe("TaskEvent.actor_display_name", func() {
 		}
 	})
 
-	It("names nobody to a user of another org, who cannot read the task", func(ctx SpecContext) {
+	It("gives no name when the display name is an email address", func(ctx SpecContext) {
+		_, err := e.pool.Exec(ctx, `UPDATE users SET display_name = email WHERE id = $1`, member.userID)
+		Expect(err).NotTo(HaveOccurred())
+		viewer := e.userIn(ctx, org, store.OrgRoleViewer)
+		Expect(messageNames(ctx, viewer)).To(HaveKeyWithValue(member.userID, ""))
+	})
+
+	It("lets a user of another org read nothing of the task", func(ctx SpecContext) {
 		_, stranger := e.newTeamOrg(ctx)
 		_, err := stranger.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: taskID})
 		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
