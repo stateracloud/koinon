@@ -335,7 +335,7 @@ OpenShell run:
 
 - `kind/up.sh` leaves out Agent Sandbox, the `runc` RuntimeClass and OpenShell.
 - `kind/substrate.sh harness` builds the substrate overlay of the harness image (guest front and launcher) and pushes it as
-  `<registry>/<cluster>/sandbox:e2e-substrate`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
+  `<registry>/<cluster>/sandbox-substrate:e2e`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
   digest, #1192).
 - `kind/substrate.sh install` runs `koinon-api substrate install --platform kind --sandbox-classes gvisor` from a clone
   at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into `~/.cache/koinon/substrate`). `GVISOR_MIRROR`

@@ -51,6 +51,18 @@ execution:
     caSecret: ate-ca
     # The substrate overlay of the harness image has not run in a real actor with recorded probe results yet (#1087).
     allowUnhardened: true
+    # The image cache is the one image source of atelet. The overlay is in the registry of the kind cluster (the local
+    # registry on the docker network, kind-registry:5000); the cache pulls it from there: an upstream for the host that
+    # the image reference names, and an egress rule for that range and port.
+    imageCache:
+      upstreams:
+        - {host: localhost:5001, url: "http://kind-registry:5000"}
+        - {host: ghcr.io, url: "https://ghcr.io"}
+        - {host: docker.io, url: "https://registry-1.docker.io"}
+        - {host: quay.io, url: "https://quay.io"}
+      egress:
+        extra:
+          - {cidr: 172.18.0.0/16, port: 5000}
     workerPolicy:
       installerIdentities: [system:admin]
     # The class the reconciler puts on every sandbox (openshell.runtimeClassName) runs at the dev tier: gVisor, Landlock best
@@ -66,7 +78,7 @@ sandboxLimitRange:
   enabled: false
 
 # Substrate runs a harness image only when it is pinned by digest (#1192). run.sh puts the digest of the pushed overlay
-# <image repository>/sandbox:e2e-substrate here.
+# <image repository>/sandbox-substrate:e2e here.
 harnesses:
   opencode:
     image:

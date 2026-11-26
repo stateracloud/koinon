@@ -229,4 +229,12 @@ spec:
         {{- end }}
       ports:
         - {port: 443, protocol: TCP}
+    {{- /* Extra upstreams on another port or a private range (egress.extra): one rule for each entry. */}}
+    {{- range $c.egress.extra }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        - {port: {{ int .port }}, protocol: TCP}
+    {{- end }}
 {{- end }}

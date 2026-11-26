@@ -1161,6 +1161,10 @@ execution:
       egress:
         cidrs: []
         exceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, fc00::/7, fe80::/10]
+        # Off by default. One more egress rule for each entry: TCP <port> to <cidr>. Use it for an upstream on another port
+        # or in a private range (an operator registry, the registry of a kind test cluster); also add it to upstreams.
+        # Example: extra: [{cidr: 172.18.0.0/16, port: 5000}]
+        extra: []
       resources:
         requests: {cpu: 50m, memory: 128Mi}
         limits: {memory: 512Mi}

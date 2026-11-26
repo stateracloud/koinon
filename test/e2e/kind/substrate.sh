@@ -6,7 +6,7 @@
 #
 #   substrate.sh harness   build the substrate overlay of the harness image (make harness-substrate-opencode's
 #                          Dockerfile: the guest front and the launcher), push it to the local registry as
-#                          <repo>/sandbox:e2e-substrate and print its digest reference. Needs <repo>/sandbox:e2e in
+#                          <repo>/sandbox-substrate:e2e and print its digest reference. Needs <repo>/sandbox:e2e in
 #                          the local daemon (images.sh build leaves it there). Substrate runs only an image pinned by
 #                          digest (#1192), so the e2e values carry this digest.
 #   substrate.sh install   install Substrate with `koinon-api substrate install --platform kind`, gvisor class only
@@ -45,7 +45,7 @@ harness() {
   docker image inspect "$src" >/dev/null 2>&1 || { echo "substrate.sh: $src is not in the local daemon; run kind/images.sh build first" >&2; exit 1; }
   step "guest front and launcher (linux/$arch)"
   (cd "$root" && make guest-launcher >&2)
-  step "substrate overlay of the harness image: $REPO/sandbox:e2e-substrate"
+  step "substrate overlay of the harness image: $REPO/sandbox-substrate:e2e"
   # The flavor image goes in as an OCI layout: the buildx builder is a container and cannot pull from localhost:5001.
   local flavor_dir
   flavor_dir=$(mktemp -d "$OUT/flavor-oci.XXXXXX")
@@ -56,16 +56,16 @@ harness() {
   docker buildx build --builder "$builder" --load --platform "linux/$arch" \
     --build-context "flavor=$("$root/hack/harness-flavor-context.sh" "$src" "$flavor_dir")" \
     --build-context "launcher=$root/build/guest-launcher" \
-    --tag "$REPO/sandbox:e2e-substrate" "$root/cmd/koinon-guest-launcher" >&2
-  docker push -q "$REPO/sandbox:e2e-substrate" >/dev/null
+    --tag "$REPO/sandbox-substrate:e2e" "$root/cmd/koinon-guest-launcher" >&2
+  docker push -q "$REPO/sandbox-substrate:e2e" >/dev/null
   # The digest of what the registry now holds under the tag. The node pulls it from the registry, so the registry's
   # digest is the one the chart must pin (a local RepoDigests entry can differ after a push through another manifest type).
   local digest
-  digest=$(docker buildx imagetools inspect "$REPO/sandbox:e2e-substrate" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+  digest=$(docker buildx imagetools inspect "$REPO/sandbox-substrate:e2e" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
   if [[ -z $digest ]]; then
-    digest=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$REPO/sandbox:e2e-substrate" | sed -n "s#^.*@##p" | head -n1)
+    digest=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$REPO/sandbox-substrate:e2e" | sed -n "s#^.*@##p" | head -n1)
   fi
-  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "substrate.sh: no digest for $REPO/sandbox:e2e-substrate (got '$digest')" >&2; exit 1; }
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "substrate.sh: no digest for $REPO/sandbox-substrate:e2e (got '$digest')" >&2; exit 1; }
   printf '%s\n' "$digest" >"$OUT/harness-substrate.digest"
   echo "$digest"
 }
