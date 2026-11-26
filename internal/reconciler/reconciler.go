@@ -803,7 +803,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// gateway's 401 or 429 (old issue 188).
 	for _, i := range draft.Stops {
 		w := items[i]
-		if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
+		if n, err := ledger.StopSpent(ctx, r.db, w.agent, now); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
 			errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 		} else if n > 0 {
@@ -1527,7 +1527,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		r.m.SandboxRepairs.Inc()
 		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": names.Sandbox, "reason": w.sb.UnhealthyReason.String, "home_generation": sb.ID},
 		}); err != nil {
@@ -1641,13 +1641,13 @@ func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (executio
 //
 // release gives the slot back; call it when the backend call that followed failed.
 func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (release func(), held bool, err error) {
-	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.db, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
 	if err != nil {
 		return nil, false, fmt.Errorf("reserve a sandbox creation: %w", err)
 	}
 	if ok {
 		return func() {
-			if err := res.Release(context.WithoutCancel(ctx), r.pool); err != nil {
+			if err := res.Release(context.WithoutCancel(ctx), r.db); err != nil {
 				r.log.Warn("release a sandbox creation slot", append(w.logAttrs(), "error", err)...)
 			}
 		}, false, nil
@@ -1746,7 +1746,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		}
 		r.m.AgentsUnhealthy.Inc()
 		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": name, "reason": reason, "recreations_in_24h": n},
 		}); err != nil {
@@ -1765,7 +1765,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	}
 	r.m.SandboxRepairs.Inc()
 	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
-	if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+	if err := audit.RecordAfter(ctx, r.db, audit.Event{
 		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": name, "reason": "sandbox " + detail, "phase": string(sb.Phase), "message": truncate(sb.Message, 300), "home_generation": sb.ID},
 	}); err != nil {

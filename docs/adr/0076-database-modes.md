@@ -188,16 +188,24 @@ prune objects the new one made.
 The maintainer chose option 1 of issue 635 (comment of 2026-11-26): a term on database writes.
 
 - **The term.** Migration 00116 adds the table `reconciler_leader` with one row and a `term`. A new
-  leader increments the term on its lock connection while it holds the lock
-  (`leaderterm.Take`), and logs it (`reconciler is leading ... term=N`).
-- **The check.** The lead context carries the term (`leaderterm.WithTerm`). The reconciler's queries
-  (`store.Queries`), its audit writes and the publish of the State stream (`staterev`) go through
-  `leaderterm.DB`. It sends each statement in one batch with `reconciler_check_term(term)`: one round
-  trip and one implicit transaction. A transaction starts with the check. The check fails with
-  SQLSTATE `KO635` when the term is not current, and the lead ends at once.
-- **No write of an old term commits after a newer term.** The check holds a share lock on the term
-  row until its transaction ends. The increment of the next leader waits for each open statement of
-  the old term.
+  leader takes the next term (`reconciler_take_term`, through `leaderterm.Take`) on its lock
+  connection while it holds the lock, and logs it (`reconciler is leading ... term=N`).
+- **The check.** The lead context carries the term (`leaderterm.WithTerm`). These writes go through
+  `leaderterm.DB`: the reconciler's queries (`store.Queries`), its audit writes, the budget stop of
+  runs (`ledger.StopSpent`), the sandbox creation slots (`orgsettings`) and the publish of the State
+  stream (`staterev`). It sends each statement in one batch with `reconciler_check_term(term)`: one
+  round trip and one implicit transaction. A transaction starts with the check. The check fails with
+  SQLSTATE `KO635` when the term is not current, and the lead ends at once. Reads go through the
+  check too: a stale leader stops at its first statement.
+- **No write of an old term commits after a newer term.** The check holds a transaction advisory
+  lock in shared mode until its transaction ends; the take holds it in exclusive mode. The take of
+  the next leader waits for each open transaction of the old term, and a check that starts while a
+  take waits queues behind it and then reads the new term. The transactions must be READ COMMITTED
+  (the default), so that the check reads the term after it holds the lock. An advisory lock lives in
+  the lock table only: the check assigns no transaction ID and writes no WAL. A transaction of a lead
+  also sets `idle_in_transaction_session_timeout` to 10 s, in the same statement as the check: a
+  leader that vanished in an open transaction (a partition) delays the take of the next leader by at
+  most that time, not until Postgres sees the dead client.
 - **Not covered: Kubernetes deletes and execution-layer calls.** The database cannot refuse them.
   They keep the time fence of the amendment above. Issue #1465 names their exit condition: the
   gateway reads only the State stream (ADR 0097). Writes of the MCP prober and the remote agent

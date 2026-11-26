@@ -124,6 +124,60 @@ var _ = Describe("the reconciler leader term (#635)", func() {
 		Expect(rows(ctx)).To(Equal(1))
 	})
 
+	It("refuses a write of the old term that starts while the newer term waits", func(ctx SpecContext) {
+		old := leaderterm.WithTerm(ctx, take(ctx), nil)
+		tx, err := db.Begin(old)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = tx.Rollback(context.Background()) })
+
+		taken := make(chan int64, 1)
+		go func() {
+			defer GinkgoRecover()
+			taken <- take(context.Background())
+		}()
+		Consistently(taken, 200*time.Millisecond).ShouldNot(Receive(), "the new term waits for the open transaction")
+
+		// A second write of the old term queues behind the waiting take, not in front of it.
+		wrote := make(chan error, 1)
+		go func() {
+			_, err := db.Exec(old, "INSERT INTO leaderterm_spec (v) VALUES (1)")
+			wrote <- err
+		}()
+		Consistently(wrote, 200*time.Millisecond).ShouldNot(Receive(), "the write waits behind the take")
+
+		Expect(tx.Commit(old)).To(Succeed())
+		Eventually(taken).Should(Receive())
+		var werr error
+		Eventually(wrote).Should(Receive(&werr))
+		Expect(werr).To(MatchError(leaderterm.ErrStale), "the write sees the newer term")
+		Expect(rows(ctx)).To(BeZero())
+	})
+
+	It("reports an error of the implicit commit through the rows of a query", func(ctx SpecContext) {
+		_, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS leaderterm_deferred (
+			v int UNIQUE DEFERRABLE INITIALLY DEFERRED)`)
+		Expect(err).NotTo(HaveOccurred())
+		lctx := leaderterm.WithTerm(ctx, take(ctx), nil)
+		// Two equal rows break the deferred unique check at commit, after the rows were returned.
+		r, err := db.Query(lctx, "INSERT INTO leaderterm_deferred (v) VALUES (7), (7) RETURNING v")
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pgx.CollectRows(r, pgx.RowTo[int])
+		Expect(err).To(HaveOccurred(), "the failed commit is not lost")
+		var n int
+		Expect(pool.QueryRow(ctx, "SELECT count(*) FROM leaderterm_deferred").Scan(&n)).To(Succeed())
+		Expect(n).To(BeZero())
+	})
+
+	It("bounds how long a transaction of a lead may be idle, so a vanished leader cannot hold the next one", func(ctx SpecContext) {
+		lctx := leaderterm.WithTerm(ctx, take(ctx), nil)
+		tx, err := db.Begin(lctx)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = tx.Rollback(context.Background()) })
+		var v string
+		Expect(tx.QueryRow(lctx, "SHOW idle_in_transaction_session_timeout").Scan(&v)).To(Succeed())
+		Expect(v).To(Equal("10s"))
+	})
+
 	It("passes the statements of a context without a term through unchanged", func(ctx SpecContext) {
 		take(ctx)
 		_, err := db.Exec(ctx, "INSERT INTO leaderterm_spec (v) VALUES (1)")

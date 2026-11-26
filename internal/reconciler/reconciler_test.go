@@ -1908,7 +1908,7 @@ var _ = Describe("Reconciler", func() {
 
 			// A newer leader takes the term, as after a silent connection loss before the heartbeat
 			// sees it. The old leader's next pass reads and writes the database: the term is refused.
-			_, err := pool.Exec(ctx, "UPDATE reconciler_leader SET term = term + 1")
+			_, err := pool.Exec(ctx, "SELECT reconciler_take_term()")
 			Expect(err).NotTo(HaveOccurred())
 			_, err = pool.Exec(ctx, "SELECT pg_notify($1, '')", reconciler.NotifyChannel)
 			Expect(err).NotTo(HaveOccurred())

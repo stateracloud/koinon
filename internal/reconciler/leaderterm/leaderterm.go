@@ -8,9 +8,11 @@
 // term closes that window for database writes: each new leader increments the term (Take) while it
 // holds the lock, and puts it on its context (WithTerm). DB sends each statement of a context that
 // carries a term in one implicit transaction together with reconciler_check_term(term), so the
-// database refuses a statement of an old term (ErrStale). The check holds a share lock on the term
-// row until the transaction ends: the increment of the next leader waits for each statement of the
-// old term that is in progress, so none of them commits after the newer term.
+// database refuses a statement of an old term (ErrStale). The check holds a shared transaction
+// advisory lock until the transaction ends, and the take holds it exclusive: the take of the next
+// leader waits for each statement of the old term that is in progress, so none of them commits after
+// the newer term (migration 00116). The transactions must be READ COMMITTED (the default), so the
+// check reads the term after it holds the lock.
 //
 // The term covers database writes only. Kubernetes deletes and execution-layer calls keep the time
 // fence of ADR 0076 (gateway.WithFence); issue 1465 names their exit condition.
@@ -20,17 +22,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// IdleInTransaction bounds how long a transaction of a lead may be idle. The reconciler's transactions
+// are short; this bounds how long a vanished leader delays the next one.
+const IdleInTransaction = 10 * time.Second
 
 // staleCode is the SQLSTATE that reconciler_check_term raises (migration 00116).
 const staleCode = "KO635"
 
 const (
 	checkSQL = "SELECT reconciler_check_term($1)"
-	takeSQL  = "UPDATE reconciler_leader SET term = term + 1 WHERE id = 1 RETURNING term"
+	// beginSQL is the check of a transaction. The transaction also ends when it is idle for longer
+	// than IdleInTransaction: a leader that vanished in an open transaction (a partition) would hold
+	// the shared lock until Postgres sees the dead client, which can be hours, and the next leader's
+	// take would wait that long.
+	beginSQL = "SELECT reconciler_check_term($1), set_config('idle_in_transaction_session_timeout', $2, true)"
+	takeSQL  = "SELECT reconciler_take_term()"
 )
 
 // ErrStale is the error of a statement whose term is not the current term: a newer leader took the
@@ -164,7 +177,7 @@ func begin(ctx context.Context, db Beginner) (pgx.Tx, error) {
 	if !ok {
 		return tx, nil
 	}
-	if _, err := tx.Exec(ctx, checkSQL, l.term); err != nil {
+	if _, err := tx.Exec(ctx, beginSQL, l.term, strconv.FormatInt(IdleInTransaction.Milliseconds(), 10)); err != nil {
 		_ = tx.Rollback(context.WithoutCancel(ctx))
 		return nil, l.refused(err)
 	}
@@ -193,12 +206,37 @@ func (l lease) refused(err error) error {
 
 type batchRows struct {
 	pgx.Rows
-	br pgx.BatchResults
+	br       pgx.BatchResults
+	closed   bool
+	closeErr error
 }
 
-func (r *batchRows) Close() {
+// Next closes the batch after the last row, so Err also reports an error of the implicit commit at
+// the end of the batch (a deferred constraint, for example).
+func (r *batchRows) Next() bool {
+	if r.Rows.Next() {
+		return true
+	}
+	r.close()
+	return false
+}
+
+func (r *batchRows) Err() error {
+	if err := r.Rows.Err(); err != nil {
+		return err
+	}
+	return r.closeErr
+}
+
+func (r *batchRows) Close() { r.close() }
+
+func (r *batchRows) close() {
+	if r.closed {
+		return
+	}
+	r.closed = true
 	r.Rows.Close()
-	_ = r.br.Close()
+	r.closeErr = r.br.Close()
 }
 
 type batchRow struct {
