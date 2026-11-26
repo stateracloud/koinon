@@ -3,6 +3,7 @@
 package substrate
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"google.golang.org/grpc/credentials"
 )
@@ -133,38 +133,63 @@ func routerCredentials(ep Endpoint) (credentials.TransportCredentials, error) {
 			return nil, err
 		}
 	}
-	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		ServerName: name,
-		// The standard verification takes a pool fixed at dial time, which cannot follow a rotation of the
-		// router's CA. VerifyConnection below does the whole check (chain, name, key usage) against the
-		// current pool, so nothing is skipped (the pattern of go-spiffe's tlsconfig).
-		InsecureSkipVerify: true, //nolint:gosec // VerifyConnection verifies the chain and the name
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			if len(cs.PeerCertificates) == 0 {
-				return errors.New("the router sent no certificate")
-			}
-			pool, err := ca.get()
-			if err != nil {
-				return err
-			}
-			inter := x509.NewCertPool()
-			for _, c := range cs.PeerCertificates[1:] {
-				inter.AddCert(c)
-			}
-			_, err = cs.PeerCertificates[0].Verify(x509.VerifyOptions{
-				Roots: pool, Intermediates: inter, DNSName: name, CurrentTime: time.Now(),
-				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-			})
-			return err
-		},
-	}
+	rc := &routerCreds{name: name, ca: ca}
 	if ep.RouterCertFile != "" {
 		cc := &clientCert{file: &watchedFile{path: ep.RouterCertFile}}
 		if _, err := cc.get(); err != nil {
 			return nil, err
 		}
-		cfg.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return cc.get() }
+		rc.clientCert = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return cc.get() }
 	}
-	return credentials.NewTLS(cfg), nil
+	return rc, nil
+}
+
+// routerCreds are gRPC transport credentials that build a new tls.Config for every handshake. The standard
+// verification (chain, name, ServerAuth key usage) then runs against the CA pool of that moment, so a
+// rotation of the router's CA needs no restart and no verification is skipped.
+type routerCreds struct {
+	name       string
+	ca         *roots
+	clientCert func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
+}
+
+func (c *routerCreds) config() (*tls.Config, error) {
+	pool, err := c.ca.get()
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		MinVersion:           tls.VersionTLS13,
+		ServerName:           c.name,
+		RootCAs:              pool, // nil: the system roots
+		GetClientCertificate: c.clientCert,
+	}, nil
+}
+
+func (c *routerCreds) ClientHandshake(ctx context.Context, authority string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	cfg, err := c.config()
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	return credentials.NewTLS(cfg).ClientHandshake(ctx, authority, conn)
+}
+
+func (c *routerCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	return nil, nil, errors.New("substrate: the router credentials are client side only")
+}
+
+func (c *routerCreds) Info() credentials.ProtocolInfo {
+	return credentials.ProtocolInfo{SecurityProtocol: "tls", SecurityVersion: "1.2", ServerName: c.name}
+}
+
+func (c *routerCreds) Clone() credentials.TransportCredentials {
+	cp := *c
+	return &cp
+}
+
+// OverrideServerName sets the name the router certificate is checked against.
+func (c *routerCreds) OverrideServerName(name string) error {
+	c.name = name
+	return nil
 }
