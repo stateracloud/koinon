@@ -909,6 +909,7 @@ jobs:
       - run: hack/hooks/prose-question-stop-check_test.sh
       - run: hack/hooks/question-checklist-check_test.sh
       - run: hack/agent-state-test.sh
+      - run: hack/backup-restore-mode-test.sh
       - run: hack/release-gate-test.sh
       - run: hack/board-test.sh
       - run: hack/release-drill-wait-test.sh
