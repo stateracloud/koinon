@@ -364,8 +364,8 @@ func run(ctx context.Context, cfg config) error {
 		keyReady = keys
 	}
 	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
-		return podReady(guardLoad, keyReady, sc, (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
-	}, log); err != nil {
+		return podReady(guardLoad, keyReady, (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
+	}, func() bool { return sc != nil && sc.Stale() != nil }, log); err != nil {
 		return err
 	}
 
@@ -542,21 +542,14 @@ type loadChecker interface{ Loaded() error }
 // keyReadier is the key loader's readiness (gatewaykeys.Loader.Ready).
 type keyReadier interface{ Ready() (bool, error) }
 
-// staleChecker is the State client's view of its halves (stateclient.Client.Stale): an error when a half has
-// failed to apply for longer than its bound.
-type staleChecker interface{ Stale() error }
-
 // podReady is the /readyz answer of the pod. A pod is ready when it applied a config (configured), its key
 // loader holds the keys it needs, and the leak guard reached its database. The guard opens a lazy pool
 // and retries every 2 s: a broken login would leave every org target closed behind a ready pod, and a
 // rollout would not stop. A nil guard or loader means the pod runs without one. Each later outage is not
 // checked here: the guard refuses on its own then (fail closed), and a database blip must not
 // remove every endpoint.
-func podReady(guard loadChecker, keys keyReadier, state staleChecker, configured bool) bool {
+func podReady(guard loadChecker, keys keyReadier, configured bool) bool {
 	if guard != nil && guard.Loaded() != nil {
-		return false
-	}
-	if state != nil && state.Stale() != nil {
 		return false
 	}
 	if keys != nil {
@@ -567,27 +560,34 @@ func podReady(guard loadChecker, keys keyReadier, state staleChecker, configured
 	return configured
 }
 
-// serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is
-// not draining) on addr. An empty addr serves nothing.
-func serveHealth(life, term context.Context, addr string, configured func() bool, log *slog.Logger) error {
-	if addr == "" {
-		return nil
-	}
+// readyzHandler answers /readyz. A replica with no config would refuse every key: it is not ready until the
+// first revision applied (configured). Once one has, a later State stream outage keeps the config in force,
+// so that answer latches. degraded does not latch: it is asked on every probe, and a pod that fails to
+// apply a newer revision (stateclient.Client.Stale) leaves the Service although it was ready before. Without
+// that, a copy stuck on an old revision would go on to accept keys that a later revision revoked (#1347).
+func readyzHandler(term context.Context, configured, degraded func() bool) http.HandlerFunc {
 	var applied atomic.Bool
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		// A replica with no config would refuse every key: it is not ready until the first
-		// revision applied. Once one has, a later State stream outage keeps the config in force.
+	return func(w http.ResponseWriter, _ *http.Request) {
 		if !applied.Load() && configured() {
 			applied.Store(true)
 		}
-		if term.Err() != nil || !applied.Load() {
+		if term.Err() != nil || !applied.Load() || degraded() {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}
+}
+
+// serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config, is not
+// degraded and is not draining) on addr. An empty addr serves nothing.
+func serveHealth(life, term context.Context, addr string, configured, degraded func() bool, log *slog.Logger) error {
+	if addr == "" {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /readyz", readyzHandler(term, configured, degraded))
 	ln, err := (&net.ListenConfig{}).Listen(life, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("health listener: %w", err)
