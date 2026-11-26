@@ -142,7 +142,8 @@ type GatewayAccess struct {
 // it: its policy entries carry the same rule.
 type GatewayAccessSetter interface {
 	// SetGatewayAccess records the access of sandbox name and applies it at once to a sandbox that
-	// exists, in place. A sandbox that does not exist yet gets it when it is created or restored. A
+	// exists, in place (in the control plane; the data plane can cache the old policy for a short
+	// time). A sandbox that does not exist yet gets it when it is created or restored. A
 	// driver that has no access recorded for a sandbox gives it the zero value: it fails closed.
 	SetGatewayAccess(ctx context.Context, workspace, name string, access GatewayAccess) error
 }

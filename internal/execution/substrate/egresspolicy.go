@@ -145,9 +145,11 @@ func (d *Driver) requireGatewayRoutes(op string) error {
 }
 
 // SetGatewayAccess implements [execution.GatewayAccessSetter]. It records the access of the sandbox and makes the
-// policy of an actor that exists match it at once, in place: a removed grant takes the egress listener away from
-// a running actor without a new sandbox. For an actor that does not exist yet it only records the access, which
-// CreateSandbox and RestoreSandbox then write.
+// policy of an actor that exists match it at once in the control plane, in place: a removed grant takes the egress
+// listener away from a running actor without a new sandbox. atenet-egress sees the change within its policy cache
+// TTL. For an actor that does not exist yet it only records the access, which CreateSandbox and RestoreSandbox
+// then write. When the write fails, the actor keeps its old policy until a later call or resume writes the
+// recorded access; the gateway checks each call again (ADR 0097). DeleteSandbox drops the record.
 func (d *Driver) SetGatewayAccess(ctx context.Context, workspace, name string, access execution.GatewayAccess) error {
 	const op = "SetGatewayAccess"
 	k := key{workspace, name}
@@ -159,6 +161,14 @@ func (d *Driver) SetGatewayAccess(ctx context.Context, workspace, name string, a
 		return nil // no actor yet: CreateSandbox or RestoreSandbox writes the access recorded above
 	}
 	return err
+}
+
+// forgetAccess drops the access recorded for the sandbox, so that the record does not outlive the actor (an
+// ephemeral agent gets a new sandbox for each task). The reconciler sets the access again before a later create.
+func (d *Driver) forgetAccess(k key) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.access, k)
 }
 
 // accessOf is the access recorded for the sandbox, or the zero access.

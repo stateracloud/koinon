@@ -315,6 +315,18 @@ var _ = Describe("the egress listener in the actor egress policy", func() {
 		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse())
 	})
 
+	It("forgets the grant with the sandbox, so a new sandbox of that name has no egress listener until it is set", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeTrue())
+		_, err := d.DeleteSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "no access recorded: fail closed")
+	})
+
 	It("is reached through the adapter of the production wiring", func() {
 		d, _ := newDriver()
 		Expect(execution.GatewayAccessSetterOf(execution.WithoutEgress(d))).To(BeIdenticalTo(d))

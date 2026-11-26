@@ -441,6 +441,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 		d.forget(k)
 		d.setOwed(k, false)
 		d.forgetLineage(k)
+		d.forgetAccess(k)
 		return execution.DeleteAbsent, nil
 	case err != nil:
 		return "", execution.GRPCError(op, err)
@@ -451,6 +452,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	d.forget(k)
 	d.setOwed(k, false)
 	d.forgetLineage(k)
+	d.forgetAccess(k)
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}

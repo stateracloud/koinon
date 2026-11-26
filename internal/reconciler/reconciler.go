@@ -1434,7 +1434,8 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	// The sandbox's gateway access (issue #1444), for a driver with a per-sandbox allow list (Substrate):
 	// the egress listener under the same condition as the egressRule entry above. It is set on every pass,
 	// before this pass creates or starts the sandbox, and the driver applies it in place: a changed grant
-	// never replaces the sandbox, and a removed one takes the listener away at once. It is not in spec or
+	// never replaces the sandbox, and a removed one takes the listener away at once (within the data plane's
+	// policy cache TTL). It is not in spec or
 	// hash for that reason.
 	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
 		access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
