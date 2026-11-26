@@ -15,6 +15,3 @@ bootstrapAdmin:
 gateway:
   model:
     driver: koinon
-# The OpenShell and Kata checks need a cluster with both; this install only proves the held gateways.
-preflight:
-  enabled: false
