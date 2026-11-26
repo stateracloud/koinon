@@ -15,35 +15,40 @@ relates: ["0006", "0007", "0010", "0017", "0023", "0055", "0065", "0066", "0110"
   [0017](0017-board-and-chat-interaction-model.md), [0023](0023-observability-and-audit.md),
   [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md),
   [0066](0066-triggers-and-scheduling.md), [0110](0110-held-copy-isolation.md)
-- Design adapted from hydro-project/infinity (Apache-2.0): the split into a core without I/O, with chat events in and
-  chat actions out, and a driver around it (Upstream verification).
+- Design adapted from hydro-project/infinity (Apache-2.0): the split into a core without I/O, with platform events in
+  and platform actions out, and a driver around it (Upstream verification).
 
 ## Context
 
-Release v0.2 adds Slack and Teams ([0024](0024-roadmap.md)). Earlier ADRs decide what the two connectors do:
+Release v0.2 adds Slack and Teams ([0024](0024-roadmap.md), the v0.2 row). Accepted ADRs decide what the two
+connectors do:
 
 - Channel event triggers: a channel message that matches rules, or an @mention, starts or wakes a task
   ([0066](0066-triggers-and-scheduling.md) decision 3).
 - Notifications and `ask_user` questions go to Slack and Teams with buttons. A person whose chat account is linked to
-  their Koinon user answers there. A tap from an unlinked account is refused
-  ([0065](0065-work-model-tasks-inbox.md) decisions 7 to 9).
-- Threads mirror tasks in both directions. This needs dedupe and loop prevention
-  ([0017](0017-board-and-chat-interaction-model.md), consequences).
+  their Koinon user answers there, with a button or with free text in the thread. A tap from an unlinked account is
+  refused ([0065](0065-work-model-tasks-inbox.md) decisions 7 to 9).
+- Only a person's chat message on a task can interrupt a running turn. Other input waits until the turn ends
+  ([0066](0066-triggers-and-scheduling.md) decision 12).
+
+[0017](0017-board-and-chat-interaction-model.md) proposed two-way mirroring of threads and tasks. It is superseded, and
+its amendment says that two-way mirroring "was not decided again". This ADR does not decide it either (open question
+8).
 
 [0066](0066-triggers-and-scheduling.md) also decides the ingress:
 
 - Webhooks are verified by signature: the Slack signing secret, the Teams JWT (decision 5).
 - Slack Socket Mode is an outbound WebSocket (decision 6).
 - Everything lands in DBOS for dedupe and retries (decision 8).
-- The correlation key of a chat event is the thread (decision 9). Bursts in a short window become one wake-up
+- The correlation key of a channel event is the thread (decision 9). Bursts in a short window become one wake-up
   (decision 10). Koinon acknowledges at once (decision 11).
 - The DB3 amendment builds `durable.Once` and the table `dedupe_records`, with the source `slack` keyed on `event_id`.
-  `durable.Commit` sends notifications only after the commit.
+  One `(source, key)` guards one effect kind. `durable.Commit` sends notifications only after the commit.
 
 Both platforms put hard limits on the adapter:
 
-- They expect an HTTP answer in a few seconds. Slack retries an event that it does not see acknowledged in time. A
-  slow handler thus causes duplicate deliveries.
+- They expect an HTTP answer in a few seconds. Slack retries an event that it does not see acknowledged in time. So a
+  slow handler causes duplicate deliveries.
 - They limit how fast a bot can send. An over-limit call gets HTTP 429, usually with a `Retry-After` header in seconds.
 - Message bodies are org content. Logs, metrics and errors must not carry them ([0023](0023-observability-and-audit.md)
   keeps run content under the org's retention and content level).
@@ -61,63 +66,67 @@ The adapter has three parts. Only the core makes decisions.
 
 | Part | Does | Does not |
 | --- | --- | --- |
-| **Edge** (one per platform and transport) | Receives the delivery (HTTP webhook or Socket Mode), verifies the signature, parses it into an `Event`, hands it to DBOS, acknowledges | Decide, call Koinon services, send to the platform |
+| **Edge** (one per platform and transport) | Receives the delivery (HTTP webhook or Socket Mode), verifies the signature, parses it into an `Event`, enqueues it in DBOS, acknowledges | Decide, call Koinon services, send to the platform |
 | **Core** (one, for both platforms) | A pure function `Step(state, event, now) -> (state', actions)` | I/O of any kind |
-| **Driver** (one per platform) | Loads the state, calls the core, runs each action as a DBOS step, renders messages for the platform, applies rate limits | Decide what to do with an event |
+| **Driver** (one per platform) | Runs the apply step (decision 4), then runs each platform action as a DBOS step, renders messages for the platform, applies rate limits | Decide what to do with an event |
 
 ```mermaid
 flowchart LR
   P[Slack / Teams] -->|delivery| E[Edge: verify, parse]
   E -->|enqueue workflow, then ack| D[(DBOS)]
-  D --> R[Driver: load state]
-  R --> C[Core: Step]
-  C -->|state', actions| R
-  R -->|Koinon operations| K[Tasks, questions, runs]
-  R -->|rate-limited sends| P
+  D --> A[Driver: apply step, one transaction]
+  A --> C[Core: Step]
+  C -->|state', actions| A
+  A -->|Koinon operations, same transaction| K[Tasks, questions, runs]
+  A -->|checkpointed actions| S[Driver: send steps]
+  S -->|rate-limited sends| P
 ```
 
 The core package must not import network, database, DBOS, logging or platform SDK packages. A Go test of the import
 graph enforces this. The core gets the time as the input `now`. It uses no random values. It returns actions in a
-fixed order. The same input thus gives the same output, and the core is unit-testable without the platform.
+fixed order. So the same input gives the same output, and the core is unit-testable without the platform.
 
 ### 2. The core's types
 
 The types are platform-neutral. A platform field appears only where the platforms differ.
 
-- **`Key`**: `{platform, team, channel, thread}`. Decision 5 gives the values. The key is the chat correlation key of
-  [0066](0066-triggers-and-scheduling.md) decision 9, made exact.
+- **`Key`**: `{platform, team, channel, thread}`. Decision 6 gives the values. The key is the channel-event
+  correlation key of [0066](0066-triggers-and-scheduling.md) decision 9, made exact.
 - **`Event`**:
   - `key`, `connection` (the Koinon connection the delivery arrived on, and through it the org);
-  - `delivery_id`: the platform's ID for this delivery (Slack `event_id`, Teams activity `id`);
+  - `cause_id`: the ID of this input (decision 4);
   - `kind`: one of `message`, `mention`, `choice` (a button tap), `message_changed`, `message_deleted`, `flush` (the
-    burst timer of decision 4), `uninstalled`;
+    burst timer), `posted` (Koinon started a thread, decision 5), `uninstalled`;
   - `actor`: the platform user ID and a bot flag;
   - `at`: the platform timestamp;
-  - `body`: a `Body` value (decision 8);
+  - `body`: a `Body` value (decision 9);
   - `choice`: for a button tap, the question ID and the choice ID that Koinon put in the button.
-- **`State`**: a snapshot that the driver loads before each step. It has two parts:
+- **`State`**: a snapshot that the driver loads in the apply step. It has two parts:
   - **Read-only facts**: the connection's status and outward state, the channel event triggers in effect for the
     connection ([0066](0066-triggers-and-scheduling.md) TR1 read side), the actor's account link (a Koinon user or
-    none), and the open question that a `choice` names.
-  - **Thread state**, stored per key with a version: the bound task (or none), the burst buffer and its flush time, the
-    platform IDs of the messages Koinon sent to the thread, and the Teams conversation reference.
-- **`Action`**: a closed set. Each action has an idempotency key: the delivery ID of its cause plus its index in the
-  output.
-  - Koinon effects: `CreateTask`, `WakeTask`, `AnswerQuestion`. The driver runs them through Koinon's own operations
-    (`services.CreateTriggeredTask`, the wake and answer paths), as [0066](0066-triggers-and-scheduling.md) requires for
-    all DBOS work.
+    none), the open question on the bound task, and whether the bound task has a running turn.
+  - **Thread state**, one row per key: the bound task (or none), the burst buffer and its flush time, the platform IDs
+    of the messages Koinon sent to the thread, and the Teams conversation reference.
+- **`Action`**: a closed set. Each action has an action key: its cause ID, its kind and its index in the output.
+  - Koinon effects:
+    - `CreateTask(agent, trigger, events)`: also binds the key to the new task (decision 5);
+    - `WakeTask(task, events, interrupt)`: `interrupt` is true only for a message from a linked person, as
+      [0066](0066-triggers-and-scheduling.md) decision 12 requires; the wake path keeps other input until the turn
+      ends;
+    - `AnswerQuestion(question, answer, user)`: from a `choice`, or from a `message` by a linked person in a thread
+      whose bound task has an open question ([0065](0065-work-model-tasks-inbox.md) decision 9).
   - Platform effects: `Post`, `Update`, `React`, `SetStatus` (a typing or "working on it" status), `RefuseUnlinked`
-    (an ephemeral answer to an unlinked tap).
+    (an ephemeral answer to an unlinked tap). A `Post` that starts a thread carries the task it is for.
   - Timers: `ScheduleFlush(key, at)`.
   - `Drop(reason)`: the core ignores the event. The reason is a fixed enum and becomes a metric label.
 
 The core works with a neutral message model: text, and buttons with choice IDs. The driver renders it as Slack Block
 Kit or as a Teams Adaptive Card. The core never builds platform JSON.
 
-The core drops events from Koinon's own bot user and from other bots, unless a trigger allows bots. This is the loop
-prevention that [0017](0017-board-and-chat-interaction-model.md) asks for.
+The core drops events from Koinon's own bot user and from other bots, unless a trigger allows bots. This is loop
+prevention.
 
-### 3. Acknowledge first, then hand the event to DBOS
+### 3. Enqueue, then acknowledge
 
 The edge does these steps, in this order:
 
@@ -126,33 +135,52 @@ The edge does these steps, in this order:
 2. Parse the delivery into an `Event`. Find the connection from the team and the app. An unknown team gets HTTP 200
    and a `Drop` metric, so that the platform does not retry it.
 3. Enqueue one DBOS workflow on the org's queue (`durable.EnqueueForOrg`). The workflow ID is
-   `chat:<platform>:<team>:<delivery_id>`. A platform retry thus maps to the same workflow.
+   `chat:<platform>:<team>:<delivery_id>`. So a platform retry maps to the same workflow.
 4. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
 
-The edge does no other work before the acknowledgement. The enqueue is one Postgres write. If it fails, the edge
-answers with HTTP 5xx (or does not acknowledge the envelope), and the platform delivers again.
+The edge does no other work before the acknowledgement: a connection lookup, the org's queue limits and one enqueue
+write. This is what "acknowledge first" means in #24 and in [0066](0066-triggers-and-scheduling.md) decision 11: the
+acknowledgement does not wait for any task work. The enqueue comes before the acknowledgement, because an event that is
+acknowledged and then lost in a crash never comes back. If the enqueue fails, the edge answers with HTTP 5xx (or does
+not acknowledge the envelope), and the platform delivers again.
 
 A visible acknowledgement (a reaction or a status) is different. It is a core action, and the driver sends it after
-the enqueue. [0066](0066-triggers-and-scheduling.md) (LT1 amendment) gives this to the chat connector.
+the apply step. [0066](0066-triggers-and-scheduling.md) (LT1 amendment) gives this to the chat connector.
 
-### 4. Idempotency and ordering
+### 4. The apply step: idempotency and order
 
-- **Inbound.** The workflow ID stops a second workflow for one delivery. Each Koinon effect also runs in
-  `durable.Once`, in the same transaction as the effect. The source is `slack` (existing) or `teams` (new), and the
-  key is the delivery ID. A replay returns the existing effect.
-- **Outbound.** The driver runs each platform action as its own DBOS step. A step that succeeded does not run again.
-  Slack's `chat.postMessage` and the Teams send API have no idempotency key. A crash after the platform accepted a
-  post and before DBOS recorded the step can thus post twice. This is at-least-once delivery. The driver records the
-  platform message ID in the step result and uses `Update` on that ID for later changes, which are idempotent.
-- **Order in one thread.** The driver writes the new thread state only if the version did not change since it loaded
-  the state. On a conflict it loads again and runs the core again. Events for one key are thus applied one at a time.
-  Different keys run in parallel, within the org's queue limits.
-- **Bursts.** The core puts `message` events for a key in the burst buffer and returns `ScheduleFlush`. The driver
-  starts a durable DBOS timer. At the flush time a `flush` event arrives, and the core returns one `CreateTask` or
-  `WakeTask` with all buffered events, in platform-timestamp order. An `@mention` or a `choice` does not wait for a
-  flush. The window is per org (open question 2).
+The driver's workflow has one **apply step**, then one send step per platform action. The apply step is one DBOS step
+and one Postgres transaction:
 
-### 5. Keys
+1. Create the thread row for the key if it does not exist, then lock it (`SELECT ... FOR UPDATE`). So inputs for one key
+   are applied one at a time. Different keys run in parallel, within the org's queue limits.
+2. If the row records the event's `cause_id` as applied, return the actions stored with it, and stop.
+3. Load the read-only facts and call `Step`.
+4. Run the Koinon effects in this transaction, each in `durable.Once` with the source `slack` or `teams` (new) and
+   the action key. One action key guards one effect kind, as DB3 requires.
+5. Write the new thread state, the `cause_id` and the platform actions. Commit.
+
+The platform actions in the step's result are the ones that the send steps run. A crash after the commit and before
+DBOS records the step runs the step again. Step 2 then returns the stored actions, and `Step` does not run again on the
+new state. Applied cause IDs are removed after the dedupe window.
+
+Today `services.CreateTriggeredTask` opens its own transaction. The first code issue lets it, and the wake and answer
+paths, run in the caller's transaction, as `durable.Once` does.
+
+- **Cause IDs.** For a platform delivery, the cause ID is the delivery ID (Slack `event_id`, Teams activity `id`). For
+  a flush, it is `flush:<key>:<flush time in Unix seconds>`. For a `posted` event, it is `posted:<action key of the
+  Post>`.
+- **Outbound.** Each platform action runs as its own DBOS step. A step that succeeded does not run again. Slack's
+  `chat.postMessage` and the Teams send API have no idempotency key. So a crash after the platform accepted a post and
+  before DBOS recorded the step can post twice. This is at-least-once delivery. The driver records the platform
+  message ID in the step result and uses `Update` on that ID for later changes, which are idempotent.
+- **Bursts.** The core puts `message` events for a key in the burst buffer. It returns `ScheduleFlush` only when no
+  flush is pending for the key, so one burst has one timer. The driver starts a durable DBOS timer. At the flush time
+  a `flush` event arrives, and the core returns one `CreateTask` or `WakeTask` with all buffered events, in
+  platform-timestamp order, and clears the buffer. An `@mention`, a `choice` or an answer does not wait for a flush.
+  The window is per org (open question 2).
+
+### 5. Keys and the thread binding
 
 | Field | Slack | Teams |
 | --- | --- | --- |
@@ -163,41 +191,57 @@ the enqueue. [0066](0066-triggers-and-scheduling.md) (LT1 amendment) gives this 
 The key holds platform IDs only, never names or text. Logs can hold it. Metric labels must not hold it
 ([0023](0023-observability-and-audit.md) label rule).
 
+- **A thread that a person starts.** `CreateTask` binds the key to the task in the transaction that creates the task
+  (`TriggeredTask.OnCreate`). A unique constraint allows one open binding per key. Two mentions in a new thread are
+  applied one after the other (decision 4), so the second one sees the binding and wakes the task.
+- **A thread that Koinon starts** (a notification or an `ask_user` post). The key exists only after the post returns
+  its `ts` or ID. The send step then enqueues a `posted` event with the key and the task. The core binds the key to the
+  task in the apply step of that event. If the send step fails before it enqueues the event, it runs again and posts
+  again (at-least-once, decision 4).
+- **The end of a task** removes the binding. A later message in the thread then follows the triggers again.
+
 ### 6. Batches, 429 and `Retry-After`
 
 Rate limits live in the driver. The core only states what to send.
 
 - **Coalesce.** In one step, the driver joins consecutive `Post` actions for one thread into one message when the
   result is under the platform's size limit. Status changes for one thread go out at most once per interval.
-- **Proactive limits.** The driver keeps a token bucket per connection and per channel, sized from the platform's
-  published limits.
-- **On 429.** The driver reads `Retry-After` and stores "paused until" on the connection in Postgres, so every
-  replica obeys it. It waits with a durable DBOS sleep, not a goroutine sleep, and then runs the step again. It never
-  sends to that scope before the time has passed. Without a `Retry-After` header, it uses exponential backoff with
-  jitter.
+- **Proactive limits.** The driver keeps token buckets sized from the platform's published limits: per connection and
+  method for Slack, per conversation for Teams.
+- **On 429.** The driver reads `Retry-After` and stores "paused until" in Postgres for the scope of that limit (the
+  bucket that the call used), so every replica obeys it. It waits with a durable DBOS sleep, not a goroutine sleep, and
+  then runs the step again. It never sends to that scope before the time has passed. Without a `Retry-After` header, it
+  uses exponential backoff with jitter. The first code issue for each platform confirms the scopes.
 - **On 5xx and network errors.** Exponential backoff with jitter.
 - **Give up.** After a fixed number of attempts, the action fails. The driver records a metric and shows the failure
   on the connection's status, for the org admin. A failed `ask_user` post does not change the question: the inbox
   still has it ([0065](0065-work-model-tasks-inbox.md)).
 
-### 7. Secrets and the outward switch
+### 7. Secrets
 
 - The bot token, the signing secret and the Teams app credential are connection credentials of the `app-credential`
   auth type ([0006](0006-identity-layers.md), [0007](0007-connector-model.md)), stored in the secret store. Only the
   edge and the driver read them, in `koinon-api`.
 - No chat credential goes into a sandbox. An agent reaches Slack or Teams only through Koinon: notifications,
   `ask_user` and its own task's replies. It never gets a chat token.
-- A chat connection is an outward target ([0110](0110-held-copy-isolation.md), `internal/outward`). Today the kind
-  `connection` covers code-host connections only; chat connections join it. When an admin disables it, or the install is held after a restore, the driver sends nothing. The edge still acknowledges, so the
-  platform does not retry, and the core returns `Drop(outward_disabled)`.
 - The driver calls only hosts on a fixed list per platform. Teams gives a `serviceUrl` in each activity. The driver
   refuses a `serviceUrl` that is not on the list, so a forged activity cannot make Koinon call another host.
 
-### 8. Message bodies are never logged
+### 8. The outward switch
+
+- A chat connection is an outward target ([0110](0110-held-copy-isolation.md), `internal/outward`) with a new kind,
+  `chat-connection`, added from its first migration, as the comment on the outward kinds asks.
+- When an admin disables the connection, or the install is held after a restore, the core returns
+  `Drop(outward_disabled)` for every inbound event: no task is created or woken. The edge still acknowledges, so the
+  platform does not retry.
+- Each send step checks the outward state again at send time, not only in the apply step's snapshot. A disabled
+  target gets no call.
+
+### 9. Message bodies are never logged
 
 - `Body` is a type, not a string. Its `String`, `GoString`, `slog.LogValuer` and JSON output give only
-  `[redacted, N bytes]`. Code that must read the text calls one method (`Text()`); a lint rule allows that call only
-  in the core and in the code that writes task messages.
+  `[redacted, N bytes]`. Code that must read the text calls one method (`Text()`). A lint rule allows that call only
+  in the core, in the code that writes task messages and in the platform renderers.
 - The core has no logger. The edge and the driver log the connection ID, the key, the event kind, the outcome and the
   platform error code. They never log text, blocks, cards, file names, display names or a platform error message that
   echoes the request.
@@ -205,13 +249,17 @@ Rate limits live in the driver. The core only states what to send.
   ([0023](0023-observability-and-audit.md)).
 - A leak test sends a canary body through the edge, the core and the driver with a capturing logger, a metrics
   registry and a trace exporter. It fails if the canary appears in any of them.
-- The body is stored once, as a task message, under the org's run-content retention
-  ([0023](0023-observability-and-audit.md)). The DBOS workflow input also holds the event (open question 5).
+- Bodies are stored in three places, and each one is bounded:
+  - the task message, under the org's run-content retention ([0023](0023-observability-and-audit.md));
+  - the burst buffer in the thread row, until the flush clears it; the run-content purge also clears it;
+  - the DBOS workflow input of the event (open question 5).
 
-### 9. Tests
+### 10. Tests
 
 - The core: table tests of event sequences and their expected actions; property tests for determinism and for order
   (the same buffered events in any arrival order give one wake-up in timestamp order).
+- The apply step: a replay after a crash between the commit and the checkpoint gives the same actions and no second
+  effect; two concurrent mentions in a new thread give one task.
 - The edge: recorded deliveries, including bad signatures and retries.
 - The driver: a fake Slack and a fake Teams server in the test process, which return 429 with `Retry-After`, 5xx and
   slow answers. No test calls the real platforms, as no test calls a paid model.
@@ -225,12 +273,17 @@ Rate limits live in the driver. The core only states what to send.
 - **Work before the acknowledgement** _(reconstructed)_. The handler does the task work and then answers. This is
   simpler, but a slow database or a cold path misses the platform deadline. The platform then retries, and the
   duplicates need more dedupe. Rejected: the acknowledgement must not depend on Koinon's load.
+- **Acknowledge before the enqueue** _(reconstructed)_. This answers a few milliseconds sooner, but a crash after the
+  answer loses the event, and the platform does not deliver it again. Rejected.
+- **Optimistic versioning of the thread row, without a lock** _(reconstructed)_. It avoids a row lock, but a retry
+  after a conflict runs `Step` on a new state, and the effects of the first try must then be found and undone. The row
+  lock is short, because the apply step does no platform I/O.
 - **Infinity's runtime as it is** _(reconstructed)_. Infinity builds its Slack core as a Hydro dataflow in Rust.
   Koinon is Go and already has DBOS for durability. We take the shape (no-I/O core, events in, actions out), not the
   runtime.
-- **A separate chat gateway process** _(reconstructed)_. It isolates the chat traffic, but [0066](0066-triggers-and-scheduling.md)
-  runs DBOS workers in `koinon-api` only, and a second process needs its own credential access. The edge and the
-  driver stay in `koinon-api`. The pure core keeps a later move cheap.
+- **A separate chat gateway process** _(reconstructed)_. It isolates the chat traffic, but
+  [0066](0066-triggers-and-scheduling.md) runs DBOS workers in `koinon-api` only, and a second process needs its own
+  credential access. The edge and the driver stay in `koinon-api`. The pure core keeps a later move cheap.
 - **A hosted chat bridge or a third-party relay** _(reconstructed)_. Rejected: the chat credentials and the bodies
   would leave the install.
 - **Rate limits in the core** _(reconstructed)_. The core would need the clock and the platform's answers as state,
@@ -243,16 +296,21 @@ Rate limits live in the driver. The core only states what to send.
 - Positive: the acknowledgement does not depend on Koinon's load, so slow work does not cause platform retries.
 - Positive: retries, rate limits, secret access and the no-body-log rule are each in one place.
 - Negative: there are more types (event, state, action, a renderer per platform) than in a handler-based adapter.
+- Negative: Koinon's task, wake and answer operations must accept the caller's transaction. _(inferred)_
 - Negative: posts are at-least-once. A crash at the wrong time can post a message twice. _(inferred)_
 - Negative: the DBOS system tables hold message bodies in workflow inputs until DBOS removes the workflow records.
   _(inferred)_
 - Follow-ups: the code goes in issues filed after the review of this ADR. Proposed split: (1) the core types and
-  `Step`, with the import-graph test; (2) the Slack edge (Events API and Socket Mode); (3) the Slack driver with rate
-  limits and the fake Slack server; (4) the Teams edge and driver; (5) account linking
-  ([0065](0065-work-model-tasks-inbox.md) decision 9); (6) the body leak test. The `teams` dedupe source goes into the
-  [0066](0066-triggers-and-scheduling.md) DB3 list when it is built.
+  `Step`, with the import-graph test; (2) the apply step, the thread table and the caller's transaction for the task
+  operations; (3) the Slack edge (Events API and Socket Mode); (4) the Slack driver with rate limits and the fake Slack
+  server; (5) the Teams edge and driver; (6) account linking ([0065](0065-work-model-tasks-inbox.md) decision 9); (7)
+  the body leak test.
+- Follow-ups: when this ADR is accepted, [0066](0066-triggers-and-scheduling.md) gets an "Amended by" line for the
+  exact channel-event key (decision 9) and the `teams` dedupe source (DB3 list).
 
 ## Open questions
+
+Each question gets a tracking issue with the code issues, after the review of this ADR.
 
 1. **Names.** The glossary keeps "Chat" for a planned object ([0055](0055-chat-as-its-own-object.md)). Proposed
    package: `internal/chatadapter`, with the core in `internal/chatadapter/core`. The maintainer decides the name.
@@ -268,6 +326,8 @@ Rate limits live in the driver. The core only states what to send.
 6. **Teams API.** The Bot Framework connector or Microsoft Graph for channel messages. This ADR assumes the Bot
    Framework (activities with `serviceUrl`).
 7. **Give-up limit and the status interval** of decision 6. Not decided.
+8. **Two-way mirroring.** Should Koinon post every task message to a bound thread, or only notifications, questions
+   and the agent's replies? This ADR builds the second. The first needs a decision on loop prevention for edits.
 
 ## Upstream verification
 
