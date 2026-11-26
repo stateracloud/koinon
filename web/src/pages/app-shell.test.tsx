@@ -4,7 +4,7 @@ import { createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
@@ -18,7 +18,10 @@ type Who = Parameters<typeof whoAmI>[0]
 function transport(who: Who = {}) {
   return createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI(who) })
-    service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+    service(AgentService, {
+      listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }),
+      listAgentSummaries: () => ({ agents: [{ agentId: 'a-1', displayName: 'Repo helper', status: AgentStatus.ACTIVE }] }),
+    })
     service(TaskService, { listTasks: () => ({ tasks: [] }) })
     service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
   })
