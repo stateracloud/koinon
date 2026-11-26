@@ -799,10 +799,17 @@ root payload from two tiers and leaves the third as it was.
   payload is open work in [#1478](https://github.com/stateracloud/koinon/issues/1478). A staging directory that
   the payload owns lets the payload swap a symlink while the root front writes, so this amendment does not
   contain one.
-- **Before #1387 closes.** A proof run with the real front image and the escape suite on the lab. The maintainer
-  runs it. It must show the runsc network mode, Exec in `/sandbox` as uid 10001, `CapEff` 0, and the escape
-  suite. The proof for Upload and the checkpoint restore belongs to #1478. The owner and mode of the home volume
-  at run time decide whether the front, without `CAP_DAC_READ_SEARCH`, can enter `/sandbox`.
+- **Lab proof run, 2026-11-26 21:00Z (koinon-lab, gVisor worker).** Head `41a2400b5`, through the real Substrate
+  driver and the real front image. The run showed:
+  - runsc network mode `--network=sandbox`;
+  - Exec in `/sandbox` as uid 10001 with `CapEff` 0;
+  - `/sandbox` at run time is `0:0` mode 777, so the front enters it without `CAP_DAC_READ_SEARCH`;
+  - the escape suite: 14 of 18 specs pass (13 of 18 on main). The 4 network failures are the same on main.
+    Their cause in the lab setup is not confirmed.
+- **Not proved here.** The Upload and checkpoint restore proof belongs to #1478. The lab run above used the
+  staging design that this amendment later reverted, so it does not cover the current code for these two paths.
+  The maintainer has not yet accepted the 4 network failures in writing, so this change does not close #1387.
+  It uses `Refs #1387`.
 
 ### Prior art
 

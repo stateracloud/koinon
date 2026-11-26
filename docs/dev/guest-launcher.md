@@ -166,8 +166,9 @@ modes. Two results follow:
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
   `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
-  of #1387 must show the runsc network mode, Exec in `/sandbox` as uid 10001, `CapEff` 0 and the escape
-  suite. The Upload and restore proof belongs to #1478.
+  of #1387 (2026-11-26, head `41a2400b5`) showed `--network=sandbox`, Exec in `/sandbox` as uid 10001
+  with `CapEff` 0, `/sandbox` at `0:0` mode 777 and 14 of 18 escape specs (the 4 network failures are the
+  same on main; the cause is not confirmed). The Upload and restore proof belongs to #1478.
 
 **`vm` tier.** The template keeps the Substrate default set. The Substrate v1.0.1 microVM guest gave
 payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so the drop failed
