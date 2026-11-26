@@ -20,6 +20,8 @@ export type OutwardSwitchProps = {
   subject: string
   /** The target's adminDisabled from Get or List; unset when it is enabled. */
   disabled?: AdminDisabled
+  /** A table row: the state is one short line (badge, who, reason) instead of the full notice. */
+  compact?: boolean
 }
 
 /**
@@ -27,7 +29,7 @@ export type OutwardSwitchProps = {
  * Disabling is always offered; enabling is refused by the server while the install is held for a restore,
  * and for a target whose declaring Secret says disabled: true. The server's message is shown as it is.
  */
-export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwitchProps) {
+export function OutwardSwitch({ kind, targetId, subject, disabled, compact = false }: OutwardSwitchProps) {
   // A platform target (the platform trace destination) is in the platform console, which has no org; the server
   // ignores org_id for it.
   const orgId = useOptionalOrg()?.org.orgId ?? ''
@@ -53,7 +55,14 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
 
   return (
     <div className="grid gap-2">
-      {disabled && (
+      {disabled && compact && (
+        <p role="note" className="text-sm">
+          <Badge variant="destructive">Switched off</Badge> by {disabled.by}
+          {disabled.note ? `: ${disabled.note}` : '.'}
+          {disabled.declared && ' Its declaring Secret says disabled: true; remove that field from the Secret to enable it.'}
+        </p>
+      )}
+      {disabled && !compact && (
         <Alert variant="destructive" role="note">
           <AlertDescription>
             <Badge variant="destructive">Switched off by an admin</Badge> Koinon does not call it, probe it or offer it to runs. Its settings and credential are kept. Since {formatTime(disabled.at, '')} by {disabled.by}

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Restore-hold on the default standalone install (issue #1358): the shape of the restore drill. The
 # default MCP driver (koinon-gateway) and the koinon model driver start with --restore-hold and are
-# ready with no State revision, deny-all. The smoke tests prove they answer /readyz with 200.
+# ready with no State revision, deny-all. The smoke tests prove they answer /readyz with 200, and
+# that the egress listener of the held MCP gateway refuses every request (issue #1390).
 restoreHold: true
 openshell:
   address: openshell.openshell.svc:8080
@@ -13,5 +14,9 @@ postgres:
 bootstrapAdmin:
   enabled: false
 gateway:
+  mcp:
+    koinon:
+      egress:
+        enabled: true
   model:
     driver: koinon

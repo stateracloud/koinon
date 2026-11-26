@@ -383,9 +383,13 @@ go)
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
+  # The first spec replaces the bootstrap password; the others sign in with this one (web/e2e-real/session.ts).
+  # KOINON_E2E_FAKEMCP_CA is the fake MCP server's CA, which mcp-servers.spec.ts registers on the server record.
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="${KOINON_E2E_NEW_PASSWORD:-e2e-browser-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}" \
     KOINON_E2E_FAKEMODEL_URL="http://fakemodel.$FAKES.svc:8080/v1" \
     PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
     pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"

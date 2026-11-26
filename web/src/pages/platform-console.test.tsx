@@ -134,6 +134,7 @@ describe('the platform console', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Platform console' })).toBeInTheDocument()
     expect(linkNames(screen.getByRole('navigation', { name: 'Platform console' }))).toEqual(['Home', 'Orgs'])
     expect(linkNames(screen.getByRole('navigation', { name: 'Usage and cost' }))).toEqual(['Usage', 'Budget ceilings', 'Prices'])
+    expect(linkNames(screen.getByRole('navigation', { name: 'Org resources' }))).toEqual(['Providers', 'Templates', 'MCP servers'])
     expect(linkNames(screen.getByRole('navigation', { name: 'Platform settings' }))).toEqual(['Observability'])
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('link', { name: 'Back to Default' }))

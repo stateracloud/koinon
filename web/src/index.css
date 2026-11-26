@@ -182,3 +182,18 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Reduced motion (WCAG 2.3.3): menus, dialogs, sheets, popovers, selects, toasts and tooltips open and close
+   without the fade, zoom and slide. Radix marks them with data-state (a tooltip opens as delayed-open or
+   instant-open). The duration is near zero rather than "none", so a close takes the same path as without the
+   preference. Loops such as a pulse carry no data-state and keep their own rules. The axe specs emulate
+   reduced motion, so they scan a menu at rest, not mid-fade. */
+@media (prefers-reduced-motion: reduce) {
+  [data-state="open"],
+  [data-state="closed"],
+  [data-state="delayed-open"],
+  [data-state="instant-open"] {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+}

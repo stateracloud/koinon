@@ -2,15 +2,17 @@
 
 import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createClient, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentService, AgentStatus, AgentSummarySchema, type AgentSummary } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { agentSummaryPageSize } from '@/hooks/use-agent-summaries'
+import { inboxPollMs } from '@/hooks/use-inbox'
 import { agent, renderApp, task, whoAmI } from '@/test-utils'
 
 // The org home of ADR 0126 section 4 (issue #1274): the "Waiting on you" strip, the agent cards by team, the Chart tab
@@ -139,6 +141,109 @@ describe('agent cards', () => {
     expect(await screen.findByText('No agents yet.')).toBeInTheDocument()
     expect(screen.getByText(text)).toBeInTheDocument()
     expect(screen.queryAllByRole('link', { name: 'New agent' }).length > 0).toBe(canCreate)
+  })
+})
+
+// Issue #1411: a poll refetched every loaded page (100 sequential requests every 15 s at 10,000 agents).
+describe('the poll of the agent cards', () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
+  afterEach(() => vi.useRealTimers())
+
+  it('reads only the first page, whatever the number of loaded pages', async () => {
+    const asked: string[] = []
+    const pages = Array.from({ length: 6 }, (_, i) => [summary(`a-${i}`, `Bot ${i}`)])
+    renderApp(transport({ pages, asked }), '/')
+    await card('Bot 0')
+    for (let i = 1; i < pages.length; i++) {
+      await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
+      await card(`Bot ${i}`)
+    }
+    expect(asked).toEqual(['', 'p1', 'p2', 'p3', 'p4', 'p5'])
+
+    asked.length = 0
+    pages[0] = [summary('a-0', 'Bot 0', { runningRuns: 1, lastRunState: RunState.RUNNING })]
+    await vi.advanceTimersByTimeAsync(inboxPollMs)
+    // One poll, one request.
+    expect(asked).toEqual([''])
+    await waitFor(() => expect(within(screen.getByRole('article', { name: 'Bot 0' })).getByText('Running now')).toBeInTheDocument())
+    expect(screen.getAllByRole('article')).toHaveLength(6)
+  })
+
+  it('retries a failed later page on the next poll', async () => {
+    const asked: string[] = []
+    let fail = true
+    const pages = [[summary('a-0', 'Bot 0')], [summary('a-1', 'Bot 1')]]
+    const inner = transport({ pages, asked })
+    const failing = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, {
+        listAgents: () => ({ agents: [] }),
+        listAgentSummaries: async (req) => {
+          if (req.pageToken === 'p1' && fail) {
+            fail = false
+            asked.push('p1 failed')
+            throw new ConnectError('down', Code.Unavailable)
+          }
+          return createClient(AgentService, inner).listAgentSummaries(req)
+        },
+      })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
+      service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+    })
+    renderApp(failing, '/')
+    await card('Bot 0')
+    await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
+    expect(await screen.findByText('This list may be incomplete.')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(inboxPollMs)
+    await card('Bot 1')
+    expect(asked).toEqual(['', 'p1 failed', '', 'p1'])
+    expect(screen.queryByText('This list may be incomplete.')).not.toBeInTheDocument()
+  })
+
+  it('loads the later pages again from the new cursor when the first page changes, with no gap', async () => {
+    // A server with cursor tokens like ListAgentSummaries: the token is the position after the last agent of a page.
+    const all = Array.from({ length: 2 * agentSummaryPageSize + 50 }, (_, i) => summary(`a-${i}`, `Bot ${i}`))
+    const asked: string[] = []
+    let hold: Promise<void> | undefined
+    const cursorTransport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, {
+        listAgents: () => ({ agents: [] }),
+        listAgentSummaries: async (req) => {
+          asked.push(req.pageToken)
+          if (req.pageToken === 'a-98') await hold
+          const start = req.pageToken === '' ? 0 : all.findIndex((a) => a.agentId === req.pageToken) + 1
+          const page = all.slice(start, start + req.pageSize)
+          return { agents: page, nextPageToken: start + req.pageSize < all.length ? page[page.length - 1].agentId : '' }
+        },
+      })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
+      service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+    })
+    renderApp(cursorTransport, '/')
+    await card('Bot 0')
+    await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
+    await card('Bot 100')
+    await userEvent.click(screen.getByRole('button', { name: 'Show more agents' }))
+    await card('Bot 249')
+    expect(asked).toEqual(['', 'a-99', 'a-199'])
+
+    // An agent early in the order moves the end of the first page: Bot 99 is now on the second page.
+    asked.length = 0
+    let release = () => {}
+    hold = new Promise((r) => (release = r))
+    all.unshift(summary('new', 'New bot'))
+    await vi.advanceTimersByTimeAsync(inboxPollMs)
+    await card('New bot')
+    // The old later pages stay on screen while they load again: no card goes away. Bot 99 was the end of the old first
+    // page and is now on the second page.
+    await waitFor(() => expect(asked).toEqual(['', 'a-98']))
+    expect(screen.getByRole('article', { name: 'Bot 99' })).toBeInTheDocument()
+    expect(screen.getAllByRole('article')).toHaveLength(all.length)
+    release()
+    await waitFor(() => expect(asked).toEqual(['', 'a-98', 'a-198']))
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(all.length))
+    expect(screen.queryByRole('button', { name: 'Show more agents' })).not.toBeInTheDocument()
   })
 })
 

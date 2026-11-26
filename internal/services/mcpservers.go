@@ -7,6 +7,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -94,19 +95,29 @@ func (s *Server) ListServers(ctx context.Context, req *mcpserverv1alpha1.ListSer
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.mcp.List(ctx, c.org)
-	if err != nil {
-		return nil, s.mcpError(err)
-	}
 	slug, err := s.orgSlug(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	res := &mcpserverv1alpha1.ListServersResponse{}
-	for _, m := range list {
-		res.Servers = append(res.Servers, s.mcpServerProto(req.GetOrgId(), slug, m))
+	list, err := s.orgMcpServers(ctx, c.org, slug)
+	if err != nil {
+		return nil, err
 	}
-	return res, nil
+	return &mcpserverv1alpha1.ListServersResponse{Servers: list}, nil
+}
+
+// orgMcpServers lists the remote MCP servers of one org, whose slug is slug. The caller authorizes;
+// s.mcp is set.
+func (s *Server) orgMcpServers(ctx context.Context, org pgtype.UUID, slug string) ([]*mcpserverv1alpha1.Server, error) {
+	list, err := s.mcp.List(ctx, org)
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	out := make([]*mcpserverv1alpha1.Server, 0, len(list))
+	for _, m := range list {
+		out = append(out, s.mcpServerProto(idString(org), slug, m))
+	}
+	return out, nil
 }
 
 func (s *Server) orgSlug(ctx context.Context, c caller) (string, error) {

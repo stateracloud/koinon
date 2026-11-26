@@ -8,10 +8,12 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 )
 
@@ -169,4 +172,72 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		code, _ = get("/egress/evil.example.test/x", token)
 		Expect(code).To(Equal(0), "the listener is closed after the drain")
 	}, SpecTimeout(40*time.Second))
+
+	// ADR 0107: a held gateway is ready but deny-all, on the egress listener too (issue #1390). The
+	// hold is read at start, so the release is a start without --restore-hold.
+	It("refuses every egress request while held, also with --egress-routes-file, and serves again after the release", func(specCtx SpecContext) {
+		minter := writeActorKey(keysDir, "k1")
+		// A reserved host: a regression that serves while held fails to dial and never reaches the internet.
+		routes := filepath.Join(GinkgoT().TempDir(), "routes.json")
+		Expect(os.WriteFile(routes, []byte(`{"routes":[{"name":"reg","class":"registry","host":"registry.example.test","methods":["GET"],"pathPrefixes":["/"]}]}`), 0o600)).To(Succeed())
+		token, err := minter.Mint(actortoken.Actor{Org: "acme", Agent: "repo-helper"}, 5*time.Minute)
+		Expect(err).NotTo(HaveOccurred())
+
+		start := func(held bool, routesFile string) (string, func()) {
+			cfg := config{
+				listenAddr: freeAddr(), healthAddr: freeAddr(), egressAddr: freeAddr(),
+				mcpPath: true, stateURL: "http://" + freeAddr(), stateTokenFile: tokenFile, podName: "koinon-gateway-0",
+				drain: time.Second, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, egressRoutesFile: routesFile,
+				namespace: "koinon", restoreHold: held,
+			}
+			ctx, term := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- run(ctx, cfg) }()
+			stop := func() {
+				term()
+				Eventually(done, racescale.D(10*time.Second)).Should(Receive(BeNil()))
+			}
+			DeferCleanup(term)
+			return cfg.egressAddr, stop
+		}
+		get := func(addr, path, tok string) (int, string, string) {
+			req, err := http.NewRequestWithContext(specCtx, http.MethodGet, "http://"+addr+path, nil)
+			Expect(err).NotTo(HaveOccurred())
+			if tok != "" {
+				req.Header.Set(route.TokenHeader, tok)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return 0, "", ""
+			}
+			defer func() { _ = resp.Body.Close() }()
+			b, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, resp.Header.Get(egress.RefusalHeader), string(b)
+		}
+		allowed := "/egress/registry.example.test/left-pad"
+
+		for _, routesFile := range []string{routes, ""} {
+			By("held, routes file " + strconv.Quote(routesFile))
+			addr, stop := start(true, routesFile)
+			Eventually(func() int { c, _, _ := get(addr, allowed, token); return c }, racescale.D(10*time.Second), 50*time.Millisecond).
+				Should(Equal(http.StatusServiceUnavailable))
+			// The request that a platform route allows, one with no token and one with no route: all held.
+			for _, c := range []struct{ path, tok string }{{allowed, token}, {allowed, ""}, {"/egress/evil.example.test/x", token}} {
+				code, reason, body := get(addr, c.path, c.tok)
+				Expect(code).To(Equal(http.StatusServiceUnavailable), c.path)
+				Expect(reason).To(Equal(string(egress.ReasonHeld)), c.path)
+				Expect(body).To(ContainSubstring(restorehold.Message), c.path)
+			}
+			stop()
+		}
+
+		By("released: the same config without --restore-hold serves the routes again")
+		addr, stop := start(false, routes)
+		// The gate answers with its own reasons, so the request passed the hold.
+		Eventually(func() string { _, r, _ := get(addr, allowed, ""); return r }, racescale.D(10*time.Second), 50*time.Millisecond).
+			Should(Equal(string(route.ReasonNoToken)))
+		_, reason, _ := get(addr, "/egress/evil.example.test/x", token)
+		Expect(reason).To(Equal(string(route.ReasonNoRoute)))
+		stop()
+	}, SpecTimeout(60*time.Second))
 })

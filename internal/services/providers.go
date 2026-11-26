@@ -107,11 +107,21 @@ func (s *Server) ListProviders(ctx context.Context, req *providerv1alpha1.ListPr
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.catalog.ListProviders(ctx, c.org)
+	list, err := s.orgProviders(ctx, c.org)
+	if err != nil {
+		return nil, err
+	}
+	return &providerv1alpha1.ListProvidersResponse{Providers: list}, nil
+}
+
+// orgProviders lists the providers of one org with their latest echo checks. The caller authorizes;
+// s.catalog is set.
+func (s *Server) orgProviders(ctx context.Context, org pgtype.UUID) ([]*providerv1alpha1.Provider, error) {
+	list, err := s.catalog.ListProviders(ctx, org)
 	if err != nil {
 		return nil, s.catalogError(err)
 	}
-	rows, err := s.q.ListProviderEchoChecks(ctx, c.org)
+	rows, err := s.q.ListProviderEchoChecks(ctx, org)
 	if err != nil {
 		return nil, s.dbError(err, "provider")
 	}
@@ -119,7 +129,7 @@ func (s *Server) ListProviders(ctx context.Context, req *providerv1alpha1.ListPr
 	for _, r := range rows {
 		checks[r.ProviderID] = modelcheck.FromRow(r)
 	}
-	res := &providerv1alpha1.ListProvidersResponse{}
+	out := make([]*providerv1alpha1.Provider, 0, len(list))
 	for _, p := range list {
 		pp := providerProto(p)
 		if id, err := parseID("provider_id", p.ID); err == nil {
@@ -127,9 +137,9 @@ func (s *Server) ListProviders(ctx context.Context, req *providerv1alpha1.ListPr
 				pp.EchoCheck = echoProto(r)
 			}
 		}
-		res.Providers = append(res.Providers, pp)
+		out = append(out, pp)
 	}
-	return res, nil
+	return out, nil
 }
 
 // CreateProvider implements ProviderService. Admins and owners.

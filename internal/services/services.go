@@ -15,7 +15,7 @@
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
-// PlatformService (ListOrgs, GetOrg) is for platform admins only: an org role does not count.
+// PlatformService (ListOrgs, GetOrg) and PlatformResourceService are for platform admins only: an org role does not count.
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
 // probed; a member without the required role gets PermissionDenied.
@@ -284,6 +284,7 @@ func (s *Server) Register(server *connect.Server) {
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 	platformv1alpha1connect.RegisterPlatformServiceHandler(server, s)
+	platformv1alpha1connect.RegisterPlatformResourceServiceHandler(server, platformResourcesAPI{s})
 	usagev1alpha1connect.RegisterUsageServiceHandler(server, s)
 	orgv1alpha1connect.RegisterOrgServiceHandler(server, s)
 }

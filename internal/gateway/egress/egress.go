@@ -18,7 +18,7 @@
 // What the handler guarantees:
 //
 //   - Default deny. No table, no token, a bad token or no route refuses the request. There is no
-//     audit-only mode.
+//     audit-only mode. A held install (ADR 0107, Options.Held) refuses every request before any check.
 //   - The upstream leg is HTTPS only, to the exact host and port of the route, through the dialer the
 //     caller gives (the URL policy of package catalog in the binary: no loopback, link-local,
 //     metadata or private address unless the platform allowed the host).
@@ -56,6 +56,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/route"
+	"github.com/stateracloud/koinon/internal/restorehold"
 )
 
 // PathPrefix is where the egress routes are served. The segment after it is the upstream authority.
@@ -73,11 +74,13 @@ const (
 	ReasonUpstream route.Reason = "upstream_error"
 	// ReasonDraining: the gateway stops and takes no new request.
 	ReasonDraining route.Reason = "draining"
+	// ReasonHeld: the install is held for restore (ADR 0107): a held gateway is ready but deny-all.
+	ReasonHeld route.Reason = "held"
 )
 
 // reasons is every reason the metric can carry, so each series exists from the start.
 var reasons = append(route.Reasons(),
-	ReasonNoCredential, ReasonUpstream, ReasonDraining,
+	ReasonNoCredential, ReasonUpstream, ReasonDraining, ReasonHeld,
 )
 
 // classNone labels a request that matched no route.
@@ -137,6 +140,9 @@ type Options struct {
 	// masks it (org is the route's org). The binary passes the Record of the gateway's credential scrub,
 	// which reads the rule of the kind from the one list (credkind, #1221).
 	Scrub func(kind credkind.Kind, org string, values ...string)
+	// Held refuses every request with ReasonHeld, whatever routes are applied (ADR 0107, issue #1390).
+	// It is read at start, as --restore-hold: a release is a rollout. It must not change after New.
+	Held bool
 }
 
 // state is one installed set: the route table and the credentials its routes name. Both change
@@ -235,6 +241,11 @@ type target struct {
 type targetKey struct{}
 
 func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
+	if g.opts.Held {
+		// Before the token check and the route match: a held install sends nothing out.
+		g.refuse(w, r, route.Decision{Reason: ReasonHeld}, "")
+		return
+	}
 	if g.draining.Load() {
 		g.refuse(w, r, route.Decision{Reason: ReasonDraining}, "")
 		return
@@ -489,7 +500,7 @@ func (g *Gateway) refuse(w http.ResponseWriter, r *http.Request, d route.Decisio
 		status = http.StatusUnauthorized
 	case route.ReasonBadRequest:
 		status = http.StatusBadRequest
-	case route.ReasonNoTable, ReasonNoCredential, ReasonDraining:
+	case route.ReasonNoTable, ReasonNoCredential, ReasonDraining, ReasonHeld:
 		status = http.StatusServiceUnavailable
 	}
 	g.opts.Metrics.count(d.Route.Class, d.Reason)
@@ -507,7 +518,11 @@ func (g *Gateway) refuse(w http.ResponseWriter, r *http.Request, d route.Decisio
 		wire = route.ReasonNoRoute
 	}
 	w.Header().Set(RefusalHeader, string(wire))
-	http.Error(w, "koinon-gateway: egress refused: "+string(wire), status)
+	msg := "koinon-gateway: egress refused: " + string(wire)
+	if wire == ReasonHeld {
+		msg += ": " + restorehold.Message
+	}
+	http.Error(w, msg, status)
 }
 
 // log writes one line per request: who, which route, the host and the result. Never the token, the
