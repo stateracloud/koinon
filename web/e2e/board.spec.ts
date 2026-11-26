@@ -22,8 +22,9 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
       createdAt: now(),
     },
   })
-  const addEvent = (kind: string, payload: Record<string, unknown>, actorKind = 'ACTOR_KIND_USER') =>
-    events.push({ seq: String(events.length + 1), kind, actorKind, payload, createdAt: now() })
+  // A task event as the API sends it: its kind and its typed event (protojson).
+  const addEvent = (kind: string, event: Record<string, unknown>, actorKind = 'ACTOR_KIND_USER') =>
+    events.push({ seq: String(events.length + 1), kind, actorKind, event, createdAt: now() })
 
   await page.route('/auth/methods', (r) => r.fulfill({ json: { password: true, oidc: true } }))
   await page.route('/auth/login', async (r) => {
@@ -52,15 +53,15 @@ test('sign in, create a task and watch the run stream, across a dropped connecti
       'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: events.length ? [task()] : [] }),
       'koinon.task.v1alpha1.TaskService/CreateTask': (req) => {
         expect(req).toMatchObject({ orgId: org, agentId: 'a-1', title: 'Say hello', message: 'Please say hello' })
-        addEvent('task.created', { title: 'Say hello' }, 'ACTOR_KIND_SYSTEM')
-        addEvent('message', { text: 'Please say hello' })
-        addEvent('run.queued', {}, 'ACTOR_KIND_SYSTEM')
+        addEvent('task.created', { taskCreated: { title: 'Say hello' } }, 'ACTOR_KIND_SYSTEM')
+        addEvent('message', { message: { text: 'Please say hello' } })
+        addEvent('run.queued', { runQueued: {} }, 'ACTOR_KIND_SYSTEM')
         state = 'TASK_STATE_WORKING'
         return { task: task(), run: run('RUN_STATE_QUEUED') }
       },
       'koinon.task.v1alpha1.TaskService/GetTask': () => ({ task: task(), events, runs: [run('RUN_STATE_RUNNING')] }),
       'koinon.task.v1alpha1.TaskService/AppendMessage': (req) => {
-        addEvent('message', { text: req.text })
+        addEvent('message', { message: { text: req.text } })
         return { event: events.at(-1)! }
       },
       'koinon.task.v1alpha1.TaskService/CancelTask': () => {
