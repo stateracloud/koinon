@@ -94,11 +94,18 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 		control = c
 		name = rig.sandbox(ctx, rig.workspace, fmt.Sprintf("kese-%d", suffix()))
 
+		// The driver wrote the actor's "default" policy (the gateway routes, issue #1444) before the
+		// create. The spec replaces its rules with the allow-all rule, in the same policy.
 		ref := &ateapiv1.ObjectRef{Atespace: rig.workspace, Name: name}
-		_, err := control.CreateActorEgressPolicy(ctx, &ateapiv1.CreateActorEgressPolicyRequest{
+		cur, err := control.GetActorEgressPolicy(ctx, &ateapiv1.GetActorEgressPolicyRequest{Actor: ref, Name: "default"})
+		Expect(err).NotTo(HaveOccurred(), "the egress policy that the driver wrote")
+		_, err = control.UpdateActorEgressPolicy(ctx, &ateapiv1.UpdateActorEgressPolicyRequest{
 			Actor: ref,
 			EgressPolicy: &ateapiv1.EgressPolicy{
-				Metadata: &ateapiv1.ResourceMetadata{Atespace: rig.workspace, Name: "default"},
+				Metadata: &ateapiv1.ResourceMetadata{
+					Atespace: rig.workspace, Name: "default",
+					Uid: cur.GetMetadata().GetUid(), Version: cur.GetMetadata().GetVersion(),
+				},
 				Rules: []*ateapiv1.EgressRule{{
 					Http: &ateapiv1.HttpRule{
 						// The allow-all rule: every name, on the ports the specs use.

@@ -426,6 +426,43 @@ def listeners(_):
     return sorted(ports)
 
 
+def egress_http(c):
+    """One HTTP/1.1 GET of c["path"] to c["host"]:c["port"], with the headers of c["headers"] in their
+    order ([name, value] pairs; a name can repeat). With c["tls"] the request goes through TLS, and the
+    probe does not check the certificate: the spec asks what reaches the gateway, not whom it trusts.
+    Returns {"status": NNN, "refusal": <Koinon-Egress-Refusal header or "">}, or the error name."""
+    try:
+        s = socket.create_connection((c["host"], c["port"]), timeout=10)
+    except OSError as e:
+        return err_name(e)
+    try:
+        if c.get("tls"):
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            s = ctx.wrap_socket(s, server_hostname=c["host"])
+        lines = ["GET %s HTTP/1.1" % c["path"], "Host: %s:%d" % (c["host"], c["port"]), "Connection: close"]
+        lines += ["%s: %s" % (k, v) for k, v in c.get("headers", [])]
+        s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 16384:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "noresponse"
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        return {"status": int(parts[1]), "refusal": headers.get("koinon-egress-refusal", "")}
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def kernel(_):
     with open("/proc/cpuinfo") as f:
         hypervisor = any(l.startswith("flags") and " hypervisor" in l for l in f)
@@ -434,5 +471,5 @@ def kernel(_):
 
 OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
-       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
+       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners, "egress_http": egress_http}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
