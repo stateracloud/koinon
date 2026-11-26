@@ -25,7 +25,6 @@ names what needs the upstream project's rights and what still works from a fork.
 | `wt.sh` | nothing: local worktrees, and it only reads pull requests |
 | `go tool worktidy` (`make tidy`) | nothing: it reads pull requests and claims; `APPLY=1` removes local worktrees, branches and (opt-in) Docker objects |
 | `e2e-status.sh` | posting a commit status |
-| `go-test-lab.sh` | posting a commit status, a lab host |
 | `e2e-remote.sh` | the lab target (`--local` needs none) |
 | `e2e-bisect.sh` | the upstream CI's token |
 | `drill-issue.sh` | the upstream CI's token |

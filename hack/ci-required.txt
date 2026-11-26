@@ -15,11 +15,11 @@
 # (hack/ci-required-test.sh, also with --ruleset).
 #
 # Required checks that other workflows produce:
-#   dco              .github/workflows/dco.yml
 #   gitleaks         .github/workflows/secrets.yml
-#   claim            .github/workflows/claims.yml
 #   e2e result       .github/workflows/e2e-kind.yml
 # They are listed under `external` and are not compared with ci.yml.
+# Not required since #682: `claim` (.github/workflows/claims.yml) still runs and reports, but it only
+# informs; the sign-off check that was `dco` is now part of `quick checks` (hack/git-identity-check.sh range).
 
 # ci.yml jobs. `aggregator` is a required job that reads needs.*.result of its parts (go, web); only
 # the jobs an aggregator needs are exempt from being listed.
@@ -38,9 +38,7 @@ scripts
 harnesses
 
 # produced by other workflows
-external dco
 external gitleaks
-external claim
 external e2e result
 
 # Advisory on purpose: reported, never blocks. Keep this list as short as it is. A job that only
