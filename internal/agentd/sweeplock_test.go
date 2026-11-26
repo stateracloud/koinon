@@ -51,6 +51,7 @@ var _ = Describe("sweep locks", func() {
 		defer cancel()
 		var one int
 		g.Expect(small.QueryRow(qctx, `SELECT 1`).Scan(&one)).To(Succeed())
+		// A busy try rolls back before BeginFunc returns, so its connection is back in the pool by then.
 		g.Expect(small.Stat().AcquiredConns()).To(BeNumerically("<=", poolSize/2))
 	}
 
@@ -151,6 +152,28 @@ var _ = Describe("sweep locks", func() {
 		err := locks.With(wctx, agent, func(pgx.Tx) error { ran = true; return nil })
 		Expect(err).To(MatchError(context.DeadlineExceeded))
 		Expect(ran).To(BeFalse())
+
+		release()
+		Eventually(done).Should(Receive(BeNil()))
+	}, SpecTimeout(time.Minute))
+
+	It("sends the run back to the queue when the lock stays busy", func(ctx SpecContext) {
+		locks.SetWait(500 * time.Millisecond)
+		agent := newAgent()
+		wait, release := newRelease()
+		held := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- locks.With(ctx, agent, func(pgx.Tx) error { close(held); <-wait; return nil })
+		}()
+		Eventually(held).Should(BeClosed())
+
+		ran := false
+		err := locks.With(ctx, agent, func(pgx.Tx) error { ran = true; return nil })
+		Expect(agentd.IsRequeued(err)).To(BeTrue(), "got %v", err)
+		Expect(ran).To(BeFalse())
+		// The waiter gave its place back: a sweep of another agent runs.
+		Expect(locks.With(ctx, newAgent(), func(pgx.Tx) error { return nil })).To(Succeed())
 
 		release()
 		Eventually(done).Should(Receive(BeNil()))

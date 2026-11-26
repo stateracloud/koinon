@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -173,6 +174,15 @@ type SweepLocks = sweepLocks
 
 // NewSweepLocks returns the sweep locks of a pool on db.
 var NewSweepLocks = newSweepLocks
+
+// SetWait sets the longest wait for a busy sweep lock.
+func (l *sweepLocks) SetWait(d time.Duration) { l.wait = d }
+
+// IsRequeued reports whether err sends the run back to the queue.
+func IsRequeued(err error) bool {
+	var rq *requeued
+	return errors.As(err, &rq)
+}
 
 // With runs fn in a transaction that holds agent's sweep lock.
 func (l *sweepLocks) With(ctx context.Context, agent pgtype.UUID, fn func(pgx.Tx) error) error {
