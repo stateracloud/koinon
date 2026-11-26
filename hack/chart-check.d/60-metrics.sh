@@ -26,9 +26,10 @@ gwsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /app
 gwsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: gateway\n/ {n++} END{print n+0}')
 [ "$gwsel" = 1 ] || fail "gateway ServiceMonitor must select app.kubernetes.io/component=gateway"
 # The mcp-gateway ServiceMonitor (#1452), with gateway.mcp.driver=koinon (the default): it selects by
-# component, exactly one Service carries component=mcp-gateway, and that Service has the "stats" port
+# component, exactly one Service carries component=mcp-gateway in its metadata labels (a ServiceMonitor
+# matches those, not spec.selector), and that Service has the "stats" port
 # (15020) the monitor scrapes.
-mcpsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /app\.kubernetes\.io\/component: mcp-gateway\n/ {n++; if (/name: koinon-mcp-gateway\n/ && /- name: stats\n +port: 15020\n +targetPort: stats\n/) s++} END{print n+0, s+0}')
+mcpsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /\n  labels:\n(    [^\n]*\n)*    app\.kubernetes\.io\/component: mcp-gateway\n(    [^\n]*\n)*spec:\n/ {n++; if (/name: koinon-mcp-gateway\n/ && /- name: stats\n +port: 15020\n +targetPort: stats\n/) s++} END{print n+0, s+0}')
 [ "$mcpsvc" = "1 1" ] || fail "Services matching the mcp-gateway ServiceMonitor (count, of which the mcp-gateway Service with a stats port): $mcpsvc, want 1 1"
 mcpsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-mcp-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: mcp-gateway\n/ && /endpoints:\n +- port: stats\n +path: \/metrics\n/ {n++} END{print n+0}')
 [ "$mcpsel" = 1 ] || fail "mcp-gateway ServiceMonitor must select app.kubernetes.io/component=mcp-gateway and scrape port stats at /metrics"
