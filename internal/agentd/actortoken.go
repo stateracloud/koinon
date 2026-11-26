@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -133,6 +134,16 @@ func (c *Config) checkEgress() error {
 	}
 	c.EgressURL = strings.TrimRight(c.EgressURL, "/")
 	setDefault(&c.ActorTokenRefresh, DefaultActorTokenRefresh)
+	setDefault(&c.ForgeServeTimeout, DefaultForgeServeTimeout)
+	if c.EgressProbe == nil {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		// The egress listener is inside the cluster: never through an outbound proxy.
+		t.Proxy = nil
+		c.EgressProbe = &http.Client{
+			Transport: t, Timeout: forgeProbeTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	}
 	if c.ActorTokenRefresh*3 > actorTokenTTL {
 		return fmt.Errorf("agentd: with an EgressURL, ActorTokenRefresh must be at most %s", actorTokenTTL/3)
 	}

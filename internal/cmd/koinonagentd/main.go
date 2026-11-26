@@ -123,6 +123,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
 	fs.DurationVar(&c.pool.ModelServeTimeout, "model-serve-timeout", agentd.DefaultModelServeTimeout, "how long a run waits for the gateway to serve its model (a new provider still reaching the gateway) before it fails; keep it well above koinon-reconciler's --provider-key-settle plus a gateway apply")
+	fs.DurationVar(&c.pool.ForgeServeTimeout, "forge-serve-timeout", agentd.DefaultForgeServeTimeout, "with git through the egress listener, how long a run waits for the gateway to serve its forge route (a new forge credential still reaching the gateway) before it fails; keep it well above the reconciler's forge credential settle time")
 	fs.DurationVar(&c.pool.SandboxWaitCap, "sandbox-wait-cap", time.Hour, "the total time a run waits for its sandbox, across requeues, before it fails")
 	fs.DurationVar(&c.pool.CancelGrace, "cancel-grace", 10*time.Second, "how long a harness gets to end a cancelled turn")
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")

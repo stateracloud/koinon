@@ -37,6 +37,10 @@ turns:
       systemContains: "# Repo helper"
       userContains: "egress clone"
       toolResult: bash
+      # Only a clone that worked prints the marker (printf builds it, so the command text never holds it).
+      # A failed git leaves no turn that matches: the model answers 400 and the run fails, with git's output
+      # in its transcript.
+      toolResultContains: "egress-clone-ok"
     text: I cloned koinon-demo/hello. I made no other change.
     usage:
       inputTokens: 1400
@@ -48,7 +52,7 @@ turns:
     toolCalls:
       - name: bash
         arguments:
-          command: git clone https://fakegitea.koinon-e2e-fakes.svc.cluster.local/koinon-demo/hello.git /tmp/egress-clone && git -C /tmp/egress-clone log -1 --format=%H
+          command: git clone https://fakegitea.koinon-e2e-fakes.svc.cluster.local/koinon-demo/hello.git /tmp/egress-clone && git -C /tmp/egress-clone log -1 --format=%H && printf 'egress-clone-%s\n' ok
           description: Clone koinon-demo/hello
     usage:
       inputTokens: 1300

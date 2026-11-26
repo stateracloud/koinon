@@ -178,6 +178,8 @@ type runner struct {
 	// prefix with an actor token (actortoken.go); orgSlug is the token's org, read once.
 	egress  bool
 	orgSlug string
+	// forgeHost is the code host that writeGitConfig rendered, for the forge route wait.
+	forgeHost codeHost
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -629,6 +631,14 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if r.egress {
 		defer r.keepActorToken(ctx, workspace, sandbox)()
+	}
+	if r.egress {
+		// The gateway may not serve the agent's forge route yet: a new forge credential is still
+		// reaching the gateway pod (forgewait.go). Without the wait, the agent's first git command
+		// gets 503 credential_unavailable.
+		if err := r.waitForge(fctx, r.forgeHost, repos); err != nil {
+			return r.execErr(ctx, "wait for the gateway's forge route", err)
+		}
 	}
 
 	var stderr tail

@@ -153,9 +153,12 @@ diagnostics() {
   mkdir -p "$d"
   "${K[@]}" get pods -A -o wide >"$d/pods.txt" 2>&1 || true
   "${K[@]}" get events -A --sort-by=.lastTimestamp >"$d/events.txt" 2>&1 || true
-  for c in api reconciler agentd gateway mcp-gateway; do
+  for c in api reconciler agentd gateway; do
     "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
   done
+  # koinon-mcp-gateway runs two replicas at least, and a request can reach any of them: every pod's log,
+  # each line prefixed with its pod.
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=mcp-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-mcp-gateway.log" 2>&1 || true
   # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
   for c in fakemodel fakegithub fakemcp; do

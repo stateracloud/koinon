@@ -79,6 +79,13 @@ has "the reconciler is told the egress URL" 'egressUrl: http://koinon-mcp-gatewa
 
 # Network: sandboxes reach the egress port (as agentgateway's llm port), the MCP port stays koinon-api's only.
 has "sandboxes may reach the egress port" '^        - port: egress$' "${eg[@]}" --show-only templates/networkpolicy.yaml
+# koinon-agentd probes the forge route before the harness starts: it reaches the egress port, and no other
+# Koinon pod does.
+np_eg=$(render "${eg[@]}" --show-only templates/networkpolicy.yaml | awk '/^  name: koinon-mcp-gateway$/{p=1} p&&/^---/{p=0} p' |
+  awk '/- port: egress$/{p=1;next} p&&/^    - ports:/{p=0} p')
+printf '%s\n' "$np_eg" | hit 'app.kubernetes.io/component: agentd$' || fail "koinon-agentd may not reach the egress port"
+[ "$(printf '%s\n' "$np_eg" | grep -c 'app.kubernetes.io/component:')" = 1 ] ||
+  fail "a Koinon pod other than koinon-agentd may reach the egress port"
 lacks "no egress port in the network policy by default" 'port: egress$' --set gateway.mcp.driver=koinon --show-only templates/networkpolicy.yaml
 
 # Substrate: the egress listener needs gateway.mcp.driver=koinon, and with it the worker namespace reaches
