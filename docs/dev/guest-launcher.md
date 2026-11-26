@@ -157,11 +157,12 @@ kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
 The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
 modes. Two results follow:
 
-- **Upload.** The driver is unchanged by #1387. **Known regression:** on the gVisor tiers Upload and the
-  checkpoint restore of the home fail until #1478 lands: the root front writes the archive with mode 0600 and
-  `tar` runs as uid 10001. How Upload and the checkpoint restore work with a non-root
-  payload is open work in #1478. A directory that the payload owns must not hold the archive that the root
-  front writes (a symlink swap).
+- **Upload.** The driver is unchanged by #1387. Upload under the Substrate driver already fails on main: the
+  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`, so `WriteFile` returns
+  `PermissionDenied` before `tar` starts. The checkpoint restore of the home fails the same way. A second gap:
+  the root front writes the archive with mode 0600, and `tar` runs as uid 10001. #1478 must solve both gaps. The
+  safe design in #1478: `tar` on exec stdin as the payload user, and the file service of the guest front off.
+  The root front never writes into a path that the payload can write (a symlink swap).
 - **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner

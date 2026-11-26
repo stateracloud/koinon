@@ -792,13 +792,16 @@ root payload from two tiers and leaves the third as it was.
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
 - **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
-  Upload code of before #1387 unchanged. **Known regression:** on the gVisor tiers the front writes the archive
-  as root with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it. Upload fails with
-  `ErrInvalid`, and the checkpoint restore of the home fails the run, until #1478 lands. The maintainer decided
-  on 2026-11-26 to revert the staging design and to carry this gap. A safe design for Upload and the checkpoint restore under a non-root
-  payload is open work in [#1478](https://github.com/stateracloud/koinon/issues/1478). A staging directory that
-  the payload owns lets the payload swap a symlink while the root front writes, so this amendment does not
-  contain one.
+  Upload code of before #1387 unchanged. Upload under the Substrate driver already fails on main. This is not a
+  result of #1387. Lab, 2026-11-26 (on the head of the #1387 pull request and on `origin/main`): `WriteFile`
+  fails with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root directory "/sandbox"`. The
+  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`. The failure happens before `tar`
+  starts. The home restore in `internal/agentd/checkpoint.go` fails the same way. A second gap exists: the root
+  front writes the archive with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it
+  (`ErrInvalid`). [#1478](https://github.com/stateracloud/koinon/issues/1478) must solve both gaps. The safe
+  design in #1478: run `tar` on exec stdin as the payload user, and turn the file service of the guest front off.
+  The root front never writes into a path that the payload can write. A staging directory that the payload owns
+  lets the payload swap a symlink while the root front writes, so this amendment does not contain one.
 - **Lab proof run, 2026-11-26 21:00Z (koinon-lab, gVisor worker).** Head `41a2400b5`, through the real Substrate
   driver and the real front image. The run showed:
   - runsc network mode `--network=sandbox`;
