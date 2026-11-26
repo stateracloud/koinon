@@ -280,8 +280,8 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 				OrgID: e.org, AgentID: e.agent.ID, CreatedBy: e.user, Config: []byte(`{"instructions":5}`),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: e.org, ID: e.agent.ID})
-			Expect(err).NotTo(HaveOccurred())
+			// ActivateAgent moves an active agent to v2 in one step: a pass through draft would let the
+			// wait fail first with "the agent is not active".
 			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: e.org, ID: e.agent.ID, VersionID: v2.ID, ActivatedBy: e.user})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
