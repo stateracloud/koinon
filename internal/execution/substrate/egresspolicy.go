@@ -23,7 +23,8 @@ import (
 // every actor (Config.GatewayRoutes), and the egress listener (Config.CodeHostEgressRoute) only for an actor whose
 // gateway access has CodeHostEgress, which the reconciler gives an agent with a code-host grant
 // (SetGatewayAccess). The policy holds no org host and no credential; the gateway does the per-actor checks again
-// (ADR 0097). Issue #1386 later adds the replace_headers effect to these rules.
+// (ADR 0097). The egress rule carries the replace_headers effect of issue #1386: Substrate puts a JWT for the actor
+// in the Koinon-Actor-Token header, so the guest holds no token.
 //
 // The policy is its own object under the actor, not part of the template: a change of access updates it in place
 // and never replaces the sandbox. The driver writes it while the actor is suspended, before every ResumeActor
@@ -108,9 +109,37 @@ func validHost(h string) error {
 	return nil
 }
 
-// gatewayRules renders the rules: one HTTP rule for each gateway host, with the ports of that host. Hosts and
-// ports are sorted, so the same routes give the same rules.
-func gatewayRules(routes []GatewayRoute) []*ateapiv1.EgressRule {
+// Names that the egress rule carries to the gateway (issue #1386, ADR 0120). They repeat route.TokenHeader and
+// actortoken.Audience: the execution layer does not import the gateway packages (the gateway holds the verifier
+// and its TLS and HTTP code). A unit test asserts that the values are equal.
+const (
+	// ActorTokenHeader is the header that Substrate sets on a request to the egress listener.
+	ActorTokenHeader = "Koinon-Actor-Token" //nolint:gosec // a header name, not a credential
+	// ActorTokenAudience is the audience of the JWT: the Koinon gateway.
+	ActorTokenAudience = "koinon-gateway"
+	// ActorTokenLifetimeSeconds is the lifetime of each JWT. Substrate allows 300 to 3600 seconds.
+	ActorTokenLifetimeSeconds int64 = 900
+)
+
+// actorTokenEffects is the effect of the egress rule: Substrate replaces the header with a JWT that it signs for
+// the actor that sent the request. The guest holds no token, only a public placeholder value in the header.
+func actorTokenEffects() *ateapiv1.HttpRuleEffects {
+	return &ateapiv1.HttpRuleEffects{ReplaceHeaders: []*ateapiv1.CredentialHeader{{
+		Header: ActorTokenHeader,
+		ActorJwt: &ateapiv1.ActorJwtSource{
+			Audiences:         []string{ActorTokenAudience},
+			ExpirationSeconds: ActorTokenLifetimeSeconds,
+		},
+	}}}
+}
+
+// gatewayRules renders the rules: one HTTP rule for each gateway host, with the ports of that host, and the code-host
+// egress route (when set) as its own rule with the actor-token effect. The egress route is a separate rule, also on
+// a host that a route of every actor uses: Substrate allows two rules on one host when their ports differ (a tie is a
+// pattern with the same port), the exact port makes the egress rule win for its port, and only the winning rule's
+// effects apply. So the model and MCP rules carry no effect. Rules are sorted by host, then by ports, so the same
+// routes give the same rules.
+func gatewayRules(routes []GatewayRoute, egress *GatewayRoute) []*ateapiv1.EgressRule {
 	byHost := map[string][]int32{}
 	for _, r := range routes {
 		p := int32(r.Port) //nolint:gosec // ValidateGatewayRoutes keeps the port in 1-65535
@@ -123,7 +152,7 @@ func gatewayRules(routes []GatewayRoute) []*ateapiv1.EgressRule {
 		hosts = append(hosts, h)
 	}
 	slices.Sort(hosts)
-	rules := make([]*ateapiv1.EgressRule, 0, len(hosts))
+	rules := make([]*ateapiv1.EgressRule, 0, len(hosts)+1)
 	for _, h := range hosts {
 		ports := byHost[h]
 		slices.SortFunc(ports, cmp.Compare)
@@ -132,6 +161,19 @@ func gatewayRules(routes []GatewayRoute) []*ateapiv1.EgressRule {
 			Ports:     &ateapiv1.Ports{Numbers: ports},
 		}})
 	}
+	if egress != nil {
+		rules = append(rules, &ateapiv1.EgressRule{Http: &ateapiv1.HttpRule{
+			Hostnames: []string{egress.Host},
+			Ports:     &ateapiv1.Ports{Numbers: []int32{int32(egress.Port)}}, //nolint:gosec // ValidateGatewayRoutes keeps the port in 1-65535
+			Effects:   actorTokenEffects(),
+		}})
+	}
+	slices.SortStableFunc(rules, func(a, b *ateapiv1.EgressRule) int {
+		return cmp.Or(
+			cmp.Compare(a.GetHttp().GetHostnames()[0], b.GetHttp().GetHostnames()[0]),
+			slices.Compare(a.GetHttp().GetPorts().GetNumbers(), b.GetHttp().GetPorts().GetNumbers()),
+		)
+	})
 	return rules
 }
 
@@ -178,14 +220,14 @@ func (d *Driver) accessOf(k key) execution.GatewayAccess {
 	return d.access[k]
 }
 
-// policyRoutes are the routes of the actor's policy: the routes of every actor, and the egress listener when its
+// policyRules are the rules of the actor's policy: the routes of every actor, and the egress listener when its
 // access has CodeHostEgress and the install has one.
-func (d *Driver) policyRoutes(k key) []GatewayRoute {
-	routes := slices.Clone(d.cfg.GatewayRoutes)
+func (d *Driver) policyRules(k key) []*ateapiv1.EgressRule {
+	var egress *GatewayRoute
 	if d.cfg.CodeHostEgressRoute != nil && d.accessOf(k).CodeHostEgress {
-		routes = append(routes, *d.cfg.CodeHostEgressRoute)
+		egress = d.cfg.CodeHostEgressRoute
 	}
-	return routes
+	return gatewayRules(d.cfg.GatewayRoutes, egress)
 }
 
 // policyWriteAttempts bounds the retries when another writer changes the policy between the read and the write.
@@ -201,7 +243,7 @@ func (d *Driver) ensureEgressPolicy(ctx context.Context, op string, k key) error
 	}
 	want := &ateapiv1.EgressPolicy{
 		Metadata: &ateapiv1.ResourceMetadata{Atespace: k.atespace, Name: egressPolicyName},
-		Rules:    gatewayRules(d.policyRoutes(k)),
+		Rules:    d.policyRules(k),
 	}
 	actor := ref(k.atespace, k.actor)
 	var err error
