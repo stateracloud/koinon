@@ -30,39 +30,41 @@ const (
 //
 // Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
 // rename or remove one. A client that does not know a reason shows the message of the error.
+//
+// buf:lint:ignore ENUM_VALUE_PREFIX
 type Reason int32
 
 const (
 	// The error has no reason. A server never sends this value.
 	Reason_REASON_UNSPECIFIED Reason = 0
 	// The request is not valid. The message says why.
-	Reason_INVALID Reason = 1 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_INVALID Reason = 1
 	// The thing does not exist, or the caller may not see it.
-	Reason_NOT_FOUND Reason = 2 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_NOT_FOUND Reason = 2
 	// The install is held (ADR 0107) and the call reaches outward.
-	Reason_INSTALL_HELD Reason = 3 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_INSTALL_HELD Reason = 3
 	// The caller's Role is too low for the field rule of the call (ADR 0116 decision 4).
-	Reason_ROLE_TOO_LOW Reason = 4 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_ROLE_TOO_LOW Reason = 4
 	// Only an org admin or owner may do this.
-	Reason_ADMIN_REQUIRED Reason = 5 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_ADMIN_REQUIRED Reason = 5
 	// Only a platform admin may do this.
-	Reason_PLATFORM_ADMIN_REQUIRED Reason = 6 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_PLATFORM_ADMIN_REQUIRED Reason = 6
 	// The destination changed since the caller loaded it.
-	Reason_CHANGED Reason = 7 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_CHANGED Reason = 7
 	// Only an org owner may choose content level full.
-	Reason_OWNER_ONLY Reason = 8 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_OWNER_ONLY Reason = 8
 	// The org sends full content, so only an owner may add a destination or change its connection.
-	Reason_OWNER_AT_FULL Reason = 9 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_OWNER_AT_FULL Reason = 9
 	// The caller is not a member of the org, so may only lower its settings.
-	Reason_NOT_MEMBER Reason = 10 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_NOT_MEMBER Reason = 10
 	// The level is above the platform ceiling.
-	Reason_ABOVE_CEILING Reason = 11 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_ABOVE_CEILING Reason = 11
 	// The test trace was not accepted, so nothing was saved.
-	Reason_TEST_FAILED Reason = 12 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_TEST_FAILED Reason = 12
 	// The price refresh is off on this install.
-	Reason_PRICE_REFRESH_OFF Reason = 13 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_PRICE_REFRESH_OFF Reason = 13
 	// The credential of an MCP server is too short.
-	Reason_CREDENTIAL_TOO_SHORT Reason = 14 // buf:lint:ignore ENUM_VALUE_PREFIX
+	Reason_CREDENTIAL_TOO_SHORT Reason = 14
 )
 
 // Enum value maps for Reason.

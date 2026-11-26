@@ -23,6 +23,8 @@ export const file_koinon_refusal_v1_refusal: GenFile = /*@__PURE__*/
  * Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
  * rename or remove one. A client that does not know a reason shows the message of the error.
  *
+ * buf:lint:ignore ENUM_VALUE_PREFIX
+ *
  * @generated from enum koinon.refusal.v1.Reason
  */
 export enum Reason {
@@ -36,16 +38,12 @@ export enum Reason {
   /**
    * The request is not valid. The message says why.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: INVALID = 1;
    */
   INVALID = 1,
 
   /**
    * The thing does not exist, or the caller may not see it.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: NOT_FOUND = 2;
    */
@@ -54,16 +52,12 @@ export enum Reason {
   /**
    * The install is held (ADR 0107) and the call reaches outward.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: INSTALL_HELD = 3;
    */
   INSTALL_HELD = 3,
 
   /**
    * The caller's Role is too low for the field rule of the call (ADR 0116 decision 4).
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: ROLE_TOO_LOW = 4;
    */
@@ -72,16 +66,12 @@ export enum Reason {
   /**
    * Only an org admin or owner may do this.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: ADMIN_REQUIRED = 5;
    */
   ADMIN_REQUIRED = 5,
 
   /**
    * Only a platform admin may do this.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: PLATFORM_ADMIN_REQUIRED = 6;
    */
@@ -90,16 +80,12 @@ export enum Reason {
   /**
    * The destination changed since the caller loaded it.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: CHANGED = 7;
    */
   CHANGED = 7,
 
   /**
    * Only an org owner may choose content level full.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: OWNER_ONLY = 8;
    */
@@ -108,16 +94,12 @@ export enum Reason {
   /**
    * The org sends full content, so only an owner may add a destination or change its connection.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: OWNER_AT_FULL = 9;
    */
   OWNER_AT_FULL = 9,
 
   /**
    * The caller is not a member of the org, so may only lower its settings.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: NOT_MEMBER = 10;
    */
@@ -126,16 +108,12 @@ export enum Reason {
   /**
    * The level is above the platform ceiling.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: ABOVE_CEILING = 11;
    */
   ABOVE_CEILING = 11,
 
   /**
    * The test trace was not accepted, so nothing was saved.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: TEST_FAILED = 12;
    */
@@ -144,16 +122,12 @@ export enum Reason {
   /**
    * The price refresh is off on this install.
    *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
-   *
    * @generated from enum value: PRICE_REFRESH_OFF = 13;
    */
   PRICE_REFRESH_OFF = 13,
 
   /**
    * The credential of an MCP server is too short.
-   *
-   * buf:lint:ignore ENUM_VALUE_PREFIX
    *
    * @generated from enum value: CREDENTIAL_TOO_SHORT = 14;
    */

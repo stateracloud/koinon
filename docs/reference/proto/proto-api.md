@@ -4002,6 +4002,8 @@ A spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and th
 Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
 rename or remove one. A client that does not know a reason shows the message of the error.
 
+buf:lint:ignore ENUM_VALUE_PREFIX
+
 | Value | Number | Description |
 | --- | --- | --- |
 | REASON_UNSPECIFIED | 0 | The error has no reason. A server never sends this value. |

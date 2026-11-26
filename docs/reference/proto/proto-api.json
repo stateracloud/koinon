@@ -16670,7 +16670,7 @@
           "name": "Reason",
           "fullName": "koinon.refusal.v1.Reason",
           "file": "koinon/refusal/v1/refusal.proto",
-          "description": "Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a\nvalue as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the\nsame string in `error.reason`. The value names are the wire strings, so they have no enum prefix.\nA spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.\n\nAdd a value only when a client acts on the reason differently. Values are add-only: never reuse,\nrename or remove one. A client that does not know a reason shows the message of the error.",
+          "description": "Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a\nvalue as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the\nsame string in `error.reason`. The value names are the wire strings, so they have no enum prefix.\nA spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.\n\nAdd a value only when a client acts on the reason differently. Values are add-only: never reuse,\nrename or remove one. A client that does not know a reason shows the message of the error.\n\nbuf:lint:ignore ENUM_VALUE_PREFIX",
           "deprecated": false,
           "values": [
             {
