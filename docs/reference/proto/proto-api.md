@@ -4434,7 +4434,7 @@ RunState is the ADR 0030 state machine.
 
 ## koinon.task.v1alpha1
 
-Files: `koinon/task/v1alpha1/task.proto`
+Files: `koinon/task/v1alpha1/task.proto`, `koinon/task/v1alpha1/timeline.proto`
 
 ### Service TaskService
 
@@ -4470,6 +4470,51 @@ AppendMessageResponse holds the new event and the queued run, if one was queued 
 | --- | --- | --- | --- | --- | --- |
 | event | 1 | `koinon.task.v1alpha1.TaskEvent` | singular |  |  |
 | run | 2 | `koinon.run.v1alpha1.Run` | singular |  |  |
+
+### Message ApprovalChanged
+
+ApprovalChanged records a step of an approval after its request.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| approval_id | 1 | `string` | singular |  |  |
+| tool | 2 | `string` | singular |  |  |
+| target | 3 | `string` | singular |  |  |
+| args_sha256 | 4 | `string` | singular |  |  |
+| note | 5 | `string` | singular |  | The approver's note. |
+| scope | 6 | `koinon.task.v1alpha1.ApprovalScope` | singular |  | The scope that an approval created. |
+| result | 7 | `google.protobuf.Struct` | singular |  | The result of an executed action. |
+| error | 8 | `string` | singular |  | Why the action failed. |
+| expires_at | 9 | `google.protobuf.Timestamp` | singular |  | When the approval expired. |
+| reason | 10 | `string` | singular |  | Why the approval was canceled. |
+
+### Message ApprovalRequested
+
+ApprovalRequested records an action that waits for approval, or one that a scope covered.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| approval_id | 1 | `string` | singular |  |  |
+| tool | 2 | `string` | singular |  |  |
+| target | 3 | `string` | singular |  |  |
+| args_sha256 | 4 | `string` | singular |  |  |
+| decision | 5 | `string` | singular |  | The policy decision, for example "ask" or "allow". |
+| risk | 6 | `google.protobuf.Value` | singular |  | The risk card of the action. |
+| approvals_required | 7 | `int32` | singular |  | The number of approvals that the action needs, when it is more than one. |
+| system | 8 | `bool` | singular |  | True when Koinon asks, not the agent. |
+| scope | 9 | `koinon.task.v1alpha1.ApprovalScope` | singular |  | The scope that covered the call. |
+
+### Message ApprovalScope
+
+ApprovalScope is the scoped approval that covered a call.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| kind | 2 | `string` | singular |  | "once", "task" or "agent". |
+| expires_at | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| created_by | 4 | `string` | singular |  |  |
+| task_id | 5 | `string` | singular |  |  |
 
 ### Message CancelTaskRequest
 
@@ -4572,6 +4617,109 @@ NotifyTypingResponse is empty.
 
 No fields.
 
+### Message QuestionAsked
+
+QuestionAsked records a question from the agent to a person.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| question | 2 | `string` | singular |  |  |
+| target | 3 | `koinon.task.v1alpha1.QuestionTarget` | singular |  |  |
+| to_label | 4 | `string` | singular |  | The recipients as people read them. |
+| recipients | 5 | `string` | repeated |  |  |
+| choices | 6 | `string` | repeated |  |  |
+| has_draft | 7 | `bool` | singular |  |  |
+| default_answer | 8 | `string` | singular |  | The answer that applies when the question expires. |
+| expires_at | 9 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message QuestionCanceled
+
+QuestionCanceled records a question that nobody needs to answer now.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| reason | 2 | `string` | singular |  |  |
+
+### Message QuestionResolved
+
+QuestionResolved records the end of a question: answered, dismissed or expired.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| answer_kind | 2 | `string` | singular |  |  |
+| answer | 3 | `string` | singular |  |  |
+| default_applied | 4 | `bool` | singular |  |  |
+| answered_by_name | 5 | `string` | singular |  | The display name of the person who answered. |
+
+### Message QuestionRetargeted
+
+QuestionRetargeted records a question that goes to other recipients.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| to_label | 2 | `string` | singular |  |  |
+| recipients | 3 | `string` | repeated |  |  |
+| reason | 4 | `string` | singular |  |  |
+| requested_target | 5 | `koinon.task.v1alpha1.QuestionTarget` | singular |  | The target that was asked for, when a fallback applies. |
+| fallback_reason | 6 | `string` | singular |  |  |
+
+### Message QuestionTarget
+
+QuestionTarget names who a question is for.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| kind | 1 | `string` | singular |  | "user", "role" or "creator". |
+| user | 2 | `string` | singular |  |  |
+| role | 3 | `string` | singular |  |  |
+
+### Message RunEnded
+
+RunEnded records a run that failed or was canceled.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| reason | 1 | `string` | singular |  | A code or a text, for example "user", "wall_clock_cap" or "spend_limit". |
+| failure_class | 2 | `string` | singular |  | The run's failure class, for example "transient" or "loop". |
+| message | 3 | `string` | singular |  | A text for people. |
+| sandbox_cause | 4 | `string` | singular |  | A sandbox that was not available. |
+| waited_seconds | 5 | `int64` | singular |  |  |
+| detail | 6 | `string` | singular |  |  |
+| cause_seen_ms | 7 | `int64` | singular |  |  |
+| max_wall_clock_seconds | 8 | `int32` | singular |  | A run stopped at its time limit, and what the agent said last. |
+| summary | 9 | `string` | singular |  |  |
+| summary_source | 10 | `string` | singular |  | "reply", "notes" or "none". |
+| limit | 11 | `string` | singular |  | A run stopped at a spend or request limit. |
+| spend_limit_usd | 12 | `string` | singular |  |  |
+| spent_usd | 13 | `string` | singular |  |  |
+| window_start | 14 | `string` | singular |  |  |
+| model_requests | 15 | `int64` | singular |  |  |
+| requeue_reason | 16 | `string` | singular |  | Why a newer queued run replaced this one. |
+
+### Message RunParked
+
+RunParked records a run that waits for a person.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| reason | 1 | `string` | singular |  | "approval" or "input_required". |
+| approval_ids | 2 | `string` | repeated |  | The approvals and the questions that the run waits for. |
+| question_ids | 3 | `string` | repeated |  |  |
+
+### Message RunQueued
+
+RunQueued records a run put on the queue with its limits.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_wall_clock_seconds | 1 | `int32` | singular |  |  |
+| max_model_requests | 2 | `int64` | singular |  |  |
+| max_spend_usd | 3 | `string` | singular |  | A decimal amount in US dollars; empty when the run has no spend cap. |
+
 ### Message SendDirectMessageRequest
 
 SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
@@ -4594,6 +4742,31 @@ SendDirectMessageResponse holds the thread's task.
 | event | 2 | `koinon.task.v1alpha1.TaskEvent` | singular |  | The message as it entered the timeline. A replay of an earlier call returns no event when the API runs the delivery inline; with the durable queue it attaches to the finished delivery and returns the original event and created flag. |
 | created | 3 | `bool` | singular |  | True when this call created the task. |
 | reopened | 4 | `bool` | singular |  | True when this call reopened a completed task as a follow-up. |
+
+### Message SessionChanged
+
+SessionChanged records a new harness session.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `string` | singular |  |  |
+| previous_session_id | 2 | `string` | singular |  |  |
+| session_id | 3 | `string` | singular |  |  |
+
+### Message StatusChanged
+
+StatusChanged records a move of the task's state.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `string` | singular |  | Task states as the database names them: "submitted", "working", "input_required", "completed", "canceled" or "failed". from is empty when the writer did not record it. They are strings, not TaskState, because task.proto imports this file. |
+| to | 2 | `string` | singular |  |  |
+| reason | 3 | `string` | singular |  | A code for the cause, for example "follow_up", "run_succeeded", "continuation_limit". |
+| continuations | 4 | `int32` | singular |  | The continuation and spend counts of a task that stopped at a limit. |
+| max_continuations | 5 | `int32` | singular |  |  |
+| task_spent_usd | 6 | `string` | singular |  |  |
+| task_spend_cap_usd | 7 | `string` | singular |  |  |
+| error | 8 | `string` | singular |  | Why the next continuation could not start, when its agent is not available. |
 
 ### Message Task
 
@@ -4619,6 +4792,18 @@ Task is one unit of work and its conversation.
 | direct_message_thread | 16 | `bool` | singular |  | True when a direct message to the agent started the task: replies in its inbox-chat thread go to SendDirectMessage with this task_id (plan item TR3). |
 | waiting_on_user_ids | 17 | `string` | repeated |  | Everyone the task's open questions wait on. Set by ListTasks and GetTask. The inbox uses it so that a task waiting on someone else's answer is not shown to its creator as theirs to act on. |
 
+### Message TaskCreated
+
+TaskCreated records the start of a task.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| title | 1 | `string` | singular |  |  |
+| source | 2 | `string` | singular |  | What created the task when it is not a person: "trigger", "trigger_manual" or "direct_message". |
+| fire | 3 | `string` | singular |  | How a trigger fired: "scheduled" or "manual". |
+| fired_by | 4 | `string` | singular |  | The user who fired a trigger by hand. |
+| trigger_id | 5 | `string` | singular |  | The trigger of a direct message thread. |
+
 ### Message TaskEvent
 
 TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
@@ -4632,9 +4817,71 @@ TaskEvent is one entry of the task timeline: a message, a state change or a run 
 | actor_user_id | 4 | `string` | singular |  |  |
 | actor_agent_id | 5 | `string` | singular |  |  |
 | run_id | 6 | `string` | singular |  | The run the event is about, if any. |
-| payload | 7 | `google.protobuf.Struct` | singular |  |  |
+| payload | 7 | `google.protobuf.Struct` | singular |  | The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old rows too. |
 | created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
 | actor_display_name | 9 | `string` | singular |  | The display name of actor_user_id, for a person's event; empty for other actors, an unnamed user or a deleted user. Never an email address. Any role that can read the task sees it. |
+| event | 10 | `koinon.task.v1alpha1.TimelineEvent` | singular |  | The typed event. It is not set for a kind that this server does not know. |
+
+### Message TaskNote
+
+TaskNote is a note from Koinon about the task's sandbox or agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `string` | singular |  |  |
+
+### Message TimelineEvent
+
+TimelineEvent is the typed body of one Timeline event (issue #735). Each member of the oneof is
+one event kind; internal/tasks has the table that maps a member to the kind string in
+task_events.kind. A row with payload_version 1 stores this message as protojson. A row with
+payload_version 0 has the older free-form JSON, which the reader translates to this message.
+
+Add a kind as a new member with a new field number. Never reuse or renumber a member.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `koinon.task.v1alpha1.TimelineMessage` | singular | event | "message": a message from a person, the agent or the system. |
+| task_created | 2 | `koinon.task.v1alpha1.TaskCreated` | singular | event | "task.created". |
+| status_changed | 3 | `koinon.task.v1alpha1.StatusChanged` | singular | event | "status.changed". |
+| run_queued | 4 | `koinon.task.v1alpha1.RunQueued` | singular | event | "run.queued". |
+| run_parked | 5 | `koinon.task.v1alpha1.RunParked` | singular | event | "run.parked": the run waits for a person. |
+| run_failed | 6 | `koinon.task.v1alpha1.RunEnded` | singular | event | "run.failed". |
+| run_canceled | 7 | `koinon.task.v1alpha1.RunEnded` | singular | event | "run.canceled". |
+| run_session_reset | 8 | `koinon.task.v1alpha1.SessionChanged` | singular | event | "run.session_reset": the harness started a new session. |
+| run_session_restarted | 9 | `koinon.task.v1alpha1.SessionChanged` | singular | event | "run.session_restarted": the harness session started again with a handoff prompt. |
+| sandbox_recreated | 10 | `koinon.task.v1alpha1.TaskNote` | singular | event | "sandbox.recreated". |
+| sandbox_work_lost | 11 | `koinon.task.v1alpha1.TaskNote` | singular | event | "sandbox.work_lost". |
+| agent_unhealthy | 12 | `koinon.task.v1alpha1.TaskNote` | singular | event | "agent.unhealthy". |
+| approval_requested | 13 | `koinon.task.v1alpha1.ApprovalRequested` | singular | event | "approval.requested". |
+| approval_first_approved | 14 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.first_approved": the first of two approvals. |
+| approval_approved | 15 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.approved". |
+| approval_denied | 16 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.denied". |
+| approval_executed | 17 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.executed". |
+| approval_failed | 18 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.failed". |
+| approval_expired | 19 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.expired". |
+| approval_canceled | 20 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.canceled". |
+| question_asked | 21 | `koinon.task.v1alpha1.QuestionAsked` | singular | event | "question.asked". |
+| question_answered | 22 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.answered". |
+| question_dismissed | 23 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.dismissed". |
+| question_expired | 24 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.expired": the question expired; its default can apply. |
+| question_canceled | 25 | `koinon.task.v1alpha1.QuestionCanceled` | singular | event | "question.canceled". |
+| question_retargeted | 26 | `koinon.task.v1alpha1.QuestionRetargeted` | singular | event | "question.retargeted": the question goes to other recipients. |
+
+### Message TimelineMessage
+
+TimelineMessage is a message on the task.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| text | 1 | `string` | singular |  | The message as the agent reads it. |
+| display | 2 | `string` | singular |  | The text to show to people when it is not text, for example a direct message without the trigger instruction that Koinon put before it. |
+| source | 3 | `string` | singular |  | Where a system message or a direct message comes from: "trigger", "trigger_manual", "direct_message" or "continuation". Empty for a message that a person or the agent wrote. |
+| message_id | 4 | `string` | singular |  | The ID of the direct message. |
+| fire | 5 | `string` | singular |  | How a trigger fired: "scheduled" or "manual". |
+| fired_by | 6 | `string` | singular |  | The user who fired a trigger by hand. |
+| continuation | 7 | `int32` | singular |  | For a continuation: its number, and the most that the task can have. |
+| continuation_max | 8 | `int32` | singular |  |  |
 
 ### Enum ActorKind
 

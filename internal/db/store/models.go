@@ -3152,17 +3152,19 @@ type Task struct {
 }
 
 type TaskEvent struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	TaskID       pgtype.UUID
-	Seq          int64
-	Kind         string
-	ActorKind    TaskActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	CreatedAt    pgtype.Timestamptz
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	TaskID         pgtype.UUID
+	Seq            int64
+	Kind           string
+	ActorKind      TaskActorKind
+	ActorUserID    pgtype.UUID
+	ActorAgentID   pgtype.UUID
+	RunID          pgtype.UUID
+	Payload        []byte
+	CreatedAt      pgtype.Timestamptz
+	PayloadVersion int16
+	Prompt         bool
 }
 
 type Template struct {

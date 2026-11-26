@@ -154,6 +154,7 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 				OrgID: c.org, TaskID: t.ID, Kind: KindMessage,
 				ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
 				Payload: jsonPayload(map[string]any{"text": msg}),
+				Prompt:  true,
 			}); err != nil {
 				return nil, err
 			}
@@ -308,6 +309,7 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 			OrgID: c.org, TaskID: t.ID, Kind: KindMessage,
 			ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
 			Payload: jsonPayload(map[string]any{"text": msg}),
+			Prompt:  true,
 		})
 		if err != nil {
 			return nil, err

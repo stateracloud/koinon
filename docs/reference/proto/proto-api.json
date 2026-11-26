@@ -18543,7 +18543,8 @@
     {
       "name": "koinon.task.v1alpha1",
       "files": [
-        "koinon/task/v1alpha1/task.proto"
+        "koinon/task/v1alpha1/task.proto",
+        "koinon/task/v1alpha1/timeline.proto"
       ],
       "services": [
         {
@@ -18676,6 +18677,249 @@
               "name": "run",
               "number": 2,
               "type": "koinon.run.v1alpha1.Run",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ApprovalChanged",
+          "fullName": "koinon.task.v1alpha1.ApprovalChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalChanged records a step of an approval after its request.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "approval_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "args_sha256",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "note",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The approver's note."
+            },
+            {
+              "name": "scope",
+              "number": 6,
+              "type": "koinon.task.v1alpha1.ApprovalScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The scope that an approval created."
+            },
+            {
+              "name": "result",
+              "number": 7,
+              "type": "google.protobuf.Struct",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The result of an executed action."
+            },
+            {
+              "name": "error",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the action failed."
+            },
+            {
+              "name": "expires_at",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "When the approval expired."
+            },
+            {
+              "name": "reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the approval was canceled."
+            }
+          ]
+        },
+        {
+          "name": "ApprovalRequested",
+          "fullName": "koinon.task.v1alpha1.ApprovalRequested",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalRequested records an action that waits for approval, or one that a scope covered.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "approval_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "args_sha256",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "decision",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The policy decision, for example \"ask\" or \"allow\"."
+            },
+            {
+              "name": "risk",
+              "number": 6,
+              "type": "google.protobuf.Value",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The risk card of the action."
+            },
+            {
+              "name": "approvals_required",
+              "number": 7,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The number of approvals that the action needs, when it is more than one."
+            },
+            {
+              "name": "system",
+              "number": 8,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "True when Koinon asks, not the agent."
+            },
+            {
+              "name": "scope",
+              "number": 9,
+              "type": "koinon.task.v1alpha1.ApprovalScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The scope that covered the call."
+            }
+          ]
+        },
+        {
+          "name": "ApprovalScope",
+          "fullName": "koinon.task.v1alpha1.ApprovalScope",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalScope is the scoped approval that covered a call.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "kind",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"once\", \"task\" or \"agent\"."
+            },
+            {
+              "name": "expires_at",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "created_by",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_id",
+              "number": 5,
+              "type": "string",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -18998,6 +19242,501 @@
           "fields": []
         },
         {
+          "name": "QuestionAsked",
+          "fullName": "koinon.task.v1alpha1.QuestionAsked",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionAsked records a question from the agent to a person.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "question",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "koinon.task.v1alpha1.QuestionTarget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to_label",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The recipients as people read them."
+            },
+            {
+              "name": "recipients",
+              "number": 5,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "choices",
+              "number": 6,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "has_draft",
+              "number": 7,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_answer",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The answer that applies when the question expires."
+            },
+            {
+              "name": "expires_at",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionCanceled",
+          "fullName": "koinon.task.v1alpha1.QuestionCanceled",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionCanceled records a question that nobody needs to answer now.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionResolved",
+          "fullName": "koinon.task.v1alpha1.QuestionResolved",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionResolved records the end of a question: answered, dismissed or expired.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answer_kind",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answer",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_applied",
+              "number": 4,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answered_by_name",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of the person who answered."
+            }
+          ]
+        },
+        {
+          "name": "QuestionRetargeted",
+          "fullName": "koinon.task.v1alpha1.QuestionRetargeted",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionRetargeted records a question that goes to other recipients.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to_label",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "recipients",
+              "number": 3,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "requested_target",
+              "number": 5,
+              "type": "koinon.task.v1alpha1.QuestionTarget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The target that was asked for, when a fallback applies."
+            },
+            {
+              "name": "fallback_reason",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionTarget",
+          "fullName": "koinon.task.v1alpha1.QuestionTarget",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionTarget names who a question is for.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "kind",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"user\", \"role\" or \"creator\"."
+            },
+            {
+              "name": "user",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "role",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunEnded",
+          "fullName": "koinon.task.v1alpha1.RunEnded",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunEnded records a run that failed or was canceled.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "reason",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A code or a text, for example \"user\", \"wall_clock_cap\" or \"spend_limit\"."
+            },
+            {
+              "name": "failure_class",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The run's failure class, for example \"transient\" or \"loop\"."
+            },
+            {
+              "name": "message",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A text for people."
+            },
+            {
+              "name": "sandbox_cause",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A sandbox that was not available."
+            },
+            {
+              "name": "waited_seconds",
+              "number": 5,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "detail",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cause_seen_ms",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_wall_clock_seconds",
+              "number": 8,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A run stopped at its time limit, and what the agent said last."
+            },
+            {
+              "name": "summary",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "summary_source",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"reply\", \"notes\" or \"none\"."
+            },
+            {
+              "name": "limit",
+              "number": 11,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A run stopped at a spend or request limit."
+            },
+            {
+              "name": "spend_limit_usd",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "spent_usd",
+              "number": 13,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "window_start",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model_requests",
+              "number": 15,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "requeue_reason",
+              "number": 16,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why a newer queued run replaced this one."
+            }
+          ]
+        },
+        {
+          "name": "RunParked",
+          "fullName": "koinon.task.v1alpha1.RunParked",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunParked records a run that waits for a person.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "reason",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"approval\" or \"input_required\"."
+            },
+            {
+              "name": "approval_ids",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The approvals and the questions that the run waits for."
+            },
+            {
+              "name": "question_ids",
+              "number": 3,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunQueued",
+          "fullName": "koinon.task.v1alpha1.RunQueued",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunQueued records a run put on the queue with its limits.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_wall_clock_seconds",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_model_requests",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_spend_usd",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A decimal amount in US dollars; empty when the run has no spend cap."
+            }
+          ]
+        },
+        {
           "name": "SendDirectMessageRequest",
           "fullName": "koinon.task.v1alpha1.SendDirectMessageRequest",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -19093,6 +19832,123 @@
               "oneof": "",
               "deprecated": false,
               "description": "True when this call reopened a completed task as a follow-up."
+            }
+          ]
+        },
+        {
+          "name": "SessionChanged",
+          "fullName": "koinon.task.v1alpha1.SessionChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "SessionChanged records a new harness session.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "previous_session_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "session_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StatusChanged",
+          "fullName": "koinon.task.v1alpha1.StatusChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "StatusChanged records a move of the task's state.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Task states as the database names them: \"submitted\", \"working\", \"input_required\",\n\"completed\", \"canceled\" or \"failed\". from is empty when the writer did not record it. They are\nstrings, not TaskState, because task.proto imports this file."
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A code for the cause, for example \"follow_up\", \"run_succeeded\", \"continuation_limit\"."
+            },
+            {
+              "name": "continuations",
+              "number": 4,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The continuation and spend counts of a task that stopped at a limit."
+            },
+            {
+              "name": "max_continuations",
+              "number": 5,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spent_usd",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spend_cap_usd",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "error",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the next continuation could not start, when its agent is not available."
             }
           ]
         },
@@ -19259,6 +20115,60 @@
           ]
         },
         {
+          "name": "TaskCreated",
+          "fullName": "koinon.task.v1alpha1.TaskCreated",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TaskCreated records the start of a task.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "title",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "What created the task when it is not a person: \"trigger\", \"trigger_manual\" or\n\"direct_message\"."
+            },
+            {
+              "name": "fire",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "How a trigger fired: \"scheduled\" or \"manual\"."
+            },
+            {
+              "name": "fired_by",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user who fired a trigger by hand."
+            },
+            {
+              "name": "trigger_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The trigger of a direct message thread."
+            }
+          ]
+        },
+        {
           "name": "TaskEvent",
           "fullName": "koinon.task.v1alpha1.TaskEvent",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -19326,7 +20236,7 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": ""
+              "description": "The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old\nrows too."
             },
             {
               "name": "created_at",
@@ -19345,6 +20255,357 @@
               "oneof": "",
               "deprecated": false,
               "description": "The display name of actor_user_id, for a person's event; empty for other actors, an unnamed\nuser or a deleted user. Never an email address. Any role that can read the task sees it."
+            },
+            {
+              "name": "event",
+              "number": 10,
+              "type": "koinon.task.v1alpha1.TimelineEvent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The typed event. It is not set for a kind that this server does not know."
+            }
+          ]
+        },
+        {
+          "name": "TaskNote",
+          "fullName": "koinon.task.v1alpha1.TaskNote",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TaskNote is a note from Koinon about the task's sandbox or agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "TimelineEvent",
+          "fullName": "koinon.task.v1alpha1.TimelineEvent",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TimelineEvent is the typed body of one Timeline event (issue #735). Each member of the oneof is\none event kind; internal/tasks has the table that maps a member to the kind string in\ntask_events.kind. A row with payload_version 1 stores this message as protojson. A row with\npayload_version 0 has the older free-form JSON, which the reader translates to this message.\n\nAdd a kind as a new member with a new field number. Never reuse or renumber a member.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "koinon.task.v1alpha1.TimelineMessage",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"message\": a message from a person, the agent or the system."
+            },
+            {
+              "name": "task_created",
+              "number": 2,
+              "type": "koinon.task.v1alpha1.TaskCreated",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"task.created\"."
+            },
+            {
+              "name": "status_changed",
+              "number": 3,
+              "type": "koinon.task.v1alpha1.StatusChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"status.changed\"."
+            },
+            {
+              "name": "run_queued",
+              "number": 4,
+              "type": "koinon.task.v1alpha1.RunQueued",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.queued\"."
+            },
+            {
+              "name": "run_parked",
+              "number": 5,
+              "type": "koinon.task.v1alpha1.RunParked",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.parked\": the run waits for a person."
+            },
+            {
+              "name": "run_failed",
+              "number": 6,
+              "type": "koinon.task.v1alpha1.RunEnded",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.failed\"."
+            },
+            {
+              "name": "run_canceled",
+              "number": 7,
+              "type": "koinon.task.v1alpha1.RunEnded",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.canceled\"."
+            },
+            {
+              "name": "run_session_reset",
+              "number": 8,
+              "type": "koinon.task.v1alpha1.SessionChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.session_reset\": the harness started a new session."
+            },
+            {
+              "name": "run_session_restarted",
+              "number": 9,
+              "type": "koinon.task.v1alpha1.SessionChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.session_restarted\": the harness session started again with a handoff prompt."
+            },
+            {
+              "name": "sandbox_recreated",
+              "number": 10,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"sandbox.recreated\"."
+            },
+            {
+              "name": "sandbox_work_lost",
+              "number": 11,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"sandbox.work_lost\"."
+            },
+            {
+              "name": "agent_unhealthy",
+              "number": 12,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"agent.unhealthy\"."
+            },
+            {
+              "name": "approval_requested",
+              "number": 13,
+              "type": "koinon.task.v1alpha1.ApprovalRequested",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.requested\"."
+            },
+            {
+              "name": "approval_first_approved",
+              "number": 14,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.first_approved\": the first of two approvals."
+            },
+            {
+              "name": "approval_approved",
+              "number": 15,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.approved\"."
+            },
+            {
+              "name": "approval_denied",
+              "number": 16,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.denied\"."
+            },
+            {
+              "name": "approval_executed",
+              "number": 17,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.executed\"."
+            },
+            {
+              "name": "approval_failed",
+              "number": 18,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.failed\"."
+            },
+            {
+              "name": "approval_expired",
+              "number": 19,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.expired\"."
+            },
+            {
+              "name": "approval_canceled",
+              "number": 20,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.canceled\"."
+            },
+            {
+              "name": "question_asked",
+              "number": 21,
+              "type": "koinon.task.v1alpha1.QuestionAsked",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.asked\"."
+            },
+            {
+              "name": "question_answered",
+              "number": 22,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.answered\"."
+            },
+            {
+              "name": "question_dismissed",
+              "number": 23,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.dismissed\"."
+            },
+            {
+              "name": "question_expired",
+              "number": 24,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.expired\": the question expired; its default can apply."
+            },
+            {
+              "name": "question_canceled",
+              "number": 25,
+              "type": "koinon.task.v1alpha1.QuestionCanceled",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.canceled\"."
+            },
+            {
+              "name": "question_retargeted",
+              "number": 26,
+              "type": "koinon.task.v1alpha1.QuestionRetargeted",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.retargeted\": the question goes to other recipients."
+            }
+          ]
+        },
+        {
+          "name": "TimelineMessage",
+          "fullName": "koinon.task.v1alpha1.TimelineMessage",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TimelineMessage is a message on the task.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "text",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The message as the agent reads it."
+            },
+            {
+              "name": "display",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The text to show to people when it is not text, for example a direct message without the\ntrigger instruction that Koinon put before it."
+            },
+            {
+              "name": "source",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Where a system message or a direct message comes from: \"trigger\", \"trigger_manual\",\n\"direct_message\" or \"continuation\". Empty for a message that a person or the agent wrote."
+            },
+            {
+              "name": "message_id",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The ID of the direct message."
+            },
+            {
+              "name": "fire",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "How a trigger fired: \"scheduled\" or \"manual\"."
+            },
+            {
+              "name": "fired_by",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user who fired a trigger by hand."
+            },
+            {
+              "name": "continuation",
+              "number": 7,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "For a continuation: its number, and the most that the task can have."
+            },
+            {
+              "name": "continuation_max",
+              "number": 8,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         }
