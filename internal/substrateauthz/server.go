@@ -67,6 +67,8 @@ func (s *Server) ensure(w http.ResponseWriter, r *http.Request) {
 	}
 	who, err := s.Auth.Authenticate(r.Context(), strings.TrimSpace(token))
 	if err != nil {
+		// The cause is logged, not answered: a TokenReview the API server forbids shows here.
+		s.log().Warn("provisioner: token not accepted", "err", err)
 		http.Error(w, "the token is not valid", http.StatusUnauthorized)
 		return
 	}
