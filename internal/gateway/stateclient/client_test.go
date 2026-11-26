@@ -331,6 +331,37 @@ var _ = Describe("the gateway State client", func() {
 		Expect(failed).To(BeNumerically("<", 25))
 	})
 
+	It("reports a half that has failed to apply for longer than StaleAfter, and clears it on the next success (#1347)", func() {
+		start(20 * time.Millisecond)
+		st.publish(7, "wiki")
+		mcp.setErr(errors.New("gateway rejected the config"))
+		var mu sync.Mutex
+		clock := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+		now := func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+		advance := func(d time.Duration) { mu.Lock(); defer mu.Unlock(); clock = clock.Add(d) }
+		m := stateclient.NewMetrics(nil)
+		c, err := stateclient.New(stateclient.Config{
+			URL: ts.URL, Token: func() (string, error) { return token, nil }, CopyID: "copy-test-1",
+			Model: model, MCP: mcp, MinBackoff: 10 * time.Millisecond, MaxBackoff: 50 * time.Millisecond, Metrics: m,
+			StaleAfter: time.Minute, Now: now,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		ctx, stop := context.WithCancel(context.Background())
+		fin := make(chan error, 1)
+		go func() { fin <- c.Run(ctx) }()
+		DeferCleanup(func() { stop(); Eventually(fin).Should(Receive()) })
+
+		Eventually(func() float64 { return testutil.ToFloat64(m.Applied.WithLabelValues("mcp", "failed")) }, 10*time.Second, 10*time.Millisecond).
+			Should(BeNumerically(">=", 1))
+		Expect(c.Stale()).To(Succeed(), "a first failure is inside the bound")
+		advance(2 * time.Minute)
+		Eventually(c.Stale, 5*time.Second, 10*time.Millisecond).Should(MatchError(ContainSubstring("mcp half has failed")))
+
+		mcp.setErr(nil)
+		Eventually(acked(7, gwv1.Half_HALF_MCP), 10*time.Second, 10*time.Millisecond).Should(BeTrue())
+		Expect(c.Stale()).To(Succeed(), "an applied revision clears it")
+	})
+
 	It("retries a half whose apply failed, without a new publish", func() {
 		start(20 * time.Millisecond)
 		st.publish(5, "wiki")

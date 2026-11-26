@@ -143,9 +143,12 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"internal hosts (names, IPs or CIDRs, optionally with a port) that the egress routes may reach although they are internal")
 	fs.DurationVar(&c.shutdownDelay, "shutdown-delay", 5*time.Second,
 		"on SIGTERM /readyz turns 503 at once and the gateway keeps serving for this long, so the Service and clients stop sending requests to it; then it drains")
-	fs.DurationVar(&c.drain, "drain-timeout", 30*time.Second,
-		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long")
+	fs.DurationVar(&c.drain, "drain-timeout", defaultDrain,
+		"on SIGTERM the gateway refuses new requests, then lets calls in flight finish for up to this long; with the MCP path it must be at least "+mcpgateway.MinDrain.String()+" (the call timeout twice)")
 }
+
+// defaultDrain is the default --drain-timeout: the MCP call timeout and a margin.
+const defaultDrain = mcpgateway.MinDrain + 30*time.Second
 
 // validate holds the rules between flags, which cobra's required-flag check does not know.
 func (c *config) validate() error {
@@ -181,6 +184,12 @@ func (c *config) validate() error {
 	}
 	if c.drain <= 0 {
 		return errors.New("--drain-timeout must be positive")
+	}
+	// A tool call is never retried. It may wait up to the call timeout for a person's approval and then run
+	// upstream for up to the call timeout. A shorter drain cuts a call that is still running when a rollout
+	// starts (issue 1347).
+	if c.mcpPath && c.drain < mcpgateway.MinDrain {
+		return fmt.Errorf("--drain-timeout (%s) must be at least %s (the MCP call timeout twice: approval wait and upstream call): a call in flight at SIGTERM would be cut", c.drain, mcpgateway.MinDrain)
 	}
 	return nil
 }
@@ -262,6 +271,8 @@ func run(ctx context.Context, cfg config) error {
 	}
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
 	var keys *gatewaykeys.Loader
+	// guardLoad is the guard's database check; nil when the pod runs no guard. /readyz asks it.
+	var guardLoad loadChecker
 	if cfg.mcpPath && cfg.databaseURLFile != "" {
 		// A call the guard holds for a person is parked through koinon-api (#1301): koinon-api records the
 		// approval, and the gateway's database login has no right on approvals.
@@ -276,6 +287,7 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		defer pool.Close()
+		guardLoad = guard
 		gopts.Guard, gopts.Audit = guard, multiAudit{logAudit{log: log}, audit}
 		// The pod reports the formats it reads, so koinon-api seals a credential to the gateway key only when
 		// every gateway pod opens it (ADR 0097 decision 12.5 step 1). A pod without a key reads none.
@@ -353,15 +365,15 @@ func run(ctx context.Context, cfg config) error {
 	// leaves the Service first.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
+	var keyReady keyReadier
+	if keys != nil {
+		keyReady = keys
+	}
 	if err := serveHealth(healthCtx, ctx, cfg.healthAddr, func() bool {
-		if keys != nil {
-			if ok, _ := keys.Ready(); !ok {
-				return false
-			}
-		}
 		// A held install has no revision to wait for: the held reconciler publishes none (ADR 0107).
-		return cfg.restoreHold || ((!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
-	}, log); err != nil {
+		held := cfg.restoreHold || ((!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
+		return podReady(guardLoad, keyReady, held)
+	}, func() bool { return sc != nil && sc.Stale() != nil }, log); err != nil {
 		return err
 	}
 
@@ -532,6 +544,30 @@ func serveEgress(ctx context.Context, cfg config, eg *egress.Gateway, log *slog.
 	return srv, nil
 }
 
+// loadChecker is the guard's view of its database login (mcpguard.GatewayGuard.Loaded).
+type loadChecker interface{ Loaded() error }
+
+// keyReadier is the key loader's readiness (gatewaykeys.Loader.Ready).
+type keyReadier interface{ Ready() (bool, error) }
+
+// podReady is the /readyz answer of the pod. A pod is ready when it applied a config (configured), its key
+// loader holds the keys it needs, and the leak guard reached its database. The guard opens a lazy pool
+// and retries every 2 s: a broken login would leave every org target closed behind a ready pod, and a
+// rollout would not stop. A nil guard or loader means the pod runs without one. Each later outage is not
+// checked here: the guard refuses on its own then (fail closed), and a database blip must not
+// remove every endpoint.
+func podReady(guard loadChecker, keys keyReadier, configured bool) bool {
+	if guard != nil && guard.Loaded() != nil {
+		return false
+	}
+	if keys != nil {
+		if ok, _ := keys.Ready(); !ok {
+			return false
+		}
+	}
+	return configured
+}
+
 // heldRefuse returns next, or, while the install is held (ADR 0107), a handler that refuses every
 // request: a held gateway is ready but deny-all, whatever config it holds.
 func heldRefuse(held bool, next http.Handler) http.Handler {
@@ -543,27 +579,34 @@ func heldRefuse(held bool, next http.Handler) http.Handler {
 	})
 }
 
-// serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is
-// not draining) on addr. An empty addr serves nothing.
-func serveHealth(life, term context.Context, addr string, configured func() bool, log *slog.Logger) error {
-	if addr == "" {
-		return nil
-	}
+// readyzHandler answers /readyz. A replica with no config would refuse every key: it is not ready until the
+// first revision applied (configured). Once one has, a later State stream outage keeps the config in force,
+// so that answer latches. degraded does not latch: it is asked on every probe, and a pod that fails to
+// apply a newer revision (stateclient.Client.Stale) leaves the Service although it was ready before. Without
+// that, a copy stuck on an old revision would go on to accept keys that a later revision revoked (#1347).
+func readyzHandler(term context.Context, configured, degraded func() bool) http.HandlerFunc {
 	var applied atomic.Bool
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		// A replica with no config would refuse every key: it is not ready until the first
-		// revision applied. Once one has, a later State stream outage keeps the config in force.
+	return func(w http.ResponseWriter, _ *http.Request) {
 		if !applied.Load() && configured() {
 			applied.Store(true)
 		}
-		if term.Err() != nil || !applied.Load() {
+		if term.Err() != nil || !applied.Load() || degraded() {
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}
+}
+
+// serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config, is not
+// degraded and is not draining) on addr. An empty addr serves nothing.
+func serveHealth(life, term context.Context, addr string, configured, degraded func() bool, log *slog.Logger) error {
+	if addr == "" {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /readyz", readyzHandler(term, configured, degraded))
 	ln, err := (&net.ListenConfig{}).Listen(life, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("health listener: %w", err)

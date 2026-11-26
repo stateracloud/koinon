@@ -3,20 +3,49 @@
 package gatewaykeys_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
+
+// flakyDB fails every call while fail is set.
+type flakyDB struct {
+	store.DBTX
+	fail     atomic.Bool
+	failExec atomic.Bool // only writes fail: a demoted, read-only node after a switchover
+}
+
+var errDown = errors.New("connection refused")
+
+func (f *flakyDB) Query(ctx context.Context, q string, a ...interface{}) (pgx.Rows, error) {
+	if f.fail.Load() {
+		return nil, errDown
+	}
+	return f.DBTX.Query(ctx, q, a...)
+}
+
+func (f *flakyDB) Exec(ctx context.Context, q string, a ...interface{}) (pgconn.CommandTag, error) {
+	if f.fail.Load() || f.failExec.Load() {
+		return pgconn.CommandTag{}, errDown
+	}
+	return f.DBTX.Exec(ctx, q, a...)
+}
 
 var _ = Describe("the gateway key lifecycle", func() {
 	var (
@@ -187,6 +216,71 @@ var _ = Describe("the gateway key lifecycle", func() {
 			by, err := gatewaykeys.LoadedBy(ctx, pool, second, time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(by).To(BeEmpty(), "a key the gateway does not hold is not reported")
+		})
+
+		It("stays ready on its last good keyring while the database fails, and is not ready before a good pass", func(ctx SpecContext) {
+			id, err := admin.Add(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			dir := GinkgoT().TempDir()
+			entries, _, err := sec.Read(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			enc, err := entries[id].Encode()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(filepath.Join(dir, id), enc, 0o600)).To(Succeed())
+
+			db := &flakyDB{DBTX: pool}
+			l := gatewaykeys.NewLoader(dir, db, ws, "gw-a", nil)
+			db.fail.Store(true)
+			Expect(l.Load(ctx)).NotTo(Succeed())
+			ok, _ := l.Ready()
+			Expect(ok).To(BeFalse(), "no good pass yet: nothing to serve")
+
+			db.fail.Store(false)
+			Expect(l.Load(ctx)).To(Succeed())
+			Expect(l.Keyring.Has(id)).To(BeTrue())
+
+			By("a Postgres switchover")
+			db.fail.Store(true)
+			Expect(l.Load(ctx)).NotTo(Succeed(), "the caller still logs the error")
+			ok, _ = l.Ready()
+			Expect(ok).To(BeTrue(), "a transient database error keeps the last good keyring ready")
+			Expect(l.Keyring.Has(id)).To(BeTrue())
+
+			By("a read-only node: the list works, the load report fails")
+			db.fail.Store(false)
+			db.failExec.Store(true)
+			Expect(l.Load(ctx)).NotTo(Succeed())
+			ok, _ = l.Ready()
+			Expect(ok).To(BeTrue(), "a failed load report keeps the pod ready")
+		})
+
+		It("does not turn ready again on a database error after a key went missing", func(ctx SpecContext) {
+			id, err := admin.Add(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			dir := GinkgoT().TempDir()
+			entries, _, err := sec.Read(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			enc, err := entries[id].Encode()
+			Expect(err).NotTo(HaveOccurred())
+			file := filepath.Join(dir, id)
+			Expect(os.WriteFile(file, enc, 0o600)).To(Succeed())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, id, "gw-a")).To(Succeed())
+			Expect(gatewaykeys.ReportLoaded(ctx, pool, id, "gw-b")).To(Succeed())
+			_, err = admin.Activate(ctx)
+			Expect(err).NotTo(HaveOccurred())
+
+			db := &flakyDB{DBTX: pool}
+			l := gatewaykeys.NewLoader(dir, db, ws, "gw-a", nil)
+			Expect(l.Load(ctx)).To(Succeed())
+			Expect(os.Remove(file)).To(Succeed())
+			Expect(l.Load(ctx)).NotTo(Succeed())
+			ok, _ := l.Ready()
+			Expect(ok).To(BeFalse(), "the active key is missing")
+
+			db.fail.Store(true)
+			Expect(l.Load(ctx)).NotTo(Succeed())
+			ok, _ = l.Ready()
+			Expect(ok).To(BeFalse(), "a database error is not a verdict on the keys")
 		})
 
 		It("is ready with no key rows yet", func(ctx SpecContext) {
