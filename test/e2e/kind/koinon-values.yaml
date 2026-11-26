@@ -32,7 +32,7 @@ gateway:
 # which the default URL policy and the gateway's egress policy deny).
 egress:
   allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080", "fakemcp.koinon-e2e-fakes.svc:8080", "fakemcp.koinon-e2e-fakes.svc:8081",
-    "fakegitea.koinon-e2e-fakes.svc:443"]
+    "fakegitea.koinon-e2e-fakes.svc.cluster.local:443"]
 
 networkPolicy:
   gatewayEgressTo:

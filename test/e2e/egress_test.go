@@ -32,7 +32,7 @@ import (
 // connection's read token. So a git-upload-pack that the fake answered 200 with a credential is the
 // gateway's work: the sandbox could not send one.
 const (
-	fakeGiteaURL  = "https://fakegitea.koinon-e2e-fakes.svc"
+	fakeGiteaURL  = "https://fakegitea.koinon-e2e-fakes.svc.cluster.local"
 	fakeGiteaRepo = "koinon-demo/hello"
 	// The fake's tokens (test/e2e/kind/fakes.yaml): obviously fake, never a real credential.
 	fakeGiteaReadToken  = "koinon_test_not-a-real-gitea-read-token"
