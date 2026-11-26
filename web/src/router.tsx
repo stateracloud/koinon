@@ -20,7 +20,7 @@ import { PricesPage } from '@/pages/prices-page'
 import { ProvidersPage } from '@/pages/providers-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
-import { NewAgentPage } from '@/pages/new-agent-page'
+import { BlankAgentPage, NewAgentPage, TemplateAgentPage } from '@/pages/new-agent-page'
 import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
 import { GitHubAppCreatedPage, GitHubAppInstalledPage } from '@/pages/github-app-setup-pages'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
@@ -88,7 +88,10 @@ export const ticketRedirectRoute = createRoute({
 export const approvalRoute = createRoute({ getParentRoute: () => appRoute, path: '/approvals/$approvalId', component: ApprovalPage })
 
 export const agentsRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents', component: AgentsPage })
+// New agent (ADR 0126 section 5): the gallery, then a template's wizard or the blank form.
 export const newAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new', component: NewAgentPage })
+export const newBlankAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new/blank', component: BlankAgentPage })
+export const newTemplateAgentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/new/template/$templateId', component: TemplateAgentPage })
 export const agentRoute = createRoute({ getParentRoute: () => appRoute, path: '/agents/$agentId', component: AgentPage })
 
 export const connectionsRoute = createRoute({
@@ -163,6 +166,8 @@ const routeTree = rootRoute.addChildren([
     approvalRoute,
     agentsRoute,
     newAgentRoute,
+    newBlankAgentRoute,
+    newTemplateAgentRoute,
     agentRoute,
     connectionsRoute,
     newGitHubConnectionRoute,

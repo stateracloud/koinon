@@ -112,8 +112,7 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   // Anchored: "Repo helper (Gitea)" is a template too (old issue 370).
-  await page.getByRole('radio', { name: /^Repo helper v/ }).check()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('region', { name: 'Platform templates' }).getByRole('link', { name: /^Repo helper(?! \(Gitea\))/ }).click()
   await page.getByRole('radio', { name: /OpenCode/ }).check()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('combobox', { name: 'Repository 1' }).fill('hello')
@@ -150,4 +149,25 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
     timeout: 5 * 60_000,
   })
   await expect(page.getByRole('region', { name: 'Run costs' })).toContainText('succeeded')
+
+  // 8. The other path (ADR 0126 section 5): a blank agent from the form, saved as an org template,
+  // then activated by the admin. It comes last so that the task above has one agent to pick.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  await page.getByRole('link', { name: 'New agent' }).click()
+  await page.getByRole('link', { name: /Blank agent/ }).click()
+  await page.getByLabel('Name', { exact: true }).fill('Docs helper')
+  await page.getByLabel('Instructions').fill('Answer questions about the docs of the repository.')
+  const github = page.getByRole('group', { name: 'GitHub access' })
+  await github.getByRole('checkbox', { name: 'Give GitHub access' }).check()
+  await github.getByRole('combobox', { name: 'GitHub repository 1' }).fill('hello')
+  await page.getByRole('option', { name: new RegExp(repository) }).click()
+  await page.getByRole('checkbox', { name: 'Save as template' }).check()
+  await page.getByLabel('Template name').fill('Docs helper')
+  await page.getByRole('button', { name: 'Create draft' }).click()
+  await expect(page.getByRole('heading', { name: 'Docs helper', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Activate' }).click()
+  await expect(page.getByText('Activated.')).toBeVisible()
+  await page.getByRole('link', { name: '← Agents' }).click()
+  await page.getByRole('link', { name: 'New agent' }).click()
+  await expect(page.getByRole('region', { name: 'Org templates' }).getByRole('link', { name: /Docs helper/ })).toBeVisible()
 })
