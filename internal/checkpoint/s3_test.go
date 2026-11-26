@@ -43,14 +43,14 @@ var _ = Describe("Writer on S3", Ordered, func() {
 		Expect(r.SnapshotID).NotTo(BeEmpty())
 
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, &out)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
 		got := readTar(out.Bytes())
 		Expect(got).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(got["big.bin"]).To(HaveLen(16 << 16))
 		Expect(w.Verify(ctx, prefix, pw, r.SnapshotID)).To(Succeed())
 
 		By("the wrong password does not open the repository")
-		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", r.SnapshotID, &bytes.Buffer{})).NotTo(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", r.SnapshotID, "", &bytes.Buffer{})).NotTo(Succeed())
 	})
 
 	It("lists an agent's later epoch folders in one delimited listing, past a gap and without epoch 0's blobs (#262)", func() {

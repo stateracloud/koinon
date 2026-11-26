@@ -459,3 +459,28 @@ records settled maintainer decisions. See the summary of the lane for that gap.
   [#1082](https://github.com/stateracloud/koinon/issues/1082), launcher
   [#1087](https://github.com/stateracloud/koinon/issues/1087), removal rules
   [#1094](https://github.com/stateracloud/koinon/issues/1094).
+
+## Amendment (2026-11-25, issue #1090): what is built of the snapshot rules in v0.1
+
+Maintainer decisions of 2026-11-24 and 2026-11-25. They change when section 5 is complete, not what it
+requires.
+
+- **Items 2, 3 and 5 for Substrate memory snapshots (tags) move to v0.2**, as one design: the snapshot
+  record (org, actor, template digest, time), single use, expiry, the digest check before a restore, and
+  the per-org encryption. No Koinon caller creates tags in v0.1. The driver's own digest check stays: it
+  takes a digest of a tag, fails closed without a content digest and refuses a wrong digest (contract
+  spec), and nothing outside `internal/execution` calls it yet.
+- **v0.1.0 has no integrity check on Substrate suspend snapshots.** The security notes of the install
+  document say so: the snapshot store is trusted, and write access to it gives control of suspended agents.
+  Item 4 (a check that the prefix belongs to the workspace) moves with it. The installer default for the
+  store stays 10Gi, and the install document gets a sizing rule (the memory in use of the agents that can
+  be suspended at one time, with the limits as the worst case).
+- **The home has a digest in v0.1.** The Koinon kopia checkpoint of the home records a SHA-256 digest and a
+  restore refuses a mismatch ([0032](0032-agent-home-checkpoints.md), amendment of 2026-11-25). So the cold
+  path of item 6 (start from the last verified home checkpoint) is a verified path.
+- **`keep_warm` default becomes 0** (issue #1090, decision 1): a warm agent saves about 1 second and holds
+  its full limits in the pool. The feature stays. The default change is a chart and reconciler change that
+  another item carries.
+- **The durable directory is in a snapshot.** It is part of every fidelity's snapshot, so a snapshot holds
+  the home. Section 1 still applies: the home holds no credential, and the 0044 exception stays refused for
+  a sandbox with snapshots on.

@@ -42,7 +42,10 @@ import (
 // HomeStore is the checkpoint writer as agentd uses it (checkpoint.Writer).
 type HomeStore interface {
 	Backup(ctx context.Context, prefix, password string, tarStream io.Reader, m checkpoint.Meta) (checkpoint.Result, error)
-	Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error
+	// Restore refuses a snapshot whose files do not match wantDigest (checkpoint.ErrDigestMismatch),
+	// before it writes a byte to dst. An empty wantDigest skips the check (a checkpoint made before
+	// digests were recorded).
+	Restore(ctx context.Context, prefix, password, snapshotID, wantDigest string, dst io.Writer) error
 	Verify(ctx context.Context, prefix, password, snapshotID string) error
 	// DeleteRepository deletes the blobs of a retired repository, never a later epoch's under it.
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
@@ -353,6 +356,7 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 		_, cerr := p.q.CompleteHomeCheckpoint(octx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
 			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
+			ContentDigest: pgtype.Text{String: res.Digest, Valid: res.Digest != ""},
 		})
 		if cerr == nil {
 			return
@@ -564,9 +568,13 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {
+				if cp.ContentDigest.String == "" {
+					r.log.Warn("restored a home checkpoint that has no content digest (made before digests, or resynced): the home is not verified", "checkpoint", cp.ID.String())
+				}
 				if recErr := r.own.Record(ctx, "run.home_restored", map[string]any{
 					"checkpoint": cp.ID.String(), "snapshot": cp.SnapshotID.String, "newer_failed": i,
 					"taken_at": cp.FinishedAt.Time.UTC().Format(time.RFC3339),
+					"verified": cp.ContentDigest.String != "",
 				}); recErr != nil {
 					r.log.Warn("recording the home restore failed", "err", recErr)
 				}
@@ -582,6 +590,10 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			}
 			r.log.Warn("restoring the home failed", "checkpoint", cp.ID.String(), "try", try, "err", err)
 			errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
+			if errors.Is(err, checkpoint.ErrDigestMismatch) {
+				// Another try reads the same snapshot: go to the next older checkpoint.
+				break
+			}
 			if try < c.RestoreTries && !sleep(ctx, time.Second<<try) {
 				return ctx.Err()
 			}
@@ -612,7 +624,7 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 	pr, pw := io.Pipe()
 	restored := make(chan error, 1)
 	go func() {
-		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, pw)
+		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, cp.ContentDigest.String, pw)
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()

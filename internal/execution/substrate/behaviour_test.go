@@ -423,13 +423,38 @@ var _ = Describe("the Substrate driver", func() {
 	})
 
 	Describe("the template", func() {
+		It("resumes the actor it created, because Substrate creates one suspended (issue #1092)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, spec("a"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Calls("ResumeActor")).To(Equal(1))
+			_, err = dd.WaitPhase(ctx, ws, "a", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a repeated create leaves the sandbox as it is")
+			_, err = dd.StopSandbox(ctx, ws, "a")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = dd.CreateSandbox(ctx, ws, spec("a"))
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := dd.GetSandbox(ctx, ws, "a")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
+		})
+
+		It("is refused by Substrate when the spec has no CPU or memory (issue #1092)", func(ctx SpecContext) {
+			dd, _ := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("resources"))
+		})
+
 		It("shares a template between equal specs and carries only the public guest API key", func(ctx SpecContext) {
 			dd, c := newDriver()
 			for _, n := range []string{"a", "b"} {
 				_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: n, Image: img, CPULimit: "500m", MemoryLimit: "1Gi"})
 				Expect(err).NotTo(HaveOccurred())
 			}
-			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2" + digest})
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2" + digest, CPULimit: "500m", MemoryLimit: "512Mi"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.Templates(ws)).To(HaveLen(2))
 			Expect(c.TemplateOf(ws, "a")).To(Equal(c.TemplateOf(ws, "b")))
@@ -445,6 +470,20 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tmpl.Resources.Limits.CpuMillicores).To(BeEquivalentTo(500))
 			Expect(tmpl.Resources.Limits.MemoryBytes).To(BeEquivalentTo(1 << 30))
 			Expect(tmpl.SnapshotConfig.PreferredFidelity).To(Equal(ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY))
+		})
+
+		It("mounts a durable directory at the agent's home and no other volume (issue #1090)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "500m", MemoryLimit: "512Mi"})
+			Expect(err).NotTo(HaveOccurred())
+			tmpl, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(tmpl.Volumes).To(HaveLen(1))
+			Expect(tmpl.Volumes[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Volumes[0].DurableDir).NotTo(BeNil(), "a durable directory, not an external or an image volume")
+			Expect(tmpl.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(tmpl.Containers[0].VolumeMounts[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Containers[0].VolumeMounts[0].MountPath).To(Equal("/sandbox"))
 		})
 
 		It("refuses egress it cannot enforce", func(ctx SpecContext) {
@@ -596,6 +635,18 @@ var _ = Describe("the Substrate driver", func() {
 			src, _ := dd.GetSandbox(ctx, ws, "src")
 			Expect(cp.ID).NotTo(Equal(src.ID))
 			Expect(c.TemplateOf(ws, "copy")).To(Equal(c.TemplateOf(ws, "src")))
+		})
+
+		It("brings a restored sandbox to ready although Substrate creates the actor suspended", func(ctx SpecContext) {
+			dd, _ := newDriver()
+			ready(ctx, dd, "src")
+			snap, err := dd.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = dd.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("copy"))
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := dd.WaitPhase(ctx, ws, "copy", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
 		})
 
 		It("refuses a restore after the stored snapshot changed", func(ctx SpecContext) {

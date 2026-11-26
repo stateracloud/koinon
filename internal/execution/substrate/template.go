@@ -28,6 +28,19 @@ const AgentContainer = "agent"
 // (ADR 0075) reaches Substrate, which has pools and no runtime classes.
 var RuntimeClassSelector = project.Domain + "/runtime-class"
 
+// HomeVolume names the durable directory of every actor template, and HomeMountPath is where the
+// agent container sees it. The path is the agent's home, the one the Koinon checkpoints save
+// (checkpoint.HomeDir; the substrate package does not import checkpoint). A durable directory
+// persists across suspend and resume and takes part in a snapshot at every fidelity, so the home
+// survives an idle suspend without a Koinon checkpoint (issue #1090, maintainer decision 2026-11-25).
+// It does not survive DeleteActor without a tag (lab, 2026-11-25): archive and restore stay with the
+// Koinon kopia checkpoint, outside Substrate (ADR 0032, amended by this issue). A durable directory
+// holds the home once in a memory snapshot, not twice.
+const (
+	HomeVolume    = "home"
+	HomeMountPath = "/sandbox"
+)
+
 // templatePrefix starts the name of every template the driver derives.
 const templatePrefix = "kt-"
 
@@ -94,11 +107,13 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	t := &ateapiv1.ActorTemplate{
 		Metadata: &ateapiv1.ResourceMetadata{Atespace: workspace},
 		Containers: []*ateapiv1.Container{{
-			Name:    AgentContainer,
-			Image:   image,
-			Command: spec.Command,
-			Env:     []*ateapiv1.EnvVar{{Name: guestauth.VerifyKeysEnv, Value: keys}},
+			Name:         AgentContainer,
+			Image:        image,
+			Command:      spec.Command,
+			Env:          []*ateapiv1.EnvVar{{Name: guestauth.VerifyKeysEnv, Value: keys}},
+			VolumeMounts: []*ateapiv1.VolumeMount{{Name: HomeVolume, MountPath: HomeMountPath}},
 		}},
+		Volumes: []*ateapiv1.Volume{{Name: HomeVolume, DurableDir: &ateapiv1.DurableDirVolumeSource{}}},
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
 			StorageLocation:   cfg.SnapshotStorageLocation,
 			PreferredFidelity: cfg.SnapshotFidelity,
@@ -113,8 +128,8 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		t.WorkerSelector = &ateapiv1.Selector{MatchLabels: map[string]string{RuntimeClassSelector: spec.RuntimeClassName}}
 	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v2\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s", workspace, image, spec.Command, cpu, mem,
-		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys)
+	_, _ = fmt.Fprintf(h, "v3\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s", workspace, image, spec.Command, cpu, mem,
+		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
 }
