@@ -49,7 +49,8 @@ current milestone a due date, and put Ready issues in it.
 - With the merge queue (ADR 0094 decision 4) `strict_required_status_checks_policy` is `false` and a `merge_queue` rule
   builds main plus the queued pull requests; values in the queue section of `docs/dev/ci.md`. (Before the queue: `true`.)
 - Required checks: `hack/ci-required.txt` is the list (`hack/ci-required-test.sh --ruleset` diffs it
-  against the live ruleset); the existing ones plus **`claim`** (required from day one) and **`adr-lint`**.
+  against the live ruleset); the existing ones plus **`adr-lint`**. **`claim`** was required from day one until #682;
+  now it reports but is not required (ADR 0104 amendment of 2026-11-26).
   `claim` fails only on another human's held claim on an issue the pull request closes, or on
   another human's `claim/adr-NNNN` reservation for an ADR file it adds (decision 2); a pull
   request without `Closes #N`, a Dependabot one and a `chore` one pass, so no exemption exists.

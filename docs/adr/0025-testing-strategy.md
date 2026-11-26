@@ -174,7 +174,7 @@ configuration and the document that described the setup are no longer tracked. T
 is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
 says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
 still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
-on a commit.
+on a commit. _(Changed by the #682 amendment below: `go-test-lab` is no longer read.)_
 
 ## Amendment (2026-11-10, [0105](0105-merge-queue-route.md)): the lab is not merge evidence
 
@@ -196,3 +196,13 @@ and the paid-key bullet under Decision.
   nightly real-model runs. (Wording of 2026-11-14, issue #992: the nightly schedule exists and runs the
   kind e2e on the fake model, the restore drill ([0109](0109-automated-restore-drill.md)) and the run-1 story suite,
   none of which calls a paid model; only a real-model run is excluded.)
+
+## Amendment (2026-11-26, #682): no go-test-lab status, no test result reuse
+
+The amendment of old issue 610 above is withdrawn. `ci.yml` no longer reads the commit status `go-test-lab`,
+`hack/go-test-lab.sh` and the `lab` mode of `hack/ci-skip-heavy.sh` are removed, and `go-test` runs on the
+hosted runner for every Go change. `hack/release-gate.sh` accepts a skipped `go-test` on main only through the
+queue build or a change with no Go. The reuse of Go test results on pull requests (#43, PR #592) is removed
+too: `hack/go-test.sh` runs serial Ginkgo suites and plain packages with `-count=1`, locally and in CI, and
+the `go-testres-` cache, `hack/go-test-cacheable.sh` and `hack/ci-stamp-mtime.sh` are gone. Reason: maintainer
+decision D4 (fold ceremony that costs time and adds little). The notes below that name `go-test-lab` describe the history.

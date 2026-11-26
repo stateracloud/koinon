@@ -229,7 +229,7 @@ while IFS= read -r name; do
 		;;
 	esac
 done <<<"$required_names"
-for name in claim dco gitleaks 'e2e result'; do
+for name in gitleaks 'e2e result'; do
 	if [[ $mg_seen == *"|$name|"* ]]; then
 		echo "ok: '$name' is among the names checked"
 		pass=$((pass + 1))
