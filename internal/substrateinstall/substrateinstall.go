@@ -65,7 +65,7 @@ type Profile struct {
 	SetupCSI string
 	// ExpectedJWTIssuer is ate-setup --ateapi-expected-jwt-issuer: the service-account issuer Substrate's api
 	// server trusts. Empty lets ate-setup read it from the API server's discovery document. It must equal the
-	// iss of the cluster's tokens, and Substrate v1.0.0 fetches discovery from this URL, so pods must reach it.
+	// iss of the cluster's tokens, and Substrate v1.0.1 fetches discovery from this URL, so pods must reach it.
 	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
 	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
@@ -691,7 +691,7 @@ func (i *Installer) pendingCRDs(ctx context.Context) ([]string, error) {
 	return pending, nil
 }
 
-// routerContainer is the router container of the atenet-router Deployment (Substrate v1.0.0).
+// routerContainer is the router container of the atenet-router Deployment (Substrate v1.0.1).
 const routerContainer = "atenet-router"
 
 // EnsureRouterSPIFFE adds the atenet client identity to the router's --ingress-allowed-spiffe-ids when

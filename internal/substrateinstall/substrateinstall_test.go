@@ -333,7 +333,7 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 func TestRefusesAnUnpinnedBuildOrRepository(t *testing.T) {
 	g := NewWithT(t)
 	for name, mutate := range map[string]func(*runner){
-		"other version": func(r *runner) { r.version = strings.Replace(r.version, substrateinstall.PinnedVersion, "v1.0.1", 1) },
+		"other version": func(r *runner) { r.version = strings.Replace(r.version, substrateinstall.PinnedVersion, "v1.0.2", 1) },
 		"other commit": func(r *runner) {
 			r.version = strings.Replace(r.version, "commit="+substrateinstall.PinnedCommit, "commit=deadbeef", 1)
 		},
@@ -516,7 +516,7 @@ func TestEnsureRouterSPIFFEIsIdempotent(t *testing.T) {
 }
 
 // The options a real cluster needs reach ate-setup under the names the pinned ate-setup defines
-// (cmd/ate-setup/internal/config/setting.go and cmd/ate-setup/internal/cmd/deploy.go at v1.0.0).
+// (cmd/ate-setup/internal/config/setting.go and cmd/ate-setup/internal/cmd/deploy.go at v1.0.1).
 func TestProfilePassesTheClusterOptions(t *testing.T) {
 	g := NewWithT(t)
 	plain := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("ate-system")

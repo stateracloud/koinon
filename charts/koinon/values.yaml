@@ -927,7 +927,7 @@ execution:
         - system:kube-controller-manager
       # Identities whose pods may use a tag instead of a digest. This list is used as written, so an
       # empty list means every image needs a digest.
-      # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
+      # Interim: Substrate v1.0.1 publishes tags only. Exit condition: ate-setup deploys by digest;
       # then set this to [] (the chart check pins the default) and pin the default WorkerPool image by digest
       # (the chart refuses a tag pool image without the ReplicaSet controller here). Tracking issue: #1140.
       digestExemptIdentities:
@@ -970,7 +970,7 @@ execution:
       # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
       # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this
       # ServiceAccount. The list is atelet's own, not the worker list: the hostPath volumes of
-      # Substrate v1.0.0 manifests/ate-install/atelet.yaml (b34fbee7) lines 394-430. The last two are
+      # Substrate v1.0.1 manifests/ate-install/atelet.yaml (20778a6d) lines 394-430. The last two are
       # the GKE credential-provider paths; remove them on a platform without GKE.
       nodeAgent:
         serviceAccount: atelet  # atelet.yaml:145
@@ -996,9 +996,9 @@ execution:
     # so keep the list in step with the Substrate manifests.
     workerNetworkPolicy:
       enabled: true
-      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.0
-      # (b34fbee7) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
-      # atenet-router.yaml:189, atenet-egress.yaml:1179. A missing pod keeps the cluster default
+      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.1
+      # (20778a6d) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
+      # atenet-router.yaml:189, atenet-egress.yaml:1211. A missing pod keeps the cluster default
       # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
       # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
@@ -1029,20 +1029,20 @@ execution:
       bucketInitJobs: [rustfs-bucket-init]
       objectStoreApp: rustfs
       objectStorePort: 9000
-      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1179), in the
+      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1211), in the
       # control-plane namespace.
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
       # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Keep a
-      # pod out of this list unless it needs it. Evidence, Substrate v1.0.0 (b34fbee7):
+      # pod out of this list unless it needs it. Evidence, Substrate v1.0.1 (20778a6d):
       #  - atenet-router DOES call it: ingress mode builds a client-go clientset for the EndpointSlice resolver
       #    (cmd/atenet/internal/router/router.go:73-95, "Only ingress needs Kubernetes"). Its manifest has
       #    ServiceAccount atenet-router, Role atenet-router-endpointslices (endpointslices get, list, watch) and a
       #    RoleBinding (manifests/ate-install/atenet-router.yaml:16-50, serviceAccountName at :194), and no
       #    automountServiceAccountToken override, so the token is mounted.
       #  - atenet-egress does NOT: ServiceAccount only, "No RBAC is bound ... on purpose ... no Kubernetes access"
-      #    (atenet-egress.yaml:30-38, serviceAccountName at :1181), and --mode=egress builds no client
+      #    (atenet-egress.yaml:30-38, serviceAccountName at :1213), and --mode=egress builds no client
       #    (router.go:75-79). It stays out: it carries worker traffic out and gets no TCP route to any address.
       apiServerApps: [atelet, ate-controller, ate-api-server, atenet-router]
       # TCP ports of the Kubernetes API server. The pods that call the API server (the apiServerApps, the
@@ -1072,7 +1072,7 @@ execution:
           matchLabels:
             app: opentelemetry-collector
         ports: [4317, 4318]
-      # Fence of the otel-system namespace (kind/otel-collector.yaml, kind/prometheus.yaml of Substrate v1.0.0): default
+      # Fence of the otel-system namespace (kind/otel-collector.yaml, kind/prometheus.yaml of Substrate v1.0.1): default
       # deny, then one policy per app. Set enabled=false when the namespace does not exist (a cluster that has a managed
       # collector in another namespace): a NetworkPolicy in a missing namespace fails the install.
       otelSystem:
@@ -1187,7 +1187,7 @@ execution:
     # `koinon-api substrate install` create no pool, and the preflight needs one per sandbox class, so the
     # chart owns it (issue #1089): on by default with execution.driver=substrate (with openshell nothing of it
     # renders). helm upgrade changes the size, helm uninstall removes the pool. Set enabled=false to manage the
-    # pools yourself. The fields follow Substrate v1.0.0's WorkerPoolSpec: sandboxClasses takes exactly one
+    # pools yourself. The fields follow Substrate v1.0.1's WorkerPoolSpec: sandboxClasses takes exactly one
     # class (immutable), and node placement, resources and the pull ServiceAccount live under spec.template.
     # Node cost of the default: one worker pod that requests 500m CPU and 1Gi memory (the idle cost), with
     # limits of 4 CPU and 8704Mi, on one node that runs the gvisor class. To run the largest sandbox, that
@@ -1201,8 +1201,8 @@ execution:
       name: ""
       replicas: 1
       # Empty: the worker image of the pinned Substrate release for sandboxClass,
-      # ghcr.io/agent-substrate/substrate/ateworker-<sandboxClass>:v1.0.0 (registry mirrors apply). Substrate
-      # v1.0.0 publishes tags only; to pin a digest, set the image here (name@sha256:...).
+      # ghcr.io/agent-substrate/substrate/ateworker-<sandboxClass>:v1.0.1 (registry mirrors apply). Substrate
+      # v1.0.1 publishes tags only; to pin a digest, set the image here (name@sha256:...).
       workerImage: ""
       # The one sandbox class of the pool: gvisor or microvm. It must be a class the Substrate install
       # has (ate-setup --sandbox-classes; the generic platform and kind install gvisor only).

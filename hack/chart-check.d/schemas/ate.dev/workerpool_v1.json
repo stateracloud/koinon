@@ -1,5 +1,5 @@
 {
- "$comment": "SPDX-License-Identifier: Apache-2.0. Generated from Substrate v1.0.0 (commit b34fbee742906494b5eb4f1f36987176bf8770a4) manifests/ate-install/generated/ate.dev_workerpools.yaml, version v1 openAPIV3Schema, with additionalProperties false on objects that list properties. kubeconform schema for hack/chart-check.sh (issue #1089). Regenerate when the Substrate pin changes.",
+ "$comment": "SPDX-License-Identifier: Apache-2.0. Generated from Substrate v1.0.1 (commit 20778a6dbb01f13024642851bb592bf67c9fec05) manifests/ate-install/generated/ate.dev_workerpools.yaml, version v1 openAPIV3Schema, with additionalProperties false on objects that list properties. kubeconform schema for hack/chart-check.sh (issue #1089). Regenerate when the Substrate pin changes.",
  "additionalProperties": false,
  "description": "WorkerPool is the Schema for the workerpools API",
  "properties": {

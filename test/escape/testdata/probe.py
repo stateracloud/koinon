@@ -44,6 +44,28 @@ def tcp(c):
         s.close()
 
 
+def http_status(c):
+    """GET http://host:port/ and return "status NNN", or the error name. The name goes through the
+    actor's own resolver and the egress gateway, so it is the path an egress rule decides on."""
+    try:
+        infos = socket.getaddrinfo(c["host"], c["port"], type=socket.SOCK_STREAM)
+    except OSError as e:
+        return err_name(e)
+    family, kind, proto, _, addr = infos[0]
+    s = socket.socket(family, kind, proto)
+    s.settimeout(8)
+    try:
+        s.connect(addr)
+        s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
+        line = s.recv(256).split(b"\r\n", 1)[0].decode("latin-1")
+        parts = line.split(" ")
+        return "status " + parts[1] if len(parts) > 1 and parts[0].startswith("HTTP/") else "noresponse"
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def unix(c):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(5)
@@ -391,7 +413,7 @@ def kernel(_):
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
        "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
