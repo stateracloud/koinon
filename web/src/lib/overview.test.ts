@@ -60,12 +60,13 @@ describe('reportsToForest', () => {
   })
 
   it('builds a long chain in one pass, also when the chain closes a cycle at its top', () => {
-    const n = 5000
-    // c-0 reports to c-1, ... c-(n-1) reports to c-0: one cycle through every agent.
+    const n = 20_000
+    // c-0 reports to c-1, ... c-(n-1) reports to c-0: one cycle through every agent. A walk per agent to the top would
+    // be about 2·10^8 steps (seconds); one pass is a few milliseconds, so the wide limit still tells the two apart.
     const chain = Array.from({ length: n }, (_, i) => summary(`c-${i}`, { reportsTo: toAgent(`c-${(i + 1) % n}`) }))
     const start = performance.now()
     const roots = reportsToForest(chain)
-    expect(performance.now() - start).toBeLessThan(200)
+    expect(performance.now() - start).toBeLessThan(2000)
     expect(roots).toHaveLength(1)
     let depth = 0
     for (let node: ChartNode | undefined = roots[0]; node; node = node.children[0]) depth++

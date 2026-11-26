@@ -72,7 +72,6 @@ function TeamTree({ team }: { team: TeamGroup<AgentSummary> }) {
   // A row to focus once it renders: Right can move to a child past the row limit, which raises the limit first.
   const pendingFocus = useRef<string>(undefined)
   const rows = useMemo(() => visibleRows(roots, open), [roots, open])
-  const parentOf = useMemo(() => new Map(rows.map((r) => [r.node.agent.agentId, r.parentId])), [rows])
   const shown = rows.slice(0, limit)
   useEffect(() => {
     const id = pendingFocus.current
@@ -92,14 +91,9 @@ function TeamTree({ team }: { team: TeamGroup<AgentSummary> }) {
     if (el) el.focus()
     else pendingFocus.current = id
   }
-  /** isUnder says whether row id is in the branch of ancestor (the row itself excluded). */
-  const isUnder = (id: string | undefined, ancestor: string) => {
-    for (let p = id === undefined ? undefined : parentOf.get(id); p !== undefined; p = parentOf.get(p)) if (p === ancestor) return true
-    return false
-  }
+  // A row inside a branch never has the focus when the branch closes: Left closes only the focused row's own branch,
+  // and a press on the chevron focuses its row first.
   const toggle = (id: string, to: boolean) => {
-    // Closing a branch removes its rows: the focus goes to the branch's own row, not to the page.
-    if (!to && isUnder(focused, id)) moveTo(id)
     setOpen((prev) => {
       const next = new Set(prev)
       if (to) next.add(id)

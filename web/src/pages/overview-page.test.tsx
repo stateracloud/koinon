@@ -220,7 +220,8 @@ describe('Chart tab', () => {
     expect(within(tree).getAllByRole('treeitem')).toHaveLength(3)
   })
 
-  it('moves the focus to the branch row when a mouse click closes the branch', async () => {
+  it('keeps the focus on the branch row when a mouse click closes the branch', async () => {
+    // A press on the chevron focuses its row first, so the focus never drops to the page.
     renderApp(transport({ pages: [team] }), '/?tab=chart')
     const tree = await screen.findByRole('tree', { name: 'Platform · 3 agents' })
     within(tree).getByRole('treeitem', { name: /^Dev bot/ }).focus()
