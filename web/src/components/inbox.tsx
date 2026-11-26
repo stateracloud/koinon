@@ -129,7 +129,7 @@ function RowHead({ item }: { item: InboxItem }) {
     <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
       {item.kind === 'agent-unhealthy' ? <AgentStatusBadge status={AgentStatus.ACTIVE} unhealthy /> : <StatusBadge state={TaskState.INPUT_REQUIRED} />}
       {item.agentId !== '' && <AgentAvatar agentId={item.agentId} name={item.agentName} className="size-5 text-[0.625rem]" />}
-      {item.agentName && <span>{item.agentName}</span>}
+      {(item.agentName || item.agentId !== '') && <span>{item.agentName || 'Unknown agent'}</span>}
       {item.at > 0 && <span className="ms-auto">waiting {age(item.at)}</span>}
     </div>
   )
@@ -155,6 +155,8 @@ export type TaskListProps = {
   /** The tasks of the tab, in the order to show. */
   tasks: readonly Task[]
   agentNames: ReadonlyMap<string, string>
+  /** The ids of the tasks that wait on the viewer (the Blocked tab's items); other input-required tasks show the general name. */
+  blockedTaskIds: ReadonlySet<string>
   /** The list's accessible name: the tab's name. */
   label: string
   /** What the list says when it has no task. */
@@ -166,7 +168,7 @@ export type TaskListProps = {
  * a Review link to the task page. The task list has no failure reason (Task has no such field; the "run cap reached"
  * reason is an open item of ADR 0126 section 7), so a failed row shows only its state.
  */
-export function TaskList({ tasks, agentNames, label, empty }: TaskListProps) {
+export function TaskList({ tasks, agentNames, blockedTaskIds, label, empty }: TaskListProps) {
   if (tasks.length === 0) return <p className="text-muted-foreground text-sm">{empty}</p>
   return (
     <ul aria-label={label} className="grid gap-2">
@@ -175,7 +177,7 @@ export function TaskList({ tasks, agentNames, label, empty }: TaskListProps) {
         const at = taskAt(t)
         return (
           <li key={t.id} data-testid="task-row" data-state={TaskState[t.state]} className="bg-card flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border p-3 shadow-xs">
-            <StatusBadge state={t.state} />
+            <StatusBadge state={t.state} onViewer={blockedTaskIds.has(t.id)} />
             <AgentAvatar agentId={t.agentId} name={name} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{t.title || 'Untitled task'}</p>

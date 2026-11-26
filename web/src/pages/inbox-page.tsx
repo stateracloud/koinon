@@ -37,6 +37,7 @@ export function InboxPage() {
     const all = tasks.data?.tasks ?? []
     return { open: tasksForTab(all, 'open'), done: tasksForTab(all, 'done'), all: tasksForTab(all, 'all') }
   }, [tasks.data])
+  const blockedTaskIds = useMemo(() => new Set(items.map((i) => i.taskId).filter((id) => id !== '')), [items])
   const counts: Record<InboxTab, number> = { blocked: items.length, open: byTab.open.length, done: byTab.done.length, all: byTab.all.length }
   const [selected, setSelected] = useState<string>()
   const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set())
@@ -144,7 +145,7 @@ export function InboxPage() {
                 </TabsContent>
                 {taskTabs.map(({ value, label, empty }) => (
                   <TabsContent key={value} value={value}>
-                    <TaskList tasks={byTab[value]} agentNames={agentNames} label={`${label} tasks`} empty={empty} />
+                    <TaskList tasks={byTab[value]} agentNames={agentNames} blockedTaskIds={blockedTaskIds} label={`${label} tasks`} empty={empty} />
                   </TabsContent>
                 ))}
               </>
