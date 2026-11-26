@@ -578,6 +578,12 @@ var isolationCases = map[string]isolationCase{
 			return priceClient(c).ListPrices(ctx, &budgetv1alpha1.ListPricesRequest{OrgId: org})
 		},
 	},
+	budgetv1alpha1connect.PriceServiceExplainOrgPricesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).ExplainOrgPrices(ctx, &budgetv1alpha1.ExplainOrgPricesRequest{OrgId: org})
+		},
+	},
 	budgetv1alpha1connect.PriceServiceSetPriceProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

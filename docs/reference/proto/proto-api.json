@@ -4616,6 +4616,15 @@
               "deprecated": false
             },
             {
+              "name": "ExplainOrgPrices",
+              "description": "ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. It does not check the provider URL policy or a lost key. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+              "responseType": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ExplainPlatformPrice",
               "description": "ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its\nprice_ref.",
               "requestType": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
@@ -5165,6 +5174,42 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ExplainOrgPricesRequest",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExplainOrgPricesResponse",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "models",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.ModelPriceSource",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "models has one row per enabled model, ordered by provider name then model name."
+            }
+          ]
         },
         {
           "name": "ExplainPlatformPriceRequest",
@@ -6188,6 +6233,105 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ModelPriceSource",
+          "fullName": "koinon.budget.v1alpha1.ModelPriceSource",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ModelPriceSource is the price in use now for one model of an org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "provider_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_type",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "source is org, platform or default. It is empty when the model has no usable price."
+            },
+            {
+              "name": "price_ref",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 6,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_version is set for source platform."
+            },
+            {
+              "name": "list_version",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "list_version is set for source default."
+            },
+            {
+              "name": "replaces",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.ReplacedPrice",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "replaces is set for source org when a lower layer would price the model without the org price."
+            },
+            {
+              "name": "unpriced_reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unpriced_reason is no_price or unusable_price when source is empty."
+            }
+          ]
         },
         {
           "name": "Notification",
@@ -7512,6 +7656,60 @@
             },
             {
               "name": "reasoning",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ReplacedPrice",
+          "fullName": "koinon.budget.v1alpha1.ReplacedPrice",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ReplacedPrice is the price an org price replaces: the next layer down (platform or default).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "source",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "list_version",
               "number": 5,
               "type": "string",
               "label": "singular",
