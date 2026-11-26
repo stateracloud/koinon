@@ -1131,6 +1131,7 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | CheckPriceSources | `koinon.budget.v1alpha1.CheckPriceSourcesRequest` | `koinon.budget.v1alpha1.CheckPriceSourcesResponse` | - | CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It makes proposals and applies nothing. |
 | DiffPlatformPriceVersions | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse` | - | DiffPlatformPriceVersions returns what changed between two versions of the platform list. |
 | DismissPriceProposal | `koinon.budget.v1alpha1.DismissPriceProposalRequest` | `koinon.budget.v1alpha1.DismissPriceProposalResponse` | - | DismissPriceProposal closes a proposal; the same values from the same source do not come back. |
+| ExplainOrgPrices | `koinon.budget.v1alpha1.ExplainOrgPricesRequest` | `koinon.budget.v1alpha1.ExplainOrgPricesResponse` | - | ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or default) prices it now and, for an org price, the price it replaces. It uses the same lookup as the gateway. Admins and owners. |
 | ExplainPlatformPrice | `koinon.budget.v1alpha1.ExplainPlatformPriceRequest` | `koinon.budget.v1alpha1.ExplainPlatformPriceResponse` | - | ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its price_ref. |
 | GetDefaultPriceChanges | `koinon.budget.v1alpha1.GetDefaultPriceChangesRequest` | `koinon.budget.v1alpha1.GetDefaultPriceChangesResponse` | - | GetDefaultPriceChanges returns what changed between two versions of the default list. An empty from_version means the version before to_version; an empty to_version the current one. |
 | GetDefaultPrices | `koinon.budget.v1alpha1.GetDefaultPricesRequest` | `koinon.budget.v1alpha1.GetDefaultPricesResponse` | - | GetDefaultPrices returns the default list this installation runs. |
@@ -1246,6 +1247,18 @@ ContinuationValues are the continuation limits of one task of an agent.
 ### Message DismissPriceProposalResponse
 
 No fields.
+
+### Message ExplainOrgPricesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ExplainOrgPricesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| models | 1 | `koinon.budget.v1alpha1.ModelPriceSource` | repeated |  | models has one row per served model, ordered by provider name then model name. |
 
 ### Message ExplainPlatformPriceRequest
 
@@ -1522,6 +1535,23 @@ No fields.
 
 No fields.
 
+### Message ModelPriceSource
+
+ModelPriceSource is the price in use now for one model of an org.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| provider_name | 1 | `string` | singular |  |  |
+| provider_type | 2 | `string` | singular |  |  |
+| model | 3 | `string` | singular |  |  |
+| source | 4 | `string` | singular |  | source is org, platform or default. It is empty when the model has no usable price. |
+| price_ref | 5 | `string` | singular |  |  |
+| entry | 6 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 7 | `int64` | singular |  | platform_version is set for source platform. |
+| list_version | 8 | `string` | singular |  | list_version is set for source default. |
+| replaces | 9 | `koinon.budget.v1alpha1.ReplacedPrice` | singular |  | replaces is set for source org when a lower layer would price the model without the org price. |
+| unpriced_reason | 10 | `string` | singular |  | unpriced_reason is no_price or unusable_price when source is empty. |
+
 ### Message Notification
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1747,6 +1777,18 @@ means unset; a free model needs an explicit "0".
 | cache_read | 3 | `string` | singular |  |  |
 | cache_write | 4 | `string` | singular |  |  |
 | reasoning | 5 | `string` | singular |  |  |
+
+### Message ReplacedPrice
+
+ReplacedPrice is the price an org price replaces: the next layer down (platform or default).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| source | 1 | `string` | singular |  |  |
+| price_ref | 2 | `string` | singular |  |  |
+| entry | 3 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 4 | `int64` | singular |  |  |
+| list_version | 5 | `string` | singular |  |  |
 
 ### Message RetirePriceRequest
 
