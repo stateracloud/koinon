@@ -1157,8 +1157,13 @@ func (l planLookups) SystemKey(ctx context.Context, secret string, org gatewaypl
 	return l.r.systemKey(ctx, secret, org.ID, ref)
 }
 
+// IssueKey issues a probe key. Until a stored revision holds it, the prober does not use it (#1260).
 func (l planLookups) IssueKey(ctx context.Context, ref gateway.AgentRef) (gateway.IssuedKey, error) {
-	return l.r.gw.IssueKey(ctx, ref)
+	k, err := l.r.gw.IssueKey(ctx, ref)
+	if err == nil {
+		l.r.keyIssued(k.ID)
+	}
+	return k, err
 }
 
 func (l planLookups) SystemLimit(ctx context.Context, org gatewayplan.Org, now time.Time) (*gateway.Limit, error) {

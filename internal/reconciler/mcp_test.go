@@ -484,6 +484,44 @@ var _ = Describe("Org MCP servers", func() {
 				Expect(g.refused.Load()).To(BeZero(), "no probe got a 401, so none was recorded as a failure")
 			})
 
+			It("does not probe with a new probe key that no stored revision holds, and records no 401", func(ctx SpecContext) {
+				s := server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				DeferCleanup(g.stop)
+				const copyID = "koinon-gateway-a/boot3"
+				Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
+				// The copy acked every revision stored so far: only the new probe key is missing.
+				if latest, err := staterev.Latest(ctx, pool); err == nil && latest != nil {
+					Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				}
+				failing := &flakyStateDB{DB: pool}
+				failing.fail.Store(true)
+				m := reconciler.NewMetrics(nil)
+				rr := probing(ctx, g.host, g.port, fast, func(c *reconciler.Config) {
+					c.StateRevisionDB = failing
+					c.MCPProbeInterval = racescale.D(100 * time.Millisecond)
+					c.Metrics = m
+				})
+				runProber(rr)
+
+				// The pass applies the server but cannot store the State: no copy gets the probe key.
+				Expect(rr.ReconcileAll(ctx)).To(MatchError(ContainSubstring("store the gateway state revision")))
+				Consistently(g.seen.Load).WithTimeout(racescale.D(1500*time.Millisecond)).Should(BeZero(), "neither the pass nor the interval probes with the key")
+				Expect(testutil.ToFloat64(m.MCPProbesSkipped)).To(BeNumerically(">=", 1))
+
+				// The next pass stores the revision that holds the key. The probe waits for the ack of it.
+				failing.fail.Store(false)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed())
+				latest, err := staterev.Latest(ctx, pool)
+				Expect(err).NotTo(HaveOccurred())
+				Consistently(g.seen.Load).WithTimeout(racescale.D(500 * time.Millisecond)).Should(BeZero())
+				g.keyed.Store(true)
+				Expect(staterev.Ack(ctx, pool, copyID, latest.Revision, gwv1.Half_HALF_MCP)).To(Succeed())
+				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
+				Expect(g.refused.Load()).To(BeZero(), "no probe got a 401, so none was recorded as a failure")
+			})
+
 			It("counts and warns about every interval probe held back by a copy that never acks (#1347)", func(ctx SpecContext) {
 				server(ctx, org, "wiki", "", nil)
 				g := newKeyedGW(slug+"-wiki", "read")
