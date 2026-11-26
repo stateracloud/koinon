@@ -466,11 +466,14 @@ type TaskEvent struct {
 	ActorUserId  string    `protobuf:"bytes,4,opt,name=actor_user_id,json=actorUserId,proto3" json:"actor_user_id,omitempty"`
 	ActorAgentId string    `protobuf:"bytes,5,opt,name=actor_agent_id,json=actorAgentId,proto3" json:"actor_agent_id,omitempty"`
 	// The run the event is about, if any.
-	RunId         string                 `protobuf:"bytes,6,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RunId     string                 `protobuf:"bytes,6,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Payload   *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
+	// user or a deleted user. Never an email address. Any role that can read the task sees it.
+	ActorDisplayName string `protobuf:"bytes,9,opt,name=actor_display_name,json=actorDisplayName,proto3" json:"actor_display_name,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TaskEvent) Reset() {
@@ -557,6 +560,13 @@ func (x *TaskEvent) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *TaskEvent) GetActorDisplayName() string {
+	if x != nil {
+		return x.ActorDisplayName
+	}
+	return ""
 }
 
 // CreateTaskRequest describes the task and its first message. A person creating it through this
@@ -1395,7 +1405,7 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x12waiting_on_user_id\x18\x0e \x01(\tB\x02\x18\x01R\x0fwaitingOnUserId\x12&\n" +
 	"\x0fwaiting_on_name\x18\x0f \x01(\tR\rwaitingOnName\x122\n" +
 	"\x15direct_message_thread\x18\x10 \x01(\bR\x13directMessageThread\x12-\n" +
-	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIds\"\xc0\x02\n" +
+	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIds\"\xee\x02\n" +
 	"\tTaskEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12>\n" +
@@ -1406,7 +1416,8 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x06run_id\x18\x06 \x01(\tR\x05runId\x121\n" +
 	"\apayload\x18\a \x01(\v2\x17.google.protobuf.StructR\apayload\x129\n" +
 	"\n" +
-	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"u\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12,\n" +
+	"\x12actor_display_name\x18\t \x01(\tR\x10actorDisplayName\"u\n" +
 	"\x11CreateTaskRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x14\n" +

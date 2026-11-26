@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useMutation, useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { Composer } from '@/components/composer'
@@ -12,9 +11,9 @@ import { ApprovalView } from '@/components/approval-view'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TaskService, TaskState, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
 import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { useMemberNames } from '@/hooks/use-member-names'
 import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
+import { describeError } from '@/lib/api-error'
 import { isReplyThread, noDirectMessagesText, takesDirectMessages } from '@/lib/direct-message'
 import { isEnded, runFinished, runStateLabel } from '@/lib/labels'
 
@@ -67,7 +66,6 @@ export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, sele
 function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: string; task: Task; agentName?: string; agent?: Agent; canEdit: boolean }) {
   const { task: query, watches, items, refresh } = useTaskConversation(orgId, task.id)
   const who = useQuery(AuthService.method.whoAmI, {})
-  const memberNames = useMemberNames(orgId)
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refresh })
   const direct = useDirectMessage(orgId, () => void refresh())
   const state = query.data?.task?.state ?? task.state
@@ -94,14 +92,14 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
       </div>
       {query.isError ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(query.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(query.error).message}</AlertDescription>
         </Alert>
       ) : query.isPending ? (
         <p role="status">Loading the thread…</p>
       ) : (
         <>
           <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
-          <Timeline items={items} meUserId={who.data?.user?.id} memberNames={memberNames} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
+          <Timeline items={items} meUserId={who.data?.user?.id} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
         </>
       )}
       {canEdit && thread && takes === false && (
@@ -125,7 +123,7 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
         <Composer
           idPrefix="chat-composer"
           pending={thread ? direct.pending : append.isPending}
-          error={thread ? direct.error : append.error ? ConnectError.from(append.error).rawMessage : undefined}
+          error={thread ? direct.error : append.error ? describeError(append.error).message : undefined}
           onSend={(text) => (thread ? direct.send({ agentId: task.agentId, taskId: task.id, text }) : append.mutateAsync({ orgId, taskId: task.id, text }))}
         />
       )}

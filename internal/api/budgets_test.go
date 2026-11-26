@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
+	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 )
 
 var _ = Describe("BudgetService and PriceService", func() {
@@ -257,6 +258,39 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = priceSvc(admin).RetirePrice(ctx, &budgetv1alpha1.RetirePriceRequest{OrgId: org, Name: "claude"})
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("explains the layer of each served model to an org admin only", func(ctx SpecContext) {
+		owner := e.userIn(ctx, org, store.OrgRoleOwner)
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		member := e.userIn(ctx, org, store.OrgRoleMember)
+		prov, err := owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: "explain", Type: "openrouter", Url: "https://openrouter.ai/api/v1"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: prov.GetProvider().GetId(), Name: "anthropic/claude-haiku-5.5"})
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = priceSvc(member).ExplainOrgPrices(ctx, &budgetv1alpha1.ExplainOrgPricesRequest{OrgId: org})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+
+		before, err := priceSvc(admin).ExplainOrgPrices(ctx, &budgetv1alpha1.ExplainOrgPricesRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(before.GetModels()).To(HaveLen(1))
+		Expect(before.GetModels()[0].GetSource()).To(Equal("default"))
+		Expect(before.GetModels()[0].GetListVersion()).NotTo(BeEmpty())
+		Expect(before.GetModels()[0].GetReplaces()).To(BeNil())
+
+		_, err = priceSvc(admin).SetPrice(ctx, &budgetv1alpha1.SetPriceRequest{
+			OrgId: org, Name: "haiku-contract", Provider: "openrouter", Match: &budgetv1alpha1.PriceMatch{Glob: "anthropic/claude-haiku-5.5"},
+			Rates: &budgetv1alpha1.Rates{Input: "0.5", Output: "1.5"}, MaxOutput: 4096,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		after, err := priceSvc(admin).ExplainOrgPrices(ctx, &budgetv1alpha1.ExplainOrgPricesRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		row := after.GetModels()[0]
+		Expect(row.GetSource()).To(Equal("org"))
+		Expect(row.GetEntry().GetRates().GetInput()).To(Equal("0.5"))
+		Expect(row.GetReplaces().GetSource()).To(Equal(before.GetModels()[0].GetSource()))
+		Expect(row.GetReplaces().GetPriceRef()).To(Equal(before.GetModels()[0].GetPriceRef()))
 	})
 
 	It("versions org prices and shows the default list", func(ctx SpecContext) {

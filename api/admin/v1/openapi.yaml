@@ -1232,6 +1232,16 @@ components:
           properties:
             code: {$ref: "#/components/schemas/ErrorCode"}
             message: {type: string}
+            reason:
+              $ref: "#/components/schemas/ErrorReason"
+    ErrorReason:
+      type: string
+      description: |
+        Why the call was refused, when a client acts on the reason differently. The values are the names
+        of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+        strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+        added over time: a client that does not know a reason shows `message`.
+      enum: [INVALID, NOT_FOUND, INSTALL_HELD, ROLE_TOO_LOW, ADMIN_REQUIRED, PLATFORM_ADMIN_REQUIRED, CHANGED, OWNER_ONLY, OWNER_AT_FULL, NOT_MEMBER, ABOVE_CEILING, TEST_FAILED, PRICE_REFRESH_OFF, CREDENTIAL_TOO_SHORT]
     ErrorCode:
       type: string
       enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, unavailable, internal]

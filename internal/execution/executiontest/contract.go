@@ -57,7 +57,7 @@ func ComputeContract(driver string, newHarness func() Harness) bool {
 		})
 
 		spec := func(name string) execution.SandboxSpec {
-			return execution.SandboxSpec{Name: name, Image: h.Image}
+			return execution.SandboxSpec{Name: name, Image: h.Image, CPULimit: "500m", MemoryLimit: "512Mi"}
 		}
 		phaseOf := func(ctx SpecContext, name string) func() (execution.Phase, error) {
 			return func() (execution.Phase, error) {

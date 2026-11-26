@@ -138,6 +138,11 @@ spec:
             {{- if $gwKey }}
             - --recipient-key-dir={{ include "koinon.gwKeyDir" . }}
             {{- end }}
+            {{- if include "koinon.restoreHold" . }}
+            # Held install (restoreHold, ADR 0107, issue #1358): ready with no State revision (a held
+            # reconciler publishes none) and deny-all, as the held standalone gateway of issue #530.
+            - --restore-hold
+            {{- end }}
             {{- if $egress }}
             # The egress listener (#1086 part C2): the forge routes of the State stream, behind the actor token.
             - --egress-addr=:{{ int $eg.port }}

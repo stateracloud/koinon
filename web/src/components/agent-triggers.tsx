@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -16,6 +15,7 @@ import { AgentService, AgentStatus, type Agent } from '@/gen/koinon/agent/v1alph
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionService, type AskableMember } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { NotifyTargetKind, NotifyTargetSchema, TriggerSchema, TriggerType, type Trigger } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { describeError } from '@/lib/api-error'
 
 /** triggerTypeLabel names the trigger types that can be set in v0.1. */
 function triggerTypeLabel(t: TriggerType): string {
@@ -107,7 +107,7 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
       </div>
       {run.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not run the trigger: {ConnectError.from(run.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not run the trigger: {describeError(run.error).message}</AlertDescription>
         </Alert>
       )}
       {pending && <p className="text-muted-foreground">These take effect when version {agent.latestVersion} is activated.</p>}
@@ -244,7 +244,7 @@ function Editor({
                       </option>
                     ))}
                   </NativeSelect>
-                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {ConnectError.from(members.error).rawMessage}</p>}
+                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {describeError(members.error).message}</p>}
                 </>
               )}
             </>
@@ -272,7 +272,7 @@ function Editor({
       {problem && <p className="text-muted-foreground">{problem}</p>}
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div className="flex gap-2">

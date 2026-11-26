@@ -1,23 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState, type FormEvent } from 'react'
+import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
+import { KeyRoundIcon } from 'lucide-react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { RequireAdmin } from '@/components/require-admin'
+import { TokenStatusBadge } from '@/components/status-badge'
 import { TokenSecret } from '@/components/token-secret'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DataTable } from '@/components/ui/data-table'
+import { EmptyState } from '@/components/ui/empty-state'
+import { InlineError, QueryError } from '@/components/ui/inline-error'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { TokenService } from '@/gen/koinon/token/v1alpha1/token_pb'
+import { TokenService, type Token } from '@/gen/koinon/token/v1alpha1/token_pb'
 import { useTokenActions } from '@/hooks/use-catalog-actions'
+import { useFeedback } from '@/hooks/use-feedback'
+import { dataTableColumns, type DataTableColumn } from '@/lib/data-table'
 import { tokenRoleLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 import { createdByLabel, daysToSeconds, defaultTokenDays, formatTime, maxTokenDays, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { toast } from '@/lib/toast'
+
+const col = dataTableColumns<Token>()
+
+/** timeMs is the sort key of an optional time: no time sorts first. */
+function timeMs(ts: Timestamp | undefined): number {
+  return ts ? timestampMs(ts) : 0
+}
 
 /** TokensPage manages the org's admin API tokens (ADR 0056): create, see once, list, revoke. */
 export function TokensPage() {
@@ -35,91 +50,72 @@ function TokensContent() {
   const orgId = org.orgId
   const list = useQuery(TokenService.method.listTokens, { orgId })
   const actions = useTokenActions(orgId)
+  const revoke = useFeedback()
   const [shown, setShown] = useState<{ name: string; secret: string }>()
-  const [refused, setRefused] = useState<string>()
-  const tokens = list.data?.tokens ?? []
+  const tokens = useMemo(() => list.data?.tokens ?? [], [list.data])
+  const { revoke: revokeToken } = actions
+  const { setError: setRevokeError } = revoke
+
+  const columns = useMemo<DataTableColumn<Token>[]>(
+    () => [
+      col.accessor('name', { header: 'Name', sortFn: 'text', meta: { rowHeader: true } }),
+      col.display({ id: 'status', header: 'Status', cell: (c) => <TokenStatusBadge status={tokenStatus(c.row.original)} /> }),
+      col.accessor('prefix', { header: 'Prefix', enableSorting: false, cell: (c) => <code className="font-mono text-xs">{c.getValue()}</code> }),
+      col.accessor((t) => tokenRoleLabel(t.role), { id: 'role', header: 'Role', sortFn: 'text' }),
+      col.accessor((t) => timeMs(t.createdAt), { id: 'created', header: 'Created', sortFn: 'basic', cell: (c) => formatTime(c.row.original.createdAt) }),
+      col.accessor((t) => timeMs(t.expiresAt), { id: 'expires', header: 'Expires', sortFn: 'basic', cell: (c) => formatTime(c.row.original.expiresAt) }),
+      col.accessor((t) => timeMs(t.lastUsedAt), { id: 'lastUsed', header: 'Last used', sortFn: 'basic', cell: (c) => formatTime(c.row.original.lastUsedAt) }),
+      col.display({ id: 'createdBy', header: 'Created by', cell: (c) => createdByLabel(c.row.original, tokens) }),
+      col.display({
+        id: 'actions',
+        header: () => <span className="sr-only">Actions</span>,
+        cell: (c) => {
+          const t = c.row.original
+          return (
+            tokenStatus(t) !== 'revoked' && (
+              <ConfirmAction
+                label="Revoke"
+                subject={`token ${t.name}`}
+                consequence={`Revoke ${t.name}? This also revokes every token it created.`}
+                confirmLabel="Revoke token"
+                onConfirm={async () => {
+                  setRevokeError(undefined)
+                  await revokeToken(t.id)
+                  toast(`Token ${t.name} revoked.`)
+                }}
+                onError={setRevokeError}
+              />
+            )
+          )
+        },
+      }),
+    ],
+    [tokens, revokeToken, setRevokeError],
+  )
 
   return (
     <>
-      <h1 className="text-xl font-semibold">API tokens</h1>
-      <p className="text-muted-foreground text-sm">
-        An API token lets a script or a pipeline call the admin API for this org, for example to manage providers from CI. It acts with the role you give it and stops working when it expires.
-      </p>
+      <PageHeader
+        title="API tokens"
+        description="An API token lets a script or a pipeline call the admin API for this org, for example to manage providers from CI. It acts with the role you give it and stops working when it expires."
+      />
       {shown ? (
         <TokenSecret name={shown.name} secret={shown.secret} onDismiss={() => setShown(undefined)} />
       ) : (
         <CreateTokenForm ownerAllowed={org.role === OrgRole.OWNER} onCreate={actions.create} onCreated={setShown} />
       )}
-      {refused && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{refused}</AlertDescription>
-        </Alert>
-      )}
-      {list.isError && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
-        </Alert>
-      )}
+      <InlineError message={revoke.error} />
+      <QueryError error={list.isError ? list.error : undefined} />
       {list.isPending ? (
-        <p role="status">Loading tokens…</p>
-      ) : tokens.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No tokens yet.</p>
-      ) : (
-        <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="API tokens table">
-        <table className="w-full text-left text-sm">
-          <caption className="sr-only">API tokens</caption>
-          <thead>
-            <tr className="border-b">
-              <th scope="col" className="py-2 pr-3">Name</th>
-              <th scope="col" className="py-2 pr-3">Prefix</th>
-              <th scope="col" className="py-2 pr-3">Role</th>
-              <th scope="col" className="py-2 pr-3">Created</th>
-              <th scope="col" className="py-2 pr-3">Expires</th>
-              <th scope="col" className="py-2 pr-3">Last used</th>
-              <th scope="col" className="py-2 pr-3">Created by</th>
-              <th scope="col" className="py-2">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {tokens.map((t) => {
-              const status = tokenStatus(t)
-              return (
-                <tr key={t.id} className="border-b align-top">
-                  <th scope="row" className="py-2 pr-3 font-medium">
-                    {t.name}{' '}
-                    {status !== 'active' && <Badge variant="destructive">{status === 'revoked' ? 'Revoked' : 'Expired'}</Badge>}
-                  </th>
-                  <td className="py-2 pr-3">
-                    <code className="text-xs">{t.prefix}</code>
-                  </td>
-                  <td className="py-2 pr-3">{tokenRoleLabel(t.role)}</td>
-                  <td className="py-2 pr-3">{formatTime(t.createdAt)}</td>
-                  <td className="py-2 pr-3">{formatTime(t.expiresAt)}</td>
-                  <td className="py-2 pr-3">{formatTime(t.lastUsedAt)}</td>
-                  <td className="py-2 pr-3">{createdByLabel(t, tokens)}</td>
-                  <td className="py-2">
-                    {status !== 'revoked' && (
-                      <ConfirmAction
-                        label="Revoke"
-                        subject={`token ${t.name}`}
-                        consequence={`Revoke ${t.name}? This also revokes every token it created.`}
-                        confirmLabel="Revoke token"
-                        onConfirm={async () => {
-                          setRefused(undefined)
-                          await actions.revoke(t.id)
-                        }}
-                        onError={setRefused}
-                      />
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        </div>
+        <SkeletonRows label="Loading tokens…" />
+      ) : list.isError && !list.data ? null : (
+        <DataTable
+          caption="API tokens"
+          columns={columns}
+          data={tokens}
+          getRowId={(t) => t.id}
+          empty={<EmptyState icon={KeyRoundIcon} title="No tokens yet." description="Create a token above for a script or a pipeline." />}
+        />
       )}
     </>
   )
@@ -139,7 +135,7 @@ function CreateTokenForm({
   const [days, setDays] = useState(String(defaultTokenDays))
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string>()
+  const feedback = useFeedback()
   const nameError = name.trim() ? undefined : 'Name is required.'
   const daysError = tokenDaysError(days)
 
@@ -148,17 +144,13 @@ function CreateTokenForm({
     setTouched(true)
     if (nameError || daysError) return
     setPending(true)
-    setError(undefined)
-    try {
-      const res = await onCreate({ name: name.trim(), role, expiresInSeconds: daysToSeconds(Number(days)) })
-      setName('')
-      setDays(String(defaultTokenDays))
-      onCreated({ name: res.token?.name ?? name.trim(), secret: res.secret })
-    } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
-    } finally {
-      setPending(false)
-    }
+    // No toast: the secret panel that replaces the form is the success feedback.
+    const res = await feedback.run(() => onCreate({ name: name.trim(), role, expiresInSeconds: daysToSeconds(Number(days)) }))
+    setPending(false)
+    if (!res) return
+    setName('')
+    setDays(String(defaultTokenDays))
+    onCreated({ name: res.token?.name ?? name.trim(), secret: res.secret })
   }
 
   return (
@@ -197,11 +189,7 @@ function CreateTokenForm({
           )}
         </div>
       </div>
-      {error && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <InlineError message={feedback.error} />
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
           Create token

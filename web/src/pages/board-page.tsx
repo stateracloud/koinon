@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { Link } from '@tanstack/react-router'
 import { Board } from '@/components/board'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useInbox } from '@/hooks/use-inbox'
+import { describeError } from '@/lib/api-error'
 
 /** BoardPage is the secondary view: every task by state. The inbox is the home screen. */
 export function BoardPage() {
@@ -19,7 +19,7 @@ export function BoardPage() {
       </div>
       {tasks.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(tasks.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(tasks.error).message}</AlertDescription>
         </Alert>
       )}
       {tasks.isPending ? <p role="status">Loading tasks…</p> : <Board tasks={tasks.data?.tasks ?? []} agentNames={agentNames} />}

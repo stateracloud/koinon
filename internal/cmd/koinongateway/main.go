@@ -54,6 +54,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/modelgateway"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/restorehold"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/secretstore/wrapping"
 )
@@ -105,6 +106,10 @@ type config struct {
 	namespace          string
 	egressAllowedHosts []string
 
+	// restoreHold holds the gateway (ADR 0107, issue #1358): it is ready without a first State revision
+	// (a held reconciler publishes none) and refuses every call on the MCP and model paths.
+	restoreHold bool
+
 	drain time.Duration
 	// shutdownDelay is how long the gateway keeps serving after SIGTERM, with /readyz at 503.
 	shutdownDelay time.Duration
@@ -128,6 +133,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"directory of the Secret with the gateway's wrapped recipient keys (one file per key ID). With it the gateway unwraps them, checks them against the gateway_recipient_keys rows and reports each loaded; "+
 			"it is not ready while a row needs a key it cannot unwrap. The key-wrapping flags (--kek-backend and the --openbao-* or --awskms-* flags) name the gateway's own wrapping key")
 	c.wrapping.Flags(fs)
+	restorehold.Flag(fs, &c.restoreHold)
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
 	fs.StringVar(&c.egressAddr, "egress-addr", "",
 		"address of the egress listener that serves the forge and registry routes at "+egress.PathPrefix+"<host>[:port]/<path>; empty disables it")
@@ -359,18 +365,19 @@ func run(ctx context.Context, cfg config) error {
 				return false
 			}
 		}
-		return (!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != "")
+		// A held install has no revision to wait for: the held reconciler publishes none (ADR 0107).
+		return cfg.restoreHold || ((!cfg.mcpPath || gw.Revision() != "") && (mg == nil || mg.Revision() != ""))
 	}, log); err != nil {
 		return err
 	}
 
 	mux := http.NewServeMux()
 	if cfg.mcpPath {
-		mux.Handle(mcpPath, gw.Handler())
+		mux.Handle(mcpPath, heldRefuse(cfg.restoreHold, gw.Handler()))
 	}
 	if mg != nil {
 		for _, p := range gateway.RoutePaths() {
-			mux.Handle(p, mg.Handler())
+			mux.Handle(p, heldRefuse(cfg.restoreHold, mg.Handler()))
 		}
 	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.listenAddr)
@@ -555,6 +562,17 @@ func serveEgress(ctx context.Context, cfg config, eg *egress.Gateway, log *slog.
 	safego.Go(ctx, log, "egress-listener", func(context.Context) { served <- srv.Serve(ln) })
 	log.Info("egress listener started", "listen", ln.Addr().String())
 	return srv, nil
+}
+
+// heldRefuse returns next, or, while the install is held (ADR 0107), a handler that refuses every
+// request: a held gateway is ready but deny-all, whatever config it holds.
+func heldRefuse(held bool, next http.Handler) http.Handler {
+	if !held {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, restorehold.Message, http.StatusServiceUnavailable)
+	})
 }
 
 // serveHealth serves /healthz (the process runs) and /readyz (the gateway applied a config and is

@@ -3166,14 +3166,17 @@ type TaskEvent struct {
 }
 
 type Template struct {
-	ID           pgtype.UUID
-	Slug         string
-	ContentHash  string
-	DisplayName  string
-	Description  string
-	Spec         []byte
-	CreatedAt    pgtype.Timestamptz
-	LastSyncedAt pgtype.Timestamptz
+	ID            pgtype.UUID
+	Slug          string
+	ContentHash   string
+	DisplayName   string
+	Description   string
+	Spec          []byte
+	CreatedAt     pgtype.Timestamptz
+	LastSyncedAt  pgtype.Timestamptz
+	OrgID         pgtype.UUID
+	SourceAgentID pgtype.UUID
+	CreatedBy     pgtype.UUID
 }
 
 type TraceDestination struct {

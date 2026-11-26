@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Vendored excerpt of agent-substrate/substrate cmd/atecontroller/internal/controllers/workerpool_apply.go, lines 377-468,
-// at commit b34fbee742906494b5eb4f1f36987176bf8770a4 (preflight.SubstratePinnedCommit). Apache-2.0, Copyright the Substrate authors.
+// at commit 20778a6dbb01f13024642851bb592bf67c9fec05 (preflight.SubstratePinnedCommit). Apache-2.0, Copyright the Substrate authors.
 // When the pin moves, fetch the same lines again and compare with charts/koinon/values.yaml execution.substrate.workerPolicy.workerShapes.
 // This file is test data, not Go source to build.
 // workerGvisorCapabilities is the fixed capability set for gVisor workers.

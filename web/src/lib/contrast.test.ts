@@ -65,6 +65,10 @@ const nonText: [string, string[]][] = [
   ['primary', ['background', 'card']],
   ['logo-gold', ['background', 'card']],
   ['input', ['card']],
+  // Meter fills (components/ui/meter.tsx) on the meter track.
+  ['info', ['raised']],
+  ['warning', ['raised']],
+  ['danger', ['raised']],
 ]
 
 describe.each(Object.entries(themes))('%s theme contrast', (_name, t) => {

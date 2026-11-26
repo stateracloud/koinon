@@ -4616,6 +4616,15 @@
               "deprecated": false
             },
             {
+              "name": "ExplainOrgPrices",
+              "description": "ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. It does not check the provider URL policy or a lost key. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+              "responseType": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ExplainPlatformPrice",
               "description": "ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its\nprice_ref.",
               "requestType": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
@@ -5165,6 +5174,42 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ExplainOrgPricesRequest",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExplainOrgPricesResponse",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "models",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.ModelPriceSource",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "models has one row per enabled model, ordered by provider name then model name."
+            }
+          ]
         },
         {
           "name": "ExplainPlatformPriceRequest",
@@ -6188,6 +6233,105 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ModelPriceSource",
+          "fullName": "koinon.budget.v1alpha1.ModelPriceSource",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ModelPriceSource is the price in use now for one model of an org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "provider_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_type",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "source is org, platform or default. It is empty when the model has no usable price."
+            },
+            {
+              "name": "price_ref",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 6,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_version is set for source platform."
+            },
+            {
+              "name": "list_version",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "list_version is set for source default."
+            },
+            {
+              "name": "replaces",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.ReplacedPrice",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "replaces is set for source org when a lower layer would price the model without the org price."
+            },
+            {
+              "name": "unpriced_reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unpriced_reason is no_price or unusable_price when source is empty."
+            }
+          ]
         },
         {
           "name": "Notification",
@@ -7512,6 +7656,60 @@
             },
             {
               "name": "reasoning",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ReplacedPrice",
+          "fullName": "koinon.budget.v1alpha1.ReplacedPrice",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ReplacedPrice is the price an org price replaces: the next layer down (platform or default).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "source",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "list_version",
               "number": 5,
               "type": "string",
               "label": "singular",
@@ -16659,6 +16857,115 @@
       ]
     },
     {
+      "name": "koinon.refusal.v1",
+      "files": [
+        "koinon/refusal/v1/refusal.proto"
+      ],
+      "services": [],
+      "messages": [],
+      "enums": [
+        {
+          "name": "Reason",
+          "fullName": "koinon.refusal.v1.Reason",
+          "file": "koinon/refusal/v1/refusal.proto",
+          "description": "Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a\nvalue as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the\nsame string in `error.reason`. The value names are the wire strings, so they have no enum prefix.\nA spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.\n\nAdd a value only when a client acts on the reason differently. Values are add-only: never reuse,\nrename or remove one. A client that does not know a reason shows the message of the error.\n\nbuf:lint:ignore ENUM_VALUE_PREFIX",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "REASON_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": "The error has no reason. A server never sends this value."
+            },
+            {
+              "name": "INVALID",
+              "number": 1,
+              "deprecated": false,
+              "description": "The request is not valid. The message says why."
+            },
+            {
+              "name": "NOT_FOUND",
+              "number": 2,
+              "deprecated": false,
+              "description": "The thing does not exist, or the caller may not see it."
+            },
+            {
+              "name": "INSTALL_HELD",
+              "number": 3,
+              "deprecated": false,
+              "description": "The install is held (ADR 0107) and the call reaches outward."
+            },
+            {
+              "name": "ROLE_TOO_LOW",
+              "number": 4,
+              "deprecated": false,
+              "description": "The caller's Role is too low for the field rule of the call (ADR 0116 decision 4)."
+            },
+            {
+              "name": "ADMIN_REQUIRED",
+              "number": 5,
+              "deprecated": false,
+              "description": "Only an org admin or owner may do this."
+            },
+            {
+              "name": "PLATFORM_ADMIN_REQUIRED",
+              "number": 6,
+              "deprecated": false,
+              "description": "Only a platform admin may do this."
+            },
+            {
+              "name": "CHANGED",
+              "number": 7,
+              "deprecated": false,
+              "description": "The destination changed since the caller loaded it."
+            },
+            {
+              "name": "OWNER_ONLY",
+              "number": 8,
+              "deprecated": false,
+              "description": "Only an org owner may choose content level full."
+            },
+            {
+              "name": "OWNER_AT_FULL",
+              "number": 9,
+              "deprecated": false,
+              "description": "The org sends full content, so only an owner may add a destination or change its connection."
+            },
+            {
+              "name": "NOT_MEMBER",
+              "number": 10,
+              "deprecated": false,
+              "description": "The caller is not a member of the org, so may only lower its settings."
+            },
+            {
+              "name": "ABOVE_CEILING",
+              "number": 11,
+              "deprecated": false,
+              "description": "The level is above the platform ceiling."
+            },
+            {
+              "name": "TEST_FAILED",
+              "number": 12,
+              "deprecated": false,
+              "description": "The test trace was not accepted, so nothing was saved."
+            },
+            {
+              "name": "PRICE_REFRESH_OFF",
+              "number": 13,
+              "deprecated": false,
+              "description": "The price refresh is off on this install."
+            },
+            {
+              "name": "CREDENTIAL_TOO_SHORT",
+              "number": 14,
+              "deprecated": false,
+              "description": "The credential of an MCP server is too short."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "koinon.remoteagent.v1alpha1",
       "files": [
         "koinon/remoteagent/v1alpha1/remoteagent.proto"
@@ -19029,6 +19336,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "actor_display_name",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of actor_user_id, for a person's event; empty for other actors, an unnamed\nuser or a deleted user. Never an email address. Any role that can read the task sees it."
             }
           ]
         }
@@ -19163,12 +19479,21 @@
           "name": "TemplateService",
           "fullName": "koinon.template.v1alpha1.TemplateService",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "TemplateService lists the agent templates shipped with Koinon (ADR 0020).\nTemplates are platform data: they belong to no org, and every signed-in\nuser can list them.",
+          "description": "TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs\nto no org and is read-only; an org template belongs to one org, which saved it from an agent\n(ADR 0126 section 5), and no other org sees it.",
           "deprecated": false,
           "methods": [
             {
+              "name": "CreateTemplateFromAgent",
+              "description": "CreateTemplateFromAgent saves the latest version of an agent as an org template (\"save as\ntemplate\"). It needs the member role, as creating an agent does. The template keeps the agent's\ndefinition (instructions, model, grants without their bindings, limits, triggers, settings) and\nnothing the agent is bound to: no connection, repository or run data. Promotion to a platform\ntemplate is not part of this API.",
+              "requestType": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+              "responseType": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListTemplates",
-              "description": "ListTemplates returns the current content of every template.",
+              "description": "ListTemplates returns the current content of every platform template and, when the request\nnames an org, the org's own templates. Every signed-in user can list the platform templates;\nthe org's templates need membership of the org.",
               "requestType": "koinon.template.v1alpha1.ListTemplatesRequest",
               "responseType": "koinon.template.v1alpha1.ListTemplatesResponse",
               "clientStreaming": false,
@@ -19179,6 +19504,78 @@
         }
       ],
       "messages": [
+        {
+          "name": "CreateTemplateFromAgentRequest",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentRequest saves an agent as a template of its org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The template's name, 1 to 200 characters."
+            },
+            {
+              "name": "description",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name."
+            }
+          ]
+        },
+        {
+          "name": "CreateTemplateFromAgentResponse",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentResponse is the new org template.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "template",
+              "number": 1,
+              "type": "koinon.template.v1alpha1.Template",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "Grant",
           "fullName": "koinon.template.v1alpha1.Grant",
@@ -19264,15 +19661,25 @@
           "name": "ListTemplatesRequest",
           "fullName": "koinon.template.v1alpha1.ListTemplatesRequest",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesRequest is empty.",
+          "description": "ListTemplatesRequest names the org whose templates to list with the platform ones.",
           "deprecated": false,
-          "fields": []
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs\nthe viewer role in the org."
+            }
+          ]
         },
         {
           "name": "ListTemplatesResponse",
           "fullName": "koinon.template.v1alpha1.ListTemplatesResponse",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesResponse lists the templates, sorted by slug.",
+          "description": "ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when\nan org template has the same slug.",
           "deprecated": false,
           "fields": [
             {
@@ -19544,6 +19951,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The harness an agent gets when the request names none; one of allowed_harnesses."
+            },
+            {
+              "name": "scope",
+              "number": 19,
+              "type": "koinon.template.v1alpha1.TemplateScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Who owns the template."
+            },
+            {
+              "name": "org_id",
+              "number": 20,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The owning org of an org template; empty on a platform template."
             }
           ]
         },
@@ -19708,6 +20133,33 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "TemplateScope",
+          "fullName": "koinon.template.v1alpha1.TemplateScope",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "TemplateScope says who owns a template.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "TEMPLATE_SCOPE_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "TEMPLATE_SCOPE_PLATFORM",
+              "number": 1,
+              "deprecated": false,
+              "description": "Ships with Koinon; read-only; every signed-in user sees it."
+            },
+            {
+              "name": "TEMPLATE_SCOPE_ORG",
+              "number": 2,
+              "deprecated": false,
+              "description": "Saved by an org; only that org sees it."
             }
           ]
         },
@@ -21857,6 +22309,674 @@
           ]
         }
       ]
+    },
+    {
+      "name": "koinon.usage.v1alpha1",
+      "files": [
+        "koinon/usage/v1alpha1/usage.proto"
+      ],
+      "services": [
+        {
+          "name": "UsageService",
+          "fullName": "koinon.usage.v1alpha1.UsageService",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageService is the usage and cost read model of the console home and the \"Usage and cost\" page\n(issue #1268, ADR 0126 section 4). It reads the spend ledger and the runs table in the database,\nnever Prometheus. Amounts are USD decimal strings. A day is a UTC day.\n\nEvery member of an org reads that org's usage and no other org's. The platform-wide calls are for\nplatform admins. The CSV export holds the same rows and the same totals as the matching Get call.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "ExportOrgUsage",
+              "description": "ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.",
+              "requestType": "koinon.usage.v1alpha1.ExportOrgUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ExportPlatformUsage",
+              "description": "ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.",
+              "requestType": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetOrgUsage",
+              "description": "GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and\ntoday's runs. Members and above.",
+              "requestType": "koinon.usage.v1alpha1.GetOrgUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.GetOrgUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetPlatformUsage",
+              "description": "GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's\nruns. Platform admins only.",
+              "requestType": "koinon.usage.v1alpha1.GetPlatformUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.GetPlatformUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "ExportOrgUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.ExportOrgUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "range",
+              "number": 2,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportOrgUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final\nrow with the totals (day \"total\"). The text is UTF-8 and ends in a newline.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "filename",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "csv",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportPlatformUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "range",
+              "number": 1,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportPlatformUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then\na final row with the totals (day \"total\"). The text is UTF-8 and ends in a newline. Soft-deleted\norgs stay in the rows, so the totals equal the ledger sums.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "filename",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "csv",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.GetOrgUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "range",
+              "number": 2,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent_id, model and provider_id narrow the rows. Empty means all."
+            },
+            {
+              "name": "model",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.GetOrgUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "from",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "from and to are the rounded period of the rows: from (inclusive) up to to (exclusive)."
+            },
+            {
+              "name": "to",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "rows",
+              "number": 4,
+              "type": "koinon.usage.v1alpha1.OrgUsageRow",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "totals",
+              "number": 5,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "totals is the sum of rows."
+            },
+            {
+              "name": "runs",
+              "number": 6,
+              "type": "koinon.usage.v1alpha1.RunCounts",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs counts today's runs of the org, whatever the range and the filters."
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.GetPlatformUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "range",
+              "number": 1,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.GetPlatformUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "rows",
+              "number": 3,
+              "type": "koinon.usage.v1alpha1.PlatformUsageRow",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "totals",
+              "number": 4,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "totals is the sum of rows."
+            },
+            {
+              "name": "runs",
+              "number": 5,
+              "type": "koinon.usage.v1alpha1.RunCounts",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs counts today's runs of every org."
+            }
+          ]
+        },
+        {
+          "name": "OrgUsageRow",
+          "fullName": "koinon.usage.v1alpha1.OrgUsageRow",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "OrgUsageRow is the ledger of one org for one day, principal, agent, model and provider.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "day is the UTC day as YYYY-MM-DD."
+            },
+            {
+              "name": "principal",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "principal is \"agent\" or \"system\" (a system check of the org, with no agent)."
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_name",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "provider_id is empty when the ledger did not record the provider (older entries, or a provider\nthat is deleted); provider_name is then empty too."
+            },
+            {
+              "name": "provider_name",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "usage",
+              "number": 8,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PlatformUsageRow",
+          "fullName": "koinon.usage.v1alpha1.PlatformUsageRow",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "PlatformUsageRow is the ledger of one org for one day and model.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_slug",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_name",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "usage",
+              "number": 6,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunCounts",
+          "fullName": "koinon.usage.v1alpha1.RunCounts",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "RunCounts are the runs created on the current UTC day.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day_start",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "day_start is the start of today (UTC)."
+            },
+            {
+              "name": "runs_today",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs_today counts the runs created since day_start, in any state."
+            },
+            {
+              "name": "failed_runs_today",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "failed_runs_today counts those of them that are in the state failed now."
+            }
+          ]
+        },
+        {
+          "name": "UsageRange",
+          "fullName": "koinon.usage.v1alpha1.UsageRange",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageRange is the period of a query: the UTC days from `from` up to, not including, `to`. Both\nare rounded down to the start of their UTC day. With none set, the period is the month to date\n(the first of the month up to the end of today). A period is at most 366 days.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "UsageTotals",
+          "fullName": "koinon.usage.v1alpha1.UsageTotals",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageTotals are the sums of a set of ledger rows. The token buckets are disjoint: input_tokens\ndoes not count the cache tokens, and reasoning_tokens are part of output_tokens.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "requests",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "input_tokens",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "output_tokens",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_read_tokens",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_write_tokens",
+              "number": 5,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reasoning_tokens",
+              "number": 6,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cost_usd",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "cost_usd is the recorded charge of the requests, estimated usage included."
+            },
+            {
+              "name": "estimated_usd",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "estimated_usd is the part of cost_usd that came from estimated usage."
+            },
+            {
+              "name": "cache_read_share",
+              "number": 9,
+              "type": "double",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "cache_read_share is cache_read_tokens over all the input side\n(input_tokens + cache_read_tokens + cache_write_tokens), from 0 to 1; 0 when there is none."
+            }
+          ]
+        }
+      ],
+      "enums": []
     }
   ]
 }

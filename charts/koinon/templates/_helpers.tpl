@@ -599,15 +599,15 @@ koinon.substrate.workerPoolImage: the worker image of the WorkerPool that the ch
 (koinon.imageRef), or "" when the chart makes no pool. An empty workerPool.workerImage takes the worker image of the
 pinned Substrate release for the pool's class: <repository>/ateworker-<class>:<version>. The pin is the one of
 internal/preflight/substratepin.go (SubstratePinnedImageRepo, SubstratePinnedVersion); test/chartsmoke fails when the two
-differ. Substrate v1.0.0 publishes tags only (see workerPolicy.digestExemptIdentities); pin a digest in workerImage.
+differ. Substrate v1.0.1 publishes tags only (see workerPolicy.digestExemptIdentities); pin a digest in workerImage.
 */}}
 {{- define "koinon.substrate.pinnedImageRepo" -}}ghcr.io/agent-substrate/substrate{{- end }}
-{{- define "koinon.substrate.pinnedVersion" -}}v1.0.0{{- end }}
+{{- define "koinon.substrate.pinnedVersion" -}}v1.0.1{{- end }}
 {{/*
 koinon.substrate.workerMemoryNeed gives the memory (bytes, float) that one worker pod's limit must have to
 place an actor with a memory limit of .mem bytes, for sandbox class .class. The worker offers its pod
 limits.memory less a reserve as capacity, and the scheduler books each actor at its limit plus the
-per-actor overhead of the class. Substrate v1.0.0 (b34fbee7):
+per-actor overhead of the class. Substrate v1.0.1 (20778a6d):
 - reserve 64Mi in both classes: 32Mi + 2 x 16Mi (cmd/ateworker-gvisor/memory.go:27-35,
   cmd/ateworker-microvm/run.go:152 with checkpoint.go:336-337)
 - overhead: gvisor none (cmd/ateworker-gvisor/main.go:315-328); microvm 4Mi + 8Mi per GiB of the limit

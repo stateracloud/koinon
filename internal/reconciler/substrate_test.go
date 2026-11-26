@@ -122,6 +122,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 	It("the adapter drops provider records, network rules and a filesystem policy; the plain driver refuses them", func(ctx SpecContext) {
 		withEgress := execution.SandboxSpec{
 			Name: "egress-probe", Image: substrateImage, RuntimeClassName: "kata", Providers: []string{"upstream"},
+			CPULimit: "500m", MemoryLimit: "512Mi",
 			Policy: execution.Policy{
 				Filesystem: execution.FilesystemPolicy{ReadWrite: []string{"/work"}},
 				Network:    map[string]execution.NetworkRule{"github": {Binaries: []string{"/usr/bin/git"}}},

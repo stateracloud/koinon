@@ -93,6 +93,8 @@ type files struct {
 	// sweep answers the sweep script: its output and exit code. Nil ends nothing.
 	sweep  func() (string, int)
 	sweeps int
+	// sweepsActive is how many sweeps run now, and sweepsMax the most that ran at once.
+	sweepsActive, sweepsMax int
 	// procinfo answers the script that reads the processes the sweep could not end (its lines),
 	// savework the script that reads the workspace's uncommitted work (its output and exit code).
 	procinfo     func() string
@@ -119,6 +121,13 @@ func (f *files) sweepCount() int {
 	return f.sweeps
 }
 
+// sweepOverlap is the most sweeps that ran at the same time.
+func (f *files) sweepOverlap() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sweepsMax
+}
+
 func (f *files) get(path string) ([]byte, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -130,13 +139,19 @@ func (f *files) get(path string) ([]byte, bool) {
 func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 3 && args[0] == "-c" && args[1] == agentd.SweepScript {
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.sweeps++
-		if f.sweep == nil {
-			_, _ = io.WriteString(stdout, "ended: none\n")
-			return 0
+		f.sweepsActive++
+		f.sweepsMax = max(f.sweepsMax, f.sweepsActive)
+		sweep := f.sweep
+		f.mu.Unlock()
+		// The answer is computed outside the lock, so that two sweeps that overlap are seen.
+		out, code := "ended: none\n", 0
+		if sweep != nil {
+			out, code = sweep()
 		}
-		out, code := f.sweep()
+		f.mu.Lock()
+		f.sweepsActive--
+		f.mu.Unlock()
 		if code != 0 {
 			// Like sweep.sh: survivors are printed on stdout, the rest on stderr.
 			for line := range strings.Lines(out) {

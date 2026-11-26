@@ -128,7 +128,7 @@ func lookPath(name string, env []string) (string, error) {
 	return "", fmt.Errorf("guest launcher: %q not found in PATH", name)
 }
 
-// dropUser switches to the policy's uid and gid. The guest of Substrate v1.0.0 gives payloads no
+// dropUser switches to the policy's uid and gid. The guest of Substrate v1.0.1 gives payloads no
 // CAP_SETUID or CAP_SETGID (issue #1087, phase 0 result), so in best_effort mode a failed drop is
 // logged and the launcher continues with the current user.
 func dropUser(u UserPolicy, log *slog.Logger) error {

@@ -303,7 +303,29 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
 	w.WriteHeader(status)
 	body := Error{}
 	body.Error.Code, body.Error.Message = code, msg
+	body.Error.Reason = kindReason(code)
 	_ = jsonEncode(w, body)
+}
+
+// kindReason is the reason of an error that has no other: its kind (ADR 0116 decision 5). Other kinds have none.
+func kindReason(code ErrorCode) *ErrorReason {
+	var r ErrorReason
+	switch code {
+	case InvalidRequest:
+		r = INVALID
+	case NotFound:
+		r = NOTFOUND
+	default:
+		return nil
+	}
+	return &r
+}
+
+// reasonByName returns the reason with this name, when the shared list (ErrorReason, equal to the proto enum
+// koinon.refusal.v1.Reason) has it.
+func reasonByName(name string) (ErrorReason, bool) {
+	r := ErrorReason(name)
+	return r, name != "" && r.Valid()
 }
 
 // problem maps a service-layer error.
@@ -322,11 +344,16 @@ func (s *Server) problem(err error) (int, Error) {
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
+		e.Error.Reason = kindReason(code)
 		return status, e
 	}
 	switch {
 	case errors.As(err, &inv):
-		return set(http.StatusBadRequest, InvalidRequest, inv.Msg)
+		st, out := set(http.StatusBadRequest, InvalidRequest, inv.Msg)
+		if r, ok := reasonByName(inv.Reason); ok {
+			out.Error.Reason = &r
+		}
+		return st, out
 	case errors.As(err, &tin):
 		return set(http.StatusBadRequest, InvalidRequest, tin.Msg)
 	case errors.As(err, &pin):
@@ -354,7 +381,10 @@ func (s *Server) problem(err error) (int, Error) {
 	case errors.Is(err, outward.ErrDeclared), errors.Is(err, outward.ErrDisabled):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, restorehold.ErrHeld):
-		return set(http.StatusConflict, Conflict, err.Error())
+		st, out := set(http.StatusConflict, Conflict, err.Error())
+		held := INSTALLHELD
+		out.Error.Reason = &held
+		return st, out
 	case errors.Is(err, triggers.ErrCannotRun):
 		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, budget.ErrForbidden):

@@ -42,3 +42,12 @@ cfg_names() { render "${gw[@]}" --set restoreHold=true --set fullnameOverride="$
 long_names=$(cfg_names)
 grep -q -E -- "name: .*gateway-config-held\$" <<<"$long_names" || fail "long fullname keeps the held config name suffix: $long_names"
 [[ $(grep -c -E -- 'gateway-config-held$' <<<"$long_names") == $(wc -l <<<"$long_names" | tr -d ' ') ]] || fail "long fullname: the held Deployment mounts only the held config: $long_names"
+
+# A held koinon-gateway (the mcp-gateway Deployment, issue #1358) takes --restore-hold: it is ready with
+# no State revision (the held reconciler publishes none) and refuses every call. Unheld, no flag.
+mcpgw=(--set gateway.mode=standalone --set gateway.mcp.driver=koinon --show-only templates/gateway-koinon-mcp.yaml)
+has "held koinon-gateway Deployment gets --restore-hold" '^ +- --restore-hold$' "${mcpgw[@]}" --set restoreHold=true
+lacks "unheld koinon-gateway Deployment has no --restore-hold" 'restore-hold' "${mcpgw[@]}"
+mdlgw=(--set gateway.mode=standalone --set gateway.model.driver=koinon --show-only templates/gateway-koinon-model.yaml)
+has "held koinon model gateway Deployment gets --restore-hold" '^ +- --restore-hold$' "${mdlgw[@]}" --set restoreHold=true
+lacks "unheld koinon model gateway Deployment has no --restore-hold" 'restore-hold' "${mdlgw[@]}"

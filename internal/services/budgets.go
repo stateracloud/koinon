@@ -548,6 +548,36 @@ func (s *Server) ListPrices(ctx context.Context, req *budgetv1alpha1.ListPricesR
 	return res, nil
 }
 
+// ExplainOrgPrices implements PriceService. Admins and owners.
+func (s *Server) ExplainOrgPrices(ctx context.Context, req *budgetv1alpha1.ExplainOrgPricesRequest) (*budgetv1alpha1.ExplainOrgPricesResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.prices.ExplainOrg(ctx, c.org)
+	if err != nil {
+		return nil, s.budgetError(err)
+	}
+	res := &budgetv1alpha1.ExplainOrgPricesResponse{}
+	for _, mp := range list {
+		row := &budgetv1alpha1.ModelPriceSource{
+			ProviderName: mp.ProviderName, ProviderType: mp.ProviderType, Model: mp.Model, UnpricedReason: string(mp.UnpricedReason),
+		}
+		if mp.UnpricedReason == "" {
+			r := mp.Resolution
+			row.Source, row.PriceRef, row.Entry = r.Source, r.Ref, entryProto(r.Entry)
+			row.PlatformVersion, row.ListVersion = r.PlatformVersion, r.ListVersion
+		}
+		if b := mp.Replaces; b != nil {
+			row.Replaces = &budgetv1alpha1.ReplacedPrice{
+				Source: b.Source, PriceRef: b.Ref, Entry: entryProto(b.Entry), PlatformVersion: b.PlatformVersion, ListVersion: b.ListVersion,
+			}
+		}
+		res.Models = append(res.Models, row)
+	}
+	return res, nil
+}
+
 // SetPrice implements PriceService. Admins and owners.
 func (s *Server) SetPrice(ctx context.Context, req *budgetv1alpha1.SetPriceRequest) (*budgetv1alpha1.SetPriceResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
