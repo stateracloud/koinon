@@ -531,9 +531,12 @@ other issues:
 
 - #1094 removes the OpenShell driver. So #1386 writes no OpenShell code.
 - #1446 puts the agentd leg to the Substrate router on TLS. Today every Exec through the router fails.
-- #1444 makes the Substrate driver write the actor's `EgressPolicy`: default deny plus the route to the
-  gateway. #1444 owns the policy. #1386 adds the identity header to the gateway rule of that policy. It does
-  not write the policy itself.
+- #1444 makes the Substrate driver write the actor's `EgressPolicy`: default deny plus the routes to the
+  gateway. Every actor gets the model and MCP listeners. Only an actor whose agent has a code-host grant gets
+  the egress listener, as on the OpenShell path. The policy is a separate object under the actor, not part of
+  the template: the driver writes it before each create, restore, start and resume, and changes it in place
+  when the grant changes. #1444 owns the policy. #1386 adds the identity header to the gateway rules of that
+  policy. It does not write the policy itself.
 
 ### What section 1.2 means
 

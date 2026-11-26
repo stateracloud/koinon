@@ -187,7 +187,7 @@ func (c *config) finish(v *viper.Viper) error {
 		}
 		// Every actor's egress policy allows the gateway URLs and nothing else (issue #1444): refuse at
 		// start a URL that the policy cannot carry, not at the first sandbox.
-		if _, err := c.substrateGatewayRoutes(); err != nil {
+		if _, _, err := c.substrateGatewayRoutes(); err != nil {
 			return err
 		}
 	}

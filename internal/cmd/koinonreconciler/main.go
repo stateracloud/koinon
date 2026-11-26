@@ -118,8 +118,10 @@ func serve(ctx context.Context, cfg config) error {
 		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
 	}
 	if cfg.execution.IsSubstrate() {
-		// Every actor's egress policy allows these gateway listeners and nothing else (issue #1444).
-		if cfg.execution.Substrate.GatewayRoutes, err = cfg.substrateGatewayRoutes(); err != nil {
+		// Every actor's egress policy allows these gateway listeners and nothing else (issue #1444); the
+		// egress listener only for an agent with a code-host grant.
+		sub := &cfg.execution.Substrate
+		if sub.GatewayRoutes, sub.CodeHostEgressRoute, err = cfg.substrateGatewayRoutes(); err != nil {
 			return err
 		}
 	}

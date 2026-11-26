@@ -4,6 +4,7 @@ package reconciler_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -19,6 +21,9 @@ import (
 
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
@@ -27,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // substrateImage is pinned by digest: the Substrate driver refuses any other reference. The digest
@@ -63,8 +69,9 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		DeferCleanup(router.Close)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-			GatewayRoutes: []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
-			GuestSigner:   fakeate.Signer(),
+			GatewayRoutes:       []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
+			CodeHostEgressRoute: &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort},
+			GuestSigner:         fakeate.Signer(),
 			// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
@@ -76,6 +83,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 				Prices:         prices.NewResolver(pricing.Embedded()),
 				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+				Egress:         &reconciler.Endpoint{Host: fakeate.GatewayHost, Port: fakeate.EgressPort},
+				GitHub:         fixedTokens{},
 				Keys:           ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
 				ProviderKeyDir: "/secrets/providers",
@@ -135,6 +144,56 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "plain driver: %v", err)
 		_, err = execution.WithoutEgress(d).CreateSandbox(ctx, ws, withEgress)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	// The egress listener follows the code-host grant (issue #1444), as the OpenShell policy entry does, and a
+	// change of the grant updates the actor's policy in place.
+	It("gives the egress listener only to an agent with a code-host grant, and takes it away in place", func(ctx SpecContext) {
+		gw, gwPort, egressPort := fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
+		plain := newAgent(ctx, org, user)
+		plainNames := execution.AgentObjectNames(org.Bytes, plain.ID.Bytes)
+
+		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
+		Expect(err).NotTo(HaveOccurred())
+		connCfg, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2})
+		Expect(err).NotTo(HaveOccurred())
+		conn, err := q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: org, ID: id, Connector: "github", DisplayName: "github", Config: connCfg,
+			SecretEnvelope: envelope, Source: store.ConfigSourceUi, CreatedBy: user,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		withGrant, err := agentconfig.Config{
+			Instructions: "help",
+			Grants:       []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Bindings:     []agentconfig.Binding{{Connector: "github", ConnectionID: uuidOf(conn.ID), Targets: []string{"acme/widgets"}}},
+		}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		forge := newAgentWithConfig(ctx, org, user, string(withGrant))
+		forgeNames := execution.AgentObjectNames(org.Bytes, forge.ID.Bytes)
+
+		pass(ctx)
+		for _, n := range []string{plainNames.Sandbox, forgeNames.Sandbox} {
+			Eventually(func() ateapiv1.ActorState { return cl.State(ws, n) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		}
+		Expect(cl.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
+		Expect(cl.EgressAllowed(ws, plainNames.Sandbox, gw, gwPort)).To(BeTrue())
+		Expect(cl.EgressAllowed(ws, plainNames.Sandbox, gw, egressPort)).To(BeFalse(), "an actor without a code-host grant has no route to the egress listener")
+		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, gwPort)).To(BeTrue())
+		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, egressPort)).To(BeTrue(), "the agent with the grant")
+		creates := cl.Calls("CreateActor")
+
+		By("a new version without the grant takes the listener away on the next pass, without a new sandbox")
+		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: forge.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: forge.ID, VersionID: version.ID, ActivatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, egressPort)).To(BeFalse())
+		Expect(cl.EgressAllowed(ws, forgeNames.Sandbox, gw, gwPort)).To(BeTrue())
+		Expect(cl.Calls("CreateActor")).To(Equal(creates), "the grant is not part of the sandbox spec")
+		Expect(cl.Calls("DeleteActor")).To(BeZero())
+		Expect(cl.State(ws, forgeNames.Sandbox)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	})
 
 	It("recreates nothing on later passes", func(ctx SpecContext) {

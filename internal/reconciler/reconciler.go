@@ -1431,6 +1431,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
+	// The sandbox's gateway access (issue #1444), for a driver with a per-sandbox allow list (Substrate):
+	// the egress listener under the same condition as the egressRule entry above. It is set on every pass,
+	// before this pass creates or starts the sandbox, and the driver applies it in place: a changed grant
+	// never replaces the sandbox, and a removed one takes the listener away at once. It is not in spec or
+	// hash for that reason.
+	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
+		access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
+		if err := s.SetGatewayAccess(ctx, ws, names.Sandbox, access); err != nil {
+			return err
+		}
+	}
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{
 		IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
 		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute,

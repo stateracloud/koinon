@@ -122,11 +122,16 @@ type Config struct {
 	// GuestVerifyKeys are more public keys that templates give the guest front next to the signer's,
 	// for a key rotation. They are part of the template hash.
 	GuestVerifyKeys []ed25519.PublicKey
-	// GatewayRoutes are the gateway listeners a guest calls (issue #1444). The driver writes them as the
-	// actor's egress policy before every resume, and the actor reaches nothing else. Required: without
-	// them every create, restore, start and resume fails with [execution.ErrFailedPrecondition]. Check
-	// them with [ValidateGatewayRoutes].
+	// GatewayRoutes are the gateway listeners that every guest calls: the model and MCP listeners (issue
+	// #1444). The driver writes them as the actor's egress policy before every create, restore, start
+	// and resume, and the actor reaches nothing else. Required: without them each of these calls fails
+	// with [execution.ErrFailedPrecondition]. Check them with [ValidateGatewayRoutes].
 	GatewayRoutes []GatewayRoute
+	// CodeHostEgressRoute is the gateway's egress listener, or nil when the install has none. Only an
+	// actor whose [execution.GatewayAccess] has CodeHostEgress gets it in its policy
+	// ([Driver.SetGatewayAccess]). It must not be one of GatewayRoutes: then every actor would reach
+	// it. Check it with [ValidateGatewayRoutes].
+	CodeHostEgressRoute *GatewayRoute
 }
 
 func (c Config) withDefaults() Config {
@@ -175,6 +180,10 @@ type Driver struct {
 	// tiers caches the tier of a template by atespace and name. A template name is a hash of its
 	// content, so the entry never goes stale.
 	tiers map[key]harness.Tier
+	// access holds the gateway access the reconciler set for each sandbox (SetGatewayAccess). It is not
+	// stored anywhere else: a sandbox without an entry gets the zero access, so the driver fails closed
+	// after a restart until the reconciler sets it again.
+	access map[key]execution.GatewayAccess
 
 	resuspends *prometheus.CounterVec
 }
@@ -184,6 +193,8 @@ var (
 	_ execution.Compute     = (*Driver)(nil)
 	_ execution.Suspender   = (*Driver)(nil)
 	_ execution.Snapshotter = (*Driver)(nil)
+
+	_ execution.GatewayAccessSetter = (*Driver)(nil)
 )
 
 // key names an actor.
@@ -202,6 +213,7 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		gates:      map[key]*gate{},
 		owed:       map[key]bool{},
 		tiers:      map[key]harness.Tier{},
+		access:     map[key]execution.GatewayAccess{},
 		lineage:    lineages{m: map[string]lineage{}},
 		resuspends: newResuspends(),
 	}

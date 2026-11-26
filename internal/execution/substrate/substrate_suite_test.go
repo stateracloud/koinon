@@ -64,6 +64,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	}
 	if c.GatewayRoutes == nil && !noGatewayRoutes {
 		c.GatewayRoutes = gatewayRoutes
+		c.CodeHostEgressRoute = &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort}
 	}
 	if c.ContentDigest == nil && !noContentDigest {
 		// The fake has no object store: the object's content is its address.

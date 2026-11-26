@@ -203,9 +203,128 @@ var _ = Describe("the actor egress policy", func() {
 	})
 })
 
+// The egress listener goes only to an actor whose agent has a code-host grant (issue #1444): the same least
+// privilege as the OpenShell policy entry of that listener. The access is a per-actor policy object, not part of
+// the template, so a change never replaces the sandbox.
+var _ = Describe("the egress listener in the actor egress policy", func() {
+	const gw, gwPort, egressPort = fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
+	grant := execution.GatewayAccess{CodeHostEgress: true}
+	noGrant := execution.GatewayAccess{}
+
+	It("gives an actor without a code-host grant no route to the egress listener", func(ctx SpecContext) {
+		d, c := newDriver()
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue(), "the model and MCP listeners")
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "no access recorded: the driver fails closed")
+
+		Expect(d.SetGatewayAccess(ctx, ws, "a", noGrant)).To(Succeed())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse())
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+	})
+
+	It("gives an actor with a code-host grant the egress listener before it first runs", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed(), "no actor yet: the access is only recorded")
+		Expect(c.EgressPolicy(ws, "a")).To(BeNil())
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeTrue())
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+		Expect(c.PolicyWrites(ws, "a")).To(Equal(1), "written once, before the first resume")
+		Expect(c.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
+	})
+
+	It("takes the egress listener away from a running actor when the grant goes, without a replacement", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		ready(ctx, d, "a")
+		before, err := d.GetSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeTrue())
+
+		Expect(d.SetGatewayAccess(ctx, ws, "a", noGrant)).To(Succeed())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "the removal applies at once, in place")
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+		after, err := d.GetSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(after.ID).To(Equal(before.ID), "the same actor")
+		Expect(after.Phase).To(Equal(execution.PhaseReady), "it keeps running")
+		Expect(c.Calls("DeleteActor")).To(BeZero())
+		Expect(c.Calls("CreateActor")).To(Equal(1))
+		Expect(c.Calls("ResumeActor")).To(Equal(1), "no restart")
+
+		By("a new grant applies in place too")
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeTrue())
+		Expect(c.Calls("CreateActor")).To(Equal(1))
+	})
+
+	It("does not bring back an old policy on a resume or a restore", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		ready(ctx, d, "a")
+		snap, err := d.SnapshotSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred(), "taken while the actor has the egress listener")
+		_, err = d.WaitPhase(ctx, ws, "a", execution.PhaseReady)
+		Expect(err).NotTo(HaveOccurred(), "the snapshot resumes the actor")
+
+		By("a resume writes the access of now, not the one the actor had when it stopped")
+		_, err = d.StopSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d.SetGatewayAccess(ctx, ws, "a", noGrant)).To(Succeed())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "applied to the suspended actor in place")
+		// A stale writer puts the old policy back while the actor is suspended.
+		c.SetEgressPolicy(ws, "a", []*ateapiv1.EgressRule{{Http: &ateapiv1.HttpRule{
+			Hostnames: []string{gw}, Ports: &ateapiv1.Ports{Numbers: []int32{int32(gwPort), int32(egressPort)}},
+		}}})
+		_, err = d.ResumeSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse())
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+
+		By("a restore of a snapshot taken with the grant gives the new actor only its own access")
+		_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("copy"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.EgressAllowed(ws, "copy", gw, egressPort)).To(BeFalse(), "no access recorded for the copy")
+		Expect(c.EgressAllowed(ws, "copy", gw, gwPort)).To(BeTrue())
+		Expect(c.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
+
+		By("a restore with a grant recorded first gives it the egress listener before it runs")
+		Expect(d.SetGatewayAccess(ctx, ws, "copy2", grant)).To(Succeed())
+		_, err = d.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("copy2"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.EgressAllowed(ws, "copy2", gw, egressPort)).To(BeTrue())
+	})
+
+	It("gives no actor an egress listener on an install without one", func(ctx SpecContext) {
+		d, c := newDriver(substrate.Config{GatewayRoutes: gatewayRoutes})
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		ready(ctx, d, "a")
+		Expect(c.EgressPolicy(ws, "a").GetRules()).To(HaveLen(1))
+		Expect(c.EgressPolicy(ws, "a").GetRules()[0].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(gwPort)}))
+	})
+
+	It("keeps the old policy and returns the error when the change cannot be written", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		ready(ctx, d, "a")
+		c.FailPolicyWrites(1)
+		err := d.SetGatewayAccess(ctx, ws, "a", noGrant)
+		Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+		By("the reconciler's next pass applies it")
+		Expect(d.SetGatewayAccess(ctx, ws, "a", noGrant)).To(Succeed())
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse())
+	})
+
+	It("is reached through the adapter of the production wiring", func() {
+		d, _ := newDriver()
+		Expect(execution.GatewayAccessSetterOf(execution.WithoutEgress(d))).To(BeIdenticalTo(d))
+		Expect(execution.GatewayAccessSetterOf(struct{}{})).To(BeNil())
+	})
+})
+
 var _ = DescribeTable("ValidateGatewayRoutes",
 	func(routes []substrate.GatewayRoute, ok bool) {
-		err := substrate.ValidateGatewayRoutes(routes)
+		err := substrate.ValidateGatewayRoutes(routes, nil)
 		if ok {
 			Expect(err).NotTo(HaveOccurred())
 		} else {
@@ -234,3 +353,20 @@ var _ = DescribeTable("ValidateGatewayRoutes",
 		return r
 	}(), false),
 )
+
+var _ = It("ValidateGatewayRoutes keeps the egress route apart from the routes of every actor", func() {
+	routes := []substrate.GatewayRoute{{Host: "gateway", Port: 8080}}
+	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).To(Succeed())
+	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "gateway", Port: 8080})).
+		To(MatchError(ContainSubstring("cannot gate it")))
+	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "10.0.0.1", Port: 8081})).To(HaveOccurred())
+	Expect(substrate.ValidateGatewayRoutes(nil, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).
+		To(HaveOccurred(), "the egress route alone is not enough")
+	var many []substrate.GatewayRoute
+	for p := range uint32(16) {
+		many = append(many, substrate.GatewayRoute{Host: "gateway", Port: 9000 + p})
+	}
+	Expect(substrate.ValidateGatewayRoutes(many, nil)).To(Succeed())
+	Expect(substrate.ValidateGatewayRoutes(many, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).
+		To(MatchError(ContainSubstring("more than 16 ports")), "the egress port counts toward the limit of one rule")
+})

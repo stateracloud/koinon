@@ -23,10 +23,13 @@ import (
 const egressPolicyName = "default"
 
 // GatewayHost and GatewayPort are the gateway listener that specs give the driver as its gateway route (issue
-// #1444): the name the chart gives the standalone gateway in a release "koinon" in namespace "koinon".
+// #1444): the name the chart gives the standalone gateway in a release "koinon" in namespace "koinon". EgressPort
+// is the port of the gateway's egress listener on the same host, which only an actor with a code-host grant
+// reaches.
 const (
 	GatewayHost        = "koinon-gateway.koinon.svc.cluster.local"
 	GatewayPort uint32 = 8080
+	EgressPort  uint32 = 8081
 )
 
 func checkPolicyRef(actor *ateapiv1.ObjectRef, name string) error {

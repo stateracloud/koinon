@@ -517,26 +517,36 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("allows the gateway URLs in the actor egress policy, and refuses one it cannot carry (#1444)", func() {
+	It("allows the gateway URLs in the actor egress policy, keeps the egress listener apart, and refuses a URL it cannot carry (#1444)", func() {
 		c, err := parse(substrateConfig(pinned), cli.DriverSubstrate)
 		Expect(err).NotTo(HaveOccurred())
-		routes, err := c.substrateGatewayRoutes()
+		routes, egress, err := c.substrateGatewayRoutes()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(routes).To(Equal([]substrate.GatewayRoute{{Host: "koinon-gateway.koinon.svc", Port: 8080}}))
+		Expect(egress).To(BeNil())
 
 		c.gatewayMCPURL, c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8080", "http://koinon-mcp-gateway.koinon.svc:8081"
-		routes, err = c.substrateGatewayRoutes()
+		routes, egress, err = c.substrateGatewayRoutes()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(routes).To(ConsistOf(
 			substrate.GatewayRoute{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			substrate.GatewayRoute{Host: "koinon-mcp-gateway.koinon.svc", Port: 8080},
-			substrate.GatewayRoute{Host: "koinon-mcp-gateway.koinon.svc", Port: 8081},
 		))
+		// The egress listener is not a route of every actor: only an agent with a code-host grant gets it.
+		Expect(egress).To(Equal(&substrate.GatewayRoute{Host: "koinon-mcp-gateway.koinon.svc", Port: 8081}))
+
+		// An egress listener on the port of a route of every actor cannot be gated, so it is refused.
+		c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8080"
+		_, _, err = c.substrateGatewayRoutes()
+		Expect(err).To(MatchError(ContainSubstring("cannot gate it")))
 
 		for _, bad := range []string{"https://koinon-gateway.koinon.svc:8443", "http://10.96.0.10:8080", "http://Gateway.koinon.svc:8080"} {
 			c.gatewayURL, c.gatewayMCPURL, c.egressURL = bad, "", ""
-			_, err = c.substrateGatewayRoutes()
+			_, _, err = c.substrateGatewayRoutes()
 			Expect(err).To(MatchError(ContainSubstring("--gateway-url")), bad)
 		}
+		c.gatewayURL, c.egressURL = "http://koinon-gateway.koinon.svc:8080", "https://koinon-gateway.koinon.svc:8443"
+		_, _, err = c.substrateGatewayRoutes()
+		Expect(err).To(MatchError(ContainSubstring("--gateway-egress-url")))
 	})
 })

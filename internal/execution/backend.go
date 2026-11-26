@@ -127,6 +127,36 @@ type Snapshotter interface {
 	RestoreSandbox(ctx context.Context, workspace string, snapshot SnapshotRef, spec SandboxSpec) (Sandbox, error)
 }
 
+// GatewayAccess is what a sandbox may reach at the Koinon gateway in addition to the model and MCP
+// listeners, which every sandbox reaches (issue #1444). It is not part of [SandboxSpec]: a change of
+// access never replaces a sandbox.
+type GatewayAccess struct {
+	// CodeHostEgress lets the sandbox reach the gateway's egress listener. The reconciler sets it
+	// only for an agent with a code-host grant, on an install with an egress listener: the same
+	// condition as the OpenShell policy entry of that listener.
+	CodeHostEgress bool
+}
+
+// GatewayAccessSetter is an optional capability of a driver that keeps a per-sandbox allow list to
+// the gateway (the actor egress policy of Agent Substrate). The OpenShell driver does not implement
+// it: its policy entries carry the same rule.
+type GatewayAccessSetter interface {
+	// SetGatewayAccess records the access of sandbox name and applies it at once to a sandbox that
+	// exists, in place. A sandbox that does not exist yet gets it when it is created or restored. A
+	// driver that has no access recorded for a sandbox gives it the zero value: it fails closed.
+	SetGatewayAccess(ctx context.Context, workspace, name string, access GatewayAccess) error
+}
+
+// GatewayAccessSetterOf returns the capability of b, or nil when b has none. It looks through the
+// adapter of [WithoutEgress].
+func GatewayAccessSetterOf(b any) GatewayAccessSetter {
+	if n, ok := b.(noEgress); ok {
+		b = n.Compute
+	}
+	s, _ := b.(GatewayAccessSetter)
+	return s
+}
+
 // SnapshotKind says what a snapshot holds.
 type SnapshotKind string
 

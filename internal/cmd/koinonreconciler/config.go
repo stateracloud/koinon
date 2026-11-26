@@ -142,36 +142,49 @@ func (c *config) egressEndpoint() (*reconciler.Endpoint, error) {
 	return &e, nil
 }
 
-// substrateGatewayRoutes are the gateway listeners that the egress policy of every Substrate actor allows (issue
-// #1444): the LLM listener, koinon-gateway's MCP listener and its egress listener, where they are set. The guest
-// calls them over cleartext HTTP (ADR 0120), and the policy has HTTP rules only, so an https URL is refused.
-func (c *config) substrateGatewayRoutes() ([]substrate.GatewayRoute, error) {
-	var routes []substrate.GatewayRoute
+// substrateGatewayRoutes are the gateway listeners of the Substrate actor egress policy (issue #1444): routes for
+// every actor (the LLM listener and koinon-gateway's MCP listener, where they are set), and egress, the egress
+// listener, which only an actor of an agent with a code-host grant gets (nil without --gateway-egress-url). The
+// guest calls them over cleartext HTTP (ADR 0120), and the policy has HTTP rules only, so an https URL is refused.
+func (c *config) substrateGatewayRoutes() (routes []substrate.GatewayRoute, egress *substrate.GatewayRoute, err error) {
+	routeOf := func(flag, raw string) (substrate.GatewayRoute, error) {
+		if u, err := url.Parse(raw); err == nil && u.Scheme != "http" {
+			return substrate.GatewayRoute{}, fmt.Errorf("%s %q: the Substrate egress policy allows cleartext HTTP to the gateway only; use an http:// URL", flag, raw)
+		}
+		e, err := endpointOf(flag, raw)
+		if err != nil {
+			return substrate.GatewayRoute{}, err
+		}
+		r := substrate.GatewayRoute{Host: e.Host, Port: e.Port}
+		if err := substrate.ValidateGatewayRoutes([]substrate.GatewayRoute{r}, nil); err != nil {
+			return substrate.GatewayRoute{}, fmt.Errorf("%s %q: the Substrate egress policy cannot allow it: %w", flag, raw, err)
+		}
+		return r, nil
+	}
 	for _, f := range []struct{ flag, raw string }{
 		{"--gateway-url", c.gatewayURL},
 		{"--gateway-mcp-url", c.gatewayMCPURL},
-		{"--gateway-egress-url", c.egressURL},
 	} {
 		if f.raw == "" {
 			continue
 		}
-		if u, err := url.Parse(f.raw); err == nil && u.Scheme != "http" {
-			return nil, fmt.Errorf("%s %q: the Substrate egress policy allows cleartext HTTP to the gateway only; use an http:// URL", f.flag, f.raw)
-		}
-		e, err := endpointOf(f.flag, f.raw)
+		r, err := routeOf(f.flag, f.raw)
 		if err != nil {
-			return nil, err
-		}
-		r := substrate.GatewayRoute{Host: e.Host, Port: e.Port}
-		if err := substrate.ValidateGatewayRoutes([]substrate.GatewayRoute{r}); err != nil {
-			return nil, fmt.Errorf("%s %q: the Substrate egress policy cannot allow it: %w", f.flag, f.raw, err)
+			return nil, nil, err
 		}
 		routes = append(routes, r)
 	}
-	if err := substrate.ValidateGatewayRoutes(routes); err != nil {
-		return nil, fmt.Errorf("substrate egress policy: %w", err)
+	if c.egressURL != "" {
+		r, err := routeOf("--gateway-egress-url", c.egressURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		egress = &r
 	}
-	return routes, nil
+	if err := substrate.ValidateGatewayRoutes(routes, egress); err != nil {
+		return nil, nil, fmt.Errorf("substrate egress policy: %w", err)
+	}
+	return routes, egress, nil
 }
 
 // endpointOf parses an http(s)://host[:port] URL, named flag in errors, into a host and a port.

@@ -77,9 +77,12 @@ type Substrate struct {
 	// #1088 slice e). The keys are files, never flags or values.
 	SnapshotStore SnapshotStore
 	// GatewayRoutes are the gateway listeners that the driver writes into the egress policy of every actor
-	// (issue #1444). Only the reconciler sets them, from its gateway URLs: it is the only binary that creates,
-	// starts or resumes sandboxes, and without routes those calls fail closed.
+	// (issue #1444): the model and MCP listeners. Only the reconciler sets them, from its gateway URLs: it is
+	// the only binary that creates, starts or resumes sandboxes, and without routes those calls fail closed.
 	GatewayRoutes []substrate.GatewayRoute
+	// CodeHostEgressRoute is the gateway's egress listener, or nil. The driver adds it to the policy of an
+	// actor whose agent has a code-host grant only (execution.GatewayAccess).
+	CodeHostEgressRoute *substrate.GatewayRoute
 }
 
 // SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
@@ -127,11 +130,15 @@ func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
 // checks only that the flag is set, and Dial reads and parses the key.
 func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
-	if len(s.GatewayRoutes) > 0 {
-		if err := substrate.ValidateGatewayRoutes(s.GatewayRoutes); err != nil {
+	if len(s.GatewayRoutes) > 0 || s.CodeHostEgressRoute != nil {
+		if err := substrate.ValidateGatewayRoutes(s.GatewayRoutes, s.CodeHostEgressRoute); err != nil {
 			return cfg, fmt.Errorf("substrate egress policy: %w", err)
 		}
 		cfg.GatewayRoutes = slices.Clone(s.GatewayRoutes)
+		if s.CodeHostEgressRoute != nil {
+			e := *s.CodeHostEgressRoute
+			cfg.CodeHostEgressRoute = &e
+		}
 	}
 	if readKey && s.GuestKeyFile != "" {
 		b, err := os.ReadFile(s.GuestKeyFile)
