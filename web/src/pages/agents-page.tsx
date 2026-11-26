@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConnectError } from '@connectrpc/connect'
-import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { useAllAgents } from '@/hooks/use-all-agents'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { harnessLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
@@ -14,7 +13,7 @@ import { useOrg } from '@/lib/org-context'
 /** AgentsPage lists the org's agents. */
 export function AgentsPage() {
   const { org } = useOrg()
-  const list = useQuery(AgentService.method.listAgents, { orgId: org.orgId })
+  const list = useAllAgents(org.orgId)
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
       <div className="flex items-center gap-3">
