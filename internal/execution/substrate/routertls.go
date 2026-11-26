@@ -180,7 +180,7 @@ func (c *routerCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.Auth
 }
 
 func (c *routerCreds) Info() credentials.ProtocolInfo {
-	return credentials.ProtocolInfo{SecurityProtocol: "tls", SecurityVersion: "1.2", ServerName: c.name}
+	return credentials.ProtocolInfo{SecurityProtocol: "tls", ServerName: c.name}
 }
 
 func (c *routerCreds) Clone() credentials.TransportCredentials {
