@@ -191,6 +191,20 @@ func (v *Verifier) WithClock(now func() time.Time) *Verifier {
 	return &c
 }
 
+// Identify checks token and returns the actor it speaks for, so a Verifier is a route.Identifier: the
+// Ed25519 path of the OpenShell driver, where the token names the org and the agent itself.
+// exit: #1386 PR B, after #1094 (the OpenShell driver and this path go away). A nil Verifier refuses.
+func (v *Verifier) Identify(token string) (Actor, error) {
+	if v == nil {
+		return Actor{}, ErrInvalid
+	}
+	c, err := v.Verify(token)
+	if err != nil {
+		return Actor{}, err
+	}
+	return c.Actor, nil
+}
+
 // Verify checks token and returns its claims. Every failure is ErrInvalid.
 func (v *Verifier) Verify(token string) (Claims, error) {
 	tok, err := jwt.ParseSigned(strings.TrimSpace(token), []jose.SignatureAlgorithm{jose.EdDSA})
