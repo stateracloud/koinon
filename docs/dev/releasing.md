@@ -76,7 +76,12 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    claim-tests and the dependency age steps, which run on pull requests only) must succeed on the tagged
    commit and also on the merged pull request's head (`both` in the script). The three above are listed in
    the script (`pr_only`); the pull request head is the newest run that started before the merge (the
-   `closed` event reruns some of them as skipped). They are listed rather than inferred from "no run on the
+   `closed` event reruns some of them as skipped). When the tagged commit is a merge commit, the merged
+   pull request is the one whose head is the second parent of the commit (#1373). A merge queue group of
+   two or more pull requests puts one merge commit for each pull request on main, but GitHub gives each
+   pull request of the group the first merge commit of the group as its merge commit. Thus the pull
+   request list of a later merge commit in the group is empty. A commit with one parent (a squash or
+   rebase merge) uses the pull request list of the commit. The three contexts are listed rather than inferred from "no run on the
    commit", so a new push-triggered required check that is missing or red on the commit cannot be excused.
    When a workflow gains or loses a `push` trigger, move its context in or out of `pr_only`.
    An admin-merged commit has no queue build: its `ci` jobs ran in its own push run, `dco`, `claim` and

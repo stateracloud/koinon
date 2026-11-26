@@ -3,7 +3,8 @@
 #
 # Tests hack/release-gate.sh with a stubbed gh and git (fixture JSON files, filtered by the real
 # jq, as gh --jq would): the required list is read from the ruleset, a missing or red required
-# check fails, the pull-request-only contexts are read from the merged pull request's head, a
+# check fails, the pull-request-only contexts are read from the merged pull request's head (for a
+# merge commit, also the 2nd..Nth commit of a merge queue group: the PR whose head is the second parent), a
 # push-triggered context is not excused by a PR run, and an unreadable ruleset fails closed. The
 # quickstart rule (#444) is tested the same way: skipped runs are ignored, and a green merge queue
 # run on the same tree stands in for a missing run.
@@ -50,7 +51,7 @@ case $path in
 repos/o/r) f=repo.json ;;
 repos/o/r/rules/branches/main) f=rules.json ;;
 repos/o/r/commits/*/check-runs) c=${path#repos/o/r/commits/}; f=checks-${c%%/*}.json ;;
-repos/o/r/commits/*/pulls) f=pulls.json ;;
+repos/o/r/commits/*/pulls) c=${path#repos/o/r/commits/}; f=pulls-${c%%/*}.json; [[ -f $FX/$f ]] || f=pulls.json ;;
 repos/o/r/git/commits/*) f=commit-${path##*/}.json ;;
 repos/o/r/actions/workflows/e2e-kind.yml/runs) f=mg-runs.json ;;
 repos/o/r/actions/workflows/ci.yml/runs) f=ci-runs.json ;;
@@ -267,6 +268,62 @@ check "quick checks red on the PR head (dependency age) fails although main is g
 new_case
 echo '[]' >"$FX/pulls.json"
 check "no merged PR (direct push): PR-only contexts fail" "$(gate_rc)" 1
+
+# A merge queue group of two PRs (#1373): main gets one merge commit per PR (the first parent is the commit
+# before, the second the PR head), but GitHub gives both PRs the group's first merge commit as
+# merge_commit_sha, so commits/<2nd merge commit>/pulls is empty. The PR is found from the second parent.
+grouped_case() { # the tagged commit is the 2nd merge commit of a two-PR group; $pr_head is its PR's head
+	new_case
+	rm -f "$FX/pulls.json"
+	echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"treeS\"},\"parents\":[{\"sha\":\"1111aaa\"},{\"sha\":\"$pr_head\"}]}" >"$FX/commit-$sha.json"
+	echo '[]' >"$FX/pulls-$sha.json"
+	echo "[{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"$pr_head\"}}]" >"$FX/pulls-$pr_head.json"
+	run_on "$sha" "quick checks" success
+	set_ruleset go dco "quick checks" "e2e result"
+}
+grouped_case
+run_on "$pr_head" "quick checks" success
+check "grouped queue merge: the PR is found from the second parent" "$(gate_rc)" 0
+
+grouped_case
+run_on "$pr_head" "quick checks" failure
+check "grouped queue merge: a red check on the second parent's PR head fails" "$(gate_rc)" 1
+
+grouped_case
+echo '[]' >"$FX/pulls-$pr_head.json"
+check "merge commit whose second parent is no merged PR head: PR-only contexts fail" "$(gate_rc)" 1
+check "...and says so" "$(grep -c "FAIL: dco: no check run found on the merged pull request's head" "$tmp/err")" 1
+
+grouped_case
+# commits/<parent 2>/pulls can also list a later PR that contains the commit; only a PR whose head IS parent 2 counts
+echo '[{"merged_at":"2026-01-03T00:00:00Z","head":{"sha":"cccc444"}}]' >"$FX/pulls-$pr_head.json"
+run_on cccc444 dco success
+run_on cccc444 "e2e result" success
+run_on cccc444 "quick checks" success
+check "merge commit: a PR whose head is not the second parent is not evidence" "$(gate_rc)" 1
+
+grouped_case
+# the first merge commit of a group: commits/<SHA>/pulls may name the other PR of the group (merge_commit_sha);
+# it is ignored, the PR whose head is the second parent decides
+echo "[{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"cccc444\"}},{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"$pr_head\"}}]" >"$FX/pulls-$sha.json"
+echo '[]' >"$FX/pulls-$pr_head.json"
+run_on cccc444 "quick checks" success
+run_on "$pr_head" "quick checks" failure
+check "grouped queue merge: another PR of the group named by SHA is not read" "$(gate_rc)" 1
+echo '[]' >"$FX/pulls-$sha.json"
+echo "[{\"merged_at\":\"2026-01-02T00:00:00Z\",\"head\":{\"sha\":\"$pr_head\"}}]" >"$FX/pulls-$pr_head.json"
+echo '{"check_runs":[]}' >"$FX/checks-$pr_head.json"
+run_on "$pr_head" dco success
+run_on "$pr_head" "e2e result" success
+run_on "$pr_head" "quick checks" success
+check "...and the same commit passes once its own PR head is green" "$(gate_rc)" 0
+
+new_case
+echo "{\"sha\":\"$sha\",\"tree\":{\"sha\":\"treeS\"},\"parents\":[{\"sha\":\"1111aaa\"}]}" >"$FX/commit-$sha.json"
+run_on "$sha" "quick checks" success
+run_on "$pr_head" "quick checks" success
+set_ruleset go dco "quick checks" "e2e result"
+check "one-parent commit (squash merge): the PR is read from commits/<SHA>/pulls" "$(gate_rc)" 0
 
 new_case
 run_on "$sha" dco success

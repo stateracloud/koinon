@@ -17,7 +17,8 @@
 # tree) or, for the pull-request-only contexts (pr_only below), the successful merge_group `ci` run on a
 # commit with the same tree (the queue build); and only when there is no queue run (an admin merge) the
 # head commit of the pull request that merged the tagged commit, for the pull-request-only contexts and
-# the dependency-age half of `quick checks`. A `go`/`web`/other ci job is never read from a PR head: a
+# the dependency-age half of `quick checks` (for a merge commit, the PR whose head is its second parent: a
+# merge queue group puts one merge commit per PR on main, #1373). A `go`/`web`/other ci job is never read from a PR head: a
 # draft's green is vacuous. The queue build's result is read from the queue head's merge_group runs by
 # run id (conclusion_in_run), not as the newest check run on the sha. Needs gh, git and awk, and a clone
 # with origin/main.
@@ -123,13 +124,42 @@ is_pr_only() { local p; for p in "${pr_only[@]}"; do [[ $p == "$1" ]] && return 
 
 pr_heads=
 pr_heads_read=0
+# merged_pr_heads: the head commit and merge time of each pull request that merged SHA, one "head<TAB>merged_at"
+# per line (#1373).
+#   - SHA is a merge commit (a queue or merge-button merge: first parent main, second parent the PR head): the
+#     merged pull requests whose head is exactly SHA's second parent. They are listed from the second parent
+#     (`commits/<parent 2>/pulls`) and from SHA. A merge queue group of N pull requests puts N merge commits on
+#     main, but GitHub gives every PR of the group the group's first merge commit as merge_commit_sha, so
+#     `commits/<SHA>/pulls` is empty for the 2nd..Nth commit and can name another PR of the group for the 1st.
+#     The PR head is the second parent in every case.
+#   - Any other commit (a squash or rebase merge, which has one parent): the merged pull requests of
+#     `commits/<SHA>/pulls`, as before.
+# Empty when no pull request merged SHA (a direct push): then the PR-only contexts have no evidence.
+merged_pr_heads() {
+	local parents p2 rows
+	parents=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SHA" --jq '.parents[]?.sha') ||
+		fail "cannot read the parents of $SHA"
+	mapfile -t parents <<<"$parents"
+	rows=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+		--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
+		fail "cannot list the pull requests of $SHA"
+	if ((${#parents[@]} != 2)); then
+		printf '%s\n' "$rows"
+		return 0
+	fi
+	p2=${parents[1]}
+	[[ $p2 =~ ^[0-9a-f]{7,64}$ ]] || fail "cannot read the parents of $SHA"
+	rows+=$'\n'$(gh api "repos/$GITHUB_REPOSITORY/commits/$p2/pulls" \
+		--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
+		fail "cannot list the pull requests of $p2 (the second parent of $SHA)"
+	awk -F'\t' -v h="$p2" '$1 == h && !seen[$0]++' <<<"$rows"
+}
 # from_pr_heads <name>: the conclusion of the check on the head of the pull request that merged SHA.
 from_pr_heads() {
 	local h merged got=
 	if ((pr_heads_read == 0)); then
-		pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-			--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
-			fail "cannot list the pull requests of $SHA"
+		# from_pr_heads runs in $(...), where errexit is not inherited: pass a failure on explicitly
+		pr_heads=$(merged_pr_heads) || exit 1
 		pr_heads_read=1
 	fi
 	while IFS=$'\t' read -r h merged; do
