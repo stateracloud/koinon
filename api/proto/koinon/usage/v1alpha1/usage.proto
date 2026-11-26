@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.usage.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1;usagev1alpha1";
+
+// UsageService is the usage and cost read model of the console home and the "Usage and cost" page
+// (issue #1268, ADR 0126 section 4). It reads the spend ledger and the runs table in the database,
+// never Prometheus. Amounts are USD decimal strings. A day is a UTC day.
+//
+// Every member of an org reads that org's usage and no other org's. The platform-wide calls are for
+// platform admins. The CSV export holds the same rows and the same totals as the matching Get call.
+service UsageService {
+  // GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and
+  // today's runs. Members and above.
+  rpc GetOrgUsage(GetOrgUsageRequest) returns (GetOrgUsageResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.
+  rpc ExportOrgUsage(ExportOrgUsageRequest) returns (ExportOrgUsageResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's
+  // runs. Platform admins only.
+  rpc GetPlatformUsage(GetPlatformUsageRequest) returns (GetPlatformUsageResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.
+  rpc ExportPlatformUsage(ExportPlatformUsageRequest) returns (ExportPlatformUsageResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// UsageRange is the period of a query: the UTC days from `from` up to, not including, `to`. Both
+// are rounded down to the start of their UTC day. With none set, the period is the month to date
+// (the first of the month up to the end of today). A period is at most 366 days.
+message UsageRange {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+}
+
+// UsageTotals are the sums of a set of ledger rows. The token buckets are disjoint: input_tokens
+// does not count the cache tokens, and reasoning_tokens are part of output_tokens.
+message UsageTotals {
+  int64 requests = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  int64 cache_read_tokens = 4;
+  int64 cache_write_tokens = 5;
+  int64 reasoning_tokens = 6;
+  // cost_usd is the recorded charge of the requests, estimated usage included.
+  string cost_usd = 7;
+  // estimated_usd is the part of cost_usd that came from estimated usage.
+  string estimated_usd = 8;
+  // cache_read_share is cache_read_tokens over all the input side
+  // (input_tokens + cache_read_tokens + cache_write_tokens), from 0 to 1; 0 when there is none.
+  double cache_read_share = 9;
+}
+
+// RunCounts are the runs created on the current UTC day.
+message RunCounts {
+  // day_start is the start of today (UTC).
+  google.protobuf.Timestamp day_start = 1;
+  // runs_today counts the runs created since day_start, in any state.
+  int64 runs_today = 2;
+  // failed_runs_today counts those of them that are in the state failed now.
+  int64 failed_runs_today = 3;
+}
+
+message GetOrgUsageRequest {
+  string org_id = 1;
+  UsageRange range = 2;
+  // agent_id, model and provider_id narrow the rows. Empty means all.
+  string agent_id = 3;
+  string model = 4;
+  string provider_id = 5;
+}
+
+// OrgUsageRow is the ledger of one org for one day, principal, agent, model and provider.
+message OrgUsageRow {
+  // day is the UTC day as YYYY-MM-DD.
+  string day = 1;
+  // principal is "agent" or "system" (a system check of the org, with no agent).
+  string principal = 2;
+  string agent_id = 3;
+  string agent_name = 4;
+  string model = 5;
+  // provider_id is empty when the ledger did not record the provider (older entries, or a provider
+  // that is deleted); provider_name is then empty too.
+  string provider_id = 6;
+  string provider_name = 7;
+  UsageTotals usage = 8;
+}
+
+message GetOrgUsageResponse {
+  string org_id = 1;
+  // from and to are the rounded period of the rows: from (inclusive) up to to (exclusive).
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+  repeated OrgUsageRow rows = 4;
+  // totals is the sum of rows.
+  UsageTotals totals = 5;
+  // runs counts today's runs of the org, whatever the range and the filters.
+  RunCounts runs = 6;
+}
+
+message ExportOrgUsageRequest {
+  string org_id = 1;
+  UsageRange range = 2;
+  string agent_id = 3;
+  string model = 4;
+  string provider_id = 5;
+}
+
+message GetPlatformUsageRequest {
+  UsageRange range = 1;
+}
+
+// PlatformUsageRow is the ledger of one org for one day and model.
+message PlatformUsageRow {
+  string day = 1;
+  string org_id = 2;
+  string org_slug = 3;
+  string org_name = 4;
+  string model = 5;
+  UsageTotals usage = 6;
+}
+
+message GetPlatformUsageResponse {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  repeated PlatformUsageRow rows = 3;
+  // totals is the sum of rows.
+  UsageTotals totals = 4;
+  // runs counts today's runs of every org.
+  RunCounts runs = 5;
+}
+
+message ExportPlatformUsageRequest {
+  UsageRange range = 1;
+}
+
+// ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final
+// row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+message ExportOrgUsageResponse {
+  string filename = 1;
+  string csv = 2;
+}
+
+// ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then
+// a final row with the totals (day "total"). The text is UTF-8 and ends in a newline. Soft-deleted
+// orgs stay in the rows, so the totals equal the ledger sums.
+message ExportPlatformUsageResponse {
+  string filename = 1;
+  string csv = 2;
+}

@@ -6,6 +6,7 @@ import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { ErrorInfoSchema } from '@/gen/google/rpc/error_details_pb'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
@@ -247,5 +248,25 @@ describe('TaskPage', () => {
       expect(alert).toHaveTextContent('An org admin or owner can resume it.')
       expect(screen.queryByRole('link', { name: 'Open the agent to resume it' })).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('TaskPage errors', () => {
+  // The page words an error with describeError: a reason that has copy shows the copy, not the server's text (#778).
+  it('shows the copy of a reason when the task does not load', async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.MEMBER }) })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, {
+        getTask: () => {
+          const err = new ConnectError('raw server text', Code.PermissionDenied)
+          err.details.push({ desc: ErrorInfoSchema, value: create(ErrorInfoSchema, { reason: 'ADMIN_REQUIRED', domain: 'koinon.dev' }) })
+          throw err
+        },
+      })
+    })
+    renderApp(transport, '/tasks/t-1')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only org admins and owners can do that.')
+    expect(screen.queryByText(/raw server text/)).not.toBeInTheDocument()
   })
 })
