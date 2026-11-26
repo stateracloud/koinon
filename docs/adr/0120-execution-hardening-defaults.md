@@ -792,7 +792,10 @@ root payload from two tiers and leaves the third as it was.
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
 - **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
-  Upload code of before #1387 unchanged. A safe design for Upload and the checkpoint restore under a non-root
+  Upload code of before #1387 unchanged. **Known regression:** on the gVisor tiers the front writes the archive
+  as root with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it. Upload fails with
+  `ErrInvalid`, and the checkpoint restore of the home fails the run, until #1478 lands. The maintainer decided
+  on 2026-11-26 to revert the staging design and to carry this gap. A safe design for Upload and the checkpoint restore under a non-root
   payload is open work in [#1478](https://github.com/stateracloud/koinon/issues/1478). A staging directory that
   the payload owns lets the payload swap a symlink while the root front writes, so this amendment does not
   contain one.

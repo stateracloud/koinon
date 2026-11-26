@@ -157,7 +157,9 @@ kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
 The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
 modes. Two results follow:
 
-- **Upload.** The driver is unchanged by #1387. How Upload and the checkpoint restore work with a non-root
+- **Upload.** The driver is unchanged by #1387. **Known regression:** on the gVisor tiers Upload and the
+  checkpoint restore of the home fail until #1478 lands: the root front writes the archive with mode 0600 and
+  `tar` runs as uid 10001. How Upload and the checkpoint restore work with a non-root
   payload is open work in #1478. A directory that the payload owns must not hold the archive that the root
   front writes (a symlink swap).
 - **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
