@@ -82,6 +82,10 @@ flowchart LR
   A -->|at most one Koinon operation, same transaction| K[Tasks, runs]
 ```
 
+The code is in the package `internal/channeladapter`, and the core is in `internal/channeladapter/core` (question
+1). The name matches the `channel_event` trigger, and it does not clash with the planned Chat object of
+[0055](0055-chat-as-its-own-object.md).
+
 The core package must not import network, database, DBOS, logging or platform SDK packages. A Go test of the import
 graph enforces this. The core gets the time as the input `now`. It uses no random values. So the same input gives the
 same output, and the core is unit-testable without the platform. The outbound path (#1397) adds its actions to the same
@@ -100,7 +104,8 @@ The types are platform-neutral. A platform field appears only where the platform
   - `message` (a message in a channel or a thread, or a direct message to the bot) and `mention` (a message that
     @mentions the bot). Fields: `actor` (the platform user ID and a bot flag), `at` (the platform timestamp),
     `message_ts` (the platform ID of the message), `direct` (a direct message to the bot), `root_by_koinon` (the
-    thread root is a message from Koinon's bot; decision 6 reserves it) and `body` (a `Body` value, decision 8).
+    thread root is a message from Koinon's bot; decision 6 reserves it) and `body` (a reference to the stored body,
+    which the driver loads as a `Body` value, decision 8).
   - `message_changed` and `message_deleted`: the core returns `Drop(edit_ignored)`. A task keeps what the person
     first wrote. A later ADR can change this with the two-way mirroring question.
   - `uninstalled` (connection scope): the core returns `MarkConnectionRemoved`. Later events of the connection see
@@ -108,7 +113,7 @@ The types are platform-neutral. A platform field appears only where the platform
 - **`State`**: a snapshot that the driver loads in the apply step. It has two parts:
   - **Read-only facts**: the connection's status and outward state; the org's channel event triggers in effect
     (`triggers.ForOrg`, [0066](0066-triggers-and-scheduling.md) TR1 read side) that name this connection; the actor's
-    account link (a Koinon user or none); for the bound task, its state, whether its agent is active and healthy, and
+    account link (a Koinon user or none); the claim of the event's channel (decision 3, step 3); for the bound task, its state, whether its agent is active and healthy, and
     whether it has a running turn. The facts are read without locks. The Koinon operation checks them again under its
     own locks (decision 4).
   - **Scope state**, one row per scope: the bound task (or none), whether the key was ever bound, and the recent
@@ -124,15 +129,18 @@ The types are platform-neutral. A platform field appears only where the platform
   `Step` returns at most one of `CreateTask`, `WakeTask` and `MarkConnectionRemoved` for one event (decision 4, lock
   order).
 
-The core drops events from Koinon's own bot user and from other bots, unless a trigger allows bots. This is loop
-prevention.
+The core drops every event from Koinon's own bot user and from other bots. No trigger can allow bots (decision 5,
+"Channel event triggers"). This is loop prevention.
 
 **Actors on the timeline.** A task event with the actor kind `user` must name a Koinon user (the check on
 `task_events`, migration 00003, line 200). So a message from a linked person is a `user` event with the linked user. A
 message from an unlinked person, which a channel event trigger can accept ([0066](0066-triggers-and-scheduling.md)
-decision 3), is a `system` event. Its payload holds `source` (`slack` or `teams`), the platform and the platform user
-ID, never a display name. The agent's prompt shows a `system` message only when its payload has `source`
-(`ListTaskMessagesAfter`, `internal/db/queries/tasks.sql`), so `source` is required. The first code issue confirms that the agent's prompt shows such a message as a message from a person (open question 6).
+decision 3), is an event with the new actor kind `external` (question 6). This ADR does not record such a message
+as a `system` event. The `external` kind changes the `task_actor_kind` enum and every reader of the timeline, so it has
+its own decision and its own issue. That decision says what the payload holds; this ADR requires `source` (`slack` or
+`teams`), the platform and the platform user ID, and never a display name. It also makes the agent's prompt show an
+`external` message as a message from a person. The code issue that applies messages from unlinked people depends on
+that issue. Until it lands, the core returns `Drop(unlinked_actor)` for a message from an unlinked person.
 
 **Origin.** `CreateTask` sets the run origin. A mention, a direct message, and a message from a linked person in a
 bound thread give `RunOriginInteractive`: a person waits in the thread. A message that only a channel rule matches
@@ -151,11 +159,12 @@ writes only the task event (and the reopen, if any) and returns an interrupt not
 sends after the commit. The receiver locks the run in its own transaction, in the documented order. If the turn has
 ended when the signal arrives, the signal does nothing, and the queued run sees the message.
 
-**People from outside the org.** Slack Connect channels and guest accounts bring people from other workspaces or with
-limited access. This ADR does not decide how they act on tasks. Until a later decision, the core returns
-`Drop(external_user)` for a `message` or `mention` whose actor's team is not the connection's team, and for an
-unlinked guest account. Only a linked person can reopen a completed task (decision 5). The team check of decision 3
-reads the team of the event envelope (the installing workspace), not the actor's team.
+**People from outside the org** (question 10). Slack Connect channels and guest accounts bring people from other
+workspaces or with limited access. The core returns `Drop(external_user)` for a `message` or `mention` whose actor's
+team is not the connection's team, and for an unlinked guest account. A later decision can add an admin switch that
+lets them act. Only a linked person can reopen a completed task (decision 5). The team check of decision 3 reads the
+team of the event envelope (the installing workspace), not the actor's team. The drop reason `external_user` names
+the actor's team. It is not the actor kind `external`.
 
 ### 3. Enqueue, then acknowledge
 
@@ -167,30 +176,73 @@ The edge does these steps, in this order:
 2. Verify the signature of an HTTP delivery with that connection's credential: the Slack signing secret with its
    timestamp window, or the Teams JWT. A delivery that fails gets HTTP 401. Koinon does not log its body. A Socket
    Mode delivery has no signature: the socket itself is opened with the connection's app-level token (decision 7).
-3. Check the team. A team in the payload that is not the connection's team gets HTTP 200 and `Drop(wrong_team)`, so
-   that the platform does not retry it.
+3. Check the team and the channel (question 2). More than one org can connect the same Slack workspace or Teams
+   tenant, so `(platform, team)` is not unique across connections. Each org has its own connection and its own bot.
+   - A team in the payload that is not the connection's team gets HTTP 200 and `Drop(wrong_team)`, so that the
+     platform does not retry it.
+   - **Each channel belongs to at most one org.** A table of channel claims has the unique key `(platform, team,
+     channel)` and the org that claims the channel. All connections of that org on that team can use the claim.
+   - A channel event trigger that names a channel claims it for its org when an admin saves the trigger. The save
+     fails if another org claims the channel, or if another org has an open thread binding in the channel.
+   - A claim lives while at least one trigger of the org names the channel. The delete or edit of the last such
+     trigger releases the claim in the same transaction. The claim read ignores a claim when the org has no connection
+     on that team that is not removed. `MarkConnectionRemoved` does not delete claims.
+   - A direct-message channel with a connection's bot belongs to that connection.
+   - A message in a channel that another org claims gets HTTP 200 and `Drop(channel_of_other_org)`.
+   - A channel without a claim belongs to no org. There, only a mention of a bot reaches an org, through the
+     connection of that bot.
 4. Parse the delivery into an `Event`.
 5. **Filter on facts.** The edge drops an event at once (HTTP 200, a `Drop` metric) only on facts that cannot change
    between the enqueue and the apply step: the event itself and the triggers in effect when the message was sent. It
-   drops a message from a bot when no trigger of the connection allows bots, and a **top-level** `message` that is not
-   `direct`, does not mention the bot, and is in a channel that no channel event trigger names. It never reads the
-   thread binding, because an earlier mention in the same thread can still wait in the queue and bind the thread later.
-   So it passes **every thread reply** to the core, also replies with `root_by_koinon` set, which the outbound path
-   (#1397) needs. The filter uses one indexed read of the triggers and no cache. It never selects an action; the core
-   does that. A wrong pass costs one apply step. The filter must not drop an event that the core can act on, so each
-   filter rule needs a core test that shows the core drops the same event.
-6. Enqueue one apply workflow on the org's partition of the chat apply queue (decision 4). The workflow ID is
+   drops every message from a bot (question 7), and a **top-level** `message` that is not `direct`, does not
+   mention the bot, and is in a channel that no widened trigger names (decision 5, "Channel event triggers"). It never
+   reads the thread binding, because an earlier mention in the same thread can still wait in the queue and bind the
+   thread later. So it passes **every thread reply** from a person to the core, also replies with `root_by_koinon`
+   set, which the outbound path (#1397) needs. The filter uses one indexed read of the triggers and the channel claims,
+   and no cache. It never selects an action; the core does that. A wrong pass costs one apply step. The filter must not
+   drop an event that the core can act on, so each filter rule needs a core test that shows the core drops the same
+   event.
+6. **Store the body** (question 4). The edge writes the body to the table of event bodies, keyed by
+   `(connection, cause_id)`, with `ON CONFLICT DO NOTHING`, so a platform retry reuses the row. The insert runs only
+   when the cause is not in the table of applied causes, so a retry after the apply step adds no new row. The workflow input
+   holds only this reference, never the body. Decision 8 gives the retention.
+7. Enqueue one apply workflow on the org's partition of the chat apply queue (decision 4). The workflow ID is
    `chat:<platform>:<connection>:<cause_id>`. So a platform retry maps to the same workflow.
-7. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
+8. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
 
-The edge does no other work before the acknowledgement: a connection lookup, the filter read and the enqueue.
-`durable.EnqueueForOrg` reads the org's queue limits and can register a profile queue once (a write) before the
-enqueue write.
+The edge does no other work before the acknowledgement: a connection lookup, the filter read, the body write and the
+enqueue. `durable.EnqueueForOrg` reads the org's queue limits and can register a profile queue once (a write) before
+the enqueue write. Slack wants a 2xx answer within 3 s (Upstream verification), so these writes must stay small. The
+first code issue for each platform measures the time to the acknowledgement.
 This is what "acknowledge first" means in #24 and in [0066](0066-triggers-and-scheduling.md) decision 11: the
 acknowledgement does not wait for any task work. The enqueue comes before the acknowledgement, because an event that is
 acknowledged and then lost in a crash never comes back. If the enqueue fails, the edge answers with HTTP 5xx (or does
 not acknowledge the envelope), and the platform delivers again. The chat edge needs the DBOS runtime, so `koinon-api`
 serves it only with `--durable`. A held install has no DBOS runtime; decision 9 tells what the edge does then.
+
+**Transports** (question 3).
+
+- **Slack.** The HTTP Events API is the default. Socket Mode is an opt-in for each connection, for an install behind a
+  firewall that has no public URL. Slack does not allow Socket Mode apps in the public Slack Marketplace, and it
+  recommends HTTP for production (Upstream verification).
+- **Socket Mode holders.** A fixed number K of `koinon-api` replicas holds each Socket Mode connection. K is 2 by
+  default; it is a chart value, at most 4. Each connection has K advisory-lock slot keys. A replica takes a slot with
+  `pg_try_advisory_lock` and opens one socket for it. It holds at most one slot of a connection, and it tries the free
+  slots again in a loop. This changes the lock pattern of `internal/triggers/poll/poll.go`, which takes one key with a
+  blocking `pg_advisory_lock`. One lock session of a replica holds its slots of all connections, so N connections do
+  not need N × K database sessions. With fewer replicas than K, some slots stay free and the metric shows it. Slack sends
+  each event to one open socket, chosen at random (Upstream verification). All holders enqueue on the same chat apply
+  queue, so it does not matter which holder gets an event. Two holders give active-active redundancy: when one holder
+  stops, the other socket stays open. With one holder, a failover leaves a gap with no socket (Muster measured 15 to
+  30 s). The workflow ID dedupes on `event_id`, so an event that comes on two sockets is applied once.
+- A holder closes its socket when its lock session stops answering pings, so a holder that lost its lock does not keep
+  a socket open.
+- A metric shows a connection that has fewer holders than configured.
+- The holder reads `num_connections` from Slack's `hello` message. Koinon's own sockets are at most 2 × K, because
+  during a socket refresh the client opens the new socket before it closes the old one. The holder logs a warning when
+  the number is more than 2 × K: then another program uses the same Slack app. With K at most 4, Koinon stays below
+  Slack's limit of 10 sockets for each app.
+- **Teams.** The Bot Framework connector (question 5): activities arrive by HTTP with a JWT.
 
 ### 4. The apply step: idempotency, errors and order
 
@@ -209,16 +261,18 @@ transaction:
 2. Look up `(connection, cause_id)` in the table of applied causes. If the cause is applied, return the stored result,
    and stop. The table is keyed by connection and cause, not by scope, so a connection event has a place for its cause
    too.
-3. Load the read-only facts and call `Step`.
+3. Load the read-only facts and the body row of the cause, and call `Step`.
 4. Run the Koinon operation, if there is one, under a savepoint (see "Expected outcomes").
-5. Write the new scope state, record the cause as applied with the result, and commit with `durable.Commit`, so the
+5. Write the new scope state, record the cause as applied with the result, delete the body row (decision 8), and
+   commit with `durable.Commit`, so the
    notifications that the operation returns (for example a pre-wake) go out after the commit. The apply step runs in
    `koinon-api`, which has the notifier.
 
 The stored result holds the action kinds, the task ID and the drop reason. It holds no message body. A crash after the
 commit and before DBOS records the step runs the step again. Step 2 then returns the stored result, and `Step` does
 not run again on the new state. The notifications of the first try are lost in this case. DB3 accepts this for
-pre-wakes. Applied causes are removed after the dedupe window.
+pre-wakes. Applied causes are removed after the dedupe window. The start value of the window is 24 h (question
+8).
 
 - **Dedupe of operations.** Each Koinon operation is keyed by its action key with the source `slack` or `teams`
   (new). `durable.Once` is unique per org, source and key, and one org can have more than one connection on one
@@ -246,25 +300,33 @@ pre-wakes. Applied causes are removed after the dedupe window.
   would lose it. The driver rolls back to the savepoint, loads the facts again and calls `Step` once more in the same
   transaction, while it still holds the scope row. The core now sees the closed binding and can return `CreateTask`.
   The driver does this at most once per apply step; a second expected outcome gives `Drop`.
-- **Bounded retries.** The apply step has a fixed retry limit. When the limit is reached, the workflow records the
+- **Bounded retries.** The apply step has a fixed retry limit, with the start value 5 (question 8). When the
+  limit is reached, the workflow records the
   cause as applied with `Drop(apply_failed)` in a short transaction, and a metric counts it. The write does nothing
   if the cause already has a row (`ON CONFLICT DO NOTHING`): the last attempt can have committed after DBOS lost its
-  result. The event is then lost
-  for the task. It holds nothing else back: the inbound path has no buffer and no cursor.
+  result. The same transaction deletes the body row. The event is then lost for the task. It holds nothing else back:
+  the inbound path has no buffer and no cursor.
 - **Lock order.** The scope row is a new lock. Only the apply step takes it, and it takes it first. Then it calls at
   most one existing Koinon operation, which takes its own locks in its own documented order: the wake takes the task
   row (as `deliverDirectMessage` does; the rules of `internal/runlock`); task creation inserts the task, which takes
   only `FOR KEY SHARE` on the agent row through its foreign key; `MarkConnectionRemoved` locks the connection row. No
   path that locks the agent or connection row waits for a scope row. The binding row refers to the task by a foreign key, which takes `FOR KEY SHARE` on the task row after the
-  task lock, in the same order. No existing path can wait for a scope row. So the apply step adds no new order
+  task lock, in the same order. No existing path can wait for a scope row. The apply step deletes the body row of its
+  cause after the scope row. Only the edge insert and the sweep also touch body rows, and neither holds another lock,
+  so there is no cycle. An edge insert for the same cause can wait for an apply transaction that has not committed;
+  this case is rare (a platform retry during the apply step) and the apply step is short. So the apply step adds no new order
   between two existing locks. This is why `Step` returns at most one Koinon operation for one event.
 - **A fair share for each thread.** Without a rule, the org's apply slots can all wait on one busy thread's scope
   lock, and new mentions in other threads wait behind it. So the apply step takes the scope row with `FOR UPDATE
   NOWAIT`. If another apply step holds it, the step ends at once without a change, and the workflow body starts a
   delayed workflow outside the queue that enqueues the event again with the next attempt number (workflow ID
   `chat:<platform>:<connection>:<cause_id>:busy:<n>`). So one thread holds at most one slot of the org at a time. The
-  cost: each try of a busy thread uses a start of the org's rate, and a busy thread waits a little longer. The delay
-  grows with each try, up to a limit (open question 8). The table of applied causes makes a repeat harmless.
+  cost: each try of a busy thread uses a start of the org's rate, and a busy thread waits a little longer. The start
+  values (question 8): the first try is the first delivery, and the delays between the 5 tries are 2 s, 4 s,
+  8 s and 8 s. Every try uses `NOWAIT`, so a waiting try never holds a slot. After the fifth try, the workflow records
+  the cause as applied with `Drop(thread_busy)`, deletes the body row and counts it in a metric. The apply step does no
+  platform I/O, so a scope lock that is held for about 22 s is a fault, not load. The table of applied causes makes a
+  repeat harmless.
 - **Order of messages.** Two apply workflows for one thread can take the scope lock in another order than the platform
   sent the messages. The task timeline then shows them in apply order. Each message event keeps the platform time
   `at` in its payload, so the agent's prompt can show it. Exact platform order needs the burst buffer, which is
@@ -286,14 +348,26 @@ pre-wakes. Applied causes are removed after the dedupe window.
 | --- | --- | --- |
 | `team` | `team_id` of the workspace (the `enterprise_id` too, for an org-wide Enterprise Grid install) | the Microsoft Entra tenant ID |
 | `channel` | the channel ID (for a direct message, the ID of the direct-message channel) | the channel conversation ID, without the `;messageid=` part (for a personal chat, the conversation ID) |
-| `thread` | `thread_ts`, or the message `ts` for a top-level message | the ID of the root message of the reply chain (for a personal chat: open question 9) |
+| `thread` | `thread_ts`, or the message `ts` for a top-level message | the ID of the root message of the reply chain (for a personal chat: the conversation ID, question 9) |
 
 The key holds platform IDs only, never names or text. Logs can hold it. Metric labels must not hold it
 ([0023](0023-observability-and-audit.md) label rule).
 
-- **A thread without a binding.** The core follows the channel event triggers of the connection: a `mention`, a
-  `direct` message or a `message` that a trigger's rules match gives `CreateTask` for that trigger. If more than one
-  trigger matches, the core takes the first in a fixed order (open question 7). No match gives `Drop(no_trigger)`.
+- **Channel event triggers** (question 7). A `channel_event` trigger names a connection and has one of two
+  scopes: the whole workspace or tenant of the connection, or a list of channels.
+  - By default, a trigger fires only for a `mention` of the bot or a `direct` message to the bot.
+  - An admin can widen a trigger to all messages in the channels that it names. A trigger for the whole workspace
+    cannot be widened.
+  - Messages from bots never fire a trigger (decision 2).
+  - When more than one trigger matches, the most specific trigger fires: a trigger that names the channel wins over a
+    trigger for the whole workspace. Among triggers of the same scope, the core takes the oldest (creation time, then
+    ID), so the result does not depend on the read order.
+  - One message starts at most one task: `Step` returns at most one `CreateTask`, and the `message_ts` values in the
+    scope state stop a second copy (decision 4, "One message, two events").
+  - TR1 of [0066](0066-triggers-and-scheduling.md) refuses `channel` until chat connectors exist. The first code
+    issue for the apply step adds this trigger shape to TR1.
+- **A thread without a binding.** The core takes the trigger that fires, as above, and returns `CreateTask` for it.
+  No match gives `Drop(no_trigger)`.
 - **The binding.** `CreateTask` binds the key to the task in the transaction that creates the task
   (`TriggeredTask.OnCreate`). A unique constraint allows one open binding per key. Two mentions in a new thread are
   applied one after the other (decision 4), so the second one sees the binding and wakes the task.
@@ -307,6 +381,8 @@ The key holds platform IDs only, never names or text. Logs can hold it. Metric l
   `CreateTask`, the apply step closes the old binding before `OnCreate` writes the new one, in the same transaction,
   so the unique constraint holds. The core cannot ask the person to start a new thread, as the inbox does, because the
   person is already in the thread.
+- **Teams personal chat** (question 9). A personal chat has no reply chains, so the conversation ID is the thread.
+  One person has one bound task with the bot at a time. A new task starts after the old one ends, by the rules above.
 
 ### 6. Outbound path: out of scope, see #1397
 
@@ -350,8 +426,12 @@ The inbound part reserves these for #1397, so that #1397 adds to them and change
   ([0023](0023-observability-and-audit.md)).
 - A leak test sends a canary body through the edge, the core and the driver with a capturing logger, a metrics
   registry and a trace exporter. It fails if the canary appears in any of them.
-- Bodies are stored in two places: the task message, under the org's run-content retention
-  ([0023](0023-observability-and-audit.md)); and the apply workflow input of the event (open question 4).
+- **One retention rule for bodies** (question 4). Bodies are stored only in Koinon tables, never in DBOS workflow
+  inputs or outputs: the task message, under the org's run-content retention
+  ([0023](0023-observability-and-audit.md)); and the row in the table of event bodies, from the edge until the apply
+  step. The apply step deletes the body row in its transaction, also for a `Drop`. A sweep removes every body row that
+  is older than the dedupe window (for example, when the enqueue failed and the platform gave up). A body row is
+  never kept longer than the org's run-content retention.
 
 ### 9. The outward switch
 
@@ -359,9 +439,10 @@ A Slack or Teams connection is a row of the `connections` table ([0007](0007-con
 
 - **A held install** ([0107](0107-restore-hold-mode.md) decision 2). A held `koinon-api` does no automatic work,
   starts no outward call and runs no DBOS runtime (`runDurable` in `internal/cmd/koinonapi/main.go`). So:
-  - It opens no Socket Mode connection. A Socket Mode connection is an outward call. Also, Slack spreads the events of
-    an app over all its open sockets, so a restored copy with an open socket would take events from the live install.
-  - The HTTP edge does steps 1 to 3 of decision 3 and then answers HTTP 503, with no enqueue and no task work. This is
+  - It opens no Socket Mode connection. A Socket Mode connection is an outward call. Also, Slack sends each event of
+    an app to one of its open sockets, so a restored copy with an open socket would take events from the live install.
+  - The HTTP edge does steps 1 to 3 of decision 3 and then answers HTTP 503, with no body write, no enqueue and no
+    task work. This is
     the "enqueue fails" case of decision 3. The platform delivers again for a short time and then gives up, so events
     that arrive while the install is held are lost. This is the meaning of a hold: the install takes no new work.
 - **A disabled connection** ([0110](0110-held-copy-isolation.md) decision 5: a disabled target is not called). The
@@ -375,17 +456,22 @@ The outward kind for sends is #1397 work.
 ### 10. Tests
 
 - The core: table tests of event sequences and their expected actions; property tests for determinism; `app_mention`
-  and `message` for one message apply once, in either order, with the interactive origin.
+  and `message` for one message apply once, in either order, with the interactive origin; a channel trigger wins over
+  a workspace trigger, the oldest of two equal triggers wins, and a bot message fires no trigger.
 - The apply step: a replay after a crash between the commit and the checkpoint gives the same result and no second
   operation; two concurrent mentions in a new thread give one task; an inactive or unhealthy agent and a held install
   end in a `Drop` and leave no dedupe claim; an apply step that always fails ends in `Drop(apply_failed)`; a wake that
   races with a turn end gives no deadlock; a message to a canceled task's thread creates a new task and moves the
   binding; a canceled task found only under the task lock still gives a new task; a busy thread holds at most one
-  slot; a wake with an interrupt and a turn end at the same time give no deadlock.
+  slot; a thread that stays busy for 5 tries ends in `Drop(thread_busy)`; a platform retry after the apply step adds no
+  body row; a wake with an interrupt and a turn end at the
+  same time give no deadlock; every path (an operation, a `Drop`, `Drop(apply_failed)`) deletes the body row.
 - The edge: recorded deliveries, including bad signatures, an unknown path, a wrong team and retries; a reply that
   arrives before the mention that binds its thread is passed to the core; a held install answers 503 and opens no
-  socket; a disabled connection opens no socket; each filter rule
-  has a core test that shows the core drops the same event.
+  socket; a disabled connection opens no socket; a message in a channel that another org claims is dropped; a
+  workflow input holds no body; each filter rule has a core test that shows the core drops the same event.
+- Socket Mode: with K holders, each event is applied once; a holder that loses its lock closes its socket; the metric
+  shows a missing holder; a `hello` with more than 2 × K connections logs the warning.
 - No test calls the real platforms, as no test calls a paid model.
 
 ## Alternatives considered
@@ -414,6 +500,16 @@ The outward kind for sends is #1397 work.
   credential access. Rejected for now. The pure core keeps a later move cheap.
 - **A hosted chat bridge or a third-party relay** _(reconstructed)_. Rejected: the chat credentials and the bodies
   would leave the install.
+- **Every replica opens a Socket Mode socket**. No lock is needed. But with the socket refresh,
+  about 4 replicas reach Slack's limit of 10 sockets for each app, and Curie saw split events with this design.
+  Rejected.
+- **One Socket Mode holder**. One lock slot is simpler. But a failover leaves a gap with no socket
+  (Muster measured 15 to 30 s). Rejected: K holders, 2 by default.
+- **Bodies in DBOS workflow inputs** (option A of question 4). It saves one write before the
+  acknowledgement. But the bodies then follow the retention of the DBOS records, not the org's run-content retention.
+  Rejected: one retention rule for all bodies.
+- **A trigger option that allows bot messages**. It lets two bots talk. But it opens loops between
+  bots. Rejected for now; a later decision can add it with loop limits.
 - **Inbound and outbound in one ADR** _(reconstructed)_. One decision is easier to read. But the outbound path has
   more open design (the outbox, the buffer, sends), and it held back the inbound decision. Rejected: #1397 decides it
   on the rules that section 6 reserves.
@@ -429,45 +525,45 @@ The outward kind for sends is #1397 work.
   _(inferred)_
 - Negative: until #1397, a person in chat sees no answer from the agent in the thread. The agent's work shows in the
   inbox. _(inferred)_
-- Negative: the DBOS system tables hold message bodies in workflow inputs until DBOS removes the workflow records.
-  _(inferred)_
+- Negative: the edge does one more write (the body row) before the acknowledgement. _(inferred)_
+- Negative: Socket Mode needs K open sockets for each connection, and the edge needs advisory-lock slots. _(inferred)_
 - Follow-ups: the code goes in issues filed after the review of this ADR. Proposed split: (1) the core types and
-  `Step`, with the import-graph test; (2) the apply step, the chat apply queue, the scope, binding and applied-cause
-  tables, the caller's transaction for task creation and the wake, `user` events on creation and the new `interrupt`
-  input; (3) the Slack edge (Events API and Socket Mode); (4) the Teams edge; (5) account linking
-  ([0065](0065-work-model-tasks-inbox.md) decision 9); (6) the body leak test.
+  `Step`, with the import-graph test; (2) the apply step, the chat apply queue, the scope, binding, applied-cause,
+  event-body and channel-claim tables, the `channel_event` trigger shape in TR1, the caller's transaction for task
+  creation and the wake, `user` events on creation and the new `interrupt` input; (3) the Slack edge (Events API, and
+  Socket Mode with K holders); (4) the Teams edge; (5) account linking ([0065](0065-work-model-tasks-inbox.md)
+  decision 9); (6) the body leak test. The actor kind `external` has its own decision and issue (question 6);
+  the code for messages from unlinked people waits for it.
 - Follow-ups: when this ADR is accepted, [0066](0066-triggers-and-scheduling.md) gets an "Amended by" line for the
   exact channel-event key (decision 9), the `teams` dedupe source (DB3 list; also the comment in
   `internal/durable/dedupe.go`) and the `koinon.chat-apply` queue next to `koinon.org-work` (DB2).
 
-## Open questions
+## Questions (all decided)
 
-Each question gets a tracking issue with the code issues, after the review of this ADR.
+All ten questions are answered. The numbers stay, because the decisions above refer to them.
 
-1. **Names.** The glossary keeps "Chat" for a planned object ([0055](0055-chat-as-its-own-object.md)). Proposed
-   package: `internal/chatadapter`, with the core in `internal/chatadapter/core`. The maintainer decides the name.
-2. **One workspace, more than one org.** Can two Koinon orgs connect the same Slack workspace or Teams tenant? If not,
-   `(platform, team)` is unique across connections. If yes, the team check of decision 3 needs a channel rule too.
-3. **Socket Mode with more than one API replica.** Each replica can open its own connection, or one replica holds a
-   lease. The DBOS workflow ID makes duplicates harmless, but each connection costs a platform session.
-4. **Bodies in DBOS inputs.** Option A: keep the bodies in the workflow inputs and remove chat workflow records after
-   the dedupe window. Option B: write the body to a Koinon table first and put only a reference in the input. Option B
-   keeps all bodies under one retention rule. It costs one more write before the acknowledgement.
-5. **Teams API.** The Bot Framework connector or Microsoft Graph for channel messages. This ADR assumes the Bot
-   Framework (activities with a JWT).
-6. **Messages from unlinked people.** This ADR records them as `system` task events with the platform user ID in the
-   payload (decision 2), because the `user` actor needs a Koinon user. The other option is a new actor kind, for
-   example `external`. It changes the `task_actor_kind` enum and every reader of the timeline, so it needs its own
-   decision.
-7. **The `channel_event` trigger filter.** Its shape (connection, channels, rules, @mention only, direct messages, bots
-   allowed) and the order when more than one trigger matches are not decided. TR1 refuses `channel` until chat
-   connectors exist.
-8. **Limits not decided:** the apply retry limit, the dedupe window for applied causes, and the delays and limit of
-   the busy-thread retry.
-9. **Teams personal chat.** A personal chat has no reply chains. Proposed: the conversation ID is the thread, so one
-   person has one bound task with the bot at a time, and a new task starts after the old one ends.
-10. **People from outside the org.** Slack Connect users and guest accounts get `Drop(external_user)` for now
-    (decision 2). A later decision can let them act, for example as unlinked people of the connection's org.
+1. **Names.** Decided: the package is `internal/channeladapter`, with the core in `internal/channeladapter/core`
+   (decision 1).
+2. **One workspace, more than one org.** Decided: more than one org can connect the same Slack workspace or Teams
+   tenant. Each channel belongs to at most one org (decision 3, step 3).
+3. **Socket Mode with more than one API replica.** Decided: the HTTP Events API is the default, and Socket Mode is an
+   opt-in for each connection. K replicas (2 by default, at most 4) hold each Socket Mode connection through advisory
+   locks (decision 3, "Transports").
+4. **Bodies in DBOS inputs.** Decided: option B. The edge writes the body to a Koinon table, and the workflow input
+   holds only a reference. All bodies follow one retention rule (decisions 3 and 8).
+5. **Teams API.** Decided: the Bot Framework connector (decision 3, "Transports").
+6. **Messages from unlinked people.** Decided: a new actor kind `external`, with its own decision and its own issue.
+   This ADR does not record such people as `system` (decision 2, "Actors on the timeline").
+7. **The `channel_event` trigger filter.** Decided: by default only a mention or a direct message fires a trigger; bot
+   messages never do; an admin can widen a trigger to all messages in the channels that it names; the most specific
+   trigger wins; one message starts at most one task (decision 5, "Channel event triggers").
+8. **Limits.** Decided as start values: the apply retry limit is 5, the dedupe window is 24 h, and the busy-thread
+   retry waits 2 s, 4 s, 8 s and 8 s between 5 tries, then records `Drop(thread_busy)` (decision 4). The first code issue for each platform
+   measures them and records the result here. That issue can change a value when it gives a better reason.
+9. **Teams personal chat.** Decided as proposed: the conversation ID is the thread, so one person has one bound task
+   with the bot at a time (decision 5).
+10. **People from outside the org.** Decided as proposed: `Drop(external_user)` for now. A later decision can add an
+    admin switch (decision 2).
 
 ## Upstream verification
 
@@ -477,9 +573,22 @@ Each question gets a tracking issue with the code issues, after the review of th
   out". Its `SlackEvent` has `channel` and `thread_ts`, and its tests drop bot and unauthorized messages. This ADR
   takes the shape and adds the team to the key, for multi-tenancy. It copies no code.
 - Daytona: this ADR uses no idea from it. Daytona's servers are AGPL-3.0; nothing is copied from them.
-- Not checked: the Slack documentation (the acknowledgement deadline, retries, `app_mention` with `message`) and the
-  Microsoft Teams documentation (the Bot Framework JWT, activity IDs). Their hosts were not reachable from the session
-  that wrote this ADR. The first code issue for each platform checks them and records the result here.
+- 2026-11-26, Slack (checked by the main session, from the Slack documentation and bolt-js issue 2112):
+  - Slack allows at most 10 Socket Mode sockets for each app. It sends each event to one open socket, chosen at
+    random. Slack's documentation names active-active redundancy as a use of more than one socket.
+  - Socket Mode apps are not allowed in the public Slack Marketplace. Slack recommends HTTP for production.
+  - HTTP: Slack wants a 2xx answer within 3 s. It retries 3 times (at once, after 1 min, after 5 min), with the
+    headers `x-slack-retry-num` and `x-slack-retry-reason`.
+  - During a socket refresh, the client opens the new socket before it closes the old one. So "every replica
+    connects" reaches the limit of 10 at about 4 replicas.
+- 2026-11-26, prior art (checked by the main session): OpenClaw uses HTTP for more than one replica, and its Socket
+  Mode needs one Slack app for each gateway. humagen PR 178 and Muster PRs 106 and 327 hold one Socket Mode socket
+  through a Postgres advisory lock; Muster measured a failover gap of 15 to 30 s. Curie tried "every replica
+  connects", saw split events, and now refuses more than 1 replica. No project runs 2 holders.
+- Not checked: what Slack does with an 11th socket; the acknowledgement deadline in Socket Mode; the retries of button
+  taps and slash commands; `app_mention` with `message`; and, for Microsoft Teams, the Bot Framework JWT, the activity
+  IDs and whether the endpoint must be public HTTPS. The first code issue for each platform checks them and records the
+  result here.
 
 ## Links
 
