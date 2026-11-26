@@ -83,7 +83,10 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    request list of a later merge commit in the group is empty. The merge commit of that pull request must
    be the tagged commit, or the first merge commit of the same group: the first-parent walk from the tagged
    commit reaches it in `MERGE_GROUP_LIMIT` steps or fewer (default 10), and each commit between them merges
-   a pull request of that group. Thus a later merge of an old pull request head is not evidence. A commit
+   a pull request of that group. Each of these merge commits must also bring its second parent onto main for
+   the first time (`git merge-base --is-ancestor` in the clone). Thus a later merge of an old pull request
+   head is not evidence. A group with more merge commits than the limit fails the gate; set
+   `MERGE_GROUP_LIMIT` (at most 100) for that release. A commit
    with one parent (a squash or rebase merge) uses the pull request of the commit whose merge commit is the
    tagged commit. The three contexts are listed rather than inferred from "no run on the
    commit", so a new push-triggered required check that is missing or red on the commit cannot be excused.

@@ -24,6 +24,8 @@ mkdir -p "$tmp/bin"
 cat >"$tmp/bin/git" <<'EOF'
 #!/usr/bin/env bash
 [[ $1 == merge-base && -n ${GIT_NOT_ANCESTOR:-} ]] && exit 1
+# merge-base --is-ancestor <a> <b> other than against origin/main: true only for an "<a> <b>" line in $FX/ancestors
+[[ $1 == merge-base && $2 == --is-ancestor && $4 != origin/main ]] && { grep -qx "$3 $4" "$FX/ancestors" 2>/dev/null && exit 0; exit 1; }
 [[ $1 == diff ]] && { printf '%s\n' "${GIT_DIFF:-}"; exit 0; }
 [[ $1 == show && $2 == *:hack/ci-required.txt ]] && { cat "$FX/ci-required-${2%%:*}.txt" 2>/dev/null || cat "$FX/ci-required.txt" 2>/dev/null || exit 128; exit 0; }
 [[ $1 == tag ]] && { printf '%s\n' ${GIT_TAGS:-}; exit 0; }
@@ -317,16 +319,22 @@ check "merge commit: a PR whose head is not the second parent is not evidence" "
 
 grouped_case
 # the PR of the second parent was squash-merged (merge_commit_sha 5555fff, one parent) and SHA is a later
-# admin push of `git merge --no-ff <that head>`: SHA's first-parent walk never meets a merge commit 5555fff
+# admin push of `git merge --no-ff <that head>`. Every commit between SHA and 5555fff looks like the same group;
+# only the parent count of 5555fff (a squash commit, not a merge) refuses it.
 commit_json "$sha" 1111aaa "$pr_head"
-commit_json 1111aaa 0000aaa eeee555
-commit_json 0000aaa 5555fff dddd666
+commit_json 1111aaa 5555fff eeee555
 commit_json 5555fff 4444eee
-echo "[$(pr_json eeee555 1111aaa)]" >"$FX/pulls-eeee555.json"
-echo "[$(pr_json dddd666 0000aaa)]" >"$FX/pulls-dddd666.json"
+echo "[$(pr_json eeee555 5555fff)]" >"$FX/pulls-eeee555.json"
 echo "[$(pr_json "$pr_head" 5555fff)]" >"$FX/pulls-$pr_head.json"
 run_on "$pr_head" "quick checks" success
-check "merge commit of an earlier squash-merged PR's head is not evidence (not its queue group)" "$(gate_rc)" 1
+check "merge commit of an earlier squash-merged PR's head is not evidence (its merge commit has one parent)" "$(gate_rc)" 1
+
+grouped_case
+# PR $pr_head merged alone as 1111aaa (its merge_commit_sha); SHA is a later admin push of
+# `git merge --no-ff $pr_head` on top of it: the head was already on main, so no PR merged SHA
+echo "$pr_head 1111aaa" >"$FX/ancestors"
+run_on "$pr_head" "quick checks" success
+check "re-merge of a PR head that is already on main is not evidence" "$(gate_rc)" 1
 
 grouped_case
 # a three-PR group: SHA (3rd) -> 2222bbb (2nd, PR head ffff777) -> 1111aaa (1st); every PR has merge_commit_sha 1111aaa
@@ -339,6 +347,9 @@ echo "[$(pr_json ffff777 2222bbb)]" >"$FX/pulls-ffff777.json"
 check "...but not when a commit between SHA and the group's first commit belongs to another merge" "$(gate_rc)" 1
 echo "[$(pr_json ffff777 1111aaa)]" >"$FX/pulls-ffff777.json"
 check "...nor when the walk is longer than MERGE_GROUP_LIMIT" "$(MERGE_GROUP_LIMIT=1 gate_rc)" 1
+check "...and it passes when the walk is exactly MERGE_GROUP_LIMIT" "$(MERGE_GROUP_LIMIT=2 gate_rc)" 0
+echo "ffff777 1111aaa" >"$FX/ancestors"
+check "...nor when a commit between re-merges a head that was already on main" "$(gate_rc)" 1
 
 new_case
 commit_json "$sha" 1111aaa

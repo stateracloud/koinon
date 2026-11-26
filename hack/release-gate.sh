@@ -136,11 +136,25 @@ merged_prs() {
 	gh api "repos/$GITHUB_REPOSITORY/commits/$1/pulls" \
 		--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at, (.merge_commit_sha // "")] | @tsv'
 }
+# brings_new <first parent> <second parent>: true when the merge brings the second parent onto main for the first
+# time (it is not yet an ancestor of the first parent), as every queue or merge-button merge does. A re-merge of a
+# head that is already on main (an admin push of `git merge --no-ff <old PR head>`) is false: no PR merged it.
+# Read from the clone (origin/main is fetched with history); an error fails the gate.
+brings_new() {
+	local rc=0
+	git merge-base --is-ancestor "$2" "$1" || rc=$?
+	case $rc in
+	0) return 1 ;;
+	1) return 0 ;;
+	*) fail "cannot tell whether $2 is an ancestor of $1" ;;
+	esac
+}
 # in_merge_group <mcs>: true when SHA is the merge commit <mcs>, or a later merge commit of the same merge queue
 # group (#1373). GitHub gives every PR of a group the group's first merge commit as merge_commit_sha. So SHA's
 # first-parent walk must reach <mcs> within MERGE_GROUP_LIMIT steps, every commit on the way (<mcs> included)
 # must have two parents, and the second parent of each commit between SHA and <mcs> must be the head of a
-# merged PR whose merge_commit_sha is also <mcs>. Any other shape (a squash commit, a direct push, another
+# merged PR whose merge_commit_sha is also <mcs>, and that commit must bring its second parent onto main for the
+# first time (brings_new). Any other shape (a squash commit, a direct push, another
 # group) is false.
 in_merge_group() {
 	local mcs=$1 cur=$SHA i ps rows
@@ -151,6 +165,7 @@ in_merge_group() {
 		((${#ps[@]} == 2)) || return 1
 		if [[ $cur != "$SHA" ]]; then
 			[[ $cur == "$mcs" ]] && return 0
+			brings_new "${ps[0]}" "${ps[1]}" || return 1
 			rows=$(merged_prs "${ps[1]}") || fail "cannot list the pull requests of ${ps[1]}"
 			awk -F'\t' -v h="${ps[1]}" -v m="$mcs" '$1 == h && $3 == m { f = 1 } END { exit !f }' <<<"$rows" || return 1
 		fi
@@ -167,7 +182,8 @@ pr_heads_read=0
 #     merged PRs whose head is SHA's second parent, listed from that commit (`commits/<parent 2>/pulls`), and
 #     whose merge_commit_sha is SHA or the first merge commit of SHA's queue group (in_merge_group). A queue
 #     group of N PRs puts N merge commits on main, but every PR of the group gets the first one as its
-#     merge_commit_sha, so `commits/<SHA>/pulls` is empty for the 2nd..Nth commit (#1373).
+#     merge_commit_sha, so `commits/<SHA>/pulls` is empty for the 2nd..Nth commit (#1373). A merge whose second
+#     parent was already on main (brings_new) has no PR.
 #   - Any other commit (a squash or rebase merge, which has one parent): the merged PRs of
 #     `commits/<SHA>/pulls` whose merge_commit_sha is SHA.
 load_pr_heads() {
@@ -179,6 +195,7 @@ load_pr_heads() {
 	if ((${#parents[@]} == 2)); then
 		p2=${parents[1]}
 		[[ $p2 =~ ^[0-9a-f]{7,64}$ ]] || fail "cannot read the parents of $SHA"
+		brings_new "${parents[0]}" "$p2" || return 0
 		rows=$(merged_prs "$p2") || fail "cannot list the pull requests of $p2 (the second parent of $SHA)"
 		while IFS=$'\t' read -r h merged mcs; do
 			[[ $h == "$p2" && -n $mcs ]] || continue
