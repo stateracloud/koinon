@@ -45,6 +45,8 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
     enabled: restEnabled,
     // The first page polls; the later pages load again only on demand.
     refetchOnWindowFocus: false,
+    // After a cursor move (below), turning the query on again refetches it only because it is stale at once.
+    staleTime: 0,
   })
   const restPages = restToken === '' ? undefined : rest.data?.pages
   const loaded = restPages?.length ?? 0
@@ -64,12 +66,20 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
     )
   }, [moved, isFetching, firstFetching, restToken, orgId, transport, queryClient])
 
-  // The later pages do not poll, so each poll of the first page also retries a failed later page: the next page when
-  // only that failed, else the later pages.
+  // The later pages do not poll, so each poll of the first page also retries a failed later page with one request: the
+  // next page when only that failed, else the first later page alone (the pages after it then load one by one again,
+  // so a page that keeps failing costs one request per poll).
   const firstUpdatedAt = first.dataUpdatedAt
   useEffect(() => {
     if (!restEnabled || !isError || isFetching) return
-    void (isFetchNextPageError ? fetchNextPage({ cancelRefetch: false }) : refetch())
+    if (isFetchNextPageError) {
+      void fetchNextPage({ cancelRefetch: false })
+      return
+    }
+    queryClient.setQueryData<InfiniteData<ListAgentSummariesResponse, string>>(restKey(transport, orgId), (old) =>
+      old ? { pages: old.pages.slice(0, 1), pageParams: old.pageParams.slice(0, 1) } : old,
+    )
+    void refetch()
     // Only a new first page starts a retry, not a change of the error state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstUpdatedAt])
@@ -83,7 +93,17 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
   }, [restEnabled, moved, loaded, target, hasNextPage, isFetching, isError, fetchNextPage])
 
   const firstAgents = first.data?.agents
-  const agents = useMemo(() => (firstAgents ? dedupe([firstAgents, ...(restPages ?? []).map((p) => p.agents)]) : undefined), [firstAgents, restPages])
+  // anchor is the first page that the loaded later pages follow. After a cursor move its last agents are on neither the
+  // new first page nor the old later pages, so they show from the anchor until the later pages load again.
+  const [anchor, setAnchor] = useState<{ token: string; agents: AgentSummary[] }>()
+  if (restPages && !moved && !isFetching && firstAgents && (anchor?.token !== restToken || anchor.agents !== firstAgents)) {
+    setAnchor({ token: restToken, agents: firstAgents })
+  }
+  const gap = restPages && anchor && anchor.token !== restToken ? anchor.agents : noAgents
+  const agents = useMemo(
+    () => (firstAgents ? dedupe([firstAgents, gap, ...(restPages ?? []).map((p) => p.agents)]) : undefined),
+    [firstAgents, gap, restPages],
+  )
   const restError = restEnabled && isError
   return {
     agents,
@@ -95,6 +115,8 @@ export function useAgentSummaries(orgId: string, options: { all?: boolean } = {}
     loadMore: () => setWant((w) => Math.max(w, loaded) + 1),
   }
 }
+
+const noAgents: AgentSummary[] = []
 
 function restInput(orgId: string, pageToken: string) {
   return { orgId, pageSize: agentSummaryPageSize, pageToken }

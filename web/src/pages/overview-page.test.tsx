@@ -204,12 +204,14 @@ describe('the poll of the agent cards', () => {
     // A server with cursor tokens like ListAgentSummaries: the token is the position after the last agent of a page.
     const all = Array.from({ length: 2 * agentSummaryPageSize + 50 }, (_, i) => summary(`a-${i}`, `Bot ${i}`))
     const asked: string[] = []
+    let hold: Promise<void> | undefined
     const cursorTransport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
       service(AgentService, {
         listAgents: () => ({ agents: [] }),
-        listAgentSummaries: (req) => {
+        listAgentSummaries: async (req) => {
           asked.push(req.pageToken)
+          if (req.pageToken === 'a-98') await hold
           const start = req.pageToken === '' ? 0 : all.findIndex((a) => a.agentId === req.pageToken) + 1
           const page = all.slice(start, start + req.pageSize)
           return { agents: page, nextPageToken: start + req.pageSize < all.length ? page[page.length - 1].agentId : '' }
@@ -228,11 +230,17 @@ describe('the poll of the agent cards', () => {
 
     // An agent early in the order moves the end of the first page: Bot 99 is now on the second page.
     asked.length = 0
+    let release = () => {}
+    hold = new Promise((r) => (release = r))
     all.unshift(summary('new', 'New bot'))
     await vi.advanceTimersByTimeAsync(inboxPollMs)
     await card('New bot')
-    // The old later pages stay on screen while they load again: no card goes away.
-    expect(screen.getAllByRole('article').length).toBeGreaterThanOrEqual(all.length - 1)
+    // The old later pages stay on screen while they load again: no card goes away. Bot 99 was the end of the old first
+    // page and is now on the second page.
+    await waitFor(() => expect(asked).toEqual(['', 'a-98']))
+    expect(screen.getByRole('article', { name: 'Bot 99' })).toBeInTheDocument()
+    expect(screen.getAllByRole('article')).toHaveLength(all.length)
+    release()
     await waitFor(() => expect(asked).toEqual(['', 'a-98', 'a-198']))
     await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(all.length))
     expect(screen.queryByRole('button', { name: 'Show more agents' })).not.toBeInTheDocument()
