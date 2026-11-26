@@ -61,7 +61,7 @@ func statusTo(e store.TaskEvent) (store.TaskState, bool) {
 }
 
 // personMessage reports whether an event is a message of a person: a Koinon user, or a person
-// without a Koinon account (actor kind external, ADR 0129). Both open and answer turns, so the turns
+// without a Koinon account (actor kind external, ADR 0130). Both open and answer turns, so the turns
 // agree with the history that historyMessage shows.
 func personMessage(e store.TaskEvent) bool {
 	return e.Kind == kindMessage && (e.ActorKind == store.TaskActorKindUser || e.ActorKind == store.TaskActorKindExternal)
@@ -69,7 +69,7 @@ func personMessage(e store.TaskEvent) bool {
 
 // historyMessage maps a timeline event to an A2A message, or nil when the event is not a
 // conversation entry. Messages of people are user messages, also those of a person without a
-// Koinon account (actor kind external, ADR 0129); messages of the agent and its questions are agent
+// Koinon account (actor kind external, ADR 0130); messages of the agent and its questions are agent
 // messages.
 func historyMessage(thread string, task a2a.TaskID, e store.TaskEvent) *a2a.Message {
 	var (

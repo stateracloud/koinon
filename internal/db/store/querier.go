@@ -418,7 +418,7 @@ type Querier interface {
 	// A trigger needs the poller of (connection, resource): created due at @now (the pass's clock),
 	// or left as it is.
 	EnsureCodeHostPoller(ctx context.Context, arg EnsureCodeHostPollerParams) error
-	// The row of a person without a Koinon account who writes from a chat platform (ADR 0129): it
+	// The row of a person without a Koinon account who writes from a chat platform (ADR 0130): it
 	// creates the row the first time and returns the same row after that. The update on a conflict
 	// changes nothing; it only makes the statement return the row that a concurrent writer committed.
 	EnsureExternalActor(ctx context.Context, arg EnsureExternalActorParams) (ExternalActor, error)
@@ -987,7 +987,7 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
-	// The external actors that the events of a task name, by ID (ADR 0129): what a task read shows
+	// The external actors that the events of a task name, by ID (ADR 0130): what a task read shows
 	// beside each of their messages. The rows hold no name and no profile data.
 	ListExternalActors(ctx context.Context, arg ListExternalActorsParams) ([]ExternalActor, error)
 	// Price entries with requests Koinon flagged since @since, with how often, why and by how

@@ -177,13 +177,13 @@ type eventActors struct {
 	// names maps a user ID to a display name. A user without a name, a deleted user and a former
 	// member are absent.
 	names map[string]string
-	// external maps an external actor's ID to the person (ADR 0129).
+	// external maps an external actor's ID to the person (ADR 0130).
 	external map[string]*taskv1alpha1.ExternalActor
 }
 
 // loadEventActors reads the authors of the events. For people it reads only the id and the display
 // name (never an email), and only for users that belong to the org, so a name never crosses orgs
-// (#1031). For external actors it reads the platform identity, which holds no name (ADR 0129). The
+// (#1031). For external actors it reads the platform identity, which holds no name (ADR 0130). The
 // caller has already authorized the read of the task (viewer or higher).
 func loadEventActors(ctx context.Context, q *store.Queries, org pgtype.UUID, events []store.TaskEvent) (eventActors, error) {
 	out := eventActors{names: map[string]string{}, external: map[string]*taskv1alpha1.ExternalActor{}}

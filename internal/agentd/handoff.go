@@ -143,7 +143,7 @@ func messageText(e store.TaskEvent) string {
 // externalPlatforms names the chat platforms of an external message's source for the prompt.
 var externalPlatforms = map[string]string{"slack": "Slack", "teams": "Microsoft Teams"}
 
-// externalNote is the line that agentd puts before a message from an external actor (ADR 0129
+// externalNote is the line that agentd puts before a message from an external actor (ADR 0130
 // decision 4): a person without a Koinon account who wrote in Slack or Teams. It has no name and no
 // ID. It tells the agent that this person cannot approve its tool calls or answer its questions, so
 // the agent does not ask them to. externalEnd closes the message, so the agent can see where the

@@ -11,7 +11,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 )
 
-// A message from a person without a Koinon account in Slack or Teams (ADR 0129, #1408) reads as
+// A message from a person without a Koinon account in Slack or Teams (ADR 0130, #1408) reads as
 // ACTOR_KIND_EXTERNAL with the person's platform identity, and never with a name.
 var _ = Describe("TaskEvent.actor_external", func() {
 	var (

@@ -13,7 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
-// The actor kind `external` (ADR 0129, #1408): a person without a Koinon account can only write
+// The actor kind `external` (ADR 0130, #1408): a person without a Koinon account can only write
 // messages, and each of their events names their external_actors row.
 var _ = Describe("the external actors migrations (#1408)", func() {
 	var (

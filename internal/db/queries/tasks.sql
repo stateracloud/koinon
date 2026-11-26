@@ -100,7 +100,7 @@ WHERE u.id = ANY(@user_ids::uuid[]) AND u.deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = @org_id);
 
 -- name: EnsureExternalActor :one
--- The row of a person without a Koinon account who writes from a chat platform (ADR 0129): it
+-- The row of a person without a Koinon account who writes from a chat platform (ADR 0130): it
 -- creates the row the first time and returns the same row after that. The update on a conflict
 -- changes nothing; it only makes the statement return the row that a concurrent writer committed.
 INSERT INTO external_actors (org_id, platform, team, platform_user_id)
@@ -109,7 +109,7 @@ ON CONFLICT (org_id, platform, team, platform_user_id) DO UPDATE SET platform = 
 RETURNING *;
 
 -- name: ListExternalActors :many
--- The external actors that the events of a task name, by ID (ADR 0129): what a task read shows
+-- The external actors that the events of a task name, by ID (ADR 0130): what a task read shows
 -- beside each of their messages. The rows hold no name and no profile data.
 SELECT * FROM external_actors
 WHERE org_id = @org_id AND id = ANY(@ids::uuid[]);

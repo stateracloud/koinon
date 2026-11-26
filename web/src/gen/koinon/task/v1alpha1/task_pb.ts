@@ -23,7 +23,7 @@ export const file_koinon_task_v1alpha1_task: GenFile = /*@__PURE__*/
 
 /**
  * ExternalActor is a person without a linked Koinon account who writes from a chat platform
- * (ADR 0129). It holds no display name and no other profile data.
+ * (ADR 0130). It holds no display name and no other profile data.
  *
  * @generated from message koinon.task.v1alpha1.ExternalActor
  */
@@ -771,7 +771,7 @@ export enum ActorKind {
 
   /**
    * A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account
-   * (ADR 0129). TaskEvent.actor_external names the person. Such a person can only write messages.
+   * (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages.
    *
    * @generated from enum value: ACTOR_KIND_EXTERNAL = 4;
    */

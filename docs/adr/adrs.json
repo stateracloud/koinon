@@ -152,7 +152,7 @@
       "0075",
       "0113",
       "0127",
-      "0129"
+      "0130"
     ]
   },
   {
@@ -597,7 +597,7 @@
       "0121",
       "0125",
       "0127",
-      "0129"
+      "0130"
     ]
   },
   {
@@ -1782,7 +1782,7 @@
       "0123",
       "0126",
       "0127",
-      "0129"
+      "0130"
     ]
   },
   {
@@ -1818,7 +1818,7 @@
       "0085",
       "0123",
       "0127",
-      "0129"
+      "0130"
     ]
   },
   {
@@ -3661,7 +3661,7 @@
     ],
     "amends": [],
     "amended_by": [
-      "0129"
+      "0130"
     ],
     "supersedes": [],
     "superseded_by": [],
@@ -3678,7 +3678,7 @@
       "0110"
     ],
     "related_by": [
-      "0129"
+      "0130"
     ]
   },
   {
@@ -3707,8 +3707,8 @@
     "related_by": []
   },
   {
-    "number": "0129",
-    "file": "0129-external-actor-kind.md",
+    "number": "0130",
+    "file": "0130-external-actor-kind.md",
     "title": "The external actor kind: people without a Koinon account on the task timeline",
     "status": "proposed",
     "date": "2026-11-26",

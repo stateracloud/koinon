@@ -79,7 +79,7 @@ func Kind(ev *taskv1alpha1.TimelineEvent) (string, bool) {
 	return e.kind, ok
 }
 
-// externalKinds are the kinds that an external actor (actor kind `external`, ADR 0129) can write:
+// externalKinds are the kinds that an external actor (actor kind `external`, ADR 0130) can write:
 // a person without a Koinon account can start a task and reply in its thread, and do nothing else.
 // The check task_events_external_message_check (migration 00115) enforces the same rule.
 var externalKinds = map[string]bool{"message": true}

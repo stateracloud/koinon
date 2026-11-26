@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 
 const platformNames: Record<string, string> = { slack: 'Slack', teams: 'Teams' }
 
-/** The label of a person without a Koinon account (ADR 0129): the platform and its user ID, never a name. */
+/** The label of a person without a Koinon account (ADR 0130): the platform and its user ID, never a name. */
 function externalLabel(x?: { platform: string; platformUserId: string }): string {
   const platform = (x && platformNames[x.platform]) || 'Chat'
   return x?.platformUserId ? `${platform} user ${x.platformUserId}` : `${platform} user`

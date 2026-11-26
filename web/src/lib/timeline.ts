@@ -19,7 +19,7 @@ export type TimelineItem =
       actor: ActorKind
       actorUserId: string
       actorName: string
-      /** The person without a Koinon account who wrote the message in Slack or Teams (ADR 0129). */
+      /** The person without a Koinon account who wrote the message in Slack or Teams (ADR 0130). */
       external?: { platform: string; platformUserId: string }
       text: string
       runId?: string

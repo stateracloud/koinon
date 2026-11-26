@@ -100,7 +100,7 @@ const (
 	ActorKind_ACTOR_KIND_AGENT       ActorKind = 2
 	ActorKind_ACTOR_KIND_SYSTEM      ActorKind = 3
 	// A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account
-	// (ADR 0129). TaskEvent.actor_external names the person. Such a person can only write messages.
+	// (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages.
 	ActorKind_ACTOR_KIND_EXTERNAL ActorKind = 4
 )
 
@@ -203,7 +203,7 @@ func (CreatorKind) EnumDescriptor() ([]byte, []int) {
 }
 
 // ExternalActor is a person without a linked Koinon account who writes from a chat platform
-// (ADR 0129). It holds no display name and no other profile data.
+// (ADR 0130). It holds no display name and no other profile data.
 type ExternalActor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// "slack" or "teams".

@@ -189,7 +189,7 @@ var _ = Describe("Pool", func() {
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nsummarise yesterday's issues"}))
 	})
 
-	It("sends a message from an external actor with a line that says who wrote it (ADR 0129)", func(ctx SpecContext) {
+	It("sends a message from an external actor with a line that says who wrote it (ADR 0130)", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		t, err := q.CreateTask(ctx, store.CreateTaskParams{
 			OrgID: e.org, Title: uniq("From Slack"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,

@@ -8,7 +8,7 @@ relates: ["0006", "0007", "0010", "0017", "0023", "0024", "0055", "0065", "0066"
 # 0127. Slack and Teams adapter as a pure event-to-actions core
 
 - Status: Proposed (step 1 of #24: the maintainer reviews this ADR before any code); amended by
-  [0129](0129-external-actor-kind.md) (the identity of an `external` actor is a row, not payload fields)
+  [0130](0130-external-actor-kind.md) (the identity of an `external` actor is a row, not payload fields)
 - Date: 2026-11-26
 - Area: connectors-tools
 - Tags: connectors, eventing, triggers, secrets, testing
@@ -138,7 +138,7 @@ The core drops every event from Koinon's own bot user and from other bots. No tr
 message from an unlinked person, which a channel event trigger can accept ([0066](0066-triggers-and-scheduling.md)
 decision 3), is an event with the new actor kind `external` (question 6). This ADR does not record such a message
 as a `system` event. The `external` kind changes the `task_actor_kind` enum and every reader of the timeline, so it has
-its own decision and its own issue. That decision ([0129](0129-external-actor-kind.md)) keeps the platform, the team
+its own decision and its own issue. That decision ([0130](0130-external-actor-kind.md)) keeps the platform, the team
 and the platform user ID in an `external_actors` row; the payload holds `source` (`slack` or `teams`) and never a
 display name. It also makes the agent's prompt show an
 `external` message as a message from a person. The code issue that applies messages from unlinked people depends on

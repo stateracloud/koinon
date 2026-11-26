@@ -6,7 +6,7 @@ tags: [tasks, chat, identity, database, api]
 amends: ["0127"]
 relates: ["0006", "0023", "0065", "0066", "0127"]
 ---
-# 0129. The external actor kind: people without a Koinon account on the task timeline
+# 0130. The external actor kind: people without a Koinon account on the task timeline
 
 - Status: Proposed (issue #1408; the maintainer decided the open points on 2026-11-26)
 - Date: 2026-11-26

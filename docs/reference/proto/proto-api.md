@@ -4625,7 +4625,7 @@ Creator is who or what created a task. Exactly the field of its kind is set.
 ### Message ExternalActor
 
 ExternalActor is a person without a linked Koinon account who writes from a chat platform
-(ADR 0129). It holds no display name and no other profile data.
+(ADR 0130). It holds no display name and no other profile data.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -4962,7 +4962,7 @@ ActorKind says who wrote a task event.
 | ACTOR_KIND_USER | 1 |  |
 | ACTOR_KIND_AGENT | 2 |  |
 | ACTOR_KIND_SYSTEM | 3 |  |
-| ACTOR_KIND_EXTERNAL | 4 | A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account (ADR 0129). TaskEvent.actor_external names the person. Such a person can only write messages. |
+| ACTOR_KIND_EXTERNAL | 4 | A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages. |
 
 ### Enum CreatorKind
 

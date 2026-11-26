@@ -42,7 +42,7 @@ const ext = (key: string, platform: string, platformUserId: string): TimelineIte
   text: `text ${key}`,
 })
 
-describe('Timeline messages from a person without a Koinon account (ADR 0129)', () => {
+describe('Timeline messages from a person without a Koinon account (ADR 0130)', () => {
   it('names the platform and the platform user ID, says there is no account, and never says You', () => {
     render(<Timeline meUserId="u-1" items={[ext('x', 'slack', 'U0TEST')]} />)
     const article = screen.getByRole('article')

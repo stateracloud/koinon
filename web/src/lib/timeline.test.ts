@@ -499,7 +499,7 @@ describe('buildTimeline with purged content', () => {
   })
 })
 
-describe('buildTimeline with a person without a Koinon account (ADR 0129)', () => {
+describe('buildTimeline with a person without a Koinon account (ADR 0130)', () => {
   it('keeps the platform identity on the message and only on an external message', () => {
     const external = taskEvent(1, 1000, message('the build is red'), ActorKind.EXTERNAL)
     external.actorExternal = create(ExternalActorSchema, { platform: 'slack', team: 'T0TEST', platformUserId: 'U0TEST' })

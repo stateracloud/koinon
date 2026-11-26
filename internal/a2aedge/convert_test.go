@@ -25,12 +25,12 @@ var _ = Describe("History", func() {
 			Expect(m.Parts[0].Text()).To(Equal("hello"))
 		},
 		Entry("a Koinon user", store.TaskActorKindUser, a2a.MessageRoleUser),
-		Entry("a person without a Koinon account (ADR 0129)", store.TaskActorKindExternal, a2a.MessageRoleUser),
+		Entry("a person without a Koinon account (ADR 0130)", store.TaskActorKindExternal, a2a.MessageRoleUser),
 		Entry("the agent", store.TaskActorKindAgent, a2a.MessageRoleAgent),
 		Entry("the system: not a conversation entry", store.TaskActorKindSystem, a2a.MessageRole("")),
 	)
 
-	It("opens a turn with the first message of a person without a Koinon account (ADR 0129)", func() {
+	It("opens a turn with the first message of a person without a Koinon account (ADR 0130)", func() {
 		msg := func(seq int64, actor store.TaskActorKind) store.TaskEvent {
 			return store.TaskEvent{Seq: seq, Kind: "message", ActorKind: actor, Payload: []byte(`{"text":"hello"}`)}
 		}

@@ -122,7 +122,7 @@ var actorKindToProto = enumTable[store.TaskActorKind, taskv1alpha1.ActorKind]{
 	store.TaskActorKindUser:   taskv1alpha1.ActorKind_ACTOR_KIND_USER,
 	store.TaskActorKindAgent:  taskv1alpha1.ActorKind_ACTOR_KIND_AGENT,
 	store.TaskActorKindSystem: taskv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,
-	// A person without a linked Koinon account in Slack or Teams (ADR 0129).
+	// A person without a linked Koinon account in Slack or Teams (ADR 0130).
 	store.TaskActorKindExternal: taskv1alpha1.ActorKind_ACTOR_KIND_EXTERNAL,
 }
 

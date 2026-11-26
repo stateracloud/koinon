@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- The identity of an `external` actor (ADR 0129, issue #1408): one row for each person who writes
+-- The identity of an `external` actor (ADR 0130, issue #1408): one row for each person who writes
 -- to the bot from the connection's Slack workspace or Teams tenant without a linked Koinon account.
 -- The row holds only the platform, the team and the platform user ID: never a display name, an
 -- email address or other profile data. A task event by such a person names the row.
