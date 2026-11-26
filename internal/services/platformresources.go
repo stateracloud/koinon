@@ -48,7 +48,7 @@ type resourcePage interface {
 
 // orgPage authorizes a platform admin and reads the orgs that the page covers.
 func (a platformResourcesAPI) orgPage(ctx context.Context, pg resourcePage) (orgPage, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return orgPage{}, err
 	}
 	var only pgtype.UUID
@@ -93,7 +93,7 @@ func orgRefProto(r store.ListOrgRefsRow) *platformv1alpha1.OrgRef {
 
 // ListProviders implements PlatformResourceService.
 func (a platformResourcesAPI) ListProviders(ctx context.Context, req *platformv1alpha1.ListProvidersRequest) (*platformv1alpha1.ListProvidersResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	if a.s.catalog == nil {
@@ -148,7 +148,7 @@ func (a platformResourcesAPI) ListTemplates(ctx context.Context, req *platformv1
 
 // ListMcpServers implements PlatformResourceService.
 func (a platformResourcesAPI) ListMcpServers(ctx context.Context, req *platformv1alpha1.ListMcpServersRequest) (*platformv1alpha1.ListMcpServersResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	if a.s.mcp == nil {

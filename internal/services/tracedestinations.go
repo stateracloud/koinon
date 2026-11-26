@@ -172,12 +172,9 @@ func (a traceAPI) orgCaller(ctx context.Context, orgID string) (caller, error) {
 
 // platformCaller authorizes a platform admin. Platform changes are audited in the install audit chain (ADR 0100).
 func (a traceAPI) platformCaller(ctx context.Context) (*auth.Principal, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), refusalv1.Reason_PLATFORM_ADMIN_REQUIRED)
+	p, err := requirePlatformAdmin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if a.s.traces == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "run traces are not configured")
