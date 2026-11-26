@@ -218,6 +218,10 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	STORIES=1 test/e2e/run.sh
 
+.PHONY: test-e2e-kind-substrate
+test-e2e-kind-substrate: ## Quickstart e2e on kind with execution.driver substrate on the gVisor class (issue #1091; KEEP=1 keeps the cluster; docs/dev/ci.md)
+	DRIVER=substrate ESCAPE_OPENSHELL=0 test/e2e/run.sh
+
 .PHONY: test-fence-kind
 test-fence-kind: ## Prove the Substrate fence on its own throwaway kind cluster (API server ports rule; needs Docker, kind, helm 4; KEEP_CLUSTER=1 keeps it)
 	test/e2e/kind/apiserver-egress.sh

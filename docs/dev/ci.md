@@ -327,6 +327,27 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+### The Substrate leg of the kind e2e (issue #1091)
+
+`make test-e2e-kind-substrate` (`DRIVER=substrate test/e2e/run.sh`) runs the quickstart pass with `execution.driver:
+substrate` on kind, on the gVisor class (tier `dev`; a standard runner has no KVM, ADR 0119 D10). What differs from the
+OpenShell run:
+
+- `kind/up.sh` leaves out Agent Sandbox, the `runc` RuntimeClass and OpenShell.
+- `kind/substrate.sh harness` builds the substrate overlay of the harness image (guest front and launcher) and pushes it as
+  `<registry>/<cluster>/sandbox:e2e-substrate`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
+  digest, #1192).
+- `kind/substrate.sh install` runs `koinon-api substrate install --platform kind --sandbox-classes gvisor` from a clone
+  at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into `~/.cache/koinon/substrate`). `GVISOR_MIRROR`
+  is for a host that cannot reach `storage.googleapis.com`.
+- The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
+
+Not covered yet: the harness contract tests and the restore drill on this leg, and the CI job. The CI job is a `.github`
+change, so it is a separate pull request (a build-input change and a `.github` change have no merge route in one pull
+request). It starts as an advisory leg in `hack/ci-required.txt` and becomes the required quickstart leg at the switch (#1093,
+no soak). The quickstart reaches an approved pull request on Substrate only after #1086 (gateway routes and the actor
+token); until then the driver's later specs fail on this leg.
+
 ### The N-1 to N upgrade e2e (issue #519)
 
 `UPGRADE_FROM=<release tag> make test-e2e-kind` (for example `UPGRADE_FROM=v0.1.0-rc.27`, `SUITE=go`) runs
