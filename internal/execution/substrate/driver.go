@@ -291,11 +291,18 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 		Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
 		ActorTemplate: ref(workspace, tmpl.GetMetadata().GetName()),
 	}})
+	created := err == nil
 	if isCode(err, codeAlreadyExists) {
 		actor, err = d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, spec.Name)})
 	}
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
+	}
+	// Substrate creates an actor suspended (v1.0.0), and the Compute contract says a created sandbox
+	// becomes ready: the driver resumes the actor it made (issue #1092). A sandbox that already
+	// existed keeps its state; the reconciler stops and starts it.
+	if created && actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		return d.resume(ctx, op, workspace, spec.Name)
 	}
 	return sandboxFrom(workspace, actor), nil
 }

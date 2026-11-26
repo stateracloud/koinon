@@ -140,6 +140,7 @@ expect "go chart chartsmoke" hack/versions.env
 expect "chart" hack/chart-check.sh
 expect "go chart" hack/chartlint/main.go # `go run ./hack/chartlint`
 expect "go chart" hack/cmd/vapcheck/main.go # `go run ./hack/cmd/vapcheck` (#1313)
+expect "go chart" hack/cmd/chartdigest/main.go # `go run ./hack/cmd/chartdigest` (#1360)
 expect "go chart chartsmoke escape" charts/koinon/values.yaml
 expect "go chartsmoke" test/chartsmoke/smoke_test.go
 expect "go escape" test/escape/escape_test.go
@@ -243,8 +244,8 @@ expect_gates "" docs/dev/ci-rules.md # a docs-only change does not
 expect_gates "vuln shell scripts" hack/govulncheck.sh # the check itself
 expect_gates "vuln shell scripts" .github/workflows/govulncheck.yml
 expect_gates "vuln shell scripts" hack/versions.env # accepted cost: every tool bump runs govulncheck
-expect_gates "scripts" hack/spike/acpdrive/go.mod # nested spike modules are not scanned
-expect_gates "scripts" hack/spike/acpdrive/go.sum
+expect_gates "scripts" hack/spike/approver/go.mod # nested spike modules are not scanned
+expect_gates "scripts" hack/spike/approver/go.sum
 expect_gates "shell scripts" hack/govulncheck-test.sh
 expect_gates "shell scripts" docs/design.md hack/ship.sh # the union: one trigger is enough
 # fuzz (#684): the fuzzed packages and the script, not every Go file.

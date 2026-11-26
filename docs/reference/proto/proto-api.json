@@ -4616,6 +4616,15 @@
               "deprecated": false
             },
             {
+              "name": "ExplainOrgPrices",
+              "description": "ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. It does not check the provider URL policy or a lost key. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+              "responseType": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ExplainPlatformPrice",
               "description": "ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its\nprice_ref.",
               "requestType": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
@@ -5165,6 +5174,42 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ExplainOrgPricesRequest",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExplainOrgPricesResponse",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "models",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.ModelPriceSource",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "models has one row per enabled model, ordered by provider name then model name."
+            }
+          ]
         },
         {
           "name": "ExplainPlatformPriceRequest",
@@ -6188,6 +6233,105 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ModelPriceSource",
+          "fullName": "koinon.budget.v1alpha1.ModelPriceSource",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ModelPriceSource is the price in use now for one model of an org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "provider_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_type",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "source is org, platform or default. It is empty when the model has no usable price."
+            },
+            {
+              "name": "price_ref",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 6,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_version is set for source platform."
+            },
+            {
+              "name": "list_version",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "list_version is set for source default."
+            },
+            {
+              "name": "replaces",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.ReplacedPrice",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "replaces is set for source org when a lower layer would price the model without the org price."
+            },
+            {
+              "name": "unpriced_reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unpriced_reason is no_price or unusable_price when source is empty."
+            }
+          ]
         },
         {
           "name": "Notification",
@@ -7512,6 +7656,60 @@
             },
             {
               "name": "reasoning",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ReplacedPrice",
+          "fullName": "koinon.budget.v1alpha1.ReplacedPrice",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ReplacedPrice is the price an org price replaces: the next layer down (platform or default).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "source",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "list_version",
               "number": 5,
               "type": "string",
               "label": "singular",
@@ -16653,6 +16851,115 @@
               "number": 6,
               "deprecated": false,
               "description": "The run ended (canceled, failed or finished) before anyone answered; nothing was applied."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "koinon.refusal.v1",
+      "files": [
+        "koinon/refusal/v1/refusal.proto"
+      ],
+      "services": [],
+      "messages": [],
+      "enums": [
+        {
+          "name": "Reason",
+          "fullName": "koinon.refusal.v1.Reason",
+          "file": "koinon/refusal/v1/refusal.proto",
+          "description": "Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a\nvalue as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the\nsame string in `error.reason`. The value names are the wire strings, so they have no enum prefix.\nA spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.\n\nAdd a value only when a client acts on the reason differently. Values are add-only: never reuse,\nrename or remove one. A client that does not know a reason shows the message of the error.\n\nbuf:lint:ignore ENUM_VALUE_PREFIX",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "REASON_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": "The error has no reason. A server never sends this value."
+            },
+            {
+              "name": "INVALID",
+              "number": 1,
+              "deprecated": false,
+              "description": "The request is not valid. The message says why."
+            },
+            {
+              "name": "NOT_FOUND",
+              "number": 2,
+              "deprecated": false,
+              "description": "The thing does not exist, or the caller may not see it."
+            },
+            {
+              "name": "INSTALL_HELD",
+              "number": 3,
+              "deprecated": false,
+              "description": "The install is held (ADR 0107) and the call reaches outward."
+            },
+            {
+              "name": "ROLE_TOO_LOW",
+              "number": 4,
+              "deprecated": false,
+              "description": "The caller's Role is too low for the field rule of the call (ADR 0116 decision 4)."
+            },
+            {
+              "name": "ADMIN_REQUIRED",
+              "number": 5,
+              "deprecated": false,
+              "description": "Only an org admin or owner may do this."
+            },
+            {
+              "name": "PLATFORM_ADMIN_REQUIRED",
+              "number": 6,
+              "deprecated": false,
+              "description": "Only a platform admin may do this."
+            },
+            {
+              "name": "CHANGED",
+              "number": 7,
+              "deprecated": false,
+              "description": "The destination changed since the caller loaded it."
+            },
+            {
+              "name": "OWNER_ONLY",
+              "number": 8,
+              "deprecated": false,
+              "description": "Only an org owner may choose content level full."
+            },
+            {
+              "name": "OWNER_AT_FULL",
+              "number": 9,
+              "deprecated": false,
+              "description": "The org sends full content, so only an owner may add a destination or change its connection."
+            },
+            {
+              "name": "NOT_MEMBER",
+              "number": 10,
+              "deprecated": false,
+              "description": "The caller is not a member of the org, so may only lower its settings."
+            },
+            {
+              "name": "ABOVE_CEILING",
+              "number": 11,
+              "deprecated": false,
+              "description": "The level is above the platform ceiling."
+            },
+            {
+              "name": "TEST_FAILED",
+              "number": 12,
+              "deprecated": false,
+              "description": "The test trace was not accepted, so nothing was saved."
+            },
+            {
+              "name": "PRICE_REFRESH_OFF",
+              "number": 13,
+              "deprecated": false,
+              "description": "The price refresh is off on this install."
+            },
+            {
+              "name": "CREDENTIAL_TOO_SHORT",
+              "number": 14,
+              "deprecated": false,
+              "description": "The credential of an MCP server is too short."
             }
           ]
         }

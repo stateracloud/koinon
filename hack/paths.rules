@@ -155,7 +155,7 @@ job web ^(web/|api/proto/)
 job generate ^(api/proto/|third_party/openshell/proto/|third_party/substrate/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$|hack/buf\.sh$|hack/tools/buf/|hack/cmd/generatecheck/)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
-job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/cmd/vapcheck/|hack/versions\.env$)
+job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/cmd/vapcheck/|hack/cmd/chartdigest/|hack/versions\.env$)
 
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
@@ -295,7 +295,7 @@ script-check - inputs=.github/,docs/,hack/ci-required.txt,hack/ci-rules-check-te
 script-check - inputs=guard hack/ci-rules-check.sh
 script-check - inputs=guard hack/e2e-commands-check.sh
 script-check - inputs=hack/chart-check-test.sh,hack/chart-check.d/,hack/chart-check.sh,hack/chart-check.d/ hack/chart-check-test.sh
-script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh

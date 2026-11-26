@@ -1131,6 +1131,7 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | CheckPriceSources | `koinon.budget.v1alpha1.CheckPriceSourcesRequest` | `koinon.budget.v1alpha1.CheckPriceSourcesResponse` | - | CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It makes proposals and applies nothing. |
 | DiffPlatformPriceVersions | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse` | - | DiffPlatformPriceVersions returns what changed between two versions of the platform list. |
 | DismissPriceProposal | `koinon.budget.v1alpha1.DismissPriceProposalRequest` | `koinon.budget.v1alpha1.DismissPriceProposalResponse` | - | DismissPriceProposal closes a proposal; the same values from the same source do not come back. |
+| ExplainOrgPrices | `koinon.budget.v1alpha1.ExplainOrgPricesRequest` | `koinon.budget.v1alpha1.ExplainOrgPricesResponse` | - | ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or default) prices it now and, for an org price, the price it replaces. It uses the same lookup as the gateway. It does not check the provider URL policy or a lost key. Admins and owners. |
 | ExplainPlatformPrice | `koinon.budget.v1alpha1.ExplainPlatformPriceRequest` | `koinon.budget.v1alpha1.ExplainPlatformPriceResponse` | - | ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its price_ref. |
 | GetDefaultPriceChanges | `koinon.budget.v1alpha1.GetDefaultPriceChangesRequest` | `koinon.budget.v1alpha1.GetDefaultPriceChangesResponse` | - | GetDefaultPriceChanges returns what changed between two versions of the default list. An empty from_version means the version before to_version; an empty to_version the current one. |
 | GetDefaultPrices | `koinon.budget.v1alpha1.GetDefaultPricesRequest` | `koinon.budget.v1alpha1.GetDefaultPricesResponse` | - | GetDefaultPrices returns the default list this installation runs. |
@@ -1246,6 +1247,18 @@ ContinuationValues are the continuation limits of one task of an agent.
 ### Message DismissPriceProposalResponse
 
 No fields.
+
+### Message ExplainOrgPricesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ExplainOrgPricesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| models | 1 | `koinon.budget.v1alpha1.ModelPriceSource` | repeated |  | models has one row per enabled model, ordered by provider name then model name. |
 
 ### Message ExplainPlatformPriceRequest
 
@@ -1522,6 +1535,23 @@ No fields.
 
 No fields.
 
+### Message ModelPriceSource
+
+ModelPriceSource is the price in use now for one model of an org.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| provider_name | 1 | `string` | singular |  |  |
+| provider_type | 2 | `string` | singular |  |  |
+| model | 3 | `string` | singular |  |  |
+| source | 4 | `string` | singular |  | source is org, platform or default. It is empty when the model has no usable price. |
+| price_ref | 5 | `string` | singular |  |  |
+| entry | 6 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 7 | `int64` | singular |  | platform_version is set for source platform. |
+| list_version | 8 | `string` | singular |  | list_version is set for source default. |
+| replaces | 9 | `koinon.budget.v1alpha1.ReplacedPrice` | singular |  | replaces is set for source org when a lower layer would price the model without the org price. |
+| unpriced_reason | 10 | `string` | singular |  | unpriced_reason is no_price or unusable_price when source is empty. |
+
 ### Message Notification
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1747,6 +1777,18 @@ means unset; a free model needs an explicit "0".
 | cache_read | 3 | `string` | singular |  |  |
 | cache_write | 4 | `string` | singular |  |  |
 | reasoning | 5 | `string` | singular |  |  |
+
+### Message ReplacedPrice
+
+ReplacedPrice is the price an org price replaces: the next layer down (platform or default).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| source | 1 | `string` | singular |  |  |
+| price_ref | 2 | `string` | singular |  |  |
+| entry | 3 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 4 | `int64` | singular |  |  |
+| list_version | 5 | `string` | singular |  |  |
 
 ### Message RetirePriceRequest
 
@@ -3987,6 +4029,40 @@ QuestionState is where a question stands.
 | QUESTION_STATE_DISMISSED | 4 | Dismissed by the person; the default was applied. |
 | QUESTION_STATE_EXPIRED | 5 | Nobody answered in time; the default was applied. |
 | QUESTION_STATE_CANCELED | 6 | The run ended (canceled, failed or finished) before anyone answered; nothing was applied. |
+
+## koinon.refusal.v1
+
+Files: `koinon/refusal/v1/refusal.proto`
+
+### Enum Reason
+
+Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a
+value as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the
+same string in `error.reason`. The value names are the wire strings, so they have no enum prefix.
+A spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.
+
+Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
+rename or remove one. A client that does not know a reason shows the message of the error.
+
+buf:lint:ignore ENUM_VALUE_PREFIX
+
+| Value | Number | Description |
+| --- | --- | --- |
+| REASON_UNSPECIFIED | 0 | The error has no reason. A server never sends this value. |
+| INVALID | 1 | The request is not valid. The message says why. |
+| NOT_FOUND | 2 | The thing does not exist, or the caller may not see it. |
+| INSTALL_HELD | 3 | The install is held (ADR 0107) and the call reaches outward. |
+| ROLE_TOO_LOW | 4 | The caller's Role is too low for the field rule of the call (ADR 0116 decision 4). |
+| ADMIN_REQUIRED | 5 | Only an org admin or owner may do this. |
+| PLATFORM_ADMIN_REQUIRED | 6 | Only a platform admin may do this. |
+| CHANGED | 7 | The destination changed since the caller loaded it. |
+| OWNER_ONLY | 8 | Only an org owner may choose content level full. |
+| OWNER_AT_FULL | 9 | The org sends full content, so only an owner may add a destination or change its connection. |
+| NOT_MEMBER | 10 | The caller is not a member of the org, so may only lower its settings. |
+| ABOVE_CEILING | 11 | The level is above the platform ceiling. |
+| TEST_FAILED | 12 | The test trace was not accepted, so nothing was saved. |
+| PRICE_REFRESH_OFF | 13 | The price refresh is off on this install. |
+| CREDENTIAL_TOO_SHORT | 14 | The credential of an MCP server is too short. |
 
 ## koinon.remoteagent.v1alpha1
 

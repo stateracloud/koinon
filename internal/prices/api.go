@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/pricefetch"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -160,4 +161,60 @@ func (s *Service) Settings(ctx context.Context) (RefreshSettings, error) {
 func (s *Service) Explain(ctx context.Context, providerType, model string) (Resolution, error) {
 	m := Model{Name: model, ProviderType: providerType}
 	return s.res.Resolve(ctx, store.New(s.pool), pgtype.UUID{}, m, time.Now())
+}
+
+// ServedModel is the Model of a row of the served catalog. The reconciler and ExplainOrg both build it
+// here, so they cannot price a model from different fields.
+func ServedModel(row store.ListServedCatalogRow) Model {
+	return Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType, ProviderURL: row.Url, Format: modelformat.Format(row.ModelFormat)}
+}
+
+// ModelPrice is the price in use now for one enabled model of an org's served catalog.
+type ModelPrice struct {
+	ProviderName, ProviderType, Model string
+	// Resolution is the price now; it is empty when UnpricedReason is set.
+	Resolution Resolution
+	// Replaces is the price the org price replaces, set only when Resolution.Source is SourceOrg and a
+	// lower layer prices the model.
+	Replaces *Resolution
+	// UnpricedReason is ReasonNoPrice or ReasonUnusablePrice when no usable price exists for the model.
+	UnpricedReason Reason
+}
+
+// ExplainOrg finds the price in use now for every enabled model in the served catalog of org. It
+// does not apply the reconciler's other checks (the URL policy, a lost key). It lists the
+// models with the query the reconciler uses and resolves each with the same Resolver, so the answer
+// is what the gateway prices with. For an org price it also resolves the model without the org
+// layer, which is the price the org price replaces.
+func (s *Service) ExplainOrg(ctx context.Context, org pgtype.UUID) ([]ModelPrice, error) {
+	q := store.New(s.pool)
+	rows, err := q.ListServedCatalog(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	out := make([]ModelPrice, 0, len(rows))
+	for _, row := range rows {
+		m := ServedModel(row)
+		mp := ModelPrice{ProviderName: row.ProviderName, ProviderType: row.ProviderType, Model: row.ModelName}
+		res, err := s.res.Resolve(ctx, q, org, m, now)
+		if reason, ok := Unpriceable(err); ok {
+			mp.UnpricedReason = reason
+			out = append(out, mp)
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		mp.Resolution = res
+		if res.Source == SourceOrg {
+			// A zero org has no overrides, so the lookup starts at the platform layer.
+			if below, err := s.res.Resolve(ctx, q, pgtype.UUID{}, m, now); err == nil {
+				mp.Replaces = &below
+			} else if _, ok := Unpriceable(err); !ok {
+				return nil, err
+			}
+		}
+		out = append(out, mp)
+	}
+	return out, nil
 }
