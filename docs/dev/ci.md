@@ -827,8 +827,9 @@ safety: a job that checks out a ref other than the event's trusted one (`inputs.
 the default branch's, so a save would let that ref's code write what main restores (CodeQL "cache
 poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without the cache. No save
 step is not enough: code in a job can write cache entries itself with the runner's cache token. So
-`e2e-kind` also refuses an `inputs.commit` that is not the head of the dispatch ref or an ancestor
-of it (a step before the checkout, issue 1365): only merged code runs in main's cache scope. `ci.yml`
+`e2e-kind` also refuses an `inputs.commit` that is not a first-parent commit of the dispatch ref
+(the head or a merge; a step before the checkout, issue 1365). Any ancestor is not enough: the
+inner commits of a merged pull request were never reviewed as a tree. `ci.yml`
 (`pull_request` has its own cache scope; pushes and queue builds are trusted refs), `secrets.yml` and
 `g2-kind.yml` (the dispatched ref's own scope) keep the action and save. Any new caller on an
 untrusted ref passes `save: 'false'` and takes the action from a trusted checkout. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
