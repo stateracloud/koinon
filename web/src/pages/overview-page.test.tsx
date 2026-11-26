@@ -70,6 +70,9 @@ describe('agent cards', () => {
     )
     const c = within(await card('Repo helper'))
     expect(c.getByRole('link', { name: 'Repo helper' })).toHaveAttribute('href', '/agents/a-1')
+    // The avatar of ADR 0126 section 2 is decorative: the card's name stays "Repo helper".
+    expect(c.getByTestId('agent-avatar')).toHaveTextContent('R')
+    expect(c.getByTestId('agent-avatar')).toHaveAttribute('aria-hidden')
     expect(c.getByText('claude-sonnet-5-5')).toBeInTheDocument()
     expect(c.getByText('Active')).toBeInTheDocument()
     expect(c.getByText('Reports to Ada')).toBeInTheDocument()
@@ -172,10 +175,13 @@ describe('Chart tab', () => {
     expect(asked).toEqual(['', 'p1'])
     const items = within(tree).getAllByRole('treeitem')
     expect(items.map((i) => [i.textContent, i.getAttribute('aria-level'), i.getAttribute('aria-posinset'), i.getAttribute('aria-setsize')])).toEqual([
-      ['Lead botActiveReports to Ada', '1', '1', '1'],
-      ['Dev botActive', '2', '1', '2'],
-      ['QA botActive', '2', '2', '2'],
+      // The first letter is the avatar (aria-hidden, so not in the row's name).
+      ['LLead botActiveReports to Ada', '1', '1', '1'],
+      ['DDev botActive', '2', '1', '2'],
+      ['QQA botActive', '2', '2', '2'],
     ])
+    expect(within(items[0]).getByTestId('agent-avatar')).toHaveAttribute('aria-hidden')
+    expect(items[0]).toHaveAccessibleName(/^Lead bot/)
     expect(items[0]).toHaveAttribute('aria-expanded', 'true')
     expect(items[1]).not.toHaveAttribute('aria-expanded')
     // A person is never a box.

@@ -2,6 +2,7 @@
 
 import { Link } from '@tanstack/react-router'
 import { memo } from 'react'
+import { AgentAvatar } from '@/components/agent-avatar'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Meter } from '@/components/ui/meter'
@@ -25,7 +26,8 @@ export const AgentCard = memo(function AgentCard({ agent: a, now }: { agent: Age
   return (
     <article aria-labelledby={titleId} data-testid="agent-card" className="bg-card grid content-start gap-2 rounded-lg border p-4 text-sm">
       <header className="flex flex-wrap items-start justify-between gap-2">
-        <h3 id={titleId} className="min-w-0 font-medium break-words">
+        <h3 id={titleId} className="flex min-w-0 items-center gap-2 font-medium break-words">
+          <AgentAvatar agentId={a.agentId} name={a.displayName} />
           <Link to="/agents/$agentId" params={{ agentId: a.agentId }} className="text-link hover:underline">
             {a.displayName}
           </Link>

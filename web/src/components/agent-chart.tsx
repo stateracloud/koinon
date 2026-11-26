@@ -3,6 +3,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { AgentAvatar } from '@/components/agent-avatar'
 import { AgentStatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import type { AgentSummary } from '@/gen/koinon/agent/v1alpha1/agent_pb'
@@ -182,6 +183,7 @@ function TeamTree({ team }: { team: TeamGroup<AgentSummary> }) {
               >
                 {isOpen ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
               </span>
+              <AgentAvatar agentId={a.agentId} name={a.displayName} className="size-5 text-[0.625rem]" />
               <span className="font-medium">{a.displayName}</span>
               <AgentStatusBadge status={a.status} unhealthy={cardState(a) === 'unhealthy'} />
               {row.node.reportsToLabel && <span className="text-muted-foreground text-xs">{row.node.reportsToLabel}</span>}
