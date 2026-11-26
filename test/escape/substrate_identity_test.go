@@ -70,7 +70,7 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 		Eventually(func() []arrival {
 			a = gw.seen(probe)
 			return a
-		}).WithTimeout(10*time.Second).WithPolling(100*time.Millisecond).Should(HaveLen(1), "the request %s at the gateway", probe)
+		}).WithTimeout(racescale.D(10*time.Second)).WithPolling(100*time.Millisecond).Should(HaveLen(1), "the request %s at the gateway", probe)
 		return a[0]
 	}
 	// expectAccepted checks that the request of probe reached the gateway with exactly one value, a
