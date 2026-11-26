@@ -1024,6 +1024,7 @@ move, once.
        The scrub covers the texts it sees: MCP results, errors, log lines and spans, and the egress responses (ADR
        0120). The model path records provider keys for its logs and spans, but it does not scrub the response body
        that goes back to the agent. An upstream that echoes the key in an error body reaches the agent unchanged.
+       Section 15 makes this an accepted limit of v0.2 and adds a detection and an alert.
      - **Batching.** A removal (cap or age) does not rebuild the matcher of all orgs at once. A removed value stays
        in it until the next rebuild. That rebuild runs at the next change at least one second later, and with traffic
        at most one minute later. Until then the value can only over-scrub a process record. A removal marks a value
@@ -1246,6 +1247,41 @@ below has a test. Slice 1 holds these rules; the other gaps of #1347 follow in l
   The agent sees a shorter list, not an error, which is the fail-open choice for a list (a call to a missing
   tool still fails closed). The later fix needs a stream: a stateful mode with SSE, together with the progress
   forwarding above. Build both when an org needs tools that change within one session.
+
+### 15. A provider key echoed in a model response (amendment 2026-11-26, #1332)
+
+An upstream provider can echo its provider key in a response body, most often in an error body ("invalid key:
+..."). On the model path, that body goes to the agent. Section 12 lists this limit. The maintainer decided on
+2026-11-26: accept the risk for v0.2, detect the echo and alert on it. There is no scrubber in v0.2.
+
+- **Where.** koinon-gateway checks the response on the model path (`gateway.model.driver=koinon`). It checks
+  the header values of each upstream answer of status 200 or more (2xx and error) and wraps its body before the
+  usage tap. A 1xx answer is not wrapped. The agentgateway driver does not
+  check it: its log and tracer fields never read `response.body` or `bodyPrefix`, because that makes the gateway
+  buffer every response (section 4). Step 3 deletes that driver.
+- **How.** The check streams with the body. It looks for the exact bytes of the provider key that the gateway
+  sent upstream for that request. It keeps only the last `len(key) - 1` bytes of the body, so it finds a key that
+  is split across two reads, and its memory is bounded by the key length. It never holds back, changes or
+  reorders a byte: the agent gets the same bytes, at the same time. A key shorter than 16 bytes is not checked,
+  because it would match ordinary text.
+- **Signal.** At the first match in a response (a header value or the body), the gateway counts
+  `koinon_gateway_model_key_echo_total{answer="success"|"error"}` once (a fixed label set, ADR 0023; `success`
+  is a 2xx answer) and logs one warning, `provider key echoed in a model response`, with the provider name, the
+  status and where (`header` or `body`). The log line never has the key, the body or a part of them. The chart alert
+  `KoinonModelKeyEcho` (severity critical, group `koinon-gateway`, rendered with the koinon model driver) fires
+  when the counter rises in one hour, so it stays on for an hour after one echo. The chart's ServiceMonitor
+  scrapes the `stats` port of the model-gateway Service for this counter. The operator rotates the provider key.
+- **Known limits.** The check finds the exact bytes only. It does not find a key that the upstream encodes
+  (JSON `\uXXXX` escapes, base64, URL encoding), cuts, or changes. On an SSE answer, a model that streams the key
+  in several text deltas puts JSON between its parts, so the bytes are not contiguous and the check does not find
+  it; an error body, the usual case, comes in one piece. The Go transport decodes a gzip body before the check;
+  an upstream that sends a `Content-Encoding` without a request for it is not decoded and not checked. An echo
+  before the first scrape of a new pod is not seen by `increase`, because the first sample is already 1; the
+  log line still shows it. A detection comes after the bytes went to the agent: the alert starts a rotation, it
+  does not stop the leak.
+- **Later.** A scrubber that removes the key from the stream can reuse the same matcher: it holds back the
+  `len(key) - 1` tail bytes in place of only reading them. It needs its own decision, because it changes the
+  bytes that a client sees (lengths, SSE event bounds) and the time at which it sees them.
 
 ## Alternatives considered
 
