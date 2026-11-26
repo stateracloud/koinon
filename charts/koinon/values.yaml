@@ -858,8 +858,15 @@ execution:
   substrate:
     # ateapi's host:port, for example api.ate-system.svc.cluster.local:443. Required with substrate.
     controlAddress: ""
-    # The atenet router's host:port, for example atenet-router.ate-system.svc.cluster.local:80.
+    # The atenet router's host:port, for example atenet-router.ate-system.svc:443. The router serves TLS on 443
+    # only (Substrate v1.0.1 has no plain listener) and requires a client certificate: koinon-agentd, the one
+    # component that calls it, gets a pod certificate (a podCertificate projected volume) and the CA of the
+    # router's certificate (a clusterTrustBundle volume), and the installer puts agentd's SPIFFE ID on the router
+    # allow-list (koinon-api substrate install --koinon-namespace and --koinon-release; issue #1446).
     routerAddress: ""
+    # Name checked against the router's certificate. Empty uses the host of routerAddress; the certificate names
+    # atenet-router.<namespace>.svc, so use that form in routerAddress or set this.
+    routerServerName: ""
     # Secret with ca.crt, the CA that signed ateapi's certificate. Empty uses the system roots.
     caSecret: ""
     # Name checked against ateapi's certificate. Empty uses the host of controlAddress.
@@ -1039,6 +1046,11 @@ execution:
       # atenet-router.yaml:189, atenet-egress.yaml:1211. A missing pod keeps the cluster default
       # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
+      # The container ports of the control-plane pods that Koinon's namespace may reach (issue #1446): 443 is
+      # ate-api-server (the Service api, ate-api-server.yaml:281,420) and 8443 is the TLS listener of atenet-router (the
+      # Service atenet-router port 443 targets it, atenet-router.yaml:344,427). The ingress of the control policy for
+      # Koinon's namespace lists only these, not every port of every control-plane pod.
+      koinonIngressPorts: [443, 8443]
       # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the

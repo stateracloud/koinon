@@ -129,6 +129,9 @@ func (d *Driver) startProcess(ctx context.Context, op string, k key, req *ateenv
 		if err == nil {
 			return p, nil
 		}
+		if derr := d.routerDown(op, err); derr != nil {
+			return nil, derr
+		}
 		if status.Code(err) != codes.Unavailable || time.Now().After(deadline) {
 			return nil, execution.GRPCError(op, err)
 		}

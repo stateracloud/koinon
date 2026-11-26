@@ -488,7 +488,7 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 		}
 		return parseConfig([]string{
 			"--execution-driver=" + driver,
-			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
+			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:443",
 			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
 		}, env)
 	}
