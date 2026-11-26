@@ -526,6 +526,12 @@ PROPOSED. The maintainer decided on 2026-11-26 that #1386 ships before the v0.1.
 amendment gets a maintainer review before the code. When the code of #1386 merges, this amendment is
 accepted and the interim amendment above (#1086 part C2) is removed.
 
+**Scope and order.** This amendment covers the Substrate driver only. #1386 ships after two other issues:
+
+- #1094 removes the OpenShell driver. So #1386 writes no OpenShell code.
+- #1444 makes the Substrate driver write the actor's `EgressPolicy`: default deny plus the route to the
+  gateway. #1386 adds the identity header to that gateway route. It does not write the policy itself.
+
 ### What section 1.2 means
 
 "Minted and injected outside the guest" means this. A component outside the guest adds the actor identity
@@ -537,26 +543,14 @@ refuses it (`no_token`).
 
 ### The Substrate driver (the golden path)
 
-1. **The driver writes the actor's egress policy.** Before the first resume of an actor, the Substrate driver
-   creates the actor's `EgressPolicy` (`CreateActorEgressPolicy`). It updates the policy when the gateway
-   endpoint changes. The policy has one `HttpRule` for the host and port of the gateway's egress listener. Its
-   effect is `replace_headers`: the header `Koinon-Actor-Token`, from `actor_jwt` with the gateway audience
-   and `expiration_seconds: 900`. The policy holds only gateway rules: no org host and no credential. The
-   gateway still owns the L7 rules and the credentials.
-   - **The driver owns the policy.** Substrate allows one policy for each actor, with the name `default`
-     (`ateapi.proto`, `EgressPolicy`). The driver writes all of its content. If a policy with other rules
-     exists, the driver replaces it and logs the replacement. An operator does not edit this policy.
-   - **The gateway URL of a Substrate guest is `http`.** An `HttpRule` does not match TLS. To replace a header
-     in TLS, Substrate needs an `HttpsRule`, which decrypts the request with a gateway CA that the guest must
-     trust. Koinon does not use that. The chart URL is `http` already. The driver refuses an `https` egress URL
-     with a clear error, and `CheckEgressURL` gets the same rule for the Substrate driver.
-   - The package text of `internal/execution/substrate/driver.go` and its `checkSpec` say that the driver
-     writes no network rules. That text changes to: the driver writes only the gateway rule of the actor.
-2. **This is also the first gateway route of a Substrate guest.** Today no Koinon code writes an actor egress
-   policy. Substrate v1.0.1 refuses all egress of an actor that has no policy
-   (`cmd/atenet/internal/router/egress/egress.go:260`). So a Substrate guest cannot reach the gateway now,
-   unless an operator writes a policy. The policy of item 1 closes this gap for the gateway. The org's
-   L4-only grants of section 2.1 are not part of #1386.
+1. **The gateway rule adds the header.** #1444 writes the actor's policy and its gateway rule. #1386 adds
+   one effect to that rule: `replace_headers` with the header `Koinon-Actor-Token`, from `actor_jwt` with the
+   gateway audience and `expiration_seconds: 900`. The rule holds no org host and no credential. The gateway
+   still owns the L7 rules and the credentials.
+2. **The gateway URL of a Substrate guest is `http`.** `replace_headers` works on an `HttpRule`, and an
+   `HttpRule` does not match TLS. To replace a header in TLS, Substrate needs an `HttpsRule`. That rule
+   decrypts the request with a gateway CA that the guest must trust, and Koinon does not use it. The chart
+   URL is `http` already. `CheckEgressURL` refuses an `https` egress URL with a clear error.
 3. **atenet-egress mints and adds the token.** atenet-egress runs outside the guest, in Substrate's
    control-plane namespace. For a request that carries the header, it gets a token from ateapi
    (`MintActorJwt`) and writes it over the value of the guest (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each
@@ -592,28 +586,13 @@ refuses it (`no_token`).
      token for a short time. The name comes from the org and the agent (and the task, for an ephemeral agent,
      `internal/execution/names.go`). So the token names the same agent. This is accepted.
 5. **Network and install.** The gateway needs a route to the issuer and to its `jwks_uri`. The chart adds
-   one NetworkPolicy egress rule for this route, and a chart check asserts it. The ingress side is open
+   one NetworkPolicy egress rule from the gateway for this route, and a chart check asserts it. This rule is
+   for the verifier. It is not the guest's route to the gateway, which #1444 owns. The ingress side is open
    already: Substrate's own `ate-idp-server` policy admits any source on its `https` port
    (`ate-system-networkpolicies.yaml`). The preflight checks that the gateway can read the discovery document.
    The gateway does not get a route to ateapi.
 
-### The OpenShell driver (until #1094 removes it)
-
-OpenShell has no `actor_jwt`. Two ways meet the rule. The maintainer chooses one:
-
-- **(a) A provider record with a stable placeholder (recommended).** koinon-agentd mints the Koinon actor
-  token as today, but it writes the token into an OpenShell provider record with `stable_placeholder: true`.
-  It does not write the token into the guest. It writes a new token every 5 minutes (`UpdateProvider`). The
-  supervisor replaces the placeholder on the `koinon_egress` endpoint. Section 7 already counts the
-  supervisor as the egress layer of OpenShell. The kind e2e runs OpenShell, so it keeps its clone through
-  the gateway. Cost: a refresh loop through the OpenShell API, and code that #1094 deletes. The token is in
-  the memory of the supervisor, as every OpenShell credential is during the window.
-- **(b) #1386 ships after #1094.** Then only the Substrate driver exists, and no OpenShell code is written.
-  Cost: #1386 waits for #1094, and the kind e2e must run the Substrate driver to keep the gateway clone spec.
-
 ### What is removed
-
-In all cases:
 
 - The guest token file `/tmp/.koinon-egress/token.gitconfig` and the interim amendment above.
 - In `internal/codehost`: `WriteEgressTokenCommand`, `RemoveEgressTokenCommand`, `SandboxEgressDir`,
@@ -623,16 +602,12 @@ In all cases:
 - The git configuration of the guest keeps the `insteadOf` prefix and gets the placeholder header. It holds
   no secret.
 
-The rest depends on the OpenShell choice. Today the only user of the koinon-agentd minter is the guest token
-file (`internal/agentd/actortoken.go`). The forge-wait probe (`forgewait.go`) reads the database and does not
-call the gateway.
-
-- With (a), the minter, its key seed in the `actor-token-key` Secret and the gateway's Ed25519 verifier stay
-  until #1094. They then serve the provider record. `Config.ActorTokens` and `EgressURL` stay coupled.
-- With (b), they have no user. #1386 removes `Config.ActorTokens`, the coupling check in
-  `actortoken.go`, the koinon-agentd seed in the `actor-token-key` Secret (`_helpers.tpl`) and the Ed25519
-  verifier of the gateway. The Substrate verifier is then the only one. The check in `egressGit`
-  (`actortoken.go`) then uses `EgressURL`, not `ActorTokens`.
+- The koinon-agentd minter and the Ed25519 path. Today the only user of the minter is the guest token file
+  (`internal/agentd/actortoken.go`). The forge-wait probe (`forgewait.go`) reads the database and does not
+  call the gateway. So #1386 removes `Config.ActorTokens`, the coupling check in `actortoken.go`, the
+  koinon-agentd seed in the `actor-token-key` Secret (`_helpers.tpl`) and the Ed25519 verifier of the
+  gateway. The Substrate verifier is then the only one. The check in `egressGit` (`actortoken.go`) then uses
+  `EgressURL`, not `ActorTokens`.
 
 ### Proof
 
@@ -643,11 +618,9 @@ call the gateway.
   exception. A scan without the request proves only that nothing was written before it.
 - A control spec: a request from the guest with the placeholder reaches a route of its own agent. The gateway
   accepts the added token.
-- A control spec: the same request with a token that the guest made itself is refused. The reason is
-  different for each driver. On Substrate, atenet-egress writes over the value. On OpenShell (a), the
-  supervisor replaces only the placeholder, so the value goes to the gateway, and the gateway refuses it
-  because its signature is not valid.
-- On Substrate, a guest of another org with the same request is refused.
+- A control spec: the same request with a token that the guest made itself does not reach the gateway as
+  sent. atenet-egress writes over the value, so the gateway sees only the minted token.
+- A control spec: a guest of another org sends the same request, and the gateway refuses it.
 - Section 5.1 holds as written: no credential and no token are in the guest, so no home checkpoint and no
   snapshot can hold one.
 
