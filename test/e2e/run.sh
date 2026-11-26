@@ -340,8 +340,8 @@ go)
   new_password="${KOINON_E2E_NEW_PASSWORD:-e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
   # driver <label filter> <junit file> <json file> <log file> <go test timeout>: one pass of the Ginkgo driver.
   # Worst cases (the job limit in e2e-kind.yml is 75 minutes on the schedule and on stories=true): set-up and image
-  # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 1, tear-down 5:
-  # 69 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
+  # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 5 (with
+  # its restore specs; the format gate's hold after the restore is about 3 of it), tear-down 5: 73 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
@@ -358,9 +358,10 @@ go)
       bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout "$6" -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" -ginkgo.label-filter="$3"' _ "$root" "$OUT/bin/e2e.test" "$1" "$2" "$3" "$5" 2>&1 | tee "$4"
   }
   # The quickstart pass leaves out the stories (label stories): they are not part of the queue's or a pull
-  # request's run. SUITE_LABEL, when set, is the whole filter (a developer's own choice).
+  # request's run. The restore specs (label restore) run inside backup-restore.sh. SUITE_LABEL, when set, is the
+  # whole filter (a developer's own choice).
   step "quickstart driver (go test ./test/e2e)"
-  driver "${SUITE_LABEL:-!stories && !upgrade}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
+  driver "${SUITE_LABEL:-!stories && !upgrade && !restore}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
   done_step "Quickstart driver"
   # The run-1 story suite (issue 992) is a second pass against the same install, before the escape and
   # backup steps change it. A red stories pass does not stop those steps; it fails the script at the end.
@@ -407,7 +408,15 @@ fi
 if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
   step "backup and restore (commands/backup-restore.e1)"
-  OUT="$OUT" "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
+  # The drill runs the restore specs of the Go driver (label restore, #1335): they sign in as the quickstart's admin
+  # and read the fake MCP server's request log through run.sh's forward. They open their own forward to koinon-api.
+  OUT="$OUT" \
+    KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
+    KOINON_E2E_FAKEMCP_URL="https://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
+    KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="$new_password" \
+    "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
   done_step "Backup, keys export, restore and verify"
   cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"
 fi
