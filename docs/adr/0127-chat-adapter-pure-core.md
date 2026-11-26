@@ -67,20 +67,22 @@ The adapter has three parts. Only the core makes decisions.
 
 | Part | Does | Does not |
 | --- | --- | --- |
-| **Edge** (one per platform and transport) | Receives the delivery (HTTP webhook or Socket Mode), verifies the signature, parses it into an `Event`, enqueues it in DBOS, acknowledges | Decide, call Koinon services, send to the platform |
+| **Edge** (one per platform and transport) | Receives the delivery (HTTP webhook or Socket Mode), finds the connection, verifies the signature, parses the delivery into an `Event`, filters it on facts, enqueues it in DBOS, acknowledges | Decide, change Koinon state, send to the platform |
 | **Core** (one, for both platforms) | A pure function `Step(state, event, now) -> (state', actions)` | I/O of any kind |
-| **Driver** (one per platform) | Runs the apply step (decision 4), runs the send workflows (decision 6), renders messages for the platform, applies rate limits | Decide what to do with an event |
+| **Driver** (one per platform) | Runs the apply step (decision 4), the timeline sweep (decision 2), the send workflows (decision 6) and the timers; renders messages for the platform; applies rate limits | Decide what to do with an event |
 
 ```mermaid
 flowchart LR
-  P[Slack / Teams] -->|delivery| E[Edge: verify, parse]
-  E -->|enqueue, then ack| D[(DBOS, org queue)]
-  K0[Koinon: notify, ask_user, reply, question closed] -->|koinon.notify| D
+  P[Slack / Teams] -->|delivery| E[Edge: connection, verify, parse, filter]
+  E -->|enqueue, then ack| D[(DBOS, chat apply queue per org)]
+  T[(Task timeline: task_events)] -->|timeline sweep, koinon-api| D
   D --> A[Driver: apply step, one transaction]
   A --> C[Core: Step]
   C -->|state', actions| A
-  A -->|Koinon operations, same transaction| K[Tasks, questions, runs]
-  A -->|platform actions| S[(DBOS, send queue per thread)]
+  A -->|at most one Koinon operation, same transaction| K[Tasks, questions, runs]
+  A -->|stored result| W[Apply workflow body]
+  W -->|platform actions| S[(DBOS, send queue per thread)]
+  W -->|delayed workflows| R[Flush timer, deferred retry]
   S -->|rate-limited sends, record results| P
 ```
 
@@ -94,36 +96,46 @@ The types are platform-neutral. A platform field appears only where the platform
 
 - **`Key`**: `{platform, team, channel, thread}`. Decision 5 gives the values. The key is the channel-event
   correlation key of [0066](0066-triggers-and-scheduling.md) decision 9, made exact.
-- **`Event`**: `key`, `connection` (and through it the org), `cause_id` (decision 4), `kind`, and the fields of the
-  kind. The kinds come from two sides:
-  - **Platform side**: `message`, `mention`, `choice` (a button tap), `message_changed`, `message_deleted`,
-    `uninstalled`. Fields: `actor` (the platform user ID and a bot flag), `at` (the platform timestamp), `message_ts`
-    (the platform ID of the message), `root_by_koinon` (the thread root is a message from Koinon's bot), `body` (a
-    `Body` value, decision 9) and, for `choice`, the question ID and the choice ID that Koinon put in the button.
-  - **Koinon side**: `notify` (a notification for a channel), `ask` (an `ask_user` question for a channel or a bound
-    thread), `reply` (an agent message on a bound task), `question_closed` (a question was answered elsewhere,
-    dismissed or expired). A `durable.Notifier` handler sends them after the commit that causes them, through the
-    `koinon.notify` workflow of [0066](0066-triggers-and-scheduling.md) DB3.
-  - **Timer**: `flush` (decision 4).
+- **`Scope`**: the unit that the apply step locks (decision 4). It is a thread key, a channel (`thread` empty) or a
+  connection (`channel` and `thread` empty). Each event has exactly one scope.
+- **`Event`**: `scope`, `connection` (and through it the org), `cause_id` (decision 4), `attempt` (decision 5), `kind`
+  and the fields of the kind. The kinds come from three sources:
+  - **Platform side**: `message`, `mention`, `choice` (a button tap), `message_changed` and `message_deleted` (thread
+    scope); `uninstalled` (connection scope). Fields: `actor` (the platform user ID and a bot flag), `at` (the
+    platform timestamp), `message_ts` (the platform ID of the message), `root_by_koinon` (the thread root is a message
+    from Koinon's bot), `body` (a `Body` value, decision 9) and, for `choice`, the question ID and the choice ID that
+    Koinon put in the button.
+  - **Koinon side: the task timeline.** The task timeline (`task_events`) is the outbox. Koinon does not need a new
+    notifier for chat. The kinds are: `reply` (an agent `message` event), `ask` (`question.asked`), `question_closed`
+    (`question.answered`, `question.dismissed`, `question.expired`, `question.canceled`) and `task_ended` (a
+    `status.changed` event to an end state). Decision 4 tells how they arrive. The scope is the task's bound key
+    (decision 5). For a task without a bound key and with a chat notify target (the `channel` value of
+    `notify_target_kind`, from migration 00036), the scope is the target channel. An `ask` for a question addressed to
+    a channel (`questions.target_channel_id`) has the scope of that channel.
+  - **Timer**: `flush` (thread scope, decision 4).
 - **`State`**: a snapshot that the driver loads in the apply step. It has two parts:
   - **Read-only facts**: the connection's status and outward state; the org's channel event triggers in effect
     (`triggers.ForOrg`, [0066](0066-triggers-and-scheduling.md) TR1 read side) that name this connection; the actor's
-    account link (a Koinon user or none); for the bound task, whether it is open, whether its agent is active, whether
-    it has a running turn, and its open questions with their recipients.
-  - **Thread state**, one row per key: the bound task (or none), the burst buffer and its flush time, the recent
+    account link (a Koinon user or none); for the bound task, its state, whether its agent is active, whether it has a
+    running turn, and its open questions with their recipients and roles. The facts are read without locks. The
+    Koinon operation checks them again under its own locks (decision 4).
+  - **Scope state**, one row per scope: the bound task (or none), the burst buffer and its flush time, the recent
     `message_ts` values that the core applied, the platform IDs of the messages Koinon sent to the thread (each with
-    the action key that sent it), and the Teams conversation reference.
+    the action key that sent it), the Teams conversation reference, and the timeline cursor of each task that the scope
+    serves (decision 4).
 - **`Action`**: a closed set. Each action has an action key: its cause ID, its kind and its index in the output.
-  - Koinon effects:
-    - `CreateTask(agent, trigger, events)`: also binds the key to the new task (decision 5);
-    - `WakeTask(task, events, interrupt)`: `interrupt` is true only for a message from a linked person, as
-      [0066](0066-triggers-and-scheduling.md) decision 12 requires; the wake path keeps other input until the turn
-      ends;
+  - Koinon operations. `Step` returns **at most one** of them for one event (decision 4, lock order):
+    - `CreateTask(agent, trigger, origin, events)`: also binds the key to the new task (decision 5);
+    - `WakeTask(task, events, interrupt)`: adds the events to the task's timeline and wakes it. `interrupt` is true
+      only for a message from a linked person, as [0066](0066-triggers-and-scheduling.md) decision 12 requires. The
+      interrupt of a running turn does not exist on `main` today: no task or wake path takes an `interrupt` input. The
+      first code issue for the apply step adds it, as new work. Until then, `WakeTask` queues the input for the end of
+      the turn, as the direct-message path does;
     - `AnswerQuestion(question, answer, user)`: from a `choice`, or from a free-text `message` (decision 5).
   - Platform effects: `Post`, `Update`, `React`, `SetStatus` (a typing or "working on it" status), `Ephemeral` (a
     short answer that only the actor sees, for example "your account is not linked" or "this question is closed").
-  - Timers: `ScheduleFlush(key, at)`.
-  - `Defer(until)`: apply this event again later (decision 5).
+  - Timers: `ScheduleFlush(scope, at)`.
+  - `Defer`: apply this event again later (decision 5).
   - `Drop(reason)`: the core ignores the event. The reason is a fixed enum and becomes a metric label.
 
 The core works with a neutral message model: text, and buttons with choice IDs. The driver renders it as Slack Block
@@ -132,20 +144,39 @@ Kit or as a Teams Adaptive Card. The core never builds platform JSON.
 The core drops events from Koinon's own bot user and from other bots, unless a trigger allows bots. This is loop
 prevention.
 
+**Actors on the timeline.** A task event with the actor kind `user` must name a Koinon user (the check on
+`task_events`, migration 00003). So a message from a linked person is a `user` event with the linked user. A message
+from an unlinked person, which a channel event trigger can accept ([0066](0066-triggers-and-scheduling.md) decision
+3), is a `system` event. Its payload holds the platform and the platform user ID, never a display name. The first code
+issue confirms that the agent's prompt shows such a message as a message from a person (open question 10).
+
+**Origin.** `CreateTask` sets the run origin. A mention, and a message from a linked person, give
+`RunOriginInteractive`: a person waits in the thread. A burst that a channel rule matches gives `RunOriginScheduled`.
+`CreateTriggeredTask` uses `RunOriginScheduled` when the origin is not given, so the driver always gives it.
+
 ### 3. Enqueue, then acknowledge
 
 The edge does these steps, in this order:
 
-1. Verify the signature: the Slack signing secret with its timestamp window, or the Teams JWT. A delivery that fails
-   gets HTTP 401. Koinon does not log its body.
-2. Parse the delivery into an `Event`. Find the connection from the team and the app. An unknown team gets HTTP 200
-   and a `Drop` metric, so that the platform does not retry it.
-3. Enqueue one apply workflow on the org's queue (`durable.EnqueueForOrg`). The workflow ID is
-   `chat:<platform>:<team>:<cause_id>`. So a platform retry maps to the same workflow.
-4. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
+1. Find the connection. An HTTP delivery arrives on the path of its connection
+   ([0066](0066-triggers-and-scheduling.md) decision 5: webhooks arrive on their own listener and path, per
+   connection). A Socket Mode delivery arrives on the socket of its connection. An unknown path gets HTTP 404.
+2. Verify the signature with that connection's credential: the Slack signing secret with its timestamp window, or the
+   Teams JWT. A delivery that fails gets HTTP 401. Koinon does not log its body. A team in the payload that is not the
+   connection's team gets HTTP 200 and `Drop(wrong_team)`, so that the platform does not retry it.
+3. Parse the delivery into an `Event`.
+4. **Filter on facts.** The edge drops an event at once (HTTP 200, a `Drop` metric) when it can have no effect: a
+   message from a bot when no trigger of the connection allows bots, and a `message` in a channel that no channel
+   event trigger names and in a thread that has no scope row. The filter uses one indexed read and no cache. It reads
+   facts only. It never selects an action; the core does that. A wrong pass costs one apply step. The filter must not
+   drop an event that the core can act on, so a filter rule needs a core test that shows the core drops the same
+   event.
+5. Enqueue one apply workflow on the org's partition of the **chat apply queue** (decision 4). The workflow ID is
+   `chat:<platform>:<team>:<cause_id>:<attempt>`, with attempt 0. So a platform retry maps to the same workflow.
+6. Acknowledge: HTTP 200, or the Socket Mode envelope acknowledgement.
 
-The edge does no other work before the acknowledgement: a connection lookup, the org's queue limits and one enqueue
-write. This is what "acknowledge first" means in #24 and in [0066](0066-triggers-and-scheduling.md) decision 11: the
+The edge does no other work before the acknowledgement: a connection lookup, the filter read and one enqueue write.
+This is what "acknowledge first" means in #24 and in [0066](0066-triggers-and-scheduling.md) decision 11: the
 acknowledgement does not wait for any task work. The enqueue comes before the acknowledgement, because an event that is
 acknowledged and then lost in a crash never comes back. If the enqueue fails, the edge answers with HTTP 5xx (or does
 not acknowledge the envelope), and the platform delivers again.
@@ -155,57 +186,101 @@ the apply step. [0066](0066-triggers-and-scheduling.md) (LT1 amendment) gives th
 
 ### 4. The apply step: idempotency, errors and order
 
-Each event has one apply workflow with one **apply step**. The apply step is one DBOS step and one Postgres
-transaction:
+**The chat apply queue.** Apply workflows run on a queue of their own, `koinon.chat-apply`, partitioned by org like
+`koinon.org-work` (`internal/durable/orgqueue.go`). They do not use `koinon.org-work`. That queue has a concurrency of
+4 and 60 starts per minute per org, and it carries direct messages, schedules, webhooks and poll events. A busy Slack
+channel on it would delay that work. The chat apply queue has its own limits per org (open question 7). The send
+queue, the flush timers and the deferred retries are outside both queues (decision 6).
 
-1. Create the thread row for the key if it does not exist, then lock it (`SELECT ... FOR UPDATE`). So events for one
-   key are applied one at a time. Different keys run in parallel, within the org's queue limits.
-2. If the row records the event's `cause_id` as applied, return the actions stored with it, and stop.
+Each event has one apply workflow. The workflow has one **apply step**, then the **workflow body** acts on the step's
+result.
+
+The apply step is one DBOS step and one Postgres transaction:
+
+1. Create the scope row if it does not exist, then lock it (`SELECT ... FOR UPDATE`). So events for one scope are
+   applied one at a time. Different scopes run in parallel, within the queue limits.
+2. Look up `(connection, cause_id)` in the table of applied causes. If the cause is applied, return the stored result,
+   and stop. If the cause is deferred with an attempt that is not lower than the event's `attempt`, return the stored
+   result, and stop. The table is keyed by connection and cause, not by scope, so an event with a channel or
+   connection scope has a place for its cause too.
 3. Load the read-only facts and call `Step`.
-4. Run the Koinon effects in this transaction, each under its own savepoint.
-5. Write the new thread state, the `cause_id` and the platform actions. Commit with `durable.Commit`, so the
-   notifications that the effects return (for example a pre-wake) go out after the commit.
-6. Enqueue the platform actions on the send queue (decision 6).
+4. Run the Koinon operation, if there is one, under a savepoint (see "Expected outcomes").
+5. Write the new scope state and the result: the platform actions, the timers and the `Defer` or `Drop`. Record the
+   cause as applied, or as deferred with its attempt. Commit with `durable.Commit`, so the notifications that the
+   operation returns (for example a pre-wake) go out after the commit. The apply step runs in `koinon-api`, which has
+   the notifier.
 
-The actions in the step's result are the ones that run. A crash after the commit and before DBOS records the step runs
-the step again. Step 2 then returns the stored actions, and `Step` does not run again on the new state. The
-notifications of the first try are lost in this case. DB3 accepts this for pre-wakes. Applied cause IDs are removed
-after the dedupe window.
+The workflow body then reads the step's result. It does not matter if the result is new or a stored result from step
+2:
 
-- **Dedupe of effects.** Each Koinon effect is keyed by its action key with the source `slack` or `teams` (new).
-  `CreateTask` passes the action key as `TriggeredTask.Source` and `Key`. `CreateTriggeredTask` already calls
-  `durable.Once` with them, so the driver does not wrap it in a second `Once`. The wake and answer effects call
-  `durable.Once` with the action key. Today `services.CreateTriggeredTask` opens its own transaction. The first code
-  issue lets it, and the wake and answer paths, run in the caller's transaction, as `durable.Once` does.
-- **Expected outcomes are not errors.** A Koinon effect can end in an expected outcome: the agent is inactive
+6. Enqueue the platform actions as one send workflow (decision 6). Start the flush timer workflow for a
+   `ScheduleFlush`. Start the deferred retry workflow for a `Defer` (decision 5). Each of these has a workflow ID that
+   comes from the cause and the action key, so a replay of the body starts nothing twice.
+
+A crash after the commit and before DBOS records the step runs the step again. Step 2 then returns the stored result,
+and `Step` does not run again on the new state. The body runs step 6 from that result. The notifications of the first
+try are lost in this case. DB3 accepts this for pre-wakes. Applied causes, and the results stored with them, are
+removed after the dedupe window.
+
+- **Dedupe of operations.** Each Koinon operation is keyed by its action key with the source `slack` or `teams`
+  (new). `CreateTask` passes the action key as `TriggeredTask.Source` and `Key`. `CreateTriggeredTask` already calls
+  `durable.Once` with them (`internal/services/notify.go`), so the driver does not wrap it in a second `Once`. The wake
+  and answer operations call `durable.Once` with the action key. Today `services.CreateTriggeredTask` opens its own
+  transaction. The direct-message path already has a form that runs in the caller's transaction
+  (`deliverDirectMessage` takes the caller's queries). The first code issue gives the same form to the task creation,
+  the wake and the answer operations.
+- **Expected outcomes are not errors.** An operation can end in an expected outcome: the agent is inactive
   (`services.ErrAgentInactive`, "drop, do not retry" in DB3), the question is not open (`questions.ErrNotOpen`), the
   user may not answer (`questions.ErrNotAskedTo` or the role check). The core reads these facts first and returns
-  `Drop` or `Ephemeral` without the effect. If an effect still returns one of them (a race), the driver rolls back to
-  the savepoint, records `Drop(reason)` for that action, and commits the cause ID and the new state. Only an
-  unexpected error rolls back the transaction, and the DBOS step retries it.
-- **Lock order.** The apply step locks the thread row first, then the Koinon operations take their own locks (the run,
-  then the question, as `questions.resolve` documents). No other path locks a thread row while it holds a task, run or
-  question lock. The task end does not write the thread row: the core reads "the bound task is closed" as a fact and
-  treats the key as unbound. Koinon-side events reach the thread row only through the apply step.
+  `Drop` or `Ephemeral` without the operation. A race can still give one of them. So the driver opens the savepoint
+  **before** the `durable.Once` claim, because `durable.Once` takes no savepoint itself
+  (`internal/durable/dedupe.go`). On an expected outcome, the driver rolls back to the savepoint. This removes the
+  claim and the partial writes together. The driver records `Drop(reason)` in the result and commits the cause and
+  the new state. Only an unexpected error rolls back the transaction, and the DBOS step retries it.
+- **Lock order.** The scope row is a new lock. Only the apply step, the timeline sweep's enqueue (no lock) and the
+  send record (decision 5) touch scope rows, and they take no other lock first. The apply step takes the scope row
+  first and then calls **at most one** existing Koinon operation. That operation takes its own locks in its own
+  documented order: the wake path takes the task row (as `deliverDirectMessage` does, `runlock.LockTask` rules); the
+  answer path takes the run, then the question (as `questions.resolve` documents); the task creation takes no
+  existing row lock. So the apply step adds no new order between two existing locks, and no existing path can wait
+  for a scope row. This is why `Step` returns at most one Koinon operation for one event. A burst and a mention go
+  into one `WakeTask` or one `CreateTask`. A free-text answer is one `AnswerQuestion`, and the message is not also a
+  wake. The core reads "the task has ended" as a fact. The task end does not write the scope row.
+- **Bounded retries.** The apply step has a fixed retry limit in DBOS. When the limit is reached, the workflow body
+  records the cause as applied with the result `Drop(apply_failed)` in a short transaction, and a metric counts it.
+  For a `flush`, this transaction also clears the pending flush time, so the next `message` for the scope schedules a
+  new flush. The buffered events stay in the buffer.
 - **Cause IDs.**
   - Slack Events API (HTTP and Socket Mode): the `event_id`. The Socket Mode `envelope_id` is only for the
     acknowledgement.
   - Slack interactivity (a button tap), which has no `event_id`: the container message `ts`, the `action_ts` and the
     user ID.
   - Teams: the conversation ID and the activity `id`. The activity ID alone may not be unique across conversations.
-  - Koinon side: the notification ID, the question ID with the event kind (`ask` or `question_closed`), the agent
-    message ID.
-  - Flush: `flush:<key>:<flush time in Unix seconds>`.
+  - The task timeline: the ID of the last task event in the batch (task events have a UUIDv7 `id`).
+  - Flush: `flush:<scope>:<flush time in Unix seconds>`.
 
   The first code issue for each platform checks these against the platform documentation.
-- **Bursts.** The core puts `message` events for a key in the burst buffer. It returns `ScheduleFlush` only when no
-  flush is pending for the key, so one burst has one timer. At the flush time a `flush` event arrives. If its time is
-  not the pending flush time, the core returns `Drop(stale_flush)`. Otherwise the core returns one `CreateTask` or
-  `WakeTask` with all buffered events, in platform-timestamp order, and clears the buffer. An `@mention`, a `choice` or
-  an answer does not wait: the core puts the buffered events and the new event in one effect, in timestamp order, and
-  clears the buffer and the pending flush. The window is per org (open question 2).
+- **The task timeline as the outbox.** Agent messages and question events are written in `koinon-agentd` and in
+  `koinon-api`. `koinon-agentd` has no `durable.Notifier`. So the driver does not wait for a notification. A **timeline
+  sweep** in `koinon-api` runs every interval, like `questions.Sweeper` (`internal/questions/notify.go`). It finds the
+  tasks that a scope serves (a bound task, or a task with a chat notify target) that have task events with a `seq`
+  after the scope's cursor for that task, and enqueues one apply workflow per task, with the last `seq` it found. The
+  apply step reads the task's events after the cursor up to that `seq`, in `seq` order, and passes them to the core
+  as one batch. It moves the cursor in the scope state. A workflow whose `seq` is not after the cursor returns
+  `Drop(already_applied)`. So a lost sweep, a crash or a second replica gives no loss and no double post. The latency
+  of an agent reply is at most one sweep interval (open question 7). Questions keep their in-app notification, which
+  `questions.NotifyPending` sends.
+- **Bursts.** The core puts `message` events for a scope in the burst buffer. It returns `ScheduleFlush` only when no
+  flush is pending, so one burst has one timer. At the flush time a `flush` event arrives. If its time is not the
+  pending flush time, the core returns `Drop(stale_flush)`. Otherwise the core returns one `CreateTask` or `WakeTask`
+  with all buffered events, in platform-timestamp order, and clears the buffer. A `mention`, a `choice` or an answer
+  does not wait: the core puts the buffered events and the new event in one operation, in timestamp order, and clears
+  the buffer and the pending flush. **A lost flush does not hold the buffer.** When an event arrives and the pending
+  flush time is older than `now` minus a grace time, the core treats the buffer as due: it flushes it with this event
+  in one operation, and a later `flush` event for the old time is stale. The timeline sweep also finds scope rows
+  with an overdue flush and enqueues their `flush` event. The window is per org (open question 2).
 - **One message, two events.** Slack can send `app_mention` and `message` for one message, with two `event_id`
-  values. The core keeps the recent `message_ts` values in the thread state and applies a message only once.
+  values. The core keeps the recent `message_ts` values in the scope state and applies a message only once.
 
 ### 5. Keys and the thread binding
 
@@ -218,35 +293,56 @@ after the dedupe window.
 The key holds platform IDs only, never names or text. Logs can hold it. Metric labels must not hold it
 ([0023](0023-observability-and-audit.md) label rule).
 
+- **Channels.** A chat channel that Koinon posts to is a row of the v0.2 `channels` table: the connection and the
+  platform channel ID. Migration 00036 already has the columns that point to it: `tasks.notify_channel_id` (the notify
+  target `channel` of a trigger) and `questions.target_channel_id` (a question addressed to a channel). The first code
+  issue adds the table and the composite foreign keys `(org_id, notify_channel_id)` and `(org_id, target_channel_id)`
+  that the migration comment announces. This ADR uses those columns. It adds no other notify target.
 - **A thread that a person starts.** `CreateTask` binds the key to the task in the transaction that creates the task
   (`TriggeredTask.OnCreate`). A unique constraint allows one open binding per key. Two mentions in a new thread are
   applied one after the other (decision 4), so the second one sees the binding and wakes the task.
-- **A thread that Koinon starts** (a `notify` or `ask` event for a channel). The key exists only after the post
-  returns its `ts` or ID. The send step records the result in a short transaction right after the platform call: it
-  creates the thread row, binds the key to the task and stores the message ID with its action key. A second record for
-  the same action key changes nothing.
+- **A thread that Koinon starts** (an `ask` to a channel, or a `task_ended` for a task with a channel notify target).
+  The event has the channel scope. The key exists only after the post returns its `ts` or ID. The send step records
+  the result in a short transaction right after the platform call: it creates the thread's scope row, binds the key to
+  the task, stores the message ID with its action key, and sets the new scope's timeline cursor for the task to the
+  `seq` that the post covers (the `Post` action carries it). A second record for the same action key changes nothing.
+- **More than one key for one task.** A task can be bound to more than one key: the thread where it started, and a
+  thread that Koinon started in another channel for a question. Each key has at most one open binding. The first
+  binding is the task's **home** key. Agent replies and the end of the task go to the home key. A question goes to the
+  channel that the question names, and its thread is bound to the task for the answers. The timeline cursor is per
+  scope and task, so each scope sends only what belongs to it.
 - **A reply before the record.** A person can reply in the gap between the post and the record. The event then has
-  `root_by_koinon` set, and the key is not bound yet. The core returns `Defer` for a short time instead of following the
-  triggers. After a fixed number of tries it returns `Drop(unbound_koinon_thread)`. If a crash makes the send step post
-  twice, the first post is never recorded, and replies to it end in this drop. This is rare and visible in the metric.
+  `root_by_koinon` set, and the key is not bound yet. The core returns `Defer` instead of following the triggers. The
+  apply step records the cause as deferred with the event's attempt `n`. The workflow body starts a delayed workflow
+  with the ID `chat:<platform>:<team>:<cause_id>:retry:<n+1>`, outside the chat apply queue, so a waiting event holds
+  no queue slot. When it fires, it enqueues the apply workflow with attempt `n+1` (decision 3 gives the ID). At a fixed
+  limit of attempts the core returns `Drop(unbound_koinon_thread)`. If a crash makes the send step post twice, the
+  first post is never recorded, and replies to it end in this drop. This is rare and visible in the metric.
 - **Every post records its result**, also a reply in a bound thread. So a later `Update` (for example, to remove the
   buttons of an answered question) finds the message ID.
-- **The end of a task.** The core treats the binding of a closed task as no binding. The next event for the key
-  follows the triggers again and replaces the binding.
+- **The end of a task.** The core follows the rules of the direct-message path (`internal/services/directmessage.go`,
+  [0066](0066-triggers-and-scheduling.md) TR3 amendment). A message to a bound task that has `completed` reopens the
+  task (same task, same timeline, reason `follow_up`). A message to a bound task that has been `canceled` or has
+  `failed` does not reopen it: the core treats the binding as closed, and the event follows the triggers again. A new
+  task then gets the binding of the key. The core cannot ask the person to start a new thread, as the inbox does,
+  because the person is already in the thread.
 - **Free-text answers.** A `message` from a linked person counts as the answer when the bound task has exactly one open
   question that was posted in this thread and the person is a recipient of it with a role that may answer
   ([0065](0065-work-model-tasks-inbox.md) decision 9). Every other message wakes the task.
 - **A question closed elsewhere.** A `question_closed` event makes the core `Update` the question's message: the
   buttons go, and the message says how the question ended. A tap that arrives later gets an `Ephemeral` answer.
+- **Uninstalled.** An `uninstalled` event has the connection scope. The core marks the connection as removed by the
+  platform. It drops later events of the connection.
 
 ### 6. Sends: batches, 429 and `Retry-After`
 
 Rate limits live in the driver. The core only states what to send.
 
-- **Queues.** The apply step enqueues the platform actions as one send workflow on a send queue, partitioned by the
-  thread key with a concurrency of one. So sends for one thread keep their order, and a sleeping send holds a slot on
-  the send queue only, never on the org queue that the apply steps use. The flush timer is its own delayed workflow,
-  started outside the org queue. When it fires, it enqueues the `flush` apply workflow.
+- **Queues.** The apply workflow body enqueues the platform actions as one send workflow on a send queue, partitioned
+  by the thread key with a concurrency of one. So sends for one thread keep their order, and a sleeping send holds a
+  slot on the send queue only, never on the chat apply queue or on `koinon.org-work`. The flush timer and the deferred
+  retry are delayed workflows of their own, started outside the queues. When they fire, they enqueue an apply
+  workflow.
 - **Coalesce.** In one send workflow, the driver joins consecutive `Post` actions for one thread into one message when
   the result is under the platform's size limit. Status changes for one thread go out at most once per interval.
 - **Proactive limits.** The driver keeps token buckets sized from the platform's published limits: per connection and
@@ -296,7 +392,9 @@ Rate limits live in the driver. The core only states what to send.
   registry and a trace exporter. It fails if the canary appears in any of them.
 - Bodies are stored in these places, and each one is bounded:
   - the task message, under the org's run-content retention ([0023](0023-observability-and-audit.md));
-  - the burst buffer in the thread row, until the flush clears it; the run-content purge also clears it;
+  - the burst buffer in the scope row, until the flush clears it; the run-content purge also clears it;
+  - the step result stored with an applied cause, which holds the `Post` and `Update` actions with their text, until
+    the cause is removed after the dedupe window;
   - the apply workflow input of the event and the send workflow input of a post (open question 5).
 
 ### 10. Tests
@@ -305,9 +403,15 @@ Rate limits live in the driver. The core only states what to send.
   (the same buffered events in any arrival order give one wake-up in timestamp order; a mention after buffered
   messages keeps their order; `app_mention` and `message` for one message apply once).
 - The apply step: a replay after a crash between the commit and the checkpoint gives the same actions and no second
-  effect; two concurrent mentions in a new thread give one task; an inactive agent at flush time and a tap on a closed
-  question end in a `Drop`, not in a retry loop; a reply before the post is recorded is deferred, then bound.
-- The edge: recorded deliveries, including bad signatures and retries.
+  effect, and the body still enqueues the sends and the timers; two concurrent mentions in a new thread give one task;
+  an inactive agent at flush time and a tap on a closed question end in a `Drop`, not in a retry loop, and leave no
+  dedupe claim; a reply before the post is recorded is deferred, then bound, and holds no queue slot while it waits; a
+  lost flush timer does not hold the buffer; an apply step that always fails ends in `Drop(apply_failed)`; a wake and an
+  answer that race with a turn end give no deadlock.
+- The timeline sweep: an agent reply and a question event reach the bound thread once, with two replicas and with a
+  crash between the enqueue and the apply.
+- The edge: recorded deliveries, including bad signatures, an unknown path and retries; each filter rule has a core
+  test that shows the core drops the same event.
 - The driver: a fake Slack and a fake Teams server in the test process, which return 429 with `Retry-After`, 5xx and
   slow answers. A 429 on one thread does not delay the apply steps. No test calls the real platforms, as no test calls
   a paid model.
@@ -323,11 +427,25 @@ Rate limits live in the driver. The core only states what to send.
   duplicates need more dedupe. Rejected: the acknowledgement must not depend on Koinon's load.
 - **Acknowledge before the enqueue** _(reconstructed)_. This answers a few milliseconds sooner, but a crash after the
   answer loses the event, and the platform does not deliver it again. Rejected.
-- **Optimistic versioning of the thread row, without a lock** _(reconstructed)_. It avoids a row lock, but a retry
+- **Optimistic versioning of the scope row, without a lock** _(reconstructed)_. It avoids a row lock, but a retry
   after a conflict runs `Step` on a new state, and the effects of the first try must then be found and undone.
   Rejected: the row lock is short, because the apply step does no platform I/O.
-- **Effects in their own transactions after the state write** _(reconstructed)_. This keeps the thread row lock
+- **Effects in their own transactions after the state write** _(reconstructed)_. This keeps the scope row lock
   shorter, but a crash between the two leaves a state that names a task that does not exist, or the reverse. Rejected.
+- **More than one Koinon operation in one apply step** _(reconstructed)_. For example, an answer and a wake for one
+  message. It saves an event, but the answer path locks the run before the question, and the wake path locks the task
+  row. Two operations in one transaction would join two lock orders that the existing paths do not join, and could
+  deadlock with a turn end. Rejected: one operation per apply step.
+- **Koinon-side events from a `durable.Notifier`** _(reconstructed)_. A notifier handler would send each agent
+  message and question event after its commit, with less latency than a sweep. But agent messages are written in
+  `koinon-agentd`, which has no notifier, and a lost notification would lose a chat message. Rejected: the task
+  timeline is already durable and ordered, so it is the outbox. A wake-up signal (for example Postgres `LISTEN`) can
+  cut the latency later without a change to this design (open question 7).
+- **Chat apply on `koinon.org-work`** _(reconstructed)_. One queue is less configuration. But a busy channel would use
+  the org's 4 slots and 60 starts per minute, and direct messages, schedules and poll events would wait. Rejected.
+- **`Defer` as a sleep in the apply workflow** _(reconstructed)_. It is simpler, but the sleeping workflow holds a slot
+  on the apply queue, and a replay of the step gives the stored `Defer` again. Rejected: a deferred event is a new
+  attempt with its own workflow ID.
 - **Infinity's runtime as it is** _(reconstructed)_. Infinity builds its Slack core as a Hydro dataflow in Rust.
   Koinon is Go and already has DBOS for durability. Rejected: we take the shape (no-I/O core, events in, actions out),
   not the runtime.
@@ -347,22 +465,25 @@ Rate limits live in the driver. The core only states what to send.
   them.
 - Positive: the acknowledgement does not depend on Koinon's load, so slow work does not cause platform retries.
 - Positive: retries, rate limits, secret access and the no-body-log rule are each in one place.
-- Negative: there are more types (event, state, action, a renderer per platform) and two queues (apply and send) than
-  in a handler-based adapter.
+- Negative: there are more types (event, state, action, a renderer per platform), two queues (chat apply and send),
+  a timeline sweep and two kinds of delayed workflow than in a handler-based adapter.
+- Negative: an agent reply reaches the thread up to one sweep interval after it is written.
 - Negative: Koinon's task, wake and answer operations must accept the caller's transaction and report expected
-  outcomes as values. _(inferred)_
+  outcomes as values. The wake operation gets an `interrupt` input that does not exist today. _(inferred)_
 - Negative: posts are at-least-once. A crash at the wrong time can post a message twice, and replies to the unrecorded
   copy are dropped. _(inferred)_
 - Negative: the DBOS system tables hold message bodies in workflow inputs until DBOS removes the workflow records.
   _(inferred)_
 - Follow-ups: the code goes in issues filed after the review of this ADR. Proposed split: (1) the core types and
-  `Step`, with the import-graph test; (2) the apply step, the thread table and the caller's transaction for the task
-  operations; (3) the Koinon-side events through `koinon.notify`; (4) the Slack edge (Events API, interactivity and
+  `Step`, with the import-graph test; (2) the apply step, the chat apply queue, the scope and applied-cause tables,
+  the caller's transaction for the task operations and the new `interrupt` input of the wake path; (3) the timeline
+  sweep, the `channels` table and the foreign keys of migration 00036; (4) the Slack edge (Events API, interactivity and
   Socket Mode); (5) the Slack driver with the send queue, rate limits and the fake Slack server; (6) the Teams edge
   and driver; (7) account linking ([0065](0065-work-model-tasks-inbox.md) decision 9); (8) the body leak test.
 - Follow-ups: when this ADR is accepted, [0066](0066-triggers-and-scheduling.md) gets an "Amended by" line for the
-  exact channel-event key (decision 9), the `teams` dedupe source and the synthetic cause IDs (`flush:`, Slack
-  interactivity) under the `slack` source (DB3 list; also the comment in `internal/durable/dedupe.go`).
+  exact channel-event key (decision 9), the `teams` dedupe source, the synthetic cause IDs (`flush:`, Slack
+  interactivity) under the `slack` source (DB3 list; also the comment in `internal/durable/dedupe.go`) and the
+  `koinon.chat-apply` queue next to `koinon.org-work` (DB2).
 
 ## Open questions
 
@@ -381,12 +502,17 @@ Each question gets a tracking issue with the code issues, after the review of th
    keeps all bodies under one retention rule. It costs one more write before the acknowledgement.
 6. **Teams API.** The Bot Framework connector or Microsoft Graph for channel messages. This ADR assumes the Bot
    Framework (activities with `serviceUrl`).
-7. **Limits not decided:** the give-up limit and the status interval of decision 6, and the `Defer` time and tries of
-   decision 5.
+7. **Limits not decided:** the give-up limit and the status interval of decision 6; the `Defer` time and tries of
+   decision 5; the limits of the chat apply queue, the apply retry limit, the flush grace time and the sweep interval
+   of decision 4. A wake-up signal for the sweep (Postgres `LISTEN`) is a later option if the interval is too slow.
 8. **Two-way mirroring.** Should Koinon post every task message to a bound thread, or only notifications, questions
    and the agent's replies? This ADR builds the second. The first needs a decision on loop prevention for edits.
 9. **The `channel_event` trigger filter.** Its shape (connection, channels, rules, @mention only, bots allowed) is not
    decided. TR1 refuses `channel` until chat connectors exist.
+10. **Messages from unlinked people.** This ADR records them as `system` task events with the platform user ID in the
+    payload (decision 2), because the `user` actor needs a Koinon user. The other option is a new actor kind, for
+    example `external`. It changes the `task_actor_kind` enum and every reader of the timeline, so it needs its own
+    decision. The first code issue checks that the agent's prompt shows these messages.
 
 ## Upstream verification
 
