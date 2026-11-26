@@ -178,6 +178,15 @@ var _ = Describe("the reconciler leader term (#635)", func() {
 		Expect(v).To(Equal("10s"))
 	})
 
+	It("refuses a transaction that is not READ COMMITTED, where the check could read an old term", func(ctx SpecContext) {
+		term := take(ctx)
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = tx.Rollback(context.Background()) })
+		_, err = tx.Exec(ctx, "SELECT reconciler_check_term($1)", term)
+		Expect(err).To(MatchError(ContainSubstring("needs READ COMMITTED")))
+	})
+
 	It("passes the statements of a context without a term through unchanged", func(ctx SpecContext) {
 		take(ctx)
 		_, err := db.Exec(ctx, "INSERT INTO leaderterm_spec (v) VALUES (1)")

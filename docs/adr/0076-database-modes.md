@@ -205,7 +205,10 @@ The maintainer chose option 1 of issue 635 (comment of 2026-11-26): a term on da
   the lock table only: the check assigns no transaction ID and writes no WAL. A transaction of a lead
   also sets `idle_in_transaction_session_timeout` to 10 s, in the same statement as the check: a
   leader that vanished in an open transaction (a partition) delays the take of the next leader by at
-  most that time, not until Postgres sees the dead client.
+  most that time, not until Postgres sees the dead client. Two rare cases are not bounded by it: a
+  batch whose end (Sync) did not reach the server, and a backend that is blocked on a full send
+  buffer. They hold the lock until Postgres sees the dead client. The check refuses a transaction
+  that is not READ COMMITTED (SQLSTATE `KO636`).
 - **Not covered: Kubernetes deletes and execution-layer calls.** The database cannot refuse them.
   They keep the time fence of the amendment above. Issue #1465 names their exit condition: the
   gateway reads only the State stream (ADR 0097). Writes of the MCP prober and the remote agent

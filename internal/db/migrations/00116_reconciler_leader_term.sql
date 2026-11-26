@@ -40,13 +40,18 @@ END
 $$;
 -- +goose StatementEnd
 
--- reconciler_check_term fails with SQLSTATE KO635 when t is not the current term. Under READ
--- COMMITTED the SELECT takes a new snapshot after the lock is held, so it sees a take that committed
--- while the check waited.
+-- reconciler_check_term fails with SQLSTATE KO635 when t is not the current term, and with KO636 in
+-- a transaction that is not READ COMMITTED. Under READ COMMITTED the SELECT takes a new snapshot
+-- after the lock is held, so it sees a take that committed while the check waited.
 -- +goose StatementBegin
 CREATE FUNCTION reconciler_check_term(t bigint) RETURNS void
 LANGUAGE plpgsql AS $$
 BEGIN
+    -- At a higher level the snapshot is older than the lock, and a stale term would pass.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'reconciler_check_term needs READ COMMITTED, not %', current_setting('transaction_isolation')
+            USING ERRCODE = 'KO636';
+    END IF;
     PERFORM pg_advisory_xact_lock_shared(hashtextextended('koinon.reconciler_leader_term', 0));
     PERFORM 1 FROM reconciler_leader WHERE id = 1 AND term = t;
     IF NOT FOUND THEN

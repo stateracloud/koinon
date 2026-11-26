@@ -12,7 +12,7 @@
 // advisory lock until the transaction ends, and the take holds it exclusive: the take of the next
 // leader waits for each statement of the old term that is in progress, so none of them commits after
 // the newer term (migration 00116). The transactions must be READ COMMITTED (the default), so the
-// check reads the term after it holds the lock.
+// check reads the term after it holds the lock; the check refuses any other level.
 //
 // The term covers database writes only. Kubernetes deletes and execution-layer calls keep the time
 // fence of ADR 0076 (gateway.WithFence); issue 1465 names their exit condition.
@@ -30,7 +30,9 @@ import (
 )
 
 // IdleInTransaction bounds how long a transaction of a lead may be idle. The reconciler's transactions
-// are short; this bounds how long a vanished leader delays the next one.
+// are short; this bounds how long a vanished leader delays the next one. When it fires, Postgres ends
+// the whole session, not only the transaction: a fenced transaction must do database work only, and
+// never wait on a Kubernetes or backend call.
 const IdleInTransaction = 10 * time.Second
 
 // staleCode is the SQLSTATE that reconciler_check_term raises (migration 00116).
