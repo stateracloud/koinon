@@ -188,7 +188,7 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 		echo "docker unhealthy"
 	elif grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
-	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
+	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|agent proxy: no rule|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
 		echo "network denied"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"

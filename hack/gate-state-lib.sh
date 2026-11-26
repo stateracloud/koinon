@@ -5,7 +5,7 @@
 # Claude Code sandbox, which allows writes only to the worktree, $TMPDIR and the entries of
 # .claude/settings.json. The tools under the gates write state outside those paths by default
 # (buildx its activity file under ~/.docker/buildx, pnpm its store under ~/.local/share or
-# ~/Library), so a sandboxed run got EPERM instead of a verdict. gate_state_env points each one at
+# ~/Library, buf its module cache under ~/.cache/buf), so a sandboxed run got EPERM instead of a verdict. gate_state_env points each one at
 # a path the sandbox allows. Sourced by hack/lane-gates.sh after hack/gate-reuse-lib.sh (it uses
 # gate_logdir), inside the repository root.
 #
@@ -21,6 +21,9 @@
 #                       relinks node_modules when the store changes, so the first gate run in a
 #                       worktree (and a later plain `make test-opencode-plugin`) installs again from
 #                       the registry: slower, not wrong.
+#   BUF_CACHE_DIR       $TMPDIR/koinon-buf-cache, the module cache of buf (the generate gate). buf
+#                       writes it under ~/.cache/buf by default. The lanes of one machine share it;
+#                       buf keys its entries by module digest, so a shared cache is safe.
 #
 # Not moved here, on purpose:
 #   - the envtest port locks (controller-runtime's os.UserCacheDir()/kubebuilder-envtest). They
@@ -53,6 +56,9 @@ gate_state_env() {
 	fi
 	if [[ -z ${KOINON_PNPM_STORE:-} ]]; then
 		export KOINON_PNPM_STORE=${TMPDIR:-/tmp}/koinon-pnpm-store
+	fi
+	if [[ -z ${BUF_CACHE_DIR:-} ]]; then
+		export BUF_CACHE_DIR=${TMPDIR:-/tmp}/koinon-buf-cache
 	fi
 }
 

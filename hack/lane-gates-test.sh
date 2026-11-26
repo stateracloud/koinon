@@ -62,6 +62,7 @@ sandbox) echo "open /x: operation not permitted"; exit 1 ;;
 dockerperm) echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"; exit 1 ;;
 network) echo "go: github.com/x/y@v1: Get \"https://proxy.golang.org/x\": proxyconnect tcp: CONNECT tunnel failed, response 403"; exit 1 ;;
 netallow) echo "failed downloading schema at https://schemas.example.invalid/x.json: not in this command's allowed_domains ? re-run the command"; exit 1 ;;
+agentproxy) echo 'govulncheck: fetching vulnerabilities: Get "https://vuln.example.invalid/index.json": Forbidden (agent proxy: no rule or network setting allows this host)'; exit 1 ;;
 networkfail) printf -- '--- FAIL: TestX (0.1s)\ndial tcp: lookup proxy.golang.org: no such host\n'; exit 1 ;;
 esac
 EOF
@@ -159,6 +160,8 @@ run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=network
 expect "job network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=netallow
 expect "job allowed_domains denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=agentproxy
+expect "job agent proxy refusal" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
 expect "a real failure beats a network line" 1 '^gate=escape rc=1 .*verdict=fail'
 
@@ -380,7 +383,7 @@ envtest-assets)
 	sandbox) echo "mkdir /home/x/.local/share/kubebuilder-envtest: operation not permitted" >&2; exit 1 ;;
 	broken) echo "make: *** No rule to make target" >&2; exit 2 ;;
 	esac ;;
-*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
+*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} buf=${BUF_CACHE_DIR:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
 esac
 EOF2
 chmod +x "$tmp/make-state"
@@ -395,13 +398,13 @@ mkdir -p "$tmp/home/.docker/buildx/instances"
 echo mybuilder >"$tmp/home/.docker/buildx/current"
 echo '{"Name":"mybuilder"}' >"$tmp/home/.docker/buildx/instances/mybuilder"
 mkdir -p "$tmp/home/.docker/buildx/activity"
-staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE=
+staterun STUB_JOBS="escape harnesses opencodeplugin" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR=
 expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass' '^gate=opencodeplugin .*verdict=pass'
 st=$(cat "$(gate_log harnesses)")
 total=$((total + 1))
 case $st in
-*"buildx=$tmp/koinon-preflight/"*"/state/buildx pnpm=$tmp/koinon-pnpm-store assets=$tmp/assets"*) ;;
-*) echo "FAIL: state: buildx, pnpm and envtest paths: $st"; fails=$((fails + 1)) ;;
+*"buildx=$tmp/koinon-preflight/"*"/state/buildx pnpm=$tmp/koinon-pnpm-store buf=$tmp/koinon-buf-cache assets=$tmp/assets"*) ;;
+*) echo "FAIL: state: buildx, pnpm, buf and envtest paths: $st"; fails=$((fails + 1)) ;;
 esac
 bx=${st#*buildx=}; bx=${bx%% *}
 total=$((total + 1))
@@ -416,10 +419,10 @@ if [[ -e $bx/current || -e $bx/instances ]]; then
 	echo "FAIL: state: a removed builder stays in the buildx copy"; fails=$((fails + 1))
 fi
 # A value that is set wins.
-staterun STUB_JOBS="harnesses" BUILDX_CONFIG=/own/buildx KOINON_PNPM_STORE=/own/store
+staterun STUB_JOBS="harnesses" BUILDX_CONFIG=/own/buildx KOINON_PNPM_STORE=/own/store BUF_CACHE_DIR=/own/buf
 expect "state: own values win" 0 '^gate=harnesses .*verdict=pass'
 total=$((total + 1))
-grep -q 'buildx=/own/buildx pnpm=/own/store' "$(gate_log harnesses)" || { echo "FAIL: state: own values were replaced"; fails=$((fails + 1)); }
+grep -q 'buildx=/own/buildx pnpm=/own/store buf=/own/buf' "$(gate_log harnesses)" || { echo "FAIL: state: own values were replaced"; fails=$((fails + 1)); }
 # envtest assets the sandbox cannot fetch: the envtest gates are notrun with the reason, the others run.
 staterun STUB_JOBS="escape harnesses" STUB_ASSETS=sandbox
 expect "state: envtest assets denied is notrun" 3 '^gate=escape rc=0 .*verdict=notrun reason="envtest assets not found \(sandbox denial\); run make envtest-assets once outside the sandbox"' '^gate=harnesses .*verdict=pass'
