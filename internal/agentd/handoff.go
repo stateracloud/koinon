@@ -146,7 +146,8 @@ var externalPlatforms = map[string]string{"slack": "Slack", "teams": "Microsoft 
 // externalNote is the line that agentd puts before a message from an external actor (ADR 0129
 // decision 4): a person without a Koinon account who wrote in Slack or Teams. It has no name and no
 // ID. It tells the agent that this person cannot approve its tool calls or answer its questions, so
-// the agent does not ask them to.
+// the agent does not ask them to. externalEnd closes the message, so the agent can see where the
+// person's text stops: text in the message that claims to come from Koinon is still theirs.
 func externalNote(source string) string {
 	where := externalPlatforms[source]
 	if where == "" {
@@ -156,8 +157,10 @@ func externalNote(source string) string {
 		". This person cannot approve tool calls or answer questions; members of the org do that in Koinon.]"
 }
 
+const externalEnd = "[End of the message from the person without a Koinon account.]"
+
 // promptMessage is the text of a task message as the prompt shows it, "" if it has none. A message
-// from an external actor starts with externalNote.
+// from an external actor is between externalNote and externalEnd.
 func promptMessage(e store.TaskEvent) string {
 	var body struct {
 		Text   string `json:"text"`
@@ -167,7 +170,7 @@ func promptMessage(e store.TaskEvent) string {
 		return ""
 	}
 	if e.ActorKind == store.TaskActorKindExternal {
-		return externalNote(body.Source) + "\n" + body.Text
+		return externalNote(body.Source) + "\n" + strings.TrimSpace(body.Text) + "\n" + externalEnd
 	}
 	return body.Text
 }

@@ -27,11 +27,14 @@ var _ = Describe("the external actors migrations (#1408)", func() {
 		Expect(db.QueryRowContext(ctx, query, args...).Scan(&s)).To(Succeed(), query)
 		return s
 	}
-	insert := func(ctx SpecContext, kind, actor string, byUser, byExternal any) error {
-		_, err := db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, actor_external_id, payload)
-			VALUES ($1, $2, (SELECT coalesce(max(seq), 0) + 1 FROM task_events WHERE task_id = $2), $3, $4, $5, $6, '{"text":"hi","source":"slack"}')`,
-			org, task, kind, actor, byUser, byExternal)
+	insertPrompt := func(ctx SpecContext, kind, actor string, byUser, byExternal any, prompt bool) error {
+		_, err := db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, actor_external_id, payload, prompt)
+			VALUES ($1, $2, (SELECT coalesce(max(seq), 0) + 1 FROM task_events WHERE task_id = $2), $3, $4, $5, $6, '{"text":"hi","source":"slack"}', $7)`,
+			org, task, kind, actor, byUser, byExternal, prompt)
 		return err
+	}
+	insert := func(ctx SpecContext, kind, actor string, byUser, byExternal any) error {
+		return insertPrompt(ctx, kind, actor, byUser, byExternal, kind == "message")
 	}
 
 	BeforeEach(func(ctx SpecContext) {
@@ -65,6 +68,10 @@ var _ = Describe("the external actors migrations (#1408)", func() {
 		Expect(insert(ctx, "message", "external", nil, nil)).To(MatchError(ContainSubstring("task_events_actor_external_check")))
 		Expect(insert(ctx, "message", "user", user, person)).To(MatchError(ContainSubstring("task_events_actor_external_check")))
 		Expect(insert(ctx, "message", "system", nil, person)).To(MatchError(ContainSubstring("task_events_actor_external_check")))
+	})
+
+	It("refuses a message by an external actor that is not part of the run's prompt", func(ctx SpecContext) {
+		Expect(insertPrompt(ctx, "message", "external", nil, person, false)).To(MatchError(ContainSubstring("task_events_external_prompt_check")))
 	})
 
 	It("refuses an external actor of another org", func(ctx SpecContext) {

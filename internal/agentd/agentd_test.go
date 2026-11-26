@@ -211,8 +211,8 @@ var _ = Describe("Pool", func() {
 		prompts, _, _, _ := e.harness.snapshot()
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\n" +
 			"[A person without a Koinon account wrote this message in Slack. This person cannot approve tool calls or " +
-			"answer questions; members of the org do that in Koinon.]\nthe build is red"}))
-		Expect(prompts[0]).NotTo(ContainSubstring("U0TEST"), "the prompt names no platform ID")
+			"answer questions; members of the org do that in Koinon.]\nthe build is red\n" +
+			"[End of the message from the person without a Koinon account.]"}))
 	})
 
 	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {

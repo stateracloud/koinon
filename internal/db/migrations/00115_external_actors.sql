@@ -6,7 +6,8 @@
 -- email address or other profile data. A task event by such a person names the row.
 --
 -- An external actor can only write messages: the check on task_events refuses every other kind, so
--- no approval, answer or state change can name one.
+-- no approval, answer or state change can name one. Each of their messages is part of the run's
+-- prompt: a writer that forgets the prompt flag fails, and the agent never misses their words.
 --
 -- Expand only (ADR 0085): a new table, a new nullable column and checks that every old row passes.
 
@@ -32,4 +33,6 @@ ALTER TABLE task_events
     ADD CONSTRAINT task_events_actor_external_check
         CHECK ((actor_kind = 'external') = (actor_external_id IS NOT NULL)),
     ADD CONSTRAINT task_events_external_message_check
-        CHECK (actor_kind <> 'external' OR kind = 'message');
+        CHECK (actor_kind <> 'external' OR kind = 'message'),
+    ADD CONSTRAINT task_events_external_prompt_check
+        CHECK (actor_kind <> 'external' OR prompt);

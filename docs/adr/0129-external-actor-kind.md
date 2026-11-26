@@ -91,8 +91,9 @@ The payload of an `external` message is a normal `TimelineMessage`. Its `source`
 - An `external` message never interrupts a running turn, and it never reopens a completed task. Both need a linked
   person ([0127](0127-chat-adapter-pure-core.md) decisions 2 and 5).
 
-The catalog of typed timeline events in `internal/tasks` records the same rule: each kind says whether an `external`
-actor can write it, and only `message` can.
+The catalog of typed timeline events in `internal/tasks` records the same rule for the writer: `ExternalActorCanWrite`
+is true only for `message`. The database check is the rule that holds; the catalog function lets a writer refuse
+the event before the insert.
 
 ### 4. What the timeline shows
 
@@ -102,12 +103,15 @@ actor can write it, and only `message` can.
 - **Web.** The timeline shows the message as a message from a person, with the label "Slack user" or "Teams user",
   the platform user ID, and the note "No Koinon account". A later change can show the platform's display name. It must
   read the name from the platform at display time and must not store it.
-- **Agent prompt.** An `external` message is part of the run's prompt (`task_events.prompt` is true). agentd puts one
-  fixed line before its text. The line says that a person without a Koinon account wrote the message on the platform,
+- **Agent prompt.** An `external` message is part of the run's prompt (`task_events.prompt` is true). A database check
+  enforces this: `actor_kind <> 'external' OR prompt`. Thus a writer that forgets the flag fails, and the agent never
+  misses the message. agentd puts one fixed line before its text and one fixed line after it. The line says that a person without a Koinon account wrote the message on the platform,
   and that this person cannot approve tool calls or answer questions. The line has no name and no ID. The agent thus
-  does not ask this person for an approval.
+  does not ask this person for an approval. The line after the text marks where the person's text stops, so text in
+  the message that claims to come from Koinon stays the person's text.
 - **A2A edge.** An `external` message is a message from a person. The A2A history shows it with the role `user`, as a
-  message from a Koinon user.
+  message from a Koinon user. Such a message also opens and answers A2A turns as a message from a Koinon user does,
+  so the turns agree with the history.
 
 ### 5. Metrics and logs
 
@@ -120,7 +124,9 @@ Two new migrations, both expand only ([0085](0085-upgrade-compatibility-and-reco
 
 1. `ALTER TYPE task_actor_kind ADD VALUE 'external'`. It is alone in its migration, because Postgres does not let a
    transaction use an enum value that the same transaction added.
-2. The `external_actors` table, the `actor_external_id` column and the two checks.
+2. The `external_actors` table, the `actor_external_id` column, its foreign key and the three checks (the column
+   and the kind agree, only `message`, always `prompt`). The checks and the foreign key are validated when they are
+   added. `task_events` has no row with `actor_external_id` yet, so the scan is short.
 
 No old row changes. An old binary never writes `external`. The first writer is the chat driver's apply step, which a
 later issue adds; this decision adds the readers first.
@@ -147,6 +153,10 @@ later issue adds; this decision adds the readers first.
 - Negative: every switch on `task_actor_kind` must handle a fourth value. The enum audit in `internal/services` fails
   until the API table has a row for it. _(inferred)_
 - Negative: the timeline shows a platform user ID, not a name, until a later change reads the name from the platform.
+- Negative: a question that the agent asks in a chat thread goes to the latest Koinon user who wrote in the thread
+  (`LatestUserMessageActor`), not to an `external` person, who cannot answer it. When the latest message is from an
+  `external` person, the question thus goes to an earlier Koinon user. The chat driver's issue decides how it shows
+  such a question; the label "the person in this chat" is wrong for it. _(inferred)_
 - Follow-ups: the chat driver's apply step writes `external` events (the code issue of
   [0127](0127-chat-adapter-pure-core.md) decision 2, which removes `Drop(unlinked_actor)`). The removal of an
   external person's identity on request is not decided here; it gets its own issue when the driver writes rows.

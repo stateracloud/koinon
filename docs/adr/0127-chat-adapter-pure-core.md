@@ -138,8 +138,9 @@ The core drops every event from Koinon's own bot user and from other bots. No tr
 message from an unlinked person, which a channel event trigger can accept ([0066](0066-triggers-and-scheduling.md)
 decision 3), is an event with the new actor kind `external` (question 6). This ADR does not record such a message
 as a `system` event. The `external` kind changes the `task_actor_kind` enum and every reader of the timeline, so it has
-its own decision and its own issue. That decision says what the payload holds; this ADR requires `source` (`slack` or
-`teams`), the platform and the platform user ID, and never a display name. It also makes the agent's prompt show an
+its own decision and its own issue. That decision ([0129](0129-external-actor-kind.md)) keeps the platform, the team
+and the platform user ID in an `external_actors` row; the payload holds `source` (`slack` or `teams`) and never a
+display name. It also makes the agent's prompt show an
 `external` message as a message from a person. The code issue that applies messages from unlinked people depends on
 that issue. Until it lands, the core returns `Drop(unlinked_actor)` for a message from an unlinked person.
 

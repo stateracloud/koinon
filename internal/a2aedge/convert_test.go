@@ -29,4 +29,13 @@ var _ = Describe("History", func() {
 		Entry("the agent", store.TaskActorKindAgent, a2a.MessageRoleAgent),
 		Entry("the system: not a conversation entry", store.TaskActorKindSystem, a2a.MessageRole("")),
 	)
+
+	It("opens a turn with the first message of a person without a Koinon account (ADR 0129)", func() {
+		msg := func(seq int64, actor store.TaskActorKind) store.TaskEvent {
+			return store.TaskEvent{Seq: seq, Kind: "message", ActorKind: actor, Payload: []byte(`{"text":"hello"}`)}
+		}
+		events := []store.TaskEvent{msg(1, store.TaskActorKindExternal), msg(2, store.TaskActorKindAgent), msg(3, store.TaskActorKindExternal)}
+		Expect(a2aedge.Turns(events)).To(Equal(1), "a later message answers the open turn")
+		Expect(a2aedge.TurnStarts(events)).To(Equal([]int{0}))
+	})
 })
