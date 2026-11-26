@@ -59,6 +59,6 @@ var _ = Describe("the capability set of the actor template", func() {
 
 	It("does not share the slice with the package value", func() {
 		render("gvisor", "").GetContainers()[0].GetSecurityContext().GetCapabilities().Add[0] = "SYS_ADMIN"
-		Expect(substrate.GVisorCapAdd).NotTo(ContainElement("SYS_ADMIN"))
+		Expect(substrate.GVisorCapAdd()).NotTo(ContainElement("SYS_ADMIN"))
 	})
 })

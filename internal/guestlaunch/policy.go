@@ -202,5 +202,8 @@ func (p Policy) Validate() error {
 	if p.User.Mode == ModeRequire && p.User.UID == 0 {
 		return fmt.Errorf("guest launcher policy: user mode require needs a non-zero uid")
 	}
+	if p.User.Mode == ModeRequire && p.User.GID == 0 {
+		return fmt.Errorf("guest launcher policy: user mode require needs a non-zero gid")
+	}
 	return nil
 }

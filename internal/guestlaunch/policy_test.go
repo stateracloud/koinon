@@ -67,6 +67,7 @@ var _ = Describe("ParsePolicy", func() {
 		Entry("unknown deny_extra name", `{"seccomp":{"deny_extra":["ptrcae"]}}`, "unknown syscall"),
 		Entry("relative list dir", `{"landlock":{"list_dirs":["dev"]}}`, "not absolute"),
 		Entry("require root", `{"user":{"mode":"require","uid":0}}`, "non-zero uid"),
+		Entry("require the root group", `{"user":{"mode":"require","uid":10001,"gid":0}}`, "non-zero gid"),
 		Entry("not JSON", `nope`, "guest launcher policy"),
 	)
 })

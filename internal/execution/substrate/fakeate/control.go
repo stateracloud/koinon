@@ -60,6 +60,7 @@ type actor struct {
 	procs   map[string]*fproc
 	started [][]string // every command the guest was asked to start, as sent
 	files   map[string][]byte
+	modes   map[string]uint32 // the mode that WriteFile sent for each file; rm keeps it, so a spec can read it later
 	nextPID int
 
 	smu       sync.Mutex
@@ -226,6 +227,7 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 		state: ateapiv1.ActorState_ACTOR_STATE_SUSPENDED,
 		procs: map[string]*fproc{},
 		files: map[string][]byte{},
+		modes: map[string]uint32{},
 	}
 	if src := in.GetSourceTag().GetName(); src != "" {
 		tag, ok := c.tags[key{k.atespace, src}]

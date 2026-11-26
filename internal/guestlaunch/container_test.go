@@ -282,8 +282,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		})
 
 		It("keeps the outside process's descriptors closed to the payload without Landlock", func() {
-			// No Landlock domain: the kernel's capability rule (the target's permitted set is not a
-			// subset of the payload's empty one) and the other uid refuse the access.
+			// No Landlock domain. The launcher closes the inherited descriptors before it starts the
+			// payload. The kernel's ptrace access check refuses the /proc reads: the payload has another
+			// uid than the outside process and no CAP_SYS_PTRACE.
 			out, code := runWith(noLandlockGVisor(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("uid 10001\n"))

@@ -758,9 +758,17 @@ root payload from two tiers and leaves the third as it was.
 - **The guest front on port 80.** The front keeps its listener on port 80 without `NET_BIND_SERVICE`. The gVisor
   netstack has no privileged-port check (gVisor commit `84708bc9b0a3ceeee1357c3621ae25f9d9ba3c5f`, read on
   2026-11-26: `pkg/sentry/socket/netstack` and `pkg/tcpip/stack` do not test the capability or
-  `ip_unprivileged_port_start`). The lab run above started the front with this set.
+  `ip_unprivileged_port_start`). The lab run above started the front with this set. This is true only when runsc
+  uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
+  port, and this set is not sufficient.
+- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. So the driver lets the
+  payload make a staging directory (mode `0733`). The front writes the archive there with mode `0644`, and the
+  payload extracts it and removes the directory. A spec in `internal/execution/substrate` checks the order and the
+  modes. The checkpoint restore uses the same path.
 - **Before #1387 closes.** A proof run with the real front image and the escape suite on the lab. The maintainer
-  runs it.
+  runs it. It must show the runsc network mode, Exec in `/sandbox`, Upload and the checkpoint restore. The owner
+  and mode of the home volume at run time decide whether the front, without `CAP_DAC_READ_SEARCH`, can enter
+  `/sandbox`.
 
 ### Prior art
 

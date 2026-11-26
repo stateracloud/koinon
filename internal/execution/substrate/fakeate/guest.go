@@ -176,10 +176,22 @@ func (g *guestServer) run(a *actor, p *fproc) {
 		}
 	case "mkdir":
 		p.exit(0)
-	case "rm":
+	case "rm": // rm [-f|-rf] PATH...: -r also removes every file below PATH
+		recursive := false
 		g.c.mu.Lock()
 		for _, f := range args {
+			if strings.HasPrefix(f, "-") {
+				recursive = recursive || strings.Contains(f, "r")
+				continue
+			}
 			delete(a.files, f)
+			if recursive {
+				for name := range a.files {
+					if strings.HasPrefix(name, path.Clean(f)+"/") {
+						delete(a.files, name)
+					}
+				}
+			}
 		}
 		g.c.mu.Unlock()
 		p.exit(0)
@@ -422,6 +434,7 @@ func (g *guestServer) WriteFile(stream ateenvv1alpha.FileSystemService_WriteFile
 	var (
 		name string
 		buf  []byte
+		mode uint32
 	)
 	for {
 		req, err := stream.Recv()
@@ -435,6 +448,9 @@ func (g *guestServer) WriteFile(stream ateenvv1alpha.FileSystemService_WriteFile
 			if name = req.GetPath(); name == "" {
 				return status.Error(codes.InvalidArgument, "file path cannot be empty")
 			}
+		}
+		if mode == 0 {
+			mode = req.GetMode()
 		}
 		buf = append(buf, req.GetChunk()...)
 	}
@@ -452,6 +468,7 @@ func (g *guestServer) WriteFile(stream ateenvv1alpha.FileSystemService_WriteFile
 	}
 	g.c.mu.Lock()
 	a.files[path.Clean(name)] = buf
+	a.modes[path.Clean(name)] = mode
 	g.c.mu.Unlock()
 	return stream.SendAndClose(&ateenvv1alpha.WriteFileResponse{BytesWritten: int64(len(buf))})
 }

@@ -20,12 +20,23 @@ import (
 // uploadChunk is the most bytes one WriteFile message carries.
 const uploadChunk = 256 << 10
 
-// uploadDir holds the archive in the guest while it is extracted.
+// uploadDir holds the staging directory of each Upload in the guest.
 const uploadDir = "/tmp"
 
+// The staging directory and the archive in it are made so that a non-root payload can extract and
+// remove what the root guest front writes (issue #1387). The payload (uid 10001 on the gVisor tiers)
+// makes the directory, so it can remove all of it. Its mode lets the front, which is root without
+// CAP_DAC_OVERRIDE, create the archive in it as "other", and lets no other user list it. The archive
+// is readable by other users, so tar as the payload can read the file that the front owns.
+const (
+	stagingMode = "0733"
+	archiveMode = 0o644
+)
+
 // Upload implements execution.Compute over the guest's FileSystemService. The service writes files,
-// not archives, so the driver streams the tar to a temporary file in the guest, then runs three
-// fixed commands (mkdir, tar, rm) in the guest with no shell: the paths are arguments, never parsed.
+// not archives, so the driver makes a staging directory in the guest, streams the tar to a file in
+// it, then extracts it and removes the directory. The four fixed commands (mkdir, mkdir, tar, rm)
+// run in the guest with no shell, as the payload user: the paths are arguments, never parsed.
 // The guest image therefore needs mkdir, tar and rm, which the guest launcher's image contract
 // lists (epic 1082, #1087). A 10 MiB archive took 0.62 s in the lab (ADR 0119, proof P-A).
 //
@@ -44,11 +55,17 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return fmt.Errorf("substrate: %w", err)
 	}
-	tmp := uploadDir + "/koinon-upload-" + hex.EncodeToString(rnd[:]) + ".tar"
+	staging := uploadDir + "/koinon-upload-" + hex.EncodeToString(rnd[:])
+	tmp := staging + "/archive.tar"
+	if code, msg, err := d.runOnce(ctx, op, k, []string{"mkdir", "-m", stagingMode, staging}); err != nil {
+		return err
+	} else if code != 0 {
+		return fail(op, execution.ErrFailedPrecondition, "mkdir %s exited %d: %s", staging, code, msg)
+	}
 	defer func() { // best effort, and only while the actor runs: a request would resume it
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_, _, _ = d.runOnce(cctx, op, k, []string{"rm", "-f", tmp}) // refused when the actor is not running
+		_, _, _ = d.runOnce(cctx, op, k, []string{"rm", "-rf", staging}) // refused when the actor is not running
 	}()
 
 	if err := d.writeFile(ctx, op, k, tmp, archive); err != nil {
@@ -121,7 +138,7 @@ func (d *Driver) writeAttempt(ctx context.Context, op string, k key, path string
 		return true, execution.GRPCError(op, err)
 	}
 	sent := int64(len(first))
-	msg := &ateenvv1alpha.WriteFileRequest{Path: path, Mode: 0o600, Chunk: first}
+	msg := &ateenvv1alpha.WriteFileRequest{Path: path, Mode: archiveMode, Chunk: first}
 	if err := stream.Send(msg); err != nil {
 		if errors.Is(err, io.EOF) { // the guest ended the stream: its status says why
 			_, err = stream.CloseAndRecv()

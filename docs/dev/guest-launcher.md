@@ -150,7 +150,22 @@ uses `KILL` to signal the processes that it starts. The launcher uses the other 
 and the payload keeps none of them. The lab run of 2026-11-26 (issue #1387) shows, as uid 10001:
 `CapEff` 0, `NoNewPrivs` 1, and `setuid(0)` returns `EPERM`, also in child processes. The guest front
 still listens on port 80 without `NET_BIND_SERVICE`: the gVisor netstack has no privileged-port
-check (gVisor commit `84708bc9b0a3`, `pkg/sentry/socket/netstack`, `pkg/tcpip/stack`).
+check (gVisor commit `84708bc9b0a3`, `pkg/sentry/socket/netstack`, `pkg/tcpip/stack`). This is true only
+when runsc uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host
+kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
+
+The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
+modes. Two results follow:
+
+- **Upload.** The front writes the archive, and the payload (uid 10001) extracts it. The driver first lets
+  the payload make a staging directory, `mkdir -m 0733 /tmp/koinon-upload-<random>`. The front writes
+  `archive.tar` there with mode `0644`, the payload runs `tar`, then `rm -rf` of the staging directory. The
+  payload owns the directory, so it can remove the root-owned archive. The checkpoint restore uses Upload too.
+- **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
+  `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
+  and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
+  `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
+  of #1387 must show Exec in `/sandbox`, Upload and the checkpoint restore with the real front image.
 
 **`vm` tier.** The template keeps the Substrate default set. The Substrate v1.0.1 microVM guest gave
 payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`, so the drop failed
