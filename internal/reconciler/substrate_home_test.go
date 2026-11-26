@@ -34,8 +34,8 @@ const substrateImage2 = "registry.example.com/koinon/sandbox@sha256:111111111111
 // The agent home through the sandbox lifecycle on the Substrate driver (issue #1090, slice S1).
 //
 // These specs record the behaviour on main as it is; they choose no home model. Facts they rest on:
-// the Substrate driver mounts no volume, so the home (checkpoint.HomeDir) is in the actor's root
-// filesystem, and a suspend keeps it in the actor's memory and root filesystem snapshot. The only
+// the Substrate driver mounts one durable directory at the home (substrate.HomeMountPath, slice S5),
+// and a suspend keeps it with the actor's memory and root filesystem snapshot. The only
 // copy outside Substrate is the kopia home checkpoint, which is off by default
 // (reconciler.Config.Checkpoints). The fake Substrate keeps an actor's files across a suspend and
 // drops them with DeleteActor, as Substrate does with the snapshot prefix (lab, 2026-11-24).

@@ -2169,6 +2169,7 @@ type HomeCheckpoint struct {
 	FinishedAt        pgtype.Timestamptz
 	RepositoryEpoch   int32
 	SnapshotMissingAt pgtype.Timestamptz
+	ContentDigest     pgtype.Text
 }
 
 type HomeCheckpointResync struct {

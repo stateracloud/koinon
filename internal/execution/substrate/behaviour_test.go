@@ -447,6 +447,20 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tmpl.SnapshotConfig.PreferredFidelity).To(Equal(ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY))
 		})
 
+		It("mounts a durable directory at the agent's home and no other volume (issue #1090)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img})
+			Expect(err).NotTo(HaveOccurred())
+			tmpl, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(tmpl.Volumes).To(HaveLen(1))
+			Expect(tmpl.Volumes[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Volumes[0].DurableDir).NotTo(BeNil(), "a durable directory, not an external or an image volume")
+			Expect(tmpl.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(tmpl.Containers[0].VolumeMounts[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Containers[0].VolumeMounts[0].MountPath).To(Equal("/sandbox"))
+		})
+
 		It("refuses egress it cannot enforce", func(ctx SpecContext) {
 			_, err := d.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "x", Image: img, Providers: []string{"p"}})
 			Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "got %v", err)
