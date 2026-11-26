@@ -95,16 +95,30 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
   const nav = page.getByRole('navigation', { name: 'Main' })
   await expect(nav.getByTestId('inbox-badge')).toHaveText('2')
 
-  // The badge pair (attention fill, dark text) and the state badges pass axe in the light and the dark theme.
-  for (const scheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: scheme })
-    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
-    // Controls fade between the themes; axe must not sample a colour mid-transition.
-    await page.waitForTimeout(400)
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
-    expect(results.violations.map((v) => `${scheme} ${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
+  // Every tab (issue #1276): its count, its rows with state badges and avatars, and the legend pass axe in the light and
+  // the dark theme. The badge pair (attention fill, dark text) is in the nav and on the blocked rows.
+  const tabs = page.getByRole('tablist', { name: 'Inbox' })
+  await expect(tabs.getByRole('tab')).toHaveText([/^Blocked on you\s*2$/, /^Open\s*4$/, /^Done\s*3$/, /^All\s*7$/])
+  for (const [tab, list, rows] of [
+    ['Blocked on you 2', 'Waiting on you', 2],
+    ['Open 4', 'Open tasks', 4],
+    ['Done 3', 'Done tasks', 3],
+    ['All 7', 'All tasks', 7],
+  ] as const) {
+    await tabs.getByRole('tab', { name: tab }).click()
+    await expect(page.getByRole('list', { name: list }).getByRole('listitem').filter({ has: page.getByTestId('status-badge') })).toHaveCount(rows)
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme })
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+      // Controls fade between the themes; axe must not sample a colour mid-transition.
+      await page.waitForTimeout(400)
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
+      expect(results.violations.map((v) => `${tab} ${scheme} ${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
+    }
+    await page.emulateMedia({ colorScheme: 'light' })
   }
-  await page.emulateMedia({ colorScheme: 'light' })
+  if (shots) await page.screenshot({ path: `${shots}/inbox-all.png` })
+  await tabs.getByRole('tab', { name: 'Blocked on you 2' }).click()
 
   // Chat with an agent next to it.
   await page.getByRole('list', { name: 'Threads' }).getByRole('button', { name: /Write release notes/ }).click()
