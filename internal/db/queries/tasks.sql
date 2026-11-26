@@ -89,6 +89,15 @@ WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @max_events;
 
+-- name: ListEventActorNames :many
+-- Display names of the people who wrote events of this org, by user id: what a task read shows beside
+-- each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+-- inside the org whose events name the user; a deleted user has no name.
+SELECT u.id, u.display_name
+FROM users u
+WHERE u.id = ANY(@user_ids::uuid[]) AND u.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = @org_id);
+
 -- name: ListTaskMessagesAfter :many
 -- The users' messages on the task after a timeline seq, in order: what
 -- agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose

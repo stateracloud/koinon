@@ -19029,6 +19029,15 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "actor_display_name",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of actor_user_id, for a person's event; empty for other actors, an unnamed\nuser or a deleted user. Never an email address. Any role that can read the task sees it."
             }
           ]
         }

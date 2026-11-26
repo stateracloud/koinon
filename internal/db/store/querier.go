@@ -970,6 +970,10 @@ type Querier interface {
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Display names of the people who wrote events of this org, by user id: what a task read shows beside
+	// each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+	// inside the org whose events name the user; a deleted user has no name.
+	ListEventActorNames(ctx context.Context, arg ListEventActorNamesParams) ([]ListEventActorNamesRow, error)
 	// Approved requests no executor holds: Trusted-preset calls, and calls whose
 	// executor died or failed to record the outcome.
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)

@@ -29,6 +29,40 @@ function taskEvent(seq: number, kind: string, payload: Record<string, string>, a
   return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
 }
 
+describe('TaskPage message authors', () => {
+  // The name comes on the task event, so it does not depend on the role (#1031).
+  it.each([
+    ['a member', OrgRole.MEMBER],
+    ['a viewer', OrgRole.VIEWER],
+  ])('names another person who wrote a message for %s', async (_label, role) => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role }) })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, {
+        getTask: () => ({
+          task: task('t-1', 'Say hello', TaskState.WORKING),
+          events: [
+            create(TaskEventSchema, {
+              seq: 1n,
+              kind: 'message',
+              actorKind: ActorKind.USER,
+              actorUserId: 'u-2',
+              actorDisplayName: 'Sam Example',
+              payload: { text: 'hello from Sam' },
+              createdAt: timestampFromMs(t0),
+            }),
+          ],
+          runs: [],
+        }),
+      })
+    })
+    renderApp(transport, '/tasks/t-1')
+    const article = (await screen.findByText('hello from Sam')).closest('article')
+    expect(article).toHaveTextContent('Sam Example')
+    expect(article).not.toHaveTextContent('Another member')
+  })
+})
+
 describe('TaskPage member names', () => {
   async function askableCalls(role: OrgRole) {
     let calls = 0

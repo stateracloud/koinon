@@ -4558,6 +4558,7 @@ TaskEvent is one entry of the task timeline: a message, a state change or a run 
 | run_id | 6 | `string` | singular |  | The run the event is about, if any. |
 | payload | 7 | `google.protobuf.Struct` | singular |  |  |
 | created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
+| actor_display_name | 9 | `string` | singular |  | The display name of actor_user_id, for a person's event; empty for other actors, an unnamed user or a deleted user. Never an email address. Any role that can read the task sees it. |
 
 ### Enum ActorKind
 

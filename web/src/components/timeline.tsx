@@ -51,7 +51,7 @@ function TimelineEntry({ item, renderApproval, meUserId, memberNames }: { item: 
       return (
         <article className={cn('max-w-prose rounded-lg border p-3', mine ? 'bg-secondary ml-auto' : 'bg-card')}>
           <header className="text-muted-foreground mb-1 flex gap-2 text-xs">
-            <span className="text-foreground font-medium">{actorLabel(item.actor, mine, memberNames?.get(item.actorUserId))}</span>
+            <span className="text-foreground font-medium">{actorLabel(item.actor, mine, item.actorName || memberNames?.get(item.actorUserId))}</span>
             <time dateTime={new Date(item.at).toISOString()}>{time(item.at)}</time>
           </header>
           <p className="whitespace-pre-wrap">{item.text}</p>
