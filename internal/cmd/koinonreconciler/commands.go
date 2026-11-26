@@ -185,6 +185,11 @@ func (c *config) finish(v *viper.Viper) error {
 				return fmt.Errorf("%s acts on OpenShell's namespaces and needs --execution-driver=openshell", flag)
 			}
 		}
+		// Every actor's egress policy allows the gateway URLs and nothing else (issue #1444): refuse at
+		// start a URL that the policy cannot carry, not at the first sandbox.
+		if _, _, err := c.substrateGatewayRoutes(); err != nil {
+			return err
+		}
 	}
 	if err := catalog.ValidateClusterDomain(c.clusterDomain); err != nil {
 		return fmt.Errorf("--cluster-domain: %w", err)
