@@ -32,7 +32,10 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByLabel('New password', { exact: true }).fill(newPassword)
   await page.getByLabel('Repeat new password').fill(newPassword)
   await page.getByRole('button', { name: 'Change password' }).click()
-  // The home screen is the inbox; the board is its secondary view, at /board.
+  // The home screen is the overview (ADR 0126 section 4); the inbox is at /inbox.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
+  // The link name has the waiting count when it is not zero.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Inbox/ }).click()
   await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
   await expect(page.getByRole('tab', { name: /^Blocked on you/ })).toBeVisible()
 
