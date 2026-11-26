@@ -24,7 +24,7 @@
 set -euo pipefail
 
 mode=${1:-}
-case $mode in harness | install) ;; *) echo "usage: substrate.sh harness|install" >&2; exit 2 ;; esac
+case $mode in harness | install | ca) ;; *) echo "usage: substrate.sh harness|install|ca" >&2; exit 2 ;; esac
 
 CLUSTER=${CLUSTER:-koinon-e1}
 CTX="kind-${CLUSTER}"
@@ -110,7 +110,21 @@ install() {
     ${extra[@]+"${extra[@]}"}
 }
 
+# ca: the Secret <NAMESPACE>/ate-ca with ca.crt, the roots that sign the serving certificate of ateapi. The reconciler and
+# agentd verify that certificate (execution.substrate.caSecret in kind/substrate-values.yaml). The pod certificate controller
+# of Substrate publishes the roots of its service-DNS signer as ClusterTrustBundles. The namespace must exist.
+ca() {
+  local ns=${NAMESPACE:-koinon} pem
+  pem=$(kubectl --context "$CTX" get clustertrustbundles -o json |
+    jq -r '[.items[] | select(.spec.signerName == "servicedns.podcert.ate.dev/identity") | .spec.trustBundle] | join("\n")')
+  [[ $pem == *"BEGIN CERTIFICATE"* ]] || { echo "substrate.sh: no ClusterTrustBundle of the signer servicedns.podcert.ate.dev/identity holds a certificate" >&2; exit 1; }
+  step "CA of the ateapi certificate: Secret $ns/ate-ca"
+  kubectl --context "$CTX" -n "$ns" create secret generic ate-ca --from-literal=ca.crt="$pem" --dry-run=client -o yaml |
+    kubectl --context "$CTX" apply -f - >&2
+}
+
 case $mode in
 harness) harness ;;
 install) install ;;
+ca) ca ;;
 esac

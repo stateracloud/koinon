@@ -290,6 +290,8 @@ step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
 # Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
 [[ $DRIVER == substrate ]] || e1 client-cert
+# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names.
+[[ $DRIVER != substrate ]] || OUT="$OUT" CLUSTER="$CLUSTER" NAMESPACE="$NS" "$here/kind/substrate.sh" ca
 if [[ $SUITE == go ]]; then
   e1 model-provider
   # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
