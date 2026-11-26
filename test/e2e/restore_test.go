@@ -195,13 +195,13 @@ func (e restoreEnv) callRestoreTool(ctx context.Context, agentID, nonce, keyID s
 	By("the audit row of the call names the gateway key that opened the credential")
 	Eventually(func(g Gomega) {
 		rows := psqlPrimary(ctx, g, e.kubectl, fmt.Sprintf("SELECT outcome, credential_kind, recipient_key_id FROM mcp_call_log "+
-			"WHERE id > %d AND tool LIKE '%%read_item' ORDER BY id DESC LIMIT 1", since))
+			"WHERE id > %d AND target LIKE '%%%s' AND tool LIKE '%%read_item' ORDER BY id DESC LIMIT 1", since, restoreServer))
 		g.Expect(rows).To(Equal([]string{"ok|static|" + keyID}))
 	}).WithContext(ctx).WithTimeout(racescale.D(time.Minute)).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 var _ = Describe("the restore drill's MCP credential", Label("restore"), func() {
-	It("seals a fake credential to the gateway key and calls a tool with it, before the backup", Label("restore-seal"), func(ctx SpecContext) {
+	It("seals a fake credential to the gateway key and calls a tool with it, before the backup", Label("restore-seal"), NodeTimeout(racescale.D(19*time.Minute)), func(ctx SpecContext) {
 		e := newRestoreEnv(ctx)
 
 		By("a server with a fake credential is added, and the prober marks it healthy")
@@ -262,7 +262,7 @@ var _ = Describe("the restore drill's MCP credential", Label("restore"), func() 
 		_, _ = fmt.Fprintf(GinkgoWriter, "restore drill: %s's credential is sealed to %s\n", restoreServer, keyID)
 	})
 
-	It("opens the restored credential through koinon-gateway, and seals a new one in v2, after the restore", Label("restore-open"), func(ctx SpecContext) {
+	It("opens the restored credential through koinon-gateway, and seals a new one in v2, after the restore", Label("restore-open"), NodeTimeout(racescale.D(19*time.Minute)), func(ctx SpecContext) {
 		e := newRestoreEnv(ctx)
 
 		By("the restored server still holds its credential in envelope v2")

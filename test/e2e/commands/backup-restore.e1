@@ -77,11 +77,14 @@ if test -n "$(kubectl -n "$NS" get job -l app.kubernetes.io/instance=$REL,app.ku
   kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=key-admin --timeout=15m
 fi
 # Note the replica count of each Deployment in koinon-replicas.txt: start brings each one back to it. A count of 0 is
-# from an earlier run of stop: then the note of that run stays.
+# from an earlier run of stop: then the note of that run stays. With no note and a count of 0, stop fails.
 for d in api reconciler agentd mcp-gateway; do
   kubectl -n "$NS" get deployment/"$REL-$d" > /dev/null 2>&1 || continue
   n=$(kubectl -n "$NS" get deployment/"$REL-$d" -o jsonpath='{.spec.replicas}')
   if test "$n" = 0 && test -f koinon-replicas.txt; then n=$(awk -v d="$d" '$1 == d {print $2}' koinon-replicas.txt); fi
+  case "$n" in
+    '' | 0 | *[!0-9]*) echo "deployment/$REL-$d runs 0 copies and no note has its count: add \"$d <count>\" to koinon-replicas.txt" >&2; false ;;
+  esac
   echo "$d $n"
 done > koinon-replicas.txt.new
 mv koinon-replicas.txt.new koinon-replicas.txt
