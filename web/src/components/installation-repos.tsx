@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useInfiniteQuery } from '@connectrpc/connect-query'
 import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { useDebounced } from '@/hooks/use-debounced'
+import { describeError } from '@/lib/api-error'
 
 /**
  * InstallationRepos lists the repositories a GitHub connection's App
@@ -46,7 +46,7 @@ export function InstallationRepos({ orgId, connectionId, noun = 'the installatio
       </div>
       {list.isError ? (
         <p role="alert" className="text-destructive text-sm">
-          Could not list the repositories: {ConnectError.from(list.error).rawMessage}
+          Could not list the repositories: {describeError(list.error).message}
         </p>
       ) : list.isPending ? (
         <p role="status" className="text-sm">

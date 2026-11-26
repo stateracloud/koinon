@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Server } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { buildCreateRequest, buildUpdateRequest, dataLegs, formErrors, initialForm, initialMode, maxServerNameLength, serverErrorField, serverKinds, toggleLeg, transports, type CredentialMode } from '@/lib/mcp-servers'
 
 export type ServerFormProps = {
@@ -51,7 +51,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
       onSaved?.(server?.name ?? f.name)
       onDone()
     } catch (e2) {
-      const message = ConnectError.from(e2).rawMessage
+      const message = describeError(e2).message
       setRefusal({ message: typed ? `${message} The secret was cleared from this page. Type it again.` : message, field: serverErrorField(message) })
     } finally {
       setPending(false)
