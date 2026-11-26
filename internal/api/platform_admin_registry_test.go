@@ -6,6 +6,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
@@ -19,8 +20,12 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	auditv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1/auditv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1/gatewayv1alpha1connect"
 	outwardv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/outward/v1alpha1/outwardv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/services"
 )
 
@@ -50,6 +55,23 @@ var platformConditionalCalls = map[string][]func(ctx context.Context, c *client,
 			return err
 		},
 	},
+}
+
+// installWideNotPlatform lists the RPCs of isolationExempt that are not platform-scope, with the
+// reason. An RPC that takes no org-owned input (isolationExempt) is either platform-scope (in
+// services.PlatformAdminRPCs) or listed here, so a new install-wide RPC must choose one.
+var installWideNotPlatform = map[string]string{
+	ticketv1alpha1connect.TicketServiceCreateTicketProcedure:               removedTicketReason,
+	ticketv1alpha1connect.TicketServiceListTicketsProcedure:                removedTicketReason,
+	ticketv1alpha1connect.TicketServiceGetTicketProcedure:                  removedTicketReason,
+	ticketv1alpha1connect.TicketServiceAppendMessageProcedure:              removedTicketReason,
+	ticketv1alpha1connect.TicketServiceMoveTicketProcedure:                 removedTicketReason,
+	authv1alpha1connect.AuthServiceWhoAmIProcedure:                         "every signed-in user reads their own session",
+	authv1alpha1connect.AuthServiceChangePasswordProcedure:                 "every signed-in user changes their own password",
+	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "every signed-in user reads the connector types",
+	gatewayv1alpha1connect.GatewayStateServiceStreamStateProcedure:         "only the gateway's bearer token reaches it, not a user",
+	gatewayv1alpha1connect.GatewayStateServiceAckRevisionProcedure:         "only the gateway's bearer token reaches it, not a user",
+	gatewayv1alpha1connect.GatewayApprovalServiceRequestApprovalProcedure:  "only the gateway's bearer token reaches it, not a user",
 }
 
 // cc is a generic Connect client for c's session.
@@ -133,6 +155,22 @@ var _ = Describe("platform-admin registry", func() {
 				problems = append(problems, proc+" is in platformConditionalCalls but the registry has no condition for it")
 			}
 		}
+		for proc := range isolationExempt {
+			_, platform := registry[proc]
+			_, open := installWideNotPlatform[proc]
+			switch {
+			case platform && open:
+				problems = append(problems, proc+" is both in services.platformAdminRPCs and in installWideNotPlatform")
+			case !platform && !open:
+				problems = append(problems, proc+" takes no org-owned input (isolationExempt): add it to services.platformAdminRPCs "+
+					"if it is platform-scope, else to installWideNotPlatform with a reason")
+			}
+		}
+		for proc := range installWideNotPlatform {
+			if _, ok := isolationExempt[proc]; !ok {
+				problems = append(problems, proc+" is in installWideNotPlatform but not in isolationExempt")
+			}
+		}
 		sort.Strings(problems)
 		Expect(problems).To(BeEmpty())
 	})
@@ -183,6 +221,35 @@ var _ = Describe("platform-admin registry", func() {
 						expectRefused(err, proc+" as "+string(role))
 					}
 				}
+			}
+		})
+
+		It("finds no platform-admin refusal in an RPC that is not in the registry", func(ctx SpecContext) {
+			// A handler that calls requirePlatformAdmin first but is missing from the registry would not
+			// be covered by the role specs above. An empty request as an org owner finds it.
+			_, owner := e.newTeamOrg(ctx)
+			cc := owner.cc()
+			registry := services.PlatformAdminRPCs()
+			defined := koinonMethods()
+			var procs []string
+			for proc := range defined {
+				if _, ok := registry[proc]; !ok {
+					procs = append(procs, proc)
+				}
+			}
+			sort.Strings(procs)
+			for _, proc := range procs {
+				md := defined[proc]
+				if md.IsStreamingClient() || md.IsStreamingServer() {
+					continue
+				}
+				spec := connect.Spec{StreamType: connect.StreamTypeUnary, Schema: md, Procedure: proc}
+				callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				err := cc.CallUnary(callCtx, spec, dynamicpb.NewMessage(md.Input()), dynamicpb.NewMessage(md.Output()))
+				cancel()
+				reason, _ := reasonOf(err)
+				Expect(reason).NotTo(Equal("PLATFORM_ADMIN_REQUIRED"),
+					"%s refuses an org owner as not a platform admin: add it to services.platformAdminRPCs", proc)
 			}
 		})
 
