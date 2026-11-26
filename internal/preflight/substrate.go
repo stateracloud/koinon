@@ -64,13 +64,13 @@ const (
 )
 
 // SubstrateRouterSPIFFEID is the identity the router flag must allow: the atenet client service account
-// in Substrate's namespace (Substrate v1.0.0 docs/get-started/quickstart.md).
+// in Substrate's namespace (Substrate v1.0.1 docs/get-started/quickstart.md).
 func SubstrateRouterSPIFFEID(namespace string) string {
 	return "spiffe://cluster.local/ns/" + namespace + "/sa/atenet-client"
 }
 
 // SubstrateCRDs are the CRDs the preflight requires (plural.group), verified against the Substrate
-// v1.0.0 manifests and the koinon-lab install.
+// v1.0.1 manifests and the koinon-lab install.
 var SubstrateCRDs = []string{
 	"sandboxconfigs." + SubstrateCRDGroup,
 	"workerpools." + SubstrateCRDGroup,
@@ -112,7 +112,7 @@ type SubstrateConfig struct {
 	ExpectedIssuer string
 }
 
-// WithDefaults fills the fixed names of Substrate v1.0.0.
+// WithDefaults fills the fixed names of Substrate v1.0.1.
 func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	if s.Namespace == "" {
 		s.Namespace = "ate-system"
@@ -467,7 +467,7 @@ func (c *Checker) checkWorkerPool(ctx context.Context, check, namespace, name st
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("WorkerPool %s/%s", namespace, name), err)
 	}
-	// Substrate v1.0.0 has no top-level conditions on a WorkerPool: status carries replicas and
+	// Substrate v1.0.1 has no top-level conditions on a WorkerPool: status carries replicas and
 	// readyReplicas, and each sandbox class a Resolved condition (api/infra/k8s/ate/v1).
 	want, _, _ := unstructured.NestedInt64(pool.Object, "spec", "replicas")
 	have, found, _ := unstructured.NestedInt64(pool.Object, "status", "readyReplicas")
@@ -593,7 +593,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		}
 		return Result{
 			Check: check, Status: Fail, Message: msg + info + tokenInfo,
-			Fix: "pods in " + ns + " must reach the issuer Substrate trusts, and Substrate v1.0.0 has no separate discovery URL. " +
+			Fix: "pods in " + ns + " must reach the issuer Substrate trusts, and Substrate v1.0.1 has no separate discovery URL. " +
 				"Set the API server's first --service-account-issuer to https://kubernetes.default.svc (Substrate then reads discovery from the in-cluster API server with the pod's token), " +
 				"or to a URL that pods reach with a certificate from the system roots (on Talos: cluster.apiServer.extraArgs service-account-issuer). " +
 				"Keep the old value as a second --service-account-issuer so tokens already issued stay valid, and when the discovery document's jwks_uri is not reachable from pods, " +
@@ -614,7 +614,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, probeNS, res.TokenIssuer),
-			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.0 fetches discovery from the issuer itself. " +
+			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.1 fetches discovery from the issuer itself. " +
 				"Drop --expected-jwt-issuer (or set it to " + res.TokenIssuer + ") and run the check again: it then probes that URL. " +
 				"If pods cannot reach it, set the API server's first --service-account-issuer to https://kubernetes.default.svc or another URL pods reach " +
 				"(Kubernetes signs tokens with the first value; later ones are only accepted for validation)" +
@@ -683,9 +683,9 @@ const (
 // token (kubernetesJWTProvider in cmd/ate-setup/internal/steps/create.go).
 var inClusterIssuers = []string{"https://kubernetes.default.svc", "https://kubernetes.default.svc.cluster.local"}
 
-// ProbeIssuerFromPod is what the issuer probe pod runs. It repeats what Substrate v1.0.0's api server does
+// ProbeIssuerFromPod is what the issuer probe pod runs. It repeats what Substrate v1.0.1's api server does
 // to validate a service-account token, and nothing else (permalinks at the pinned commit
-// b34fbee742906494b5eb4f1f36987176bf8770a4):
+// 20778a6dbb01f13024642851bb592bf67c9fec05):
 //   - internal/oidcjwt/oidcjwt.go discoverKeysForIssuer: GET <issuer>/.well-known/openid-configuration, require
 //     its "issuer" to equal the configured issuer, then GET its jwks_uri. The issuer string itself is not
 //     dialled for anything else; the JWKS comes from wherever jwks_uri points.

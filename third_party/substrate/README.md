@@ -6,7 +6,7 @@ the module pulls Substrate's whole dependency tree, and the guest proto sits in 
 package there.
 
 - Upstream: https://github.com/agent-substrate/substrate
-- Tag: `v1.0.0`, commit `b34fbee742906494b5eb4f1f36987176bf8770a4` (2026-11-05)
+- Tag: `v1.0.1`, commit `20778a6dbb01f13024642851bb592bf67c9fec05` (2026-11-20)
 - Licence: Apache-2.0, Copyright The Agent Substrate Authors; see [LICENSE](LICENSE). The files keep
   their upstream headers.
 - Files, copied unmodified:

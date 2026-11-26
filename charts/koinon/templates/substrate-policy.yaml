@@ -323,7 +323,7 @@ spec:
     # apply creates and updates it) and deletes it. It may not write any other workload kind, or
     # anything in the control-plane namespace. The pod template follows the pod rules already at the
     # Deployment, so a bad template fails here and not only when the ReplicaSet makes the pod. The
-    # digest rule cannot hold here: worker images are tags (Substrate v1.0.0), and the ReplicaSet
+    # digest rule cannot hold here: worker images are tags (Substrate v1.0.1), and the ReplicaSet
     # controller is digest-exempt (digestExemptIdentities, tracking issue #1140).
     - name: controllerOwn
       expression: {{ printf "request.userInfo.username in %s && variables.reqNamespace == %s && request.resource.group == 'apps' && request.resource.resource == 'deployments' && (request.operation == 'DELETE' || (!has(object.spec.template.spec.hostNetwork) || !object.spec.template.spec.hostNetwork) && (!has(object.spec.template.spec.hostPID) || !object.spec.template.spec.hostPID) && (!has(object.spec.template.spec.hostIPC) || !object.spec.template.spec.hostIPC) && (!has(object.spec.template.spec.automountServiceAccountToken) || !object.spec.template.spec.automountServiceAccountToken) && object.spec.template.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(v, !has(v.hostPath) || v.hostPath.path in %s)))" (toJson $controllers) ($wns | quote) (toJson $w.allowedHostPaths) | quote }}

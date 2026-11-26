@@ -135,7 +135,7 @@ and 4.3; the driver picks by tier through `LauncherPrefix(tier)`):
 
 ## The non-root gap
 
-The Substrate v1.0.0 guest gives payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and
+The Substrate v1.0.1 guest gives payloads root with only `CAP_KILL`, `CAP_NET_BIND_SERVICE` and
 `CAP_AUDIT_WRITE`. Without `CAP_SETUID` and `CAP_SETGID` the launcher cannot drop to uid 10001
 (`setresgid: operation not permitted`; phase 0 result, comment on #1087). The default `user.mode`
 is `best_effort`: the launcher logs "user drop failed, continuing as the current user" and applies
@@ -150,7 +150,7 @@ and the allowlist is restored as effective, inheritable and ambient for the non-
 On the hardened and dev tiers (gVisor) the launcher gets `policy-gvisor.json`, with Landlock
 `best_effort`: the kernel may not offer it (maintainer decision on #1087). The
 gVisor tiers keep a **writable root filesystem** by maintainer decision (2026-11-19, issue
-[#1150](https://github.com/stateracloud/koinon/issues/1150)). Substrate v1.0.0 sets the root of an actor
+[#1150](https://github.com/stateracloud/koinon/issues/1150)). Substrate v1.0.1 sets the root of an actor
 container writable, and a read-only root breaks `MEMORY` snapshots (`runsc checkpoint: no checkpointable
 filesystems`). Koinon carries no Substrate patch. So without Landlock, a payload on these tiers can write to
 `/etc`, `/usr` and `/var`. The launcher's other controls (`no_new_privs`, capability drop, seccomp) stay. When

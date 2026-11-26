@@ -54,6 +54,13 @@ import (
 //	KOINON_ESCAPE_SUBSTRATE_WORKSPACE      the atespace of org A (default koinon-escape)
 //	KOINON_ESCAPE_SUBSTRATE_OTHER_WORKSPACE the atespace of org B for the cross-org spec (default
 //	                                       koinon-escape-other)
+//	KOINON_ESCAPE_EGRESS_CONTROL           host:port that atenet-egress can reach (default example.com:80): the
+//	                                       control of the egress gateway spec. Precondition: add it to
+//	                                       workerNetworkPolicy.extraEgress or turn the chart policies off
+//	                                       (docs/dev/escape-substrate.md)
+//	KOINON_ESCAPE_EGRESS_REBIND            comma-separated host:port names that resolve to a metadata, loopback
+//	                                       or unspecified address (default: sslip.io names, so the egress pod
+//	                                       needs public DNS)
 //	KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT, _REGION, _BUCKET, _ACCESS_KEY_FILE, _SECRET_KEY_FILE
 //	                                       the snapshot bucket (read-only key), as --substrate-snapshot-*;
 //	                                       the restore spec needs them, and fails closed without
