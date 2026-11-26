@@ -545,7 +545,7 @@ func (r *runner) execute(ctx context.Context) error {
 	for attempt := 0; ; attempt++ {
 		r.home = sb.HomeGeneration
 		r.sandboxID = sb.SandboxID.String
-		main, ended, err = r.sweep(fctx, sb.Workspace, sb.SandboxName)
+		main, ended, err = r.sweepSlot(fctx, sb.Workspace, sb.SandboxName)
 		var sv *survivorsError
 		if !errors.As(err, &sv) {
 			break

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -664,6 +665,37 @@ var _ = Describe("Pool", func() {
 		// Each run: a sweep, its harness, a sweep; the first run's last sweep comes before the
 		// second run's harness, which it would otherwise end.
 		Expect(order).To(Equal([]string{"sweep", "harness", "sweep", "sweep", "harness", "sweep"}))
+	})
+
+	It("never runs a canceled run's end sweep at the same time as the resumed run's start sweep", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		// The end sweep of the first run (the second sweep) stays busy until released; the other
+		// sweeps answer at once. Without the per-agent lock the resumed run's start sweep runs
+		// meanwhile and the two end each other's processes (exit 143, old issue 1355).
+		var calls atomic.Int32
+		started, release := make(chan struct{}), make(chan struct{})
+		e.files.mu.Lock()
+		e.files.sweep = func() (string, int) {
+			if calls.Add(1) == 2 {
+				close(started)
+				<-release
+			}
+			return "ended: none\n", 0
+		}
+		e.files.mu.Unlock()
+		task := e.task(ctx, "first")
+		a := e.enqueue(ctx, task)
+		e.pool("agentd-a")
+		Eventually(started).WithTimeout(racescale.D(10 * time.Second)).Should(BeClosed())
+		// The run is canceled while its worker sweeps and has not seen the cancel; the task is
+		// resumed at once.
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: e.org, ID: a.ID, OutcomeReason: "user canceled"})
+		Expect(err).NotTo(HaveOccurred())
+		b := e.enqueue(ctx, task)
+		Consistently(e.files.sweepCount).WithTimeout(racescale.D(2*time.Second)).Should(Equal(2), "the start sweep waits for the end sweep")
+		close(release)
+		Eventually(runState(ctx, b)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(e.files.sweepOverlap()).To(Equal(1))
 	})
 
 	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
