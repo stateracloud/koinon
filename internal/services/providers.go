@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/modelformat"
@@ -70,8 +71,8 @@ func (s *Server) catalogError(err error) error {
 	switch {
 	case errors.As(err, &inv):
 		ce := connect.NewError(connect.CodeInvalidArgument, inv.Msg)
-		if inv.Reason != "" {
-			return withReason(ce, inv.Reason)
+		if r, ok := refusalv1.Reason_value[inv.Reason]; ok && r != 0 {
+			return withReason(ce, refusalv1.Reason(r))
 		}
 		return ce
 	case errors.Is(err, catalog.ErrNotFound):

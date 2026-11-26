@@ -19,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	orgv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/org/v1alpha1"
 	platformv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
+	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	"github.com/stateracloud/koinon/internal/money"
 )
 
@@ -43,7 +44,7 @@ func platformAdmin(ctx context.Context) (*auth.Principal, error) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
 	}
 	if !p.PlatformAdmin {
-		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), "PLATFORM_ADMIN_REQUIRED")
+		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), refusalv1.Reason_PLATFORM_ADMIN_REQUIRED)
 	}
 	return p, nil
 }

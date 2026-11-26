@@ -60,6 +60,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	_ "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1" // linked so the registry spec finds the file; it has no RPCs
 	remoteagentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
