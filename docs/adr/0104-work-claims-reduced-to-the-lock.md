@@ -180,8 +180,7 @@ limit.
 Decision 7 changes: the `claim` check still runs on every pull request and every queue build, with the same
 rule, but it is no longer a required status check (it leaves `hack/ci-required.txt` and the ruleset). A red
 `claim` tells the author to talk to the holder of the claim; it does not block the merge or eject a queue
-entry. The claim lock itself (`hack/claim.sh take`, `release`, ADR reservations) does not change. Reason: maintainer
-decision D4 (fold ceremony that costs time and adds little). The merge-queue fence of ADR 0094 decision 4 is information only from now on.
+entry. The claim lock itself (`hack/claim.sh take`, `release`, ADR reservations) does not change. Reason: issue #682 (decision D4): a required `claim` check costs time and gives little value. The merge-queue fence of ADR 0094 decision 4 is information only from now on.
 
 ## Links
 

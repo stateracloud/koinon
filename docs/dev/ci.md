@@ -27,7 +27,7 @@ Every Go test runs every time, locally and in CI. Serial Ginkgo suites and plain
 `-count=1`, so `go-test` never prints `(cached)`. Parallel Ginkgo suites (`PARALLEL_SUITES`) run through
 `ginkgo -p`, which never uses Go's test result cache. Issue #682 removed the old reuse of test results on
 pull requests (#43): the `go-testres-` cache, `hack/go-test-cacheable.sh` and `hack/ci-stamp-mtime.sh`.
-Reason: maintainer decision D4 (fold ceremony that costs time and adds little).
+Reason: issue #682 (decision D4): these steps cost CI time and give little value.
 `hack/go-test-test.sh` and `hack/ci-cache-test.sh` check that it stays
 removed.
 
@@ -862,7 +862,7 @@ How CI starts on that pull request, with no secret, PAT or App token: GitHub doc
 caused by `GITHUB_TOKEN` create no workflow runs, with two exceptions: `workflow_dispatch` and
 `repository_dispatch`, and `pull_request` events of type `opened`, `synchronize` or `reopened`, which
 create runs in an approval-required state (other types, such as `labeled`, `edited` and
-`ready_for_review`, create none). The required workflows listen as follows: `ci.yml`
+`ready_for_review`, create none). The workflows that report checks listen as follows: `ci.yml`
 (opened, synchronize, reopened, ready_for_review), `claims.yml` (opened,
 reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchronize, reopened;
 `e2e-kind.yml` also ready_for_review and `labeled`, which acts only for the `e2e` label). So the route is:

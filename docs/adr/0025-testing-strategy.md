@@ -7,7 +7,7 @@ decides: design.md#25
 ---
 # 0025. Deterministic, free CI with a continuous sandbox escape suite
 
-- Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind)
+- Status: Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind); amended 2026-11-26 (below: no `go-test-lab` status, no test result reuse, #682)
 - Date: 2026-10-21
 - Area: engineering-process
 - Tags: testing, ci, e2e, security
@@ -204,5 +204,5 @@ The amendment of old issue 610 above is withdrawn. `ci.yml` no longer reads the 
 hosted runner for every Go change. `hack/release-gate.sh` accepts a skipped `go-test` on main only through the
 queue build or a change with no Go. The reuse of Go test results on pull requests (#43, PR #592) is removed
 too: `hack/go-test.sh` runs serial Ginkgo suites and plain packages with `-count=1`, locally and in CI, and
-the `go-testres-` cache, `hack/go-test-cacheable.sh` and `hack/ci-stamp-mtime.sh` are gone. Reason: maintainer
-decision D4 (fold ceremony that costs time and adds little). The notes below that name `go-test-lab` describe the history.
+the `go-testres-` cache, `hack/go-test-cacheable.sh` and `hack/ci-stamp-mtime.sh` are gone. Reason: issue #682 (decision D4): these steps cost CI time and give little value. The notes above that name `go-test-lab`
+describe the history.

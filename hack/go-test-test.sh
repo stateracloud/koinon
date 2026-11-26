@@ -222,6 +222,7 @@ printf '// SPDX-License-Identifier: Apache-2.0\npackage zzempty\n\nimport (\n\t"
 rc=0
 out=$(env -u CI REPORT_DIR="$rd4" hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
 [[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a Ginkgo suite with no specs must exit 1, got $rc"; exit 1; }
+[[ $out == *"serial Ginkgo suites (exit"* ]] || { echo "$out" | tail -20; echo "FAIL: the empty suite must fail in the serial Ginkgo part"; exit 1; }
 rm -rf "$fx"
 echo "ok: a Ginkgo suite with no specs fails the run"
 
@@ -232,5 +233,6 @@ printf '// SPDX-License-Identifier: Apache-2.0\npackage zzpending\n\nimport (\n\
 rc=0
 out=$(env -u CI REPORT_DIR="$rd4" hack/go-test.sh "./${fx#"$root"/}" 2>&1) || rc=$?
 [[ $rc == 1 ]] || { echo "$out" | tail -20; echo "FAIL: a Ginkgo suite where no spec ran must exit 1, got $rc"; exit 1; }
+[[ $out == *"serial Ginkgo suites (exit"* ]] || { echo "$out" | tail -20; echo "FAIL: the pending-only suite must fail in the serial Ginkgo part"; exit 1; }
 rm -rf "$rd4" "$fx"
 echo "ok: a Ginkgo suite where no spec ran fails the run"

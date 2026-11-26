@@ -253,5 +253,15 @@ else
 	fails=1
 fi
 
+# The lab mode is gone since #682: it is a usage error now.
+rc=0
+"$script" lab >/dev/null 2>&1 || rc=$?
+if [[ $rc == 2 ]]; then
+	echo "ok: the lab mode is gone (usage error)"
+else
+	echo "FAIL: hack/ci-skip-heavy.sh lab must exit 2 (usage), got $rc"
+	fails=1
+fi
+
 ((fails == 0)) || exit 1
 echo "all ci-skip-heavy tests passed"

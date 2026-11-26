@@ -7,7 +7,7 @@ decides: design.md#26
 ---
 # 0026. Home lab for real isolation testing; Apache-2.0 with DCO
 
-- Status: Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md)
+- Status: Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-26 (below: the sign-off is checked in `quick checks`, #682)
 - Date: 2026-10-21
 - Area: engineering-process
 - Tags: testing, isolation, ci

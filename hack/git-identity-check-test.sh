@@ -139,7 +139,8 @@ A last paragraph, so the line above is not a trailer."
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a sign-off that is not a trailer fails" 1 $? "$out"
 git reset -q --hard "$base"
 git commit -q --allow-empty -m "Bump y" --author="dependabot[bot] <dependabot@example.invalid>"
-out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1)
+rc=0; out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1) || rc=$?
+[[ $rc == 1 ]] || { echo "FAIL the dependabot case with a non-noreply address must exit 1, got $rc"; fail=1; }
 [[ $out == *"lacks 'Signed-off-by: dependabot[bot] <dependabot@example.invalid>'"* ]] || { echo "FAIL the dependabot exemption needs the noreply address"; echo "$out"; fail=1; }
 git reset -q --hard "$base"
 git checkout -q -b side3 "$base"
