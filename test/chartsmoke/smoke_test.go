@@ -760,6 +760,18 @@ func describeMode(name, valuesFile string) {
 			if slices.Contains(c.Args, "--restore-hold") {
 				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
 				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+				if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
+					// The held egress listener serves no request either (issue #1390): 503, reason held, before
+					// the actor token check and the route match.
+					eg := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+						Path: "/egress/registry.example.test/held", Port: intstr.FromString("egress"),
+					}}}
+					egStatus, why := w.ProbeStatus(ctx, eg, 10*time.Second)
+					Expect(why).To(BeEmpty(), "the egress listener did not answer; logs:\n%s", w.Logs(ctx))
+					Expect(egStatus).To(Equal(http.StatusServiceUnavailable), "a held egress listener refuses every request; logs:\n%s", w.Logs(ctx))
+					Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+						Should(MatchRegexp(`egress request.*"?result"?[=:]"?held\b`), "the refusal is logged as held; logs:\n%s", w.Logs(ctx))
+				}
 			} else {
 				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
 			}
