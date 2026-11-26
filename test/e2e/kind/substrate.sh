@@ -49,7 +49,11 @@ harness() {
   # The flavor image goes in as an OCI layout: the buildx builder is a container and cannot pull from localhost:5001.
   local flavor_dir
   flavor_dir=$(mktemp -d "$OUT/flavor-oci.XXXXXX")
-  docker buildx build --load --platform "linux/$arch" \
+  # The default builder (the docker driver) does not read an OCI layout context. Use a builder of its own with the
+  # docker-container driver; the run needs no other setup (setup-buildx-action is skipped when the harness is pulled).
+  local builder=koinon-substrate
+  docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >&2
+  docker buildx build --builder "$builder" --load --platform "linux/$arch" \
     --build-context "flavor=$("$root/hack/harness-flavor-context.sh" "$src" "$flavor_dir")" \
     --build-context "launcher=$root/build/guest-launcher" \
     --tag "$REPO/sandbox:e2e-substrate" "$root/cmd/koinon-guest-launcher" >&2
