@@ -1677,7 +1677,7 @@ export const ExplainOrgPricesRequestSchema: GenMessage<ExplainOrgPricesRequest> 
  */
 export type ExplainOrgPricesResponse = Message<"koinon.budget.v1alpha1.ExplainOrgPricesResponse"> & {
   /**
-   * models has one row per served model, ordered by provider name then model name.
+   * models has one row per enabled model, ordered by provider name then model name.
    *
    * @generated from field: repeated koinon.budget.v1alpha1.ModelPriceSource models = 1;
    */
@@ -2001,9 +2001,9 @@ export const PriceService: GenService<{
     output: typeof ExplainPlatformPriceResponseSchema;
   },
   /**
-   * ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or
+   * ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
    * default) prices it now and, for an org price, the price it replaces. It uses the same lookup
-   * as the gateway. Admins and owners.
+   * as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
    *
    * @generated from rpc koinon.budget.v1alpha1.PriceService.ExplainOrgPrices
    */

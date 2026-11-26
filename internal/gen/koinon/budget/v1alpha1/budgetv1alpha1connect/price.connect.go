@@ -277,9 +277,9 @@ type PriceServiceClient interface {
 	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
 	// price_ref.
 	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
-	// ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or
+	// ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
 	// default) prices it now and, for an org price, the price it replaces. It uses the same lookup
-	// as the gateway. Admins and owners.
+	// as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
 	ExplainOrgPrices(context.Context, *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error)
 }
 
@@ -335,9 +335,9 @@ type PriceServiceHandler interface {
 	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
 	// price_ref.
 	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
-	// ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or
+	// ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
 	// default) prices it now and, for an org price, the price it replaces. It uses the same lookup
-	// as the gateway. Admins and owners.
+	// as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
 	ExplainOrgPrices(context.Context, *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error)
 }
 

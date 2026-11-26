@@ -1131,7 +1131,7 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | CheckPriceSources | `koinon.budget.v1alpha1.CheckPriceSourcesRequest` | `koinon.budget.v1alpha1.CheckPriceSourcesResponse` | - | CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It makes proposals and applies nothing. |
 | DiffPlatformPriceVersions | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse` | - | DiffPlatformPriceVersions returns what changed between two versions of the platform list. |
 | DismissPriceProposal | `koinon.budget.v1alpha1.DismissPriceProposalRequest` | `koinon.budget.v1alpha1.DismissPriceProposalResponse` | - | DismissPriceProposal closes a proposal; the same values from the same source do not come back. |
-| ExplainOrgPrices | `koinon.budget.v1alpha1.ExplainOrgPricesRequest` | `koinon.budget.v1alpha1.ExplainOrgPricesResponse` | - | ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or default) prices it now and, for an org price, the price it replaces. It uses the same lookup as the gateway. Admins and owners. |
+| ExplainOrgPrices | `koinon.budget.v1alpha1.ExplainOrgPricesRequest` | `koinon.budget.v1alpha1.ExplainOrgPricesResponse` | - | ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or default) prices it now and, for an org price, the price it replaces. It uses the same lookup as the gateway. It does not check the provider URL policy or a lost key. Admins and owners. |
 | ExplainPlatformPrice | `koinon.budget.v1alpha1.ExplainPlatformPriceRequest` | `koinon.budget.v1alpha1.ExplainPlatformPriceResponse` | - | ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its price_ref. |
 | GetDefaultPriceChanges | `koinon.budget.v1alpha1.GetDefaultPriceChangesRequest` | `koinon.budget.v1alpha1.GetDefaultPriceChangesResponse` | - | GetDefaultPriceChanges returns what changed between two versions of the default list. An empty from_version means the version before to_version; an empty to_version the current one. |
 | GetDefaultPrices | `koinon.budget.v1alpha1.GetDefaultPricesRequest` | `koinon.budget.v1alpha1.GetDefaultPricesResponse` | - | GetDefaultPrices returns the default list this installation runs. |
@@ -1258,7 +1258,7 @@ No fields.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
-| models | 1 | `koinon.budget.v1alpha1.ModelPriceSource` | repeated |  | models has one row per served model, ordered by provider name then model name. |
+| models | 1 | `koinon.budget.v1alpha1.ModelPriceSource` | repeated |  | models has one row per enabled model, ordered by provider name then model name. |
 
 ### Message ExplainPlatformPriceRequest
 

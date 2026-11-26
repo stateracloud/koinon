@@ -3401,7 +3401,7 @@ func (x *ExplainOrgPricesRequest) GetOrgId() string {
 
 type ExplainOrgPricesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// models has one row per served model, ordered by provider name then model name.
+	// models has one row per enabled model, ordered by provider name then model name.
 	Models        []*ModelPriceSource `protobuf:"bytes,1,rep,name=models,proto3" json:"models,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

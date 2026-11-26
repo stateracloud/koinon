@@ -4617,7 +4617,7 @@
             },
             {
               "name": "ExplainOrgPrices",
-              "description": "ExplainOrgPrices shows, for each model the org's gateway serves, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. Admins and owners.",
+              "description": "ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. It does not check the provider URL policy or a lost key. Admins and owners.",
               "requestType": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
               "responseType": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
               "clientStreaming": false,
@@ -5207,7 +5207,7 @@
               "label": "repeated",
               "oneof": "",
               "deprecated": false,
-              "description": "models has one row per served model, ordered by provider name then model name."
+              "description": "models has one row per enabled model, ordered by provider name then model name."
             }
           ]
         },
