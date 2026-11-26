@@ -6,7 +6,6 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
-import { TraceDestinationService } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
 function setup() {
@@ -15,7 +14,6 @@ function setup() {
   const view = () => ({ retention: { days, defaultDays: 7, minDays: 1, maxDays: 90 } })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.ADMIN }) })
-    service(TraceDestinationService, { listDestinations: () => ({ destinations: [] }), getSettings: () => ({}) })
     service(OrgSettingsService, {
       getRunContentRetention: () => ({ retention: { days: 30, defaultDays: 30, minDays: 1, maxDays: 365 } }),
       getHomeBackupRetention: () => view(),
@@ -26,7 +24,7 @@ function setup() {
       },
     })
   })
-  renderApp(transport, '/settings/observability')
+  renderApp(transport, '/settings/org')
   return sets
 }
 

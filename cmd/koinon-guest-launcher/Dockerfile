@@ -26,7 +26,7 @@ COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr
 COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-front /usr/local/bin/koinon-guest-front
 # Two policies, one per tier family (ADR 0120 section 4.2 and 4.3): the vm tier fails closed without
 # Landlock, the gVisor tiers (hardened, dev) run it best effort (their root is writable by decision, issue #1150).
-COPY --chmod=0644 policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
+COPY --chmod=u=rwX,go=rX policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
 # The guest front listens on port 80 (its default, which the Substrate router expects) and runs the payload as
 # its own user, so it runs as root: a non-root user has neither the port nor the right to start a process as
 # another user. The payload is hardened by the launcher (no_new_privs, capability drop, seccomp, Landlock), and

@@ -26,7 +26,7 @@ import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/connections/$connectionId')
+const route = getRouteApi('/app/org/connections/$connectionId')
 
 /** ConnectionPage shows a connection, its last test by setup-guide step, and runs the test again. */
 export function ConnectionPage() {

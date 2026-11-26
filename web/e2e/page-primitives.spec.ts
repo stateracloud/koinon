@@ -4,8 +4,9 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { mockApi, type Handlers } from './mock-api.ts'
 
-// The shared page primitives (issue #1270): the Agents and API tokens pages use PageHeader, DataTable and the status
-// badges. Each page passes axe in the dark and the light theme, with rows and empty, and the success toast does too.
+// The shared page primitives (issue #1270): the API tokens page uses PageHeader, DataTable and the status badges. It
+// passes axe in the dark and the light theme, with rows and empty, and the success toast does too. The agent list
+// moved to the org home (issue #1274, e2e/org-home.spec.ts).
 
 const org = 'org-1'
 const now = Date.now()
@@ -19,12 +20,6 @@ async function expectAccessible(page: Page) {
 }
 
 function handlers(opts: { empty?: boolean } = {}): Handlers {
-  const agents: Json[] = opts.empty
-    ? []
-    : [
-        { id: 'a-1', orgId: org, displayName: 'Repo helper', harness: 'opencode', status: 'AGENT_STATUS_ACTIVE' },
-        { id: 'a-2', orgId: org, displayName: 'Docs writer', harness: 'opencode', status: 'AGENT_STATUS_DRAFT', unhealthyAt: iso(0) },
-      ]
   const tokens: Json[] = opts.empty
     ? []
     : [
@@ -37,7 +32,7 @@ function handlers(opts: { empty?: boolean } = {}): Handlers {
         user: { id: 'u-1', email: 'admin@example.test', displayName: 'Admin' },
         memberships: [{ orgId: org, orgSlug: 'default', orgDisplayName: 'Default', role: 'ORG_ROLE_OWNER' }],
       }),
-      'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents }),
+      'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [] }),
       'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: [] }),
       'koinon.budget.v1alpha1.BudgetService/ListNotifications': () => ({ notifications: [] }),
       'koinon.token.v1alpha1.TokenService/ListTokens': () => ({ tokens }),
@@ -52,22 +47,6 @@ for (const scheme of ['dark', 'light'] as const) {
     test.beforeEach(async ({ page }) => {
       // Reduced motion: axe scans the toast at rest, not mid-slide.
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
-    })
-
-    test('the Agents page passes axe with rows and empty', async ({ page }) => {
-      await mockApi(page, handlers())
-      await page.goto('/agents')
-      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
-      await expect(page.getByRole('heading', { level: 1, name: 'Agents' })).toBeVisible()
-      const table = page.getByRole('table', { name: 'Agents' })
-      await expect(table.getByRole('rowheader')).toHaveText(['Docs writer', 'Repo helper'])
-      await expectAccessible(page)
-
-      await page.unrouteAll({ behavior: 'ignoreErrors' })
-      await mockApi(page, handlers({ empty: true }))
-      await page.reload()
-      await expect(page.getByText('No agents yet.')).toBeVisible()
-      await expectAccessible(page)
     })
 
     test('the API tokens page passes axe with rows, the revoke toast, and empty', async ({ page }) => {

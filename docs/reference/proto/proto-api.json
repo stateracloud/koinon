@@ -13841,6 +13841,15 @@
               "deprecated": false
             },
             {
+              "name": "GetRunLimits",
+              "description": "",
+              "requestType": "koinon.orgsettings.v1alpha1.GetRunLimitsRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.GetRunLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetApproverNotRequester",
               "description": "SetApproverNotRequester turns the optional rule \"the approver must not be the requester\" on or\noff (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.",
               "requestType": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest",
@@ -13863,6 +13872,15 @@
               "description": "SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the\ndefault (30 days) when days is 0. Audited as org.run_content_retention.set.",
               "requestType": "koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest",
               "responseType": "koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetRunLimits",
+              "description": "SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set\nstays as it is; 0 returns it to the default. Runs that are queued but not started get the new\nlimits when they start. Audited as org.run_limits.set.",
+              "requestType": "koinon.orgsettings.v1alpha1.SetRunLimitsRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.SetRunLimitsResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -13980,6 +13998,42 @@
           ]
         },
         {
+          "name": "GetRunLimitsRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.GetRunLimitsRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetRunLimitsResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.GetRunLimitsResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "HomeBackupRetention",
           "fullName": "koinon.orgsettings.v1alpha1.HomeBackupRetention",
           "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
@@ -14066,6 +14120,96 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunLimit",
+          "fullName": "koinon.orgsettings.v1alpha1.RunLimit",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "RunLimit is one run limit of the org. value is the limit in force; it is default_value when the\norg set none.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "value",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_value",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "min",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max",
+              "number": 4,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunLimits",
+          "fullName": "koinon.orgsettings.v1alpha1.RunLimits",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "RunLimits are the org's run limits (DB2, ADR 0066).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_concurrent_runs",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_concurrent_runs is the most runs of the org that start or run at the same time. The other\nruns wait in the queue."
+            },
+            {
+              "name": "trigger_concurrency",
+              "number": 2,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at\nthe same time."
+            },
+            {
+              "name": "trigger_rate_per_minute",
+              "number": 3,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "trigger_rate_per_minute is the most of those items that start in one minute."
+            },
+            {
+              "name": "sandbox_creations_per_minute",
+              "number": 4,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in\none minute."
             }
           ]
         },
@@ -14197,6 +14341,78 @@
               "name": "retention",
               "number": 1,
               "type": "koinon.orgsettings.v1alpha1.RunContentRetention",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetRunLimitsRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.SetRunLimitsRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0\nreturns it to the default.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_concurrent_runs",
+              "number": 2,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "trigger_concurrency",
+              "number": 3,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "trigger_rate_per_minute",
+              "number": 4,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "sandbox_creations_per_minute",
+              "number": 5,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetRunLimitsResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.SetRunLimitsResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,

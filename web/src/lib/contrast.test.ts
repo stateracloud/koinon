@@ -57,6 +57,8 @@ const text: [string, string[]][] = [
   ['link', ['state-working-bg']],
   ['success', ['state-completed-bg']],
   ['danger', ['state-failed-bg']],
+  // Agent avatars (components/agent-avatar.tsx): the initial on each categorical fill it uses (not sky).
+  ['primary-foreground', ['cat-orange', 'cat-gold', 'cat-green', 'cat-teal', 'cat-blue', 'cat-lavender', 'cat-slate']],
 ]
 // Non-text parts: the control border, the focus ring and the logo parts against the grounds they sit on.
 const nonText: [string, string[]][] = [

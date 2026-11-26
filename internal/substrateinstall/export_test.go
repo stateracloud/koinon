@@ -5,6 +5,7 @@ package substrateinstall
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 )
 
@@ -62,3 +63,8 @@ func GVisorSource(mirror, goArch string) string {
 
 // ArchiveSuffix is archiveSuffix for the tests.
 func ArchiveSuffix(head []byte) (string, error) { return archiveSuffix(head) }
+
+// APIServerTLS is apiServerTLS for the tests.
+func (i *Installer) APIServerTLS(ctx context.Context, ns string) (*tls.Config, error) {
+	return i.apiServerTLS(ctx, ns)
+}

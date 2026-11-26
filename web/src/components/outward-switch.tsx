@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { OutwardService, OutwardTargetKind, type AdminDisabled } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 import { describeError } from '@/lib/api-error'
 import { formatTime } from '@/lib/providers'
-import { useOrg } from '@/lib/org-context'
+import { useOptionalOrg } from '@/lib/org-context'
 
 export type OutwardSwitchProps = {
   kind: OutwardTargetKind
@@ -28,7 +28,9 @@ export type OutwardSwitchProps = {
  * and for a target whose declaring Secret says disabled: true. The server's message is shown as it is.
  */
 export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwitchProps) {
-  const { org } = useOrg()
+  // A platform target (the platform trace destination) is in the platform console, which has no org; the server
+  // ignores org_id for it.
+  const orgId = useOptionalOrg()?.org.orgId ?? ''
   const transport = useTransport()
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
@@ -39,7 +41,7 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
     setPending(true)
     setRefused('')
     try {
-      await createClient(OutwardService, transport).setOutwardTargetDisabled({ orgId: org.orgId, kind, targetId, disabled: off, note: off ? note.trim() : '' })
+      await createClient(OutwardService, transport).setOutwardTargetDisabled({ orgId, kind, targetId, disabled: off, note: off ? note.trim() : '' })
       setNote('')
       await queryClient.invalidateQueries()
     } catch (e) {

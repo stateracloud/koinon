@@ -3281,9 +3281,11 @@ layer the admin API uses. Admins and owners only. Every change is audited.
 | GetApproverNotRequester | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse` | - |  |
 | GetHomeBackupRetention | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse` | - |  |
 | GetRunContentRetention | `koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse` | - |  |
+| GetRunLimits | `koinon.orgsettings.v1alpha1.GetRunLimitsRequest` | `koinon.orgsettings.v1alpha1.GetRunLimitsResponse` | - |  |
 | SetApproverNotRequester | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse` | - | SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set. |
 | SetHomeBackupRetention | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse` | - | SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set. |
 | SetRunContentRetention | `koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse` | - | SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the default (30 days) when days is 0. Audited as org.run_content_retention.set. |
+| SetRunLimits | `koinon.orgsettings.v1alpha1.SetRunLimitsRequest` | `koinon.orgsettings.v1alpha1.SetRunLimitsResponse` | - | SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set stays as it is; 0 returns it to the default. Runs that are queued but not started get the new limits when they start. Audited as org.run_limits.set. |
 
 ### Message GetApproverNotRequesterRequest
 
@@ -3326,6 +3328,18 @@ host, such as two approvals on a protected branch, stays the org's own code-host
 | --- | --- | --- | --- | --- | --- |
 | retention | 1 | `koinon.orgsettings.v1alpha1.RunContentRetention` | singular |  |  |
 
+### Message GetRunLimitsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message GetRunLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.orgsettings.v1alpha1.RunLimits` | singular |  |  |
+
 ### Message HomeBackupRetention
 
 HomeBackupRetention is the org's effective retention of old home backup repositories. A key change
@@ -3353,6 +3367,29 @@ events, the run's status, traces and the spend ledger stay.
 | default_days | 2 | `int32` | singular |  |  |
 | min_days | 3 | `int32` | singular |  |  |
 | max_days | 4 | `int32` | singular |  |  |
+
+### Message RunLimit
+
+RunLimit is one run limit of the org. value is the limit in force; it is default_value when the
+org set none.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| value | 1 | `int32` | singular |  |  |
+| default_value | 2 | `int32` | singular |  |  |
+| min | 3 | `int32` | singular |  |  |
+| max | 4 | `int32` | singular |  |  |
+
+### Message RunLimits
+
+RunLimits are the org's run limits (DB2, ADR 0066).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_concurrent_runs | 1 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | max_concurrent_runs is the most runs of the org that start or run at the same time. The other runs wait in the queue. |
+| trigger_concurrency | 2 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at the same time. |
+| trigger_rate_per_minute | 3 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | trigger_rate_per_minute is the most of those items that start in one minute. |
+| sandbox_creations_per_minute | 4 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in one minute. |
 
 ### Message SetApproverNotRequesterRequest
 
@@ -3392,6 +3429,25 @@ events, the run's status, traces and the spend ledger stay.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | retention | 1 | `koinon.orgsettings.v1alpha1.RunContentRetention` | singular |  |  |
+
+### Message SetRunLimitsRequest
+
+SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0
+returns it to the default.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| max_concurrent_runs | 2 | `int32` | optional |  |  |
+| trigger_concurrency | 3 | `int32` | optional |  |  |
+| trigger_rate_per_minute | 4 | `int32` | optional |  |  |
+| sandbox_creations_per_minute | 5 | `int32` | optional |  |  |
+
+### Message SetRunLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.orgsettings.v1alpha1.RunLimits` | singular |  |  |
 
 ## koinon.outward.v1alpha1
 

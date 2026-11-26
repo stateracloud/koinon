@@ -26,7 +26,7 @@ import { agentStatusLabel, harnessLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/agents/$agentId')
+const route = getRouteApi('/app/org/agents/$agentId')
 
 /**
  * AgentPage shows an agent and, for a draft, the grants it proposes. An org
@@ -66,7 +66,7 @@ export function AgentPage() {
 
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
-      <Link to="/agents" className="text-muted-foreground text-sm hover:underline">
+      <Link to="/" className="text-muted-foreground text-sm hover:underline">
         ← Agents
       </Link>
       <div className="flex flex-wrap items-center gap-3">
@@ -182,7 +182,7 @@ export function AgentPage() {
               {activate.data.ticketsRestarting} open {activate.data.ticketsRestarting === 1 ? 'task' : 'tasks'} will start a fresh session at their next run.
             </>
           )}{' '}
-          <Link to="/" className="underline">
+          <Link to="/inbox" className="underline">
             Hand it a task from the inbox
           </Link>
         </p>
