@@ -375,7 +375,7 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 				}
 			}
 			return bad
-		}).WithTimeout(3*time.Second).WithPolling(200*time.Millisecond).Should(BeEmpty(), "an https request reached the gateway with a verified token")
+		}).WithTimeout(racescale.D(3*time.Second)).WithPolling(200*time.Millisecond).Should(BeEmpty(), "an https request reached the gateway with a verified token")
 		for _, a := range gw.seen(probe) {
 			Expect(a.TLS).To(BeTrue(), "a request of the https probe arrived without TLS: something took the TLS off on the way")
 		}
