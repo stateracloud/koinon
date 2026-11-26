@@ -44,6 +44,12 @@ const (
 	// OrgSettingsServiceSetApproverNotRequesterProcedure is the procedure name of the
 	// OrgSettingsService's SetApproverNotRequester RPC.
 	OrgSettingsServiceSetApproverNotRequesterProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetApproverNotRequester"
+	// OrgSettingsServiceGetRunLimitsProcedure is the procedure name of the OrgSettingsService's
+	// GetRunLimits RPC.
+	OrgSettingsServiceGetRunLimitsProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/GetRunLimits"
+	// OrgSettingsServiceSetRunLimitsProcedure is the procedure name of the OrgSettingsService's
+	// SetRunLimits RPC.
+	OrgSettingsServiceSetRunLimitsProcedure = "/koinon.orgsettings.v1alpha1.OrgSettingsService/SetRunLimits"
 )
 
 var (
@@ -92,6 +98,21 @@ var (
 			Procedure:  OrgSettingsServiceSetApproverNotRequesterProcedure,
 		}
 	})
+	orgSettingsServiceGetRunLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("GetRunLimits"),
+			Procedure:        OrgSettingsServiceGetRunLimitsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	orgSettingsServiceSetRunLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_orgsettings_v1alpha1_orgsettings_proto.Services().ByName("OrgSettingsService").Methods().ByName("SetRunLimits"),
+			Procedure:  OrgSettingsServiceSetRunLimitsProcedure,
+		}
+	})
 )
 
 // OrgSettingsServiceClient is a client for the koinon.orgsettings.v1alpha1.OrgSettingsService
@@ -109,6 +130,11 @@ type OrgSettingsServiceClient interface {
 	// SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
 	// off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
 	SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error)
+	GetRunLimits(context.Context, *v1alpha1.GetRunLimitsRequest) (*v1alpha1.GetRunLimitsResponse, error)
+	// SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set
+	// stays as it is; 0 returns it to the default. Runs that are queued but not started get the new
+	// limits when they start. Audited as org.run_limits.set.
+	SetRunLimits(context.Context, *v1alpha1.SetRunLimitsRequest) (*v1alpha1.SetRunLimitsResponse, error)
 }
 
 // NewOrgSettingsServiceClient constructs a client for the
@@ -133,6 +159,11 @@ type OrgSettingsServiceHandler interface {
 	// SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or
 	// off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.
 	SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error)
+	GetRunLimits(context.Context, *v1alpha1.GetRunLimitsRequest) (*v1alpha1.GetRunLimitsResponse, error)
+	// SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set
+	// stays as it is; 0 returns it to the default. Runs that are queued but not started get the new
+	// limits when they start. Audited as org.run_limits.set.
+	SetRunLimits(context.Context, *v1alpha1.SetRunLimitsRequest) (*v1alpha1.SetRunLimitsResponse, error)
 }
 
 // RegisterOrgSettingsServiceHandler registers svc as the
@@ -146,6 +177,8 @@ func RegisterOrgSettingsServiceHandler(server *connect.Server, svc OrgSettingsSe
 		connect.Method{Spec: orgSettingsServiceSetHomeBackupRetentionSpec(), Handler: adapter.setHomeBackupRetention},
 		connect.Method{Spec: orgSettingsServiceGetApproverNotRequesterSpec(), Handler: adapter.getApproverNotRequester},
 		connect.Method{Spec: orgSettingsServiceSetApproverNotRequesterSpec(), Handler: adapter.setApproverNotRequester},
+		connect.Method{Spec: orgSettingsServiceGetRunLimitsSpec(), Handler: adapter.getRunLimits},
+		connect.Method{Spec: orgSettingsServiceSetRunLimitsSpec(), Handler: adapter.setRunLimits},
 	)
 }
 
@@ -174,6 +207,14 @@ func (UnimplementedOrgSettingsServiceHandler) GetApproverNotRequester(context.Co
 
 func (UnimplementedOrgSettingsServiceHandler) SetApproverNotRequester(context.Context, *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) GetRunLimits(context.Context, *v1alpha1.GetRunLimitsRequest) (*v1alpha1.GetRunLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunLimits is not implemented")
+}
+
+func (UnimplementedOrgSettingsServiceHandler) SetRunLimits(context.Context, *v1alpha1.SetRunLimitsRequest) (*v1alpha1.SetRunLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunLimits is not implemented")
 }
 
 type orgSettingsServiceClient struct {
@@ -223,6 +264,22 @@ func (c *orgSettingsServiceClient) GetApproverNotRequester(ctx context.Context, 
 func (c *orgSettingsServiceClient) SetApproverNotRequester(ctx context.Context, req *v1alpha1.SetApproverNotRequesterRequest) (*v1alpha1.SetApproverNotRequesterResponse, error) {
 	var res v1alpha1.SetApproverNotRequesterResponse
 	if err := c.client.CallUnary(ctx, orgSettingsServiceSetApproverNotRequesterSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) GetRunLimits(ctx context.Context, req *v1alpha1.GetRunLimitsRequest) (*v1alpha1.GetRunLimitsResponse, error) {
+	var res v1alpha1.GetRunLimitsResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceGetRunLimitsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *orgSettingsServiceClient) SetRunLimits(ctx context.Context, req *v1alpha1.SetRunLimitsRequest) (*v1alpha1.SetRunLimitsResponse, error) {
+	var res v1alpha1.SetRunLimitsResponse
+	if err := c.client.CallUnary(ctx, orgSettingsServiceSetRunLimitsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -296,6 +353,30 @@ func (h orgSettingsServiceHandler) setApproverNotRequester(ctx context.Context, 
 		return err
 	}
 	res, err := h.svc.SetApproverNotRequester(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) getRunLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetRunLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetRunLimits(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h orgSettingsServiceHandler) setRunLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetRunLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetRunLimits(ctx, &req)
 	if err != nil {
 		return err
 	}

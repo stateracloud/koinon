@@ -51,7 +51,7 @@ export function NewAgentPage() {
   const loadError = templates.error ?? connections.error
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
-      <Link to="/agents" className="text-muted-foreground text-sm hover:underline">
+      <Link to="/" className="text-muted-foreground text-sm hover:underline">
         ← Agents
       </Link>
       <h1 className="text-xl font-semibold">New agent from a template</h1>

@@ -2,7 +2,6 @@
 
 import { useQuery } from '@connectrpc/connect-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
-import { ApproverNotRequesterSettings } from '@/components/approver-not-requester-settings'
 import { GitHubLinks } from '@/components/github-links'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +12,7 @@ import { isApprover } from '@/lib/approvals'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/connections')
+const route = getRouteApi('/app/org/connections')
 
 /** ConnectionsPage lists the org's connections (ADR 0007). */
 export function ConnectionsPage() {
@@ -72,7 +71,6 @@ export function ConnectionsPage() {
         </p>
       )}
       <GitHubLinks orgId={org.orgId} admin={admin} result={linkResult} />
-      {admin && <ApproverNotRequesterSettings orgId={org.orgId} />}
     </div>
   )
 }

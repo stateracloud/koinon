@@ -42,7 +42,8 @@
       "0061",
       "0075",
       "0078",
-      "0106"
+      "0106",
+      "0128"
     ]
   },
   {
@@ -2109,7 +2110,8 @@
       "0080",
       "0083",
       "0097",
-      "0101"
+      "0101",
+      "0128"
     ]
   },
   {
@@ -3469,7 +3471,8 @@
       "0111"
     ],
     "related_by": [
-      "0120"
+      "0120",
+      "0128"
     ]
   },
   {
@@ -3505,7 +3508,8 @@
       "0119"
     ],
     "related_by": [
-      "0123"
+      "0123",
+      "0128"
     ]
   },
   {
@@ -3666,6 +3670,31 @@
       "0065",
       "0066",
       "0110"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0128",
+    "file": "0128-substrate-provisioner.md",
+    "title": "A provisioner holds the global Substrate role",
+    "status": "accepted",
+    "date": "2026-11-26",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "security",
+      "identity",
+      "kubernetes"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0075",
+      "0119",
+      "0120"
     ],
     "related_by": []
   }

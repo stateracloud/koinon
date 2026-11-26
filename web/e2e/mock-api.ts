@@ -68,6 +68,25 @@ function expectHeader(headers: Record<string, string>, name: string, value: stri
   if (headers[name] !== value) throw new Error(`missing ${name}: ${value} (the API's CSRF check requires it)`)
 }
 
+/**
+ * agentSummaries is ListAgentSummaries for the agents a spec gives ListAgents (the JSON form of Agent): the org home
+ * cards of ADR 0126 section 4. `extra` adds summary fields per agent id (the spend, the runs, team, reports_to).
+ */
+export function agentSummaries(agents: Json[], extra: Record<string, Json> = {}) {
+  return () => ({
+    agents: agents.map((a) => ({
+      agentId: a.id,
+      displayName: a.displayName,
+      status: a.status,
+      harness: a.harness,
+      model: 'claude-sonnet-5-5',
+      spentTodayUsd: '0',
+      ...(a.unhealthyAt ? { unhealthyAt: a.unhealthyAt } : {}),
+      ...extra[a.id as string],
+    })),
+  })
+}
+
 const mcp = 'koinon.mcpserver.v1alpha1.McpServerService/'
 
 /**

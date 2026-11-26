@@ -86,6 +86,9 @@ type Loader struct {
 	mu    sync.Mutex
 	ready bool
 	err   error
+	// good is true once one pass held every key it needed. A later pass that fails only on the database
+	// (a list or a report error) keeps the loader ready: the keyring of the last good pass still serves.
+	good bool
 
 	// cache keeps each unwrapped key by ID and the digest of its stored bytes, so a pass calls the KMS only
 	// for a new or changed entry and a loaded key stays held through a KMS outage.
@@ -112,18 +115,57 @@ func (l *Loader) Ready() (bool, error) {
 
 // Load runs one pass. It needs every `pending`, `active` and `retiring` row's key; a missing one makes
 // the loader not ready. A key with no row, or whose row differs from the key, is refused.
+//
+// A database error (the list of rows or a load report) is transient: a Postgres restart or a CNPG
+// switchover must not remove every MCP endpoint. After one good pass, such an error leaves the loader
+// ready and the keyring of that pass in place; Load still returns the error, so the caller logs it.
+// Before the first good pass the loader stays not ready.
 func (l *Loader) Load(ctx context.Context) error {
 	err := l.load(ctx)
 	l.mu.Lock()
-	l.ready, l.err = err == nil, err
-	l.mu.Unlock()
+	defer l.mu.Unlock()
+	switch {
+	case err == nil:
+		l.good = true
+		l.ready, l.err = true, nil
+	case l.good && isTransient(err):
+		l.ready, l.err = true, nil
+	default:
+		// good means "the last pass that was not a database error held every key": a key that is missing
+		// must not turn ready again on a later database error.
+		l.good = false
+		l.ready, l.err = false, err
+	}
 	return err
+}
+
+// dbError marks an error of the database, as opposed to a key that the loader cannot hold.
+type dbError struct{ error }
+
+func (e dbError) Unwrap() error { return e.error }
+
+// isTransient reports whether every error in err is a database error. The error of a missing migration
+// is not: the table is not there, and the loader is not ready until it is.
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range j.Unwrap() {
+			if !isTransient(e) {
+				return false
+			}
+		}
+		return true
+	}
+	var d dbError
+	return errors.As(err, &d) && !errors.Is(err, ErrNotMigrated)
 }
 
 func (l *Loader) load(ctx context.Context) error {
 	rows, err := List(ctx, l.DB)
 	if err != nil {
-		return err
+		return dbError{err}
 	}
 	entries, sums, err := readDir(l.Dir)
 	if err != nil {
@@ -225,7 +267,7 @@ func (l *Loader) load(ctx context.Context) error {
 			break
 		}
 		if err := ReportLoaded(ctx, l.DB, r.KeyID, l.CopyID); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, dbError{err})
 		}
 	}
 	return errors.Join(errs...)
