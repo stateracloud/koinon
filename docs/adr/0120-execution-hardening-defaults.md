@@ -550,12 +550,12 @@ it (`no_token`).
    `replace_headers` with the header `Koinon-Actor-Token`, from `actor_jwt` with the gateway audience and
    `expiration_seconds: 900`. The rule holds no org host and no credential. The gateway still owns the L7
    rules and the credentials.
-2. **atenet-egress finds the actor from the transport.** In the worker pod, atunnel presents a certificate
-   for the actor. atenet-egress accepts it only for an actor that is placed on a worker (running or
-   resuming). So the identity comes from the connection, not from a value that the guest sets. For a request
-   that carries the header, atenet-egress gets a token from ateapi (`MintActorJwt`). It writes the token over the value of the guest
-   (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each token until a third of its lifetime remains. Each failure
-   refuses the request (403, 503 or 500, `mapActorJWTError`). Source: `cmd/atenet/internal/router/egress/credentials.go`
+2. **atenet-egress finds the actor from the transport.** In the worker pod, atunnel presents a certificate for the
+   actor. atenet-egress accepts it only for an actor that is placed on a worker (running or resuming). So the identity
+   comes from the connection, not from a value that the guest sets. For a request that carries the header, atenet-egress
+   gets a token from ateapi (`MintActorJwt`). It writes the token over the value of the guest
+   (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each token until a third of its lifetime remains. Each failure refuses the
+   request (403, 503 or 500, `mapActorJWTError`). Source: `cmd/atenet/internal/router/egress/credentials.go`
    (`applyEffects`, `actorJWT`) and `actorjwt/actorjwt.go`.
 3. **The gateway URL of a Substrate guest is `http`.** `replace_headers` works on an `HttpRule`, and an
    `HttpRule` does not match TLS. To replace a header in TLS, Substrate needs an `HttpsRule`. That rule
