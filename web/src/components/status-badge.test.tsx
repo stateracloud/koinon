@@ -32,6 +32,17 @@ describe('StatusBadge', () => {
     expect(cls).not.toMatch(/\bbg-(?!current)/)
   })
 
+  it('shows the general name and keeps the attention tone when the task waits on someone else', () => {
+    render(<StatusBadge state={TaskState.INPUT_REQUIRED} onViewer={false} />)
+    expect(screen.getByTestId('status-badge')).toHaveTextContent('Input required')
+    expect(screen.getByTestId('status-badge')).toHaveAttribute('data-tone', 'attention')
+  })
+
+  it('ignores onViewer for the other states', () => {
+    render(<StatusBadge state={TaskState.WORKING} onViewer={false} />)
+    expect(screen.getByTestId('status-badge')).toHaveTextContent('Working')
+  })
+
   it('uses the attention fill with dark text for Blocked on you', () => {
     render(<StatusBadge state={TaskState.INPUT_REQUIRED} />)
     expect(screen.getByTestId('status-badge').className).toContain('bg-attention text-attention-foreground')
