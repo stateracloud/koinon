@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus, type Agent, type SandboxResources } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { describeError } from '@/lib/api-error'
 import { boundsText } from '@/lib/sandbox-resources'
 
 type Field = 'cpuRequest' | 'cpuLimit' | 'memoryRequest' | 'memoryLimit'

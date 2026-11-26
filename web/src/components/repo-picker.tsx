@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { useId, useState, type KeyboardEvent } from 'react'
 import { Input } from '@/components/ui/input'
 import { ConnectionService, type InstallationRepo } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { useDebounced } from '@/hooks/use-debounced'
+import { describeError } from '@/lib/api-error'
 import { useOrg } from '@/lib/org-context'
 import { cn } from '@/lib/utils'
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { Code, ConnectError } from '@connectrpc/connect'
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -10,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Server, Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { buildSink, isDefaultSink, type ResultLeg, type SinkFormState, sinkClasses, sinkDerivations, sinkFormOf, sinkText, validateSink } from '@/lib/mcp-servers'
 
 const resultLegs: { value: ResultLeg; label: string }[] = [

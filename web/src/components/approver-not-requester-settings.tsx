@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
+import { describeError } from '@/lib/api-error'
 
 /**
  * ApproverNotRequesterSettings is where an org admin turns on the optional rule "the approver must not

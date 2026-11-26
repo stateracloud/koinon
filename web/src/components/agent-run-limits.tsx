@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -10,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { BudgetService, type RunLimitValues } from '@/gen/koinon/budget/v1alpha1/budget_pb'
+import { describeError } from '@/lib/api-error'
 import { runLimitsLabel } from '@/lib/cost'
 import { amountError } from '@/lib/money'
 

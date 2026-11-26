@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -9,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Health, McpServerService, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { useMcpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { allowStateFrom, allowlistProblem, buildAllowlist, healthLabel, tierExplanation, tierLabel, toolsOf, type AllowState } from '@/lib/mcp-servers'
 import { useOrg } from '@/lib/org-context'
 

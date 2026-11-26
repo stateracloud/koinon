@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -9,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { OutwardService, OutwardTargetKind, type AdminDisabled } from '@/gen/koinon/outward/v1alpha1/outward_pb'
+import { describeError } from '@/lib/api-error'
 import { formatTime } from '@/lib/providers'
 import { useOrg } from '@/lib/org-context'
 

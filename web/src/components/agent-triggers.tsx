@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { create } from '@bufbuild/protobuf'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -16,6 +15,7 @@ import { AgentService, AgentStatus, type Agent } from '@/gen/koinon/agent/v1alph
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionService, type AskableMember } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { NotifyTargetKind, NotifyTargetSchema, TriggerSchema, TriggerType, type Trigger } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { describeError } from '@/lib/api-error'
 
 /** triggerTypeLabel names the trigger types that can be set in v0.1. */
 function triggerTypeLabel(t: TriggerType): string {

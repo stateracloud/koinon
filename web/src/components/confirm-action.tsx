@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { ConnectError } from '@connectrpc/connect'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { describeError } from '@/lib/api-error'
 
 export type ConfirmActionProps = {
   /** The button that opens the confirmation, for example "Delete". */

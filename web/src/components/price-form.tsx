@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { PriceVersion } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import type { usePriceActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
 import { emptyPriceForm, emptyRates, formFromVersion, providerChoices, toSetPrice, tokenizers, validatePrice, type PriceFormValues, type RateFields } from '@/lib/prices'
 
 type Actions = ReturnType<typeof usePriceActions>

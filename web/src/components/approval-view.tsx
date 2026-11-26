@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { Code, ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -10,6 +9,7 @@ import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { timestampFromDate } from '@bufbuild/protobuf/wkt'
 import { ApprovalService, ScopeKind } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { describeError } from '@/lib/api-error'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 

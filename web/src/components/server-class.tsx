@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -10,6 +9,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Server } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { codeHostInfo } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
 import { dataLegs, kindLabel, legsText, serverKinds, toggleLeg } from '@/lib/mcp-servers'

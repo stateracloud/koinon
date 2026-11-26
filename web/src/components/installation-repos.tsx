@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useInfiniteQuery } from '@connectrpc/connect-query'
 import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { useDebounced } from '@/hooks/use-debounced'
+import { describeError } from '@/lib/api-error'
 
 /**
  * InstallationRepos lists the repositories a GitHub connection's App

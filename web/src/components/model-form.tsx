@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -11,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { ProviderService, type CreateModelResponse, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ModelChange, ModelCreate } from '@/hooks/use-catalog-actions'
+import { describeError } from '@/lib/api-error'
 import { useOrg } from '@/lib/org-context'
 import { guardProviderType, scopedModelName } from '@/lib/providers'
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { Code, ConnectError, createClient } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@connectrpc/connect-query'
@@ -9,6 +8,7 @@ import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConnectionService, type GitHubLink } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 import { type GitHubLinkResult, githubLinkResultText } from '@/lib/github-link'
 
 function hostName(host: string) {

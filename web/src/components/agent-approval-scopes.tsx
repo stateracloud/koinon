@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describeError } from '@/lib/api-error'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ApprovalService, ScopeKind, type ApprovalScope } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { describeError } from '@/lib/api-error'
 import { targetRepo } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
