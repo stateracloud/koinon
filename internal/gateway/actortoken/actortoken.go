@@ -161,6 +161,7 @@ func (m *Minter) Mint(actor Actor, ttl time.Duration) (string, error) {
 }
 
 // Verifier checks actor tokens against public keys. It holds no private key.
+// Substrate uses SubstrateVerifier instead; this one stays for OpenShell (exit: #1386 PR B, after #1094).
 type Verifier struct {
 	issuer string
 	keys   map[string]ed25519.PublicKey
