@@ -14,12 +14,13 @@ const homeOrgs = 5
 
 /**
  * PlatformConsolePage is the home of the platform console at /platform (ADR 0126 section 4). It shows the first orgs
- * by name and a link to all of them. The platform totals come with issue #1281.
+ * in the server order and a link to all of them. The platform totals come with issue #1281.
  */
 export function PlatformConsolePage() {
   const { memberships } = useOrgSession()
   const list = useAllOrgs()
-  const orgs = [...(list.orgs ?? [])].sort((a, b) => orgSummaryName(a).localeCompare(orgSummaryName(b))).slice(0, homeOrgs)
+  // The server order (by slug), so the first orgs do not change while more pages load.
+  const orgs = (list.orgs ?? []).slice(0, homeOrgs)
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
       <PageHeader title="Platform console" description="Settings for all the orgs of this Koinon." />

@@ -115,9 +115,9 @@ function ActingOrgArea({ orgId }: { orgId: string }) {
   )
   if (got.isPending) {
     return (
-      <p className="p-6" role="status">
-        Loading…
-      </p>
+      <main id="main" className="p-6">
+        <p role="status">Loading…</p>
+      </main>
     )
   }
   if (!value) {
@@ -125,7 +125,10 @@ function ActingOrgArea({ orgId }: { orgId: string }) {
       <main id="main" className="mx-auto grid max-w-xl gap-3 p-6">
         <h1 className="text-xl font-semibold">Could not open the org</h1>
         <QueryError error={got.error} />
-        <p>
+        <p className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => void got.refetch()}>
+            Try again
+          </Button>
           <Link to="/platform/orgs" className="text-link font-medium hover:underline">
             Back to platform console
           </Link>

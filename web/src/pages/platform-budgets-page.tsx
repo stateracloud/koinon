@@ -12,8 +12,9 @@ import { describeError } from '@/lib/api-error'
 import { formatUSD } from '@/lib/cost'
 
 /**
- * PlatformBudgetsPage is where a platform admin sees every org's cap, spend and platform ceiling, and sets the
- * ceilings in place (ADR 0056). Org admins see their ceiling, read only, on the Budgets page. The platform console lets in only platform admins (PlatformLayout).
+ * PlatformBudgetsPage is where a platform admin sees every org's cap, spend and platform ceiling, and sets the ceilings
+ * in place (ADR 0056). Org admins see their ceiling, read only, on the Budgets page. The platform console lets in only
+ * platform admins (PlatformLayout).
  */
 export function PlatformBudgetsPage() {
   return (

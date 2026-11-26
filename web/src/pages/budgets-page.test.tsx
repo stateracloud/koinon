@@ -260,7 +260,7 @@ describe('Platform ceilings', () => {
     await waitFor(() => expect(calls.ceilings).toEqual([expect.objectContaining({ orgId: 'org-1', platformCeilingUsd: '1000' })]))
   })
 
-  it('is refused to org admins who are not platform admins: they go to the org area, with no flash of the console', async () => {
+  it('is refused to org admins who are not platform admins: they go to the org area', async () => {
     const calls = setup({ path: '/platform/usage/budgets' })
     expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()

@@ -28,10 +28,11 @@ const summary = (orgId: string, name: string, extra: Partial<{ members: number; 
     monthlyCapUsd: extra.cap ?? '',
   })
 
+// In the server order: by slug.
 const orgs = [
-  summary('org-1', 'Default', { members: 3, agents: 2, spent: '12.50', cap: '100.00' }),
   summary('org-9', 'Acme Research', { members: 7, agents: 4, spent: '40.00' }),
   summary('org-8', 'Beta Labs'),
+  summary('org-1', 'Default', { members: 3, agents: 2, spent: '12.50', cap: '100.00' }),
 ]
 
 function setup(who: Who = { platformAdmin: true }, opts: { getOrgFails?: boolean } = {}) {

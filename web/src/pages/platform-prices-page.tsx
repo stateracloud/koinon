@@ -15,9 +15,9 @@ import { describeError } from '@/lib/api-error'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
- * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's
- * versions and where each price came from, rolls back, reads the fetch log and checks the sources
- * (ADR 0098). The platform console lets in only platform admins (PlatformLayout).
+ * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's versions and where
+ * each price came from, rolls back, reads the fetch log and checks the sources (ADR 0098). The platform console lets in
+ * only platform admins (PlatformLayout).
  */
 export function PlatformPricesPage() {
   return (

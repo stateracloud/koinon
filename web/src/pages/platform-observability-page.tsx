@@ -13,8 +13,8 @@ import { describeTraceError } from '@/lib/trace-errors'
 import { levelLabel, levelRank, levels, normalLevel, savedNotice, testNotice } from '@/lib/trace'
 
 /**
- * PlatformObservabilityPage is where a platform admin sets the platform's trace destination and the
- * highest content level an org may pick (ADR 0074). The platform console lets in only platform admins (PlatformLayout).
+ * PlatformObservabilityPage is where a platform admin sets the platform's trace destination and the highest content
+ * level an org may pick (ADR 0074). The platform console lets in only platform admins (PlatformLayout).
  */
 export function PlatformObservabilityPage() {
   return (
