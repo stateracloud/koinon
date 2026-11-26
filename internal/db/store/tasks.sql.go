@@ -15,26 +15,29 @@ const appendTaskEvent = `-- name: AppendTaskEvent :one
 WITH task AS (
     UPDATE tasks
     SET last_event_seq = last_event_seq + 1
-    WHERE tasks.org_id = $7 AND tasks.id = $8
+    WHERE tasks.org_id = $9 AND tasks.id = $10
     RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
 )
 INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
-                           actor_agent_id, run_id, payload)
+                           actor_agent_id, run_id, payload, payload_version, prompt)
 SELECT task.org_id, task.id, task.last_event_seq, $1, $2,
-       $3, $4, $5, $6
+       $3, $4, $5, $6,
+       $7::smallint, $8::boolean
 FROM task
-RETURNING org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at
+RETURNING org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt
 `
 
 type AppendTaskEventParams struct {
-	Kind         string
-	ActorKind    TaskActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	OrgID        pgtype.UUID
-	TaskID       pgtype.UUID
+	Kind           string
+	ActorKind      TaskActorKind
+	ActorUserID    pgtype.UUID
+	ActorAgentID   pgtype.UUID
+	RunID          pgtype.UUID
+	Payload        []byte
+	PayloadVersion int16
+	Prompt         bool
+	OrgID          pgtype.UUID
+	TaskID         pgtype.UUID
 }
 
 func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error) {
@@ -45,6 +48,8 @@ func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams
 		arg.ActorAgentID,
 		arg.RunID,
 		arg.Payload,
+		arg.PayloadVersion,
+		arg.Prompt,
 		arg.OrgID,
 		arg.TaskID,
 	)
@@ -61,6 +66,8 @@ func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams
 		&i.RunID,
 		&i.Payload,
 		&i.CreatedAt,
+		&i.PayloadVersion,
+		&i.Prompt,
 	)
 	return i, err
 }
@@ -391,7 +398,7 @@ func (q *Queries) ListEventActorNames(ctx context.Context, arg ListEventActorNam
 }
 
 const listTaskEvents = `-- name: ListTaskEvents :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
 ORDER BY seq
 LIMIT $4
@@ -431,6 +438,8 @@ func (q *Queries) ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) 
 			&i.RunID,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.PayloadVersion,
+			&i.Prompt,
 		); err != nil {
 			return nil, err
 		}
@@ -443,10 +452,8 @@ func (q *Queries) ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) 
 }
 
 const listTaskMessagesAfter = `-- name: ListTaskMessagesAfter :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
-WHERE org_id = $1 AND task_id = $2 AND seq > $3
-  AND kind = 'message'
-  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt FROM task_events
+WHERE org_id = $1 AND task_id = $2 AND seq > $3 AND prompt
 ORDER BY seq
 `
 
@@ -456,9 +463,10 @@ type ListTaskMessagesAfterParams struct {
 	AfterSeq int64
 }
 
-// The users' messages on the task after a timeline seq, in order: what
-// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
-// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
+// The events on the task after a timeline seq that are part of a run's prompt, in order: what
+// agentd sends the harness. The writer marks them (task_events.prompt): the users' messages, and a
+// system message with a source, such as a trigger's instruction, so a scheduled run sees what it
+// was scheduled to do.
 func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error) {
 	rows, err := q.db.Query(ctx, listTaskMessagesAfter, arg.OrgID, arg.TaskID, arg.AfterSeq)
 	if err != nil {
@@ -480,6 +488,8 @@ func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessage
 			&i.RunID,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.PayloadVersion,
+			&i.Prompt,
 		); err != nil {
 			return nil, err
 		}
