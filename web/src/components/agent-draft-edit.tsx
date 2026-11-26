@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Code } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type FormEvent } from 'react'
@@ -18,10 +19,13 @@ import { describeError } from '@/lib/api-error'
  */
 export function AgentDraftEdit({ agent }: { agent: Agent }) {
   const [editing, setEditing] = useState(false)
+  const headingId = useId()
   return (
-    <section aria-label="Draft definition" className="bg-card grid gap-2 rounded-lg border p-4 text-sm">
+    <section aria-labelledby={headingId} className="bg-card grid gap-2 rounded-lg border p-4 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold">Instructions</h2>
+        <h2 id={headingId} className="font-semibold">
+          Draft instructions
+        </h2>
         {!editing && (
           <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
             Edit draft
@@ -42,8 +46,11 @@ export function AgentDraftEdit({ agent }: { agent: Agent }) {
 function EditForm({ agent, onDone }: { agent: Agent; onDone: () => void }) {
   const id = useId()
   const queryClient = useQueryClient()
-  const [name, setName] = useState(agent.displayName)
-  const [instructions, setInstructions] = useState(agent.instructions)
+  // The version the form was opened on. A refetch can move agent.latestVersion on while the fields
+  // still hold the old text; basing the update on the opened version makes the server refuse it.
+  const [base] = useState(agent)
+  const [name, setName] = useState(base.displayName)
+  const [instructions, setInstructions] = useState(base.instructions)
   const [touched, setTouched] = useState(false)
   const update = useMutation(AgentService.method.updateAgent, {
     onSuccess: async () => {
@@ -58,13 +65,13 @@ function EditForm({ agent, onDone }: { agent: Agent; onDone: () => void }) {
     setTouched(true)
     if (problem) return
     const paths: string[] = []
-    if (name.trim() !== agent.displayName) paths.push('display_name')
-    if (instructions.trim() !== agent.instructions) paths.push('instructions')
+    if (name.trim() !== base.displayName) paths.push('display_name')
+    if (instructions.trim() !== base.instructions) paths.push('instructions')
     if (paths.length === 0) return onDone()
     update.mutate({
-      orgId: agent.orgId,
-      agentId: agent.id,
-      baseVersion: agent.latestVersion,
+      orgId: base.orgId,
+      agentId: base.id,
+      baseVersion: base.latestVersion,
       definition: { displayName: name.trim(), instructions: instructions.trim() },
       updateMask: { paths },
     })
@@ -83,7 +90,11 @@ function EditForm({ agent, onDone }: { agent: Agent; onDone: () => void }) {
       )}
       {update.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save the draft: {describeError(update.error).message}</AlertDescription>
+          <AlertDescription>
+            {describeError(update.error).code === Code.FailedPrecondition
+              ? 'Someone changed this draft after you opened the form. Cancel, read the new version, then edit again.'
+              : `Could not save the draft: ${describeError(update.error).message}`}
+          </AlertDescription>
         </Alert>
       )}
       <div className="flex gap-2">

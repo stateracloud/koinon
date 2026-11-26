@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RepoPicker } from '@/components/repo-picker'
 import { SaveAsTemplateFields } from '@/components/save-as-template'
-import { noTemplate, templateChoiceError, type TemplateChoice } from '@/hooks/use-new-agent'
+import { noTemplate, templateChoiceError, usePlatformTemplateSlugs, type TemplateChoice } from '@/hooks/use-new-agent'
+import { useOrg } from '@/lib/org-context'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
@@ -74,6 +75,7 @@ export function AgentWizard({ template, connections, targetPatterns, codeHosts, 
   const [bindings, setBindings] = useState<Record<number, Binding>>({})
   const [showErrors, setShowErrors] = useState(false)
   const [saveAs, setSaveAs] = useState<TemplateChoice>(noTemplate)
+  const platformSlugs = usePlatformTemplateSlugs(useOrg().org.orgId)
   // Unset follows the template; the toggle overrides it for this agent.
   const [ephemeralChoice, setEphemeralChoice] = useState<boolean | undefined>(undefined)
 
@@ -102,7 +104,7 @@ export function AgentWizard({ template, connections, targetPatterns, codeHosts, 
     return errs
   }
 
-  const stepValid = [chosenHarness !== '', targetGrants.every(({ g, i }) => grantErrors(i, g).length === 0), !!name.trim() && !templateChoiceError(saveAs)]
+  const stepValid = [chosenHarness !== '', targetGrants.every(({ g, i }) => grantErrors(i, g).length === 0), !!name.trim() && !templateChoiceError(saveAs, platformSlugs)]
 
   function next() {
     if (!stepValid[step]) {
@@ -254,7 +256,7 @@ export function AgentWizard({ template, connections, targetPatterns, codeHosts, 
               Creating it makes a draft. Nothing is granted until an org admin or owner reviews and activates it.
             </p>
           </section>
-          <SaveAsTemplateFields value={saveAs} onChange={setSaveAs} showErrors={showErrors} defaultName={name} />
+          <SaveAsTemplateFields value={saveAs} onChange={setSaveAs} showErrors={showErrors} defaultName={name} platformSlugs={platformSlugs} />
         </div>
       )}
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,7 @@ function githubWithScopes() {
   })
 }
 
-function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; path?: string; orgTemplates?: Template[]; failTemplate?: boolean } = {}) {
+function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; path?: string; orgTemplates?: Template[]; failTemplate?: boolean; staleDraft?: boolean } = {}) {
   const creates: CreateAgentFromTemplateRequest[] = []
   const blanks: CreateAgentRequest[] = []
   const activates: ActivateAgentRequest[] = []
@@ -90,6 +90,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole; p
       },
       updateAgent: (req) => {
         updates.push(req)
+        if (opts.staleDraft) throw new ConnectError('base_version does not match', Code.FailedPrecondition)
         agent = create(AgentSchema, { ...agent, displayName: req.definition?.displayName ?? agent.displayName, instructions: req.definition?.instructions ?? '', latestVersion: agent.latestVersion + 1 })
         return { agent }
       },
@@ -236,10 +237,24 @@ describe('AgentWizard', () => {
     expect(await within(org).findByRole('link', { name: /Our repo helper/ })).toBeInTheDocument()
   })
 
+  it('refuses a template name that a platform template has, before the draft is created', async () => {
+    const { creates, saves } = setup()
+    await toReview()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Save as template' }))
+    // The agent name is the platform template's name, so it is not offered as the template name.
+    expect(screen.getByLabelText('Template name')).toHaveValue('')
+    await userEvent.type(screen.getByLabelText('Template name'), 'Repo  Helper!')
+    await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+    expect(await screen.findByText('A platform template has this name. Choose another name.')).toBeInTheDocument()
+    expect(creates).toEqual([])
+    expect(saves).toEqual([])
+  })
+
   it('keeps the draft and says so when the template is not saved', async () => {
     const { creates } = setup({ failTemplate: true })
     await toReview()
     await userEvent.click(screen.getByRole('checkbox', { name: 'Save as template' }))
+    await userEvent.type(screen.getByLabelText('Template name'), 'Our helper')
     await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
     const alert = await screen.findByText(/The draft was created, but the template was not saved/)
     expect(creates).toHaveLength(1)
@@ -351,6 +366,17 @@ describe('BlankAgentForm', () => {
     await waitFor(() => expect(screen.getByRole('region', { name: 'Agent summary' })).toHaveTextContent('2'))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(activates).toEqual([expect.objectContaining({ agentId: 'a-9', version: 2 })]))
+  })
+
+  it('says so when another change came first, and sends the version the form was opened on', async () => {
+    const { updates } = setup({ path: '/agents/a-9', staleDraft: true })
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit draft' }))
+    expect(screen.getByRole('region', { name: 'Draft instructions' })).toBeInTheDocument()
+    const edit = screen.getByRole('form', { name: 'Edit draft' })
+    await userEvent.type(within(edit).getByLabelText('Instructions'), 'New text.')
+    await userEvent.click(within(edit).getByRole('button', { name: 'Save draft' }))
+    expect(await within(edit).findByText(/Someone changed this draft after you opened the form/)).toBeInTheDocument()
+    expect(updates).toEqual([expect.objectContaining({ baseVersion: 1, updateMask: expect.objectContaining({ paths: ['instructions'] }) })])
   })
 
   it('saves the blank definition as an org template', async () => {

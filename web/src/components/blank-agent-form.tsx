@@ -16,7 +16,7 @@ import { AgentDefinitionSchema, type AgentDefinition } from '@/gen/koinon/agent/
 import type { Connection, ConnectorType } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { GrantSchema, Preset, RunLimitsSchema, type Trigger } from '@/gen/koinon/template/v1alpha1/template_pb'
-import { noTemplate, templateChoiceError, type TemplateChoice } from '@/hooks/use-new-agent'
+import { noTemplate, templateChoiceError, usePlatformTemplateSlugs, type TemplateChoice } from '@/hooks/use-new-agent'
 import { validateRepositories } from '@/lib/agents'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { builtInHarnesses, harnessLabel, presetLabel } from '@/lib/labels'
@@ -58,6 +58,7 @@ export function BlankAgentForm({ orgId, connectorTypes, connections, models, can
   const [limits, setLimits] = useState({ requests: '', spend: '', minutes: '' })
   const [saveAs, setSaveAs] = useState<TemplateChoice>(noTemplate)
   const [showErrors, setShowErrors] = useState(false)
+  const platformSlugs = usePlatformTemplateSlugs(orgId)
   const members = useQuery(QuestionService.method.listAskableMembers, { orgId }, { enabled: triggers.length > 0 })
 
   function accessOf(t: ConnectorType): Access {
@@ -86,7 +87,7 @@ export function BlankAgentForm({ orgId, connectorTypes, connections, models, can
     requests: limits.requests.trim() !== '' && (!wholeNumber.test(limits.requests.trim()) || Number(limits.requests) < 1 || Number(limits.requests) > 100000) ? 'Model requests must be a whole number from 1 to 100,000.' : undefined,
     spend: limits.spend.trim() !== '' ? amountError('Spend', limits.spend.trim()) : undefined,
     minutes: limits.minutes.trim() !== '' && (!wholeNumber.test(limits.minutes.trim()) || Number(limits.minutes) < 1 || Number(limits.minutes) > 1440) ? 'Minutes must be a whole number from 1 to 1,440.' : undefined,
-    template: templateChoiceError(saveAs),
+    template: templateChoiceError(saveAs, platformSlugs),
   }
   const invalid = !!(problems.name || problems.instructions || problems.access.length || problems.triggers || problems.requests || problems.spend || problems.minutes || problems.template)
   const shown = (p: string | undefined) => (showErrors ? p : undefined)
@@ -264,7 +265,7 @@ export function BlankAgentForm({ orgId, connectorTypes, connections, models, can
         </div>
       </Section>
 
-      <SaveAsTemplateFields value={saveAs} onChange={setSaveAs} showErrors={showErrors} defaultName={name} />
+      <SaveAsTemplateFields value={saveAs} onChange={setSaveAs} showErrors={showErrors} defaultName={name} platformSlugs={platformSlugs} />
 
       <p className="text-muted-foreground text-sm">Creating it makes a draft. Nothing is granted, and no trigger fires, until an org admin or owner reviews and activates it.</p>
       {error && (
