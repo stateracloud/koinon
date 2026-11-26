@@ -217,6 +217,8 @@ type Probe struct {
 	Name     string
 	Target   string
 	Material string
+	// KeyID is the probe key's ID: the prober waits until koinon-gateway serves it (#1260).
+	KeyID string
 }
 
 // ProblemKind says what a Problem is about, for the pass metrics.
@@ -1086,7 +1088,7 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 		state.GrantTools(ref, gateway.ToolGrant{Target: s.target(), All: true})
 		probes = append(probes, Probe{
 			Org: s.Org.ID, OrgSlug: s.Org.Slug, Server: s.ID, Name: s.Name, Target: s.target(),
-			Material: material,
+			Material: material, KeyID: key.ID,
 		})
 	}
 	return probes, nil

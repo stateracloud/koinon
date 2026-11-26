@@ -1435,7 +1435,8 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # Peers allowed to scrape the gateway stats port (15020): agentgateway's, and the model-gateway's with
+  # gateway.model.driver=koinon (the KoinonModelKeyEcho alert reads its counter). Like metrics.allowFrom, this only
   # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
   # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
@@ -1467,7 +1468,9 @@ metrics:
   allowFrom: []
   serviceMonitor:
     # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
-    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes), and one
+    # for the model-gateway Service's "stats" port with gateway.model.driver=koinon. A scraper of its
+    # own must add that port as a target too, or KoinonModelKeyEcho gets no data. Needs
     # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
     # enabling it without them fails the install.
     enabled: false

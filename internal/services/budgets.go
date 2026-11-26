@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
@@ -103,12 +102,13 @@ func (s *Server) SetMonthlyCap(ctx context.Context, req *budgetv1alpha1.SetMonth
 
 // SetPlatformCeiling implements BudgetService. Platform admins only.
 func (s *Server) SetPlatformCeiling(ctx context.Context, req *budgetv1alpha1.SetPlatformCeilingRequest) (*budgetv1alpha1.SetPlatformCeilingResponse, error) {
+	// The platform-admin check comes first, so a refusal does not show whether the org exists.
+	if _, err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
+	}
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
 		return nil, err
-	}
-	if !c.p.PlatformAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, budget.ErrForbidden.Error())
 	}
 	ceiling, err := optionalAmount(req.GetPlatformCeilingUsd())
 	if err != nil {
@@ -243,12 +243,8 @@ func (s *Server) ListAgentBudgets(ctx context.Context, req *budgetv1alpha1.ListA
 
 // ListOrgBudgets implements BudgetService. Platform admins only.
 func (s *Server) ListOrgBudgets(ctx context.Context, _ *budgetv1alpha1.ListOrgBudgetsRequest) (*budgetv1alpha1.ListOrgBudgetsResponse, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, budget.ErrForbidden.Error())
+	if _, err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
 	}
 	since := budget.MonthStart(time.Now())
 	rows, err := s.q.ListOrgBudgetSummaries(ctx, pgtype.Timestamptz{Time: since, Valid: true})

@@ -116,10 +116,14 @@ func (s *Server) Gate(next http.Handler) http.Handler { return s.authenticate(ne
 
 // Mount registers the API on mux under BasePath.
 func (s *Server) Mount(mux *http.ServeMux) {
-	api := HandlerFromMuxWithBaseURL(NewStrictHandlerWithOptions(s, nil, StrictHTTPServerOptions{
-		RequestErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
-			writeError(w, http.StatusBadRequest, InvalidRequest, "invalid request: "+err.Error())
-		},
+	// Both request error paths (a path or query parameter the router cannot bind, and a body the
+	// strict handler cannot decode) answer with the documented JSON error. The generated default for
+	// parameters is http.Error: a text/plain body that echoed the raw request value (issue 1365).
+	invalidRequest := func(w http.ResponseWriter, _ *http.Request, err error) {
+		writeError(w, http.StatusBadRequest, InvalidRequest, "invalid request: "+err.Error())
+	}
+	api := HandlerWithOptions(NewStrictHandlerWithOptions(s, nil, StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: invalidRequest,
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
 			// A stream that failed after its first byte cannot turn into an error response: the
 			// status and part of the body are gone. Appending an error object would end the body
@@ -136,8 +140,9 @@ func (s *Server) Mount(mux *http.ServeMux) {
 			s.log.Error("admin API response failed", "err", err)
 			writeError(w, http.StatusInternalServerError, Internal, "internal error")
 		},
-	}), http.NewServeMux(), BasePath)
+	}), StdHTTPServerOptions{BaseURL: BasePath, BaseRouter: http.NewServeMux(), ErrorHandlerFunc: invalidRequest})
 	mux.HandleFunc("GET "+BasePath+"/openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Type", "application/yaml")
 		_, _ = w.Write(adminv1.OpenAPI)
 	})
@@ -183,6 +188,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := newRequestID()
 		w.Header().Set("X-Request-Id", reqID)
+		// Every body is JSON, NDJSON or YAML with its Content-Type set; a browser must never sniff one as
+		// HTML, even when it holds a request value (an error message).
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || raw == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="koinon-admin"`)

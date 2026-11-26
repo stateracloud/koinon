@@ -357,7 +357,9 @@ type Pool struct {
 	log     *slog.Logger
 	// saveSem lets one save run at a time: a bundle is up to 50 MB.
 	saveSem chan struct{}
-	http    *http.Client
+	// sweeps serialises the sweeps of an agent and caps the connections they hold (sweeplock.go).
+	sweeps *sweepLocks
+	http   *http.Client
 	// sink exports run spans; nil when tracing is off.
 	sink *traceSink
 	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
@@ -386,7 +388,7 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	}
 	p := &Pool{
 		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
-		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
+		saveSem: make(chan struct{}, 1), sweeps: newSweepLocks(db), http: &http.Client{Timeout: cfg.SaveTimeout},
 	}
 	if cfg.Tracing != nil {
 		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics, cfg.Logger)
