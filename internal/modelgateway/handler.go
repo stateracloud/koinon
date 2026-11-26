@@ -202,7 +202,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Body, pr.Out.ContentLength = io.NopCloser(bytes.NewReader(out)), int64(len(out))
 			pr.Out.Header = upstreamHeaders(r.Header, rt, rendering, secret)
 		},
-		ModifyResponse: func(resp *http.Response) error { return c.response(resp, rt, format, stream) },
+		ModifyResponse: func(resp *http.Response) error { return c.response(resp, rt, format, secret) },
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
 			c.transportError(w, req, err)
 		},
@@ -382,12 +382,13 @@ func (c *call) emit(result string, edit func(*gateway.UsageRecord)) {
 }
 
 // response runs on the upstream's answer, before its headers go to the client.
-func (c *call) response(resp *http.Response, rt route, format modelformat.Format, stream bool) error {
+func (c *call) response(resp *http.Response, rt route, format modelformat.Format, secret string) error {
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		// A redirect is never followed: it could lead the provider key to another host.
 		_ = resp.Body.Close()
 		return errRedirect
 	}
+	c.watchEcho(resp, rt, secret)
 	c.rec.Status = int64(resp.StatusCode)
 	c.rec.ResponseID = resp.Header.Get(generationHeader)
 	if resp.StatusCode == http.StatusForbidden {
@@ -410,6 +411,26 @@ func (c *call) response(resp *http.Response, rt route, format modelformat.Format
 		c.finishBody(resp.Request.Context(), cn, complete, readErr, n)
 	}}
 	return nil
+}
+
+// watchEcho wraps the body so that a provider key the upstream echoes back is counted and logged (#1332, ADR
+// 0097 section 15). It detects only: the bytes reach the agent unchanged (an accepted risk for v0.2). The
+// watch streams with the body and never buffers it.
+func (c *call) watchEcho(resp *http.Response, rt route, secret string) {
+	w := newEchoWatch(secret)
+	if w == nil {
+		return
+	}
+	body := bodyError
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		body = bodySuccess
+	}
+	status := resp.StatusCode
+	resp.Body = &echoBody{ReadCloser: resp.Body, watch: w, seen: func() {
+		c.g.o.Metrics.keyEcho(body)
+		// Never the key, the body or a part of it: the provider name and the status only.
+		c.g.o.Logger.Warn("provider key echoed in a model response body", "provider", rt.p.Name, "status", status)
+	}}
 }
 
 func (c *call) finishBody(ctx context.Context, cn counts, complete bool, readErr error, n int64) {

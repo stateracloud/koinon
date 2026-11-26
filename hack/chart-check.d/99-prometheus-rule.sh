@@ -20,3 +20,8 @@ lacks "no durable alert without api.durable.enabled" 'koinon_durable' "${pr[@]}"
 # The sandbox default-deny NetworkPolicy error alert (#993): always rendered with the rules.
 has "network policy error alert" 'alert: KoinonSandboxNetworkPolicyErrors$' "${pr[@]}" --show-only templates/prometheusrule.yaml
 has "network policy error alert reads the writer's counter" 'koinon_reconciler_sandbox_network_policy_errors_total\[15m\]' "${pr[@]}" --show-only templates/prometheusrule.yaml
+
+# The provider key echo alert (ADR 0097 section 15, #1332): only when koinon-gateway serves the model path.
+has "key echo alert with the koinon model driver" 'alert: KoinonModelKeyEcho$' "${pr[@]}" --set gateway.model.driver=koinon --show-only templates/prometheusrule.yaml
+has "key echo alert reads the gateway's counter" 'koinon_gateway_model_key_echo_total\[15m\]' "${pr[@]}" --set gateway.model.driver=koinon --show-only templates/prometheusrule.yaml
+lacks "no key echo alert with the agentgateway model driver" 'KoinonModelKeyEcho' "${pr[@]}" --set gateway.model.driver=agentgateway --show-only templates/prometheusrule.yaml

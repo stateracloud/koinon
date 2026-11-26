@@ -16,6 +16,10 @@ database, so every koinon-api replica reports the same value; the rule aggregate
 (version), never sum. A workflow waits for a process of its own version. Older versions are carried
 over by the first koinon-api of the current one, so pending work of a version that no live executor
 runs (a rollback target, or a carry-over that keeps failing) is what the alert names.
+
+Provider key echo (ADR 0097 section 15, issue #1332): with gateway.model.driver=koinon, the koinon-gateway group
+holds KoinonModelKeyEcho. It fires when the model path saw a provider key in a response body that went back to
+an agent (koinon_gateway_model_key_echo_total). The body is not changed in v0.2, so the key must be rotated.
 */ -}}
 {{- $pr := .Values.metrics.prometheusRule }}
 {{- if $pr.enabled }}
@@ -73,6 +77,21 @@ spec:
               The reconciler failed to apply the default-deny NetworkPolicy in a sandbox namespace. OpenShell's
               own policies and the platform's still apply, but Koinon's second layer is missing there. Check
               the reconciler's RBAC for networkpolicies and its log ("sandbox default-deny NetworkPolicy could not be applied").
+    {{- if include "koinon.modelKoinon" . }}
+    - name: koinon-gateway
+      rules:
+        - alert: KoinonModelKeyEcho
+          expr: sum by (body) (increase(koinon_gateway_model_key_echo_total[15m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: A model provider echoed its provider key in a response that went to an agent
+            description: >-
+              koinon-gateway found the provider key of a model provider in a response body ({{ "{{ $labels.body }}" }}
+              answer). The body went to the agent unchanged (ADR 0097 section 15), so the agent and its sandbox
+              may hold the key. Rotate the provider key now, then find the provider in the koinon-gateway log
+              ("provider key echoed in a model response body").
+    {{- end }}
     - name: koinon-restore
       rules:
         - alert: KoinonRestoreHoldOn
