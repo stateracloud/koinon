@@ -20,6 +20,7 @@ runs (a rollback target, or a carry-over that keeps failing) is what the alert n
 Provider key echo (ADR 0097 section 15, issue #1332): with gateway.model.driver=koinon, the koinon-gateway group
 holds KoinonModelKeyEcho. It fires when the model path saw a provider key in a response body that went back to
 an agent (koinon_gateway_model_key_echo_total). The body is not changed in v0.2, so the key must be rotated.
+The window is 1h, so the alert stays on for an hour after one echo and an operator can see it.
 */ -}}
 {{- $pr := .Values.metrics.prometheusRule }}
 {{- if $pr.enabled }}
@@ -81,7 +82,7 @@ spec:
     - name: koinon-gateway
       rules:
         - alert: KoinonModelKeyEcho
-          expr: sum by (body) (increase(koinon_gateway_model_key_echo_total[15m])) > 0
+          expr: sum by (body) (increase(koinon_gateway_model_key_echo_total[1h])) > 0
           labels:
             severity: critical
           annotations:

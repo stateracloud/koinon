@@ -1268,12 +1268,15 @@ An upstream provider can echo its provider key in a response body, most often in
   2xx answer) and logs one warning, `provider key echoed in a model response body`, with the provider name and
   the status. The log line never has the key, the body or a part of the body. The chart alert
   `KoinonModelKeyEcho` (severity critical, group `koinon-gateway`, rendered with the koinon model driver) fires
-  when the counter rises in 15 minutes. The operator rotates the provider key.
+  when the counter rises in one hour, so it stays on for an hour after one echo. The chart's ServiceMonitor
+  scrapes the `stats` port of the model-gateway Service for this counter. The operator rotates the provider key.
 - **Known limits.** The check finds the exact bytes only. It does not find a key that the upstream encodes
   (JSON `\uXXXX` escapes, base64, URL encoding), cuts, or changes. On an SSE answer, a model that streams the key
   in several text deltas puts JSON between its parts, so the bytes are not contiguous and the check does not find
-  it; an error body, the usual case, comes in one piece. A gzip body is not a case: the gateway never forwards an
-  accept-encoding upstream. A detection comes after the bytes went to the agent: the alert starts a rotation, it
+  it; an error body, the usual case, comes in one piece. The Go transport decodes a gzip body before the check;
+  an upstream that sends a `Content-Encoding` without a request for it is not decoded and not checked. An echo
+  before the first scrape of a new pod is not seen by `increase`, because the first sample is already 1; the
+  log line still shows it. A detection comes after the bytes went to the agent: the alert starts a rotation, it
   does not stop the leak.
 - **Later.** A scrubber that removes the key from the stream can reuse the same matcher: it holds back the
   `len(key) - 1` tail bytes in place of only reading them. It needs its own decision, because it changes the

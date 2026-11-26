@@ -142,6 +142,9 @@ var _ = Describe("the provider key echo watch (#1332)", func() {
 			Expect(logs.String()).NotTo(ContainSubstring(echoKey), "the log line never carries the key")
 		})
 
+		// The fake model sends the whole text in one delta, so the key is contiguous in the stream and only the
+		// writes cut it. A key spread over several deltas has JSON between its parts and is not found (a known
+		// limit, ADR 0097 section 15).
 		It("counts a key in an SSE stream that arrives in 7-byte writes", func(ctx SpecContext) {
 			url, material := serve(ctx, fake(fakemodel.Script{
 				Model: "m", Faults: fakemodel.Faults{SplitWrites: true},
