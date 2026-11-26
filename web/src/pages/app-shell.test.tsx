@@ -156,6 +156,16 @@ describe('the first-login screen', () => {
     }
   })
 
+  it('gives a platform admin with no team org the platform console, not the first-login screen', async () => {
+    const { history } = renderApp(transport({ memberships: [membership('org-p', 'Personal', OrgRole.OWNER)], personalOrgId: 'org-p', platformAdmin: true }), '/inbox')
+    await waitFor(() => expect(history.location.pathname).toBe('/platform'))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Platform console' })).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Platform' })).getByRole('link', { name: 'Platform console' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^Welcome/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'User menu: Admin' })).toBeInTheDocument()
+  })
+
   it('shows a user with no org at all the same screen', async () => {
     renderApp(transport({ memberships: [] }), '/inbox')
     expect(await screen.findByRole('heading', { level: 1, name: 'Welcome, Admin' })).toBeInTheDocument()
@@ -189,9 +199,9 @@ describe('a keyboard-only walk of the shell', () => {
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
     expect(switcher).toHaveFocus()
 
-    // The skip link moves the focus to the page.
-    screen.getByRole('link', { name: 'Skip to content' }).focus()
-    await userEvent.keyboard('{Enter}')
-    expect(screen.getByRole('main')).toHaveAttribute('id', 'main')
+    // The skip link targets the page, which can take the focus. jsdom does not move the focus to a fragment target, so
+    // the move itself is checked in the browser (e2e/app-shell.spec.ts).
+    expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#main')
+    expect(screen.getByRole('main')).toHaveAttribute('tabindex', '-1')
   })
 })

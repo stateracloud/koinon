@@ -15,7 +15,7 @@ export function FirstLoginPage({ name }: { name: string }) {
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="bg-card grid w-full max-w-md gap-4 rounded-lg border p-6">
         <Logo />
-        <h1 className="text-xl font-semibold">Welcome, {name}</h1>
+        <h1 className="text-xl font-semibold">{name ? `Welcome, ${name}` : 'Welcome'}</h1>
         <p className="text-muted-foreground text-sm">
           You are not a member of an org yet. An org admin must add you to their org. Then reload this page.
         </p>

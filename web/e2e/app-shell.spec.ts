@@ -19,12 +19,12 @@ async function expectAccessible(page: Page, include?: string) {
 
 const team = (orgId: string, name: string, role: string): Json => ({ orgId, orgSlug: name.toLowerCase(), orgDisplayName: name, role })
 
-function handlers(memberships: Json[]): Handlers {
+function handlers(memberships: Json[], platformAdmin = true): Handlers {
   return {
     unary: {
       'koinon.auth.v1alpha1.AuthService/WhoAmI': () => ({
         user: { id: 'u-1', email: 'admin@example.test', displayName: 'Admin', personalOrgId: 'org-p' },
-        platformAdmin: true,
+        platformAdmin,
         memberships,
       }),
       'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [{ id: 'a-1', orgId: 'org-1', displayName: 'Repo helper', harness: 'opencode', status: 'AGENT_STATUS_ACTIVE' }] }),
@@ -68,11 +68,21 @@ for (const scheme of ['dark', 'light'] as const) {
     })
 
     test('the first-login screen passes axe', async ({ page }) => {
-      await mockApi(page, handlers([team('org-p', 'Personal', 'ORG_ROLE_OWNER')]))
+      await mockApi(page, handlers([team('org-p', 'Personal', 'ORG_ROLE_OWNER')], false))
       await page.goto('/')
       await expect(page.getByRole('heading', { level: 1, name: 'Welcome, Admin' })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
       await expect(page.getByRole('navigation')).toHaveCount(0)
+      await expectAccessible(page)
+    })
+
+    test('a platform admin with no team org gets the platform console, and it passes axe', async ({ page }) => {
+      await mockApi(page, handlers([team('org-p', 'Personal', 'ORG_ROLE_OWNER')]))
+      await page.goto('/')
+      await expect(page).toHaveURL(/\/platform$/)
+      await expect(page.getByRole('heading', { level: 1, name: 'Platform console' })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' })).toBeVisible()
+      await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0)
       await expectAccessible(page)
     })
   })
@@ -97,8 +107,22 @@ test('a keyboard-only walk opens the org switcher, picks an org and opens the in
   await page.keyboard.press('Enter')
   await expect(page.getByRole('button', { name: /^Org: Beta/ })).toBeVisible()
 
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Inbox/ }).focus()
+  // The focus goes back to the switcher; the nav comes next.
+  await expect(page.getByRole('button', { name: /^Org: Beta/ })).toBeFocused()
+  const main = page.getByRole('navigation', { name: 'Main' })
+  await page.keyboard.press('Tab')
+  await expect(main.getByRole('link', { name: 'Overview' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(main.getByRole('link', { name: /^Inbox/ })).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/inbox$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
+
+  // The skip link moves the focus to the page.
+  await page.reload()
+  await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('main')).toBeFocused()
 })

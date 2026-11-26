@@ -135,7 +135,6 @@ export function connectionStatusLabel(s: ConnectionStatus): string {
   return connectionStatusLabels[s] ?? 'Unknown'
 }
 
-/** The roles an API token can have; viewers and members cannot hold one. */
 /** orgRoleLabel names a member's role in an org (the org switcher). */
 export function orgRoleLabel(r: OrgRole): string {
   switch (r) {
@@ -152,6 +151,7 @@ export function orgRoleLabel(r: OrgRole): string {
   }
 }
 
+/** The roles an API token can have; viewers and members cannot hold one. */
 export function tokenRoleLabel(r: OrgRole): string {
   switch (r) {
     case OrgRole.OWNER:

@@ -59,10 +59,16 @@ export function AppLayout() {
   return <SignedIn who={who.data} />
 }
 
-/** SignedIn shows the first-login screen to a user with no team org, else the org shell. */
+/**
+ * SignedIn shows the org shell to a user with a team org. A user with no team org gets the first-login screen, and a
+ * platform admin with no team org (the bootstrap admin of a fresh install) gets the platform console, its way in.
+ */
 function SignedIn({ who }: { who: WhoAmIResponse }) {
   const teams = useMemo(() => teamMemberships(who.memberships, who.user?.personalOrgId), [who.memberships, who.user?.personalOrgId])
-  if (teams.length === 0) return <FirstLoginPage name={who.user?.displayName || who.user?.email || 'there'} />
+  if (teams.length === 0) {
+    if (who.platformAdmin) return <PlatformShell who={who} />
+    return <FirstLoginPage name={who.user?.displayName || who.user?.email || ''} />
+  }
   return (
     <OrgProvider memberships={teams}>
       <Shell who={who} />
@@ -70,8 +76,45 @@ function SignedIn({ who }: { who: WhoAmIResponse }) {
   )
 }
 
+/**
+ * PlatformShell is the shell of a platform admin with no team org: the platform pages need no org, the org pages do,
+ * so every other URL goes to the platform console.
+ */
+function PlatformShell({ who }: { who: WhoAmIResponse }) {
+  const location = useLocation()
+  const { signOut, signingOut } = useSignOut()
+  if (location.pathname !== '/platform' && !location.pathname.startsWith('/platform/')) return <Navigate to="/platform" replace />
+  const name = who.user?.displayName || who.user?.email || 'You'
+  return (
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <a href="#main" className={skipLink}>
+        Skip to content
+      </a>
+      <aside className={sidebar}>
+        <Link to="/platform" aria-label="Koinon" className="block px-3">
+          <Logo />
+        </Link>
+        <nav aria-label="Platform">
+          <Link to="/platform" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
+            Platform console
+          </Link>
+        </nav>
+        <div className="grid gap-1 md:mt-auto">
+          <UserMenu name={name} email={who.user?.email ?? ''} onSignOut={signOut} signingOut={signingOut} />
+        </div>
+      </aside>
+      <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
+        <p role="note" className="text-muted-foreground mx-auto mb-4 max-w-3xl text-sm">
+          You are not a member of an org yet. An org admin must add you to their org to use the org pages.
+        </p>
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+
 function Shell({ who }: { who: WhoAmIResponse }) {
-  const { org, memberships } = useOrg()
+  const { org } = useOrg()
   const { signOut, signingOut } = useSignOut()
   const admin = isApprover(org.role)
   // The same polled queries the inbox page uses: one request serves both.
@@ -80,10 +123,10 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   const name = who.user?.displayName || who.user?.email || 'You'
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <a href="#main" className="bg-raised sr-only z-50 rounded-md px-3 py-1.5 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2">
+      <a href="#main" className={skipLink}>
         Skip to content
       </a>
-      <aside className="bg-card flex w-full shrink-0 flex-col gap-3 border-b p-3 md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto md:border-r md:border-b-0">
+      <aside className={sidebar}>
         <Link to="/" aria-label="Koinon" className="block px-3">
           <Logo />
         </Link>
@@ -129,11 +172,6 @@ function Shell({ who }: { who: WhoAmIResponse }) {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         {admin && <NoticeBanner key={org.orgId} orgId={org.orgId} platformAdmin={who.platformAdmin} />}
-        {who.platformAdmin && !memberships.some((m) => m.orgId === org.orgId) && (
-          <p role="note" className="bg-muted px-4 py-1.5 text-xs md:px-6">
-            You are acting as a platform admin in an org you are not a member of.
-          </p>
-        )}
         <div className="flex min-w-0 flex-1">
           <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6">
             {/* Remount pages when the org changes so no query mixes two orgs. */}
@@ -148,6 +186,8 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   )
 }
 
+const skipLink = 'bg-raised sr-only z-50 rounded-md px-3 py-1.5 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2'
+const sidebar = 'bg-card flex w-full shrink-0 flex-col gap-3 border-b p-3 md:sticky md:top-0 md:h-screen md:w-60 md:overflow-y-auto md:border-r md:border-b-0'
 const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
 const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
 
