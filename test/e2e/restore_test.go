@@ -123,14 +123,15 @@ func (e restoreEnv) credentialEnvelope(ctx context.Context, g Gomega, serverID s
 	return f[0], f[1]
 }
 
-// drillAgent is the quickstart's agent (the one the tracker server is allowed for). It has a gateway key Secret.
+// drillAgent is the quickstart's active agent (Repo helper). It has a gateway key Secret. The quickstart deletes its
+// tracker server at the end, so the drill allows its own server for the agent (restore-seal).
 func (e restoreEnv) drillAgent(ctx context.Context) string {
 	GinkgoHelper()
 	var id string
 	Eventually(func(g Gomega) {
-		rows := psqlPrimary(ctx, g, e.kubectl, "SELECT a.agent_id FROM agent_mcp_servers a JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id "+
-			"WHERE a.org_id = '"+e.org+"' AND s.name = 'tracker' ORDER BY a.agent_id LIMIT 1")
-		g.Expect(rows).To(HaveLen(1), "the quickstart pass allows an agent to call its tracker server: run the drill after the quickstart pass")
+		rows := psqlPrimary(ctx, g, e.kubectl, "SELECT id FROM agents WHERE org_id = '"+e.org+"' AND display_name = 'Repo helper' "+
+			"AND status = 'active' ORDER BY id LIMIT 1")
+		g.Expect(rows).To(HaveLen(1), "the quickstart pass leaves an active agent named Repo helper: run the drill after the quickstart pass")
 		id = rows[0]
 	}).WithContext(ctx).WithTimeout(racescale.D(30 * time.Second)).WithPolling(5 * time.Second).Should(Succeed())
 	return id
