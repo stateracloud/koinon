@@ -8,7 +8,7 @@ execution:
   substrate:
     controlAddress: api.ate-system.svc:443
     routerAddress: atenet-router.ate-system.svc.cluster.local:80
-    tokenAudience: ateapi
+    tokenAudience: api.ate-system.svc
     allowUnhardened: true
     # The worker namespace objects (issue #1089): the policies guard the Substrate objects too, the
     # NetworkPolicy fences the Substrate namespaces.

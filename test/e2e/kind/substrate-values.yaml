@@ -45,7 +45,8 @@ execution:
     # The ateapi certificate names api.ate-system.svc only: a name with .cluster.local fails the TLS handshake.
     controlAddress: api.ate-system.svc:443
     routerAddress: atenet-router.ate-system.svc.cluster.local:80
-    tokenAudience: ateapi
+    # ate-setup makes ateapi accept tokens with this audience only (the authentication config it writes).
+    tokenAudience: api.ate-system.svc
     # The Secret that kind/substrate.sh ca makes: the roots of the pod certificate controller's service-DNS signer.
     caSecret: ate-ca
     # The substrate overlay of the harness image has not run in a real actor with recorded probe results yet (#1087).

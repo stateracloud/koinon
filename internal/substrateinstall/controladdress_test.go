@@ -27,5 +27,9 @@ func TestKindValuesDialTheNameOfTheAteapiCertificate(t *testing.T) {
 		m := line.FindSubmatch(body)
 		g.Expect(m).NotTo(BeNil(), file)
 		g.Expect(string(m[1])).To(Equal("api.ate-system.svc:443"), file)
+		// ate-setup makes ateapi accept this audience only (auth.go, apiAudience); another one gives "invalid bearer token".
+		aud := regexp.MustCompile(`(?m)^\s*tokenAudience:\s*(\S+)\s*$`).FindSubmatch(body)
+		g.Expect(aud).NotTo(BeNil(), file)
+		g.Expect(string(aud[1])).To(Equal("api.ate-system.svc"), file)
 	}
 }
