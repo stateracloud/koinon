@@ -22,6 +22,9 @@ import (
 
 const maxUsageModelLen = 256
 
+// maxUsageRows caps one response, so a call over a long period cannot build an unbounded message.
+const maxUsageRows = 50000
+
 // orgUsage is what GetOrgUsage and ExportOrgUsage share: the checked query, the rows and the sums.
 type orgUsage struct {
 	org      pgtype.UUID
@@ -34,9 +37,15 @@ type orgUsage struct {
 func usageRange(r *usagev1alpha1.UsageRange) (time.Time, time.Time, error) {
 	var from, to time.Time
 	if r.GetFrom() != nil {
+		if err := r.GetFrom().CheckValid(); err != nil {
+			return from, to, connect.NewError(connect.CodeInvalidArgument, "range.from is not a valid time")
+		}
 		from = r.GetFrom().AsTime()
 	}
 	if r.GetTo() != nil {
+		if err := r.GetTo().CheckValid(); err != nil {
+			return from, to, connect.NewError(connect.CodeInvalidArgument, "range.to is not a valid time")
+		}
 		to = r.GetTo().AsTime()
 	}
 	f, t, err := usage.Resolve(from, to, time.Now())
@@ -106,6 +115,9 @@ func (s *Server) orgUsage(ctx context.Context, orgID string, rng *usagev1alpha1.
 	if err != nil {
 		return nil, s.dbError(err, "usage")
 	}
+	if len(rows) > maxUsageRows {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "too many rows: use a shorter period or a filter")
+	}
 	out := &orgUsage{org: c.org, from: from, to: to}
 	for _, r := range rows {
 		row := usage.Row{
@@ -160,7 +172,7 @@ func totalsCells(t *usagev1alpha1.UsageTotals) []string {
 }
 
 // ExportOrgUsage implements UsageService. Members and above, of the org only.
-func (s *Server) ExportOrgUsage(ctx context.Context, req *usagev1alpha1.ExportOrgUsageRequest) (*usagev1alpha1.ExportUsageResponse, error) {
+func (s *Server) ExportOrgUsage(ctx context.Context, req *usagev1alpha1.ExportOrgUsageRequest) (*usagev1alpha1.ExportOrgUsageResponse, error) {
 	u, err := s.orgUsage(ctx, req.GetOrgId(), req.GetRange(), req.GetAgentId(), req.GetModel(), req.GetProviderId())
 	if err != nil {
 		return nil, err
@@ -177,7 +189,7 @@ func (s *Server) ExportOrgUsage(ctx context.Context, req *usagev1alpha1.ExportOr
 	if err != nil {
 		return nil, s.dbError(err, "usage export")
 	}
-	return &usagev1alpha1.ExportUsageResponse{Filename: usageFilename("org-"+u.org.String(), u.from, u.to), Csv: text}, nil
+	return &usagev1alpha1.ExportOrgUsageResponse{Filename: usageFilename("org-"+u.org.String(), u.from, u.to), Csv: text}, nil
 }
 
 func usageFilename(scope string, from, to time.Time) string {
@@ -203,6 +215,9 @@ func (s *Server) platformUsage(ctx context.Context, rng *usagev1alpha1.UsageRang
 	})
 	if err != nil {
 		return nil, s.dbError(err, "usage")
+	}
+	if len(rows) > maxUsageRows {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "too many rows: use a shorter period")
 	}
 	out := &platformUsage{from: from, to: to}
 	for _, r := range rows {
@@ -248,7 +263,7 @@ var platformUsageHeader = []string{
 }
 
 // ExportPlatformUsage implements UsageService. Platform admins only.
-func (s *Server) ExportPlatformUsage(ctx context.Context, req *usagev1alpha1.ExportPlatformUsageRequest) (*usagev1alpha1.ExportUsageResponse, error) {
+func (s *Server) ExportPlatformUsage(ctx context.Context, req *usagev1alpha1.ExportPlatformUsageRequest) (*usagev1alpha1.ExportPlatformUsageResponse, error) {
 	u, err := s.platformUsage(ctx, req.GetRange())
 	if err != nil {
 		return nil, err
@@ -264,5 +279,5 @@ func (s *Server) ExportPlatformUsage(ctx context.Context, req *usagev1alpha1.Exp
 	if err != nil {
 		return nil, s.dbError(err, "usage export")
 	}
-	return &usagev1alpha1.ExportUsageResponse{Filename: usageFilename("platform", u.from, u.to), Csv: text}, nil
+	return &usagev1alpha1.ExportPlatformUsageResponse{Filename: usageFilename("platform", u.from, u.to), Csv: text}, nil
 }

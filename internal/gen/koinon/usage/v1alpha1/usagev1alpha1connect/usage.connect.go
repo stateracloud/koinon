@@ -80,12 +80,12 @@ type UsageServiceClient interface {
 	// today's runs. Members and above.
 	GetOrgUsage(context.Context, *v1alpha1.GetOrgUsageRequest) (*v1alpha1.GetOrgUsageResponse, error)
 	// ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.
-	ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportUsageResponse, error)
+	ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportOrgUsageResponse, error)
 	// GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's
 	// runs. Platform admins only.
 	GetPlatformUsage(context.Context, *v1alpha1.GetPlatformUsageRequest) (*v1alpha1.GetPlatformUsageResponse, error)
 	// ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.
-	ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportUsageResponse, error)
+	ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportPlatformUsageResponse, error)
 }
 
 // NewUsageServiceClient constructs a client for the koinon.usage.v1alpha1.UsageService service.
@@ -100,12 +100,12 @@ type UsageServiceHandler interface {
 	// today's runs. Members and above.
 	GetOrgUsage(context.Context, *v1alpha1.GetOrgUsageRequest) (*v1alpha1.GetOrgUsageResponse, error)
 	// ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.
-	ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportUsageResponse, error)
+	ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportOrgUsageResponse, error)
 	// GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's
 	// runs. Platform admins only.
 	GetPlatformUsage(context.Context, *v1alpha1.GetPlatformUsageRequest) (*v1alpha1.GetPlatformUsageResponse, error)
 	// ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.
-	ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportUsageResponse, error)
+	ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportPlatformUsageResponse, error)
 }
 
 // RegisterUsageServiceHandler registers svc as the koinon.usage.v1alpha1.UsageService
@@ -127,7 +127,7 @@ func (UnimplementedUsageServiceHandler) GetOrgUsage(context.Context, *v1alpha1.G
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.usage.v1alpha1.UsageService.GetOrgUsage is not implemented")
 }
 
-func (UnimplementedUsageServiceHandler) ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportUsageResponse, error) {
+func (UnimplementedUsageServiceHandler) ExportOrgUsage(context.Context, *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportOrgUsageResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.usage.v1alpha1.UsageService.ExportOrgUsage is not implemented")
 }
 
@@ -135,7 +135,7 @@ func (UnimplementedUsageServiceHandler) GetPlatformUsage(context.Context, *v1alp
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.usage.v1alpha1.UsageService.GetPlatformUsage is not implemented")
 }
 
-func (UnimplementedUsageServiceHandler) ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportUsageResponse, error) {
+func (UnimplementedUsageServiceHandler) ExportPlatformUsage(context.Context, *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportPlatformUsageResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.usage.v1alpha1.UsageService.ExportPlatformUsage is not implemented")
 }
 
@@ -151,8 +151,8 @@ func (c *usageServiceClient) GetOrgUsage(ctx context.Context, req *v1alpha1.GetO
 	return &res, nil
 }
 
-func (c *usageServiceClient) ExportOrgUsage(ctx context.Context, req *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportUsageResponse, error) {
-	var res v1alpha1.ExportUsageResponse
+func (c *usageServiceClient) ExportOrgUsage(ctx context.Context, req *v1alpha1.ExportOrgUsageRequest) (*v1alpha1.ExportOrgUsageResponse, error) {
+	var res v1alpha1.ExportOrgUsageResponse
 	if err := c.client.CallUnary(ctx, usageServiceExportOrgUsageSpec(), req, &res); err != nil {
 		return nil, err
 	}
@@ -167,8 +167,8 @@ func (c *usageServiceClient) GetPlatformUsage(ctx context.Context, req *v1alpha1
 	return &res, nil
 }
 
-func (c *usageServiceClient) ExportPlatformUsage(ctx context.Context, req *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportUsageResponse, error) {
-	var res v1alpha1.ExportUsageResponse
+func (c *usageServiceClient) ExportPlatformUsage(ctx context.Context, req *v1alpha1.ExportPlatformUsageRequest) (*v1alpha1.ExportPlatformUsageResponse, error) {
+	var res v1alpha1.ExportPlatformUsageResponse
 	if err := c.client.CallUnary(ctx, usageServiceExportPlatformUsageSpec(), req, &res); err != nil {
 		return nil, err
 	}

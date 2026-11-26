@@ -853,9 +853,9 @@ func (x *ExportPlatformUsageRequest) GetRange() *UsageRange {
 	return nil
 }
 
-// ExportUsageResponse is a CSV file: a header row, one row per row of the matching Get call, then
-// a final row with the totals (day "total"). The text is UTF-8 and ends in a newline.
-type ExportUsageResponse struct {
+// ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final
+// row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+type ExportOrgUsageResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
 	Csv           string                 `protobuf:"bytes,2,opt,name=csv,proto3" json:"csv,omitempty"`
@@ -863,20 +863,20 @@ type ExportUsageResponse struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ExportUsageResponse) Reset() {
-	*x = ExportUsageResponse{}
+func (x *ExportOrgUsageResponse) Reset() {
+	*x = ExportOrgUsageResponse{}
 	mi := &file_koinon_usage_v1alpha1_usage_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExportUsageResponse) String() string {
+func (x *ExportOrgUsageResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExportUsageResponse) ProtoMessage() {}
+func (*ExportOrgUsageResponse) ProtoMessage() {}
 
-func (x *ExportUsageResponse) ProtoReflect() protoreflect.Message {
+func (x *ExportOrgUsageResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_koinon_usage_v1alpha1_usage_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -888,19 +888,74 @@ func (x *ExportUsageResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExportUsageResponse.ProtoReflect.Descriptor instead.
-func (*ExportUsageResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ExportOrgUsageResponse.ProtoReflect.Descriptor instead.
+func (*ExportOrgUsageResponse) Descriptor() ([]byte, []int) {
 	return file_koinon_usage_v1alpha1_usage_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *ExportUsageResponse) GetFilename() string {
+func (x *ExportOrgUsageResponse) GetFilename() string {
 	if x != nil {
 		return x.Filename
 	}
 	return ""
 }
 
-func (x *ExportUsageResponse) GetCsv() string {
+func (x *ExportOrgUsageResponse) GetCsv() string {
+	if x != nil {
+		return x.Csv
+	}
+	return ""
+}
+
+// ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then
+// a final row with the totals (day "total"). The text is UTF-8 and ends in a newline. Soft-deleted
+// orgs stay in the rows, so the totals equal the ledger sums.
+type ExportPlatformUsageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	Csv           string                 `protobuf:"bytes,2,opt,name=csv,proto3" json:"csv,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportPlatformUsageResponse) Reset() {
+	*x = ExportPlatformUsageResponse{}
+	mi := &file_koinon_usage_v1alpha1_usage_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportPlatformUsageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportPlatformUsageResponse) ProtoMessage() {}
+
+func (x *ExportPlatformUsageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_usage_v1alpha1_usage_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportPlatformUsageResponse.ProtoReflect.Descriptor instead.
+func (*ExportPlatformUsageResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_usage_v1alpha1_usage_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ExportPlatformUsageResponse) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *ExportPlatformUsageResponse) GetCsv() string {
 	if x != nil {
 		return x.Csv
 	}
@@ -979,15 +1034,18 @@ const file_koinon_usage_v1alpha1_usage_proto_rawDesc = "" +
 	"\x06totals\x18\x04 \x01(\v2\".koinon.usage.v1alpha1.UsageTotalsR\x06totals\x124\n" +
 	"\x04runs\x18\x05 \x01(\v2 .koinon.usage.v1alpha1.RunCountsR\x04runs\"U\n" +
 	"\x1aExportPlatformUsageRequest\x127\n" +
-	"\x05range\x18\x01 \x01(\v2!.koinon.usage.v1alpha1.UsageRangeR\x05range\"C\n" +
-	"\x13ExportUsageResponse\x12\x1a\n" +
+	"\x05range\x18\x01 \x01(\v2!.koinon.usage.v1alpha1.UsageRangeR\x05range\"F\n" +
+	"\x16ExportOrgUsageResponse\x12\x1a\n" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x10\n" +
-	"\x03csv\x18\x02 \x01(\tR\x03csv2\xdf\x03\n" +
+	"\x03csv\x18\x02 \x01(\tR\x03csv\"K\n" +
+	"\x1bExportPlatformUsageResponse\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x10\n" +
+	"\x03csv\x18\x02 \x01(\tR\x03csv2\xeb\x03\n" +
 	"\fUsageService\x12i\n" +
-	"\vGetOrgUsage\x12).koinon.usage.v1alpha1.GetOrgUsageRequest\x1a*.koinon.usage.v1alpha1.GetOrgUsageResponse\"\x03\x90\x02\x01\x12o\n" +
-	"\x0eExportOrgUsage\x12,.koinon.usage.v1alpha1.ExportOrgUsageRequest\x1a*.koinon.usage.v1alpha1.ExportUsageResponse\"\x03\x90\x02\x01\x12x\n" +
-	"\x10GetPlatformUsage\x12..koinon.usage.v1alpha1.GetPlatformUsageRequest\x1a/.koinon.usage.v1alpha1.GetPlatformUsageResponse\"\x03\x90\x02\x01\x12y\n" +
-	"\x13ExportPlatformUsage\x121.koinon.usage.v1alpha1.ExportPlatformUsageRequest\x1a*.koinon.usage.v1alpha1.ExportUsageResponse\"\x03\x90\x02\x01BQZOgithub.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1;usagev1alpha1b\x06proto3"
+	"\vGetOrgUsage\x12).koinon.usage.v1alpha1.GetOrgUsageRequest\x1a*.koinon.usage.v1alpha1.GetOrgUsageResponse\"\x03\x90\x02\x01\x12r\n" +
+	"\x0eExportOrgUsage\x12,.koinon.usage.v1alpha1.ExportOrgUsageRequest\x1a-.koinon.usage.v1alpha1.ExportOrgUsageResponse\"\x03\x90\x02\x01\x12x\n" +
+	"\x10GetPlatformUsage\x12..koinon.usage.v1alpha1.GetPlatformUsageRequest\x1a/.koinon.usage.v1alpha1.GetPlatformUsageResponse\"\x03\x90\x02\x01\x12\x81\x01\n" +
+	"\x13ExportPlatformUsage\x121.koinon.usage.v1alpha1.ExportPlatformUsageRequest\x1a2.koinon.usage.v1alpha1.ExportPlatformUsageResponse\"\x03\x90\x02\x01BQZOgithub.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1;usagev1alpha1b\x06proto3"
 
 var (
 	file_koinon_usage_v1alpha1_usage_proto_rawDescOnce sync.Once
@@ -1001,38 +1059,39 @@ func file_koinon_usage_v1alpha1_usage_proto_rawDescGZIP() []byte {
 	return file_koinon_usage_v1alpha1_usage_proto_rawDescData
 }
 
-var file_koinon_usage_v1alpha1_usage_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_koinon_usage_v1alpha1_usage_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_koinon_usage_v1alpha1_usage_proto_goTypes = []any{
-	(*UsageRange)(nil),                 // 0: koinon.usage.v1alpha1.UsageRange
-	(*UsageTotals)(nil),                // 1: koinon.usage.v1alpha1.UsageTotals
-	(*RunCounts)(nil),                  // 2: koinon.usage.v1alpha1.RunCounts
-	(*GetOrgUsageRequest)(nil),         // 3: koinon.usage.v1alpha1.GetOrgUsageRequest
-	(*OrgUsageRow)(nil),                // 4: koinon.usage.v1alpha1.OrgUsageRow
-	(*GetOrgUsageResponse)(nil),        // 5: koinon.usage.v1alpha1.GetOrgUsageResponse
-	(*ExportOrgUsageRequest)(nil),      // 6: koinon.usage.v1alpha1.ExportOrgUsageRequest
-	(*GetPlatformUsageRequest)(nil),    // 7: koinon.usage.v1alpha1.GetPlatformUsageRequest
-	(*PlatformUsageRow)(nil),           // 8: koinon.usage.v1alpha1.PlatformUsageRow
-	(*GetPlatformUsageResponse)(nil),   // 9: koinon.usage.v1alpha1.GetPlatformUsageResponse
-	(*ExportPlatformUsageRequest)(nil), // 10: koinon.usage.v1alpha1.ExportPlatformUsageRequest
-	(*ExportUsageResponse)(nil),        // 11: koinon.usage.v1alpha1.ExportUsageResponse
-	(*timestamppb.Timestamp)(nil),      // 12: google.protobuf.Timestamp
+	(*UsageRange)(nil),                  // 0: koinon.usage.v1alpha1.UsageRange
+	(*UsageTotals)(nil),                 // 1: koinon.usage.v1alpha1.UsageTotals
+	(*RunCounts)(nil),                   // 2: koinon.usage.v1alpha1.RunCounts
+	(*GetOrgUsageRequest)(nil),          // 3: koinon.usage.v1alpha1.GetOrgUsageRequest
+	(*OrgUsageRow)(nil),                 // 4: koinon.usage.v1alpha1.OrgUsageRow
+	(*GetOrgUsageResponse)(nil),         // 5: koinon.usage.v1alpha1.GetOrgUsageResponse
+	(*ExportOrgUsageRequest)(nil),       // 6: koinon.usage.v1alpha1.ExportOrgUsageRequest
+	(*GetPlatformUsageRequest)(nil),     // 7: koinon.usage.v1alpha1.GetPlatformUsageRequest
+	(*PlatformUsageRow)(nil),            // 8: koinon.usage.v1alpha1.PlatformUsageRow
+	(*GetPlatformUsageResponse)(nil),    // 9: koinon.usage.v1alpha1.GetPlatformUsageResponse
+	(*ExportPlatformUsageRequest)(nil),  // 10: koinon.usage.v1alpha1.ExportPlatformUsageRequest
+	(*ExportOrgUsageResponse)(nil),      // 11: koinon.usage.v1alpha1.ExportOrgUsageResponse
+	(*ExportPlatformUsageResponse)(nil), // 12: koinon.usage.v1alpha1.ExportPlatformUsageResponse
+	(*timestamppb.Timestamp)(nil),       // 13: google.protobuf.Timestamp
 }
 var file_koinon_usage_v1alpha1_usage_proto_depIdxs = []int32{
-	12, // 0: koinon.usage.v1alpha1.UsageRange.from:type_name -> google.protobuf.Timestamp
-	12, // 1: koinon.usage.v1alpha1.UsageRange.to:type_name -> google.protobuf.Timestamp
-	12, // 2: koinon.usage.v1alpha1.RunCounts.day_start:type_name -> google.protobuf.Timestamp
+	13, // 0: koinon.usage.v1alpha1.UsageRange.from:type_name -> google.protobuf.Timestamp
+	13, // 1: koinon.usage.v1alpha1.UsageRange.to:type_name -> google.protobuf.Timestamp
+	13, // 2: koinon.usage.v1alpha1.RunCounts.day_start:type_name -> google.protobuf.Timestamp
 	0,  // 3: koinon.usage.v1alpha1.GetOrgUsageRequest.range:type_name -> koinon.usage.v1alpha1.UsageRange
 	1,  // 4: koinon.usage.v1alpha1.OrgUsageRow.usage:type_name -> koinon.usage.v1alpha1.UsageTotals
-	12, // 5: koinon.usage.v1alpha1.GetOrgUsageResponse.from:type_name -> google.protobuf.Timestamp
-	12, // 6: koinon.usage.v1alpha1.GetOrgUsageResponse.to:type_name -> google.protobuf.Timestamp
+	13, // 5: koinon.usage.v1alpha1.GetOrgUsageResponse.from:type_name -> google.protobuf.Timestamp
+	13, // 6: koinon.usage.v1alpha1.GetOrgUsageResponse.to:type_name -> google.protobuf.Timestamp
 	4,  // 7: koinon.usage.v1alpha1.GetOrgUsageResponse.rows:type_name -> koinon.usage.v1alpha1.OrgUsageRow
 	1,  // 8: koinon.usage.v1alpha1.GetOrgUsageResponse.totals:type_name -> koinon.usage.v1alpha1.UsageTotals
 	2,  // 9: koinon.usage.v1alpha1.GetOrgUsageResponse.runs:type_name -> koinon.usage.v1alpha1.RunCounts
 	0,  // 10: koinon.usage.v1alpha1.ExportOrgUsageRequest.range:type_name -> koinon.usage.v1alpha1.UsageRange
 	0,  // 11: koinon.usage.v1alpha1.GetPlatformUsageRequest.range:type_name -> koinon.usage.v1alpha1.UsageRange
 	1,  // 12: koinon.usage.v1alpha1.PlatformUsageRow.usage:type_name -> koinon.usage.v1alpha1.UsageTotals
-	12, // 13: koinon.usage.v1alpha1.GetPlatformUsageResponse.from:type_name -> google.protobuf.Timestamp
-	12, // 14: koinon.usage.v1alpha1.GetPlatformUsageResponse.to:type_name -> google.protobuf.Timestamp
+	13, // 13: koinon.usage.v1alpha1.GetPlatformUsageResponse.from:type_name -> google.protobuf.Timestamp
+	13, // 14: koinon.usage.v1alpha1.GetPlatformUsageResponse.to:type_name -> google.protobuf.Timestamp
 	8,  // 15: koinon.usage.v1alpha1.GetPlatformUsageResponse.rows:type_name -> koinon.usage.v1alpha1.PlatformUsageRow
 	1,  // 16: koinon.usage.v1alpha1.GetPlatformUsageResponse.totals:type_name -> koinon.usage.v1alpha1.UsageTotals
 	2,  // 17: koinon.usage.v1alpha1.GetPlatformUsageResponse.runs:type_name -> koinon.usage.v1alpha1.RunCounts
@@ -1042,9 +1101,9 @@ var file_koinon_usage_v1alpha1_usage_proto_depIdxs = []int32{
 	7,  // 21: koinon.usage.v1alpha1.UsageService.GetPlatformUsage:input_type -> koinon.usage.v1alpha1.GetPlatformUsageRequest
 	10, // 22: koinon.usage.v1alpha1.UsageService.ExportPlatformUsage:input_type -> koinon.usage.v1alpha1.ExportPlatformUsageRequest
 	5,  // 23: koinon.usage.v1alpha1.UsageService.GetOrgUsage:output_type -> koinon.usage.v1alpha1.GetOrgUsageResponse
-	11, // 24: koinon.usage.v1alpha1.UsageService.ExportOrgUsage:output_type -> koinon.usage.v1alpha1.ExportUsageResponse
+	11, // 24: koinon.usage.v1alpha1.UsageService.ExportOrgUsage:output_type -> koinon.usage.v1alpha1.ExportOrgUsageResponse
 	9,  // 25: koinon.usage.v1alpha1.UsageService.GetPlatformUsage:output_type -> koinon.usage.v1alpha1.GetPlatformUsageResponse
-	11, // 26: koinon.usage.v1alpha1.UsageService.ExportPlatformUsage:output_type -> koinon.usage.v1alpha1.ExportUsageResponse
+	12, // 26: koinon.usage.v1alpha1.UsageService.ExportPlatformUsage:output_type -> koinon.usage.v1alpha1.ExportPlatformUsageResponse
 	23, // [23:27] is the sub-list for method output_type
 	19, // [19:23] is the sub-list for method input_type
 	19, // [19:19] is the sub-list for extension type_name
@@ -1063,7 +1122,7 @@ func file_koinon_usage_v1alpha1_usage_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_usage_v1alpha1_usage_proto_rawDesc), len(file_koinon_usage_v1alpha1_usage_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

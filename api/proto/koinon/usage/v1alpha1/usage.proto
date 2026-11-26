@@ -22,7 +22,7 @@ service UsageService {
   }
 
   // ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.
-  rpc ExportOrgUsage(ExportOrgUsageRequest) returns (ExportUsageResponse) {
+  rpc ExportOrgUsage(ExportOrgUsageRequest) returns (ExportOrgUsageResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -33,7 +33,7 @@ service UsageService {
   }
 
   // ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.
-  rpc ExportPlatformUsage(ExportPlatformUsageRequest) returns (ExportUsageResponse) {
+  rpc ExportPlatformUsage(ExportPlatformUsageRequest) returns (ExportPlatformUsageResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }
@@ -147,9 +147,17 @@ message ExportPlatformUsageRequest {
   UsageRange range = 1;
 }
 
-// ExportUsageResponse is a CSV file: a header row, one row per row of the matching Get call, then
-// a final row with the totals (day "total"). The text is UTF-8 and ends in a newline.
-message ExportUsageResponse {
+// ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final
+// row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+message ExportOrgUsageResponse {
+  string filename = 1;
+  string csv = 2;
+}
+
+// ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then
+// a final row with the totals (day "total"). The text is UTF-8 and ends in a newline. Soft-deleted
+// orgs stay in the rows, so the totals equal the ledger sums.
+message ExportPlatformUsageResponse {
   string filename = 1;
   string csv = 2;
 }

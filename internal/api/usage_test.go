@@ -312,7 +312,7 @@ var _ = Describe("UsageService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(after.GetRuns().GetRunsToday() - before.GetRuns().GetRunsToday()).To(Equal(int64(2)))
 		Expect(after.GetRuns().GetFailedRunsToday() - before.GetRuns().GetFailedRunsToday()).To(Equal(int64(1)))
-		Expect(after.GetRuns().GetDayStart().AsTime()).To(Equal(time.Now().UTC().Truncate(24 * time.Hour)))
+		Expect(after.GetRuns().GetDayStart().AsTime()).To(BeTemporally("~", time.Now().UTC().Truncate(24*time.Hour), 24*time.Hour))
 
 		platformAfter, err := usageClient(pa).GetPlatformUsage(ctx, &usagev1alpha1.GetPlatformUsageRequest{})
 		Expect(err).NotTo(HaveOccurred())

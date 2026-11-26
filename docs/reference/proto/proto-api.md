@@ -5394,8 +5394,8 @@ platform admins. The CSV export holds the same rows and the same totals as the m
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
-| ExportOrgUsage | `koinon.usage.v1alpha1.ExportOrgUsageRequest` | `koinon.usage.v1alpha1.ExportUsageResponse` | - | ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above. |
-| ExportPlatformUsage | `koinon.usage.v1alpha1.ExportPlatformUsageRequest` | `koinon.usage.v1alpha1.ExportUsageResponse` | - | ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only. |
+| ExportOrgUsage | `koinon.usage.v1alpha1.ExportOrgUsageRequest` | `koinon.usage.v1alpha1.ExportOrgUsageResponse` | - | ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above. |
+| ExportPlatformUsage | `koinon.usage.v1alpha1.ExportPlatformUsageRequest` | `koinon.usage.v1alpha1.ExportPlatformUsageResponse` | - | ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only. |
 | GetOrgUsage | `koinon.usage.v1alpha1.GetOrgUsageRequest` | `koinon.usage.v1alpha1.GetOrgUsageResponse` | - | GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and today's runs. Members and above. |
 | GetPlatformUsage | `koinon.usage.v1alpha1.GetPlatformUsageRequest` | `koinon.usage.v1alpha1.GetPlatformUsageResponse` | - | GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's runs. Platform admins only. |
 
@@ -5409,16 +5409,27 @@ platform admins. The CSV export holds the same rows and the same totals as the m
 | model | 4 | `string` | singular |  |  |
 | provider_id | 5 | `string` | singular |  |  |
 
+### Message ExportOrgUsageResponse
+
+ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final
+row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| filename | 1 | `string` | singular |  |  |
+| csv | 2 | `string` | singular |  |  |
+
 ### Message ExportPlatformUsageRequest
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | range | 1 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
 
-### Message ExportUsageResponse
+### Message ExportPlatformUsageResponse
 
-ExportUsageResponse is a CSV file: a header row, one row per row of the matching Get call, then
-a final row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then
+a final row with the totals (day "total"). The text is UTF-8 and ends in a newline. Soft-deleted
+orgs stay in the rows, so the totals equal the ledger sums.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |

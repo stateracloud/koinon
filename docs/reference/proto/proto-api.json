@@ -22182,7 +22182,7 @@
               "name": "ExportOrgUsage",
               "description": "ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.",
               "requestType": "koinon.usage.v1alpha1.ExportOrgUsageRequest",
-              "responseType": "koinon.usage.v1alpha1.ExportUsageResponse",
+              "responseType": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -22191,7 +22191,7 @@
               "name": "ExportPlatformUsage",
               "description": "ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.",
               "requestType": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
-              "responseType": "koinon.usage.v1alpha1.ExportUsageResponse",
+              "responseType": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -22273,6 +22273,33 @@
           ]
         },
         {
+          "name": "ExportOrgUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final\nrow with the totals (day \"total\"). The text is UTF-8 and ends in a newline.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "filename",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "csv",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "ExportPlatformUsageRequest",
           "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
           "file": "koinon/usage/v1alpha1/usage.proto",
@@ -22291,10 +22318,10 @@
           ]
         },
         {
-          "name": "ExportUsageResponse",
-          "fullName": "koinon.usage.v1alpha1.ExportUsageResponse",
+          "name": "ExportPlatformUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
           "file": "koinon/usage/v1alpha1/usage.proto",
-          "description": "ExportUsageResponse is a CSV file: a header row, one row per row of the matching Get call, then\na final row with the totals (day \"total\"). The text is UTF-8 and ends in a newline.",
+          "description": "ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then\na final row with the totals (day \"total\"). The text is UTF-8 and ends in a newline. Soft-deleted\norgs stay in the rows, so the totals equal the ledger sums.",
           "deprecated": false,
           "fields": [
             {
