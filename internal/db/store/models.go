@@ -2060,6 +2060,15 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type GatewayAgentForge struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	StateRevision pgtype.Int8
+	ServedAt      pgtype.Timestamptz
+	Failure       string
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type GatewayProviderFailure struct {
 	OrgID      pgtype.UUID
 	ProviderID pgtype.UUID
@@ -3152,17 +3161,19 @@ type Task struct {
 }
 
 type TaskEvent struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	TaskID       pgtype.UUID
-	Seq          int64
-	Kind         string
-	ActorKind    TaskActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	CreatedAt    pgtype.Timestamptz
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	TaskID         pgtype.UUID
+	Seq            int64
+	Kind           string
+	ActorKind      TaskActorKind
+	ActorUserID    pgtype.UUID
+	ActorAgentID   pgtype.UUID
+	RunID          pgtype.UUID
+	Payload        []byte
+	CreatedAt      pgtype.Timestamptz
+	PayloadVersion int16
+	Prompt         bool
 }
 
 type Template struct {

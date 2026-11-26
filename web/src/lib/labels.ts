@@ -82,6 +82,9 @@ const harnessLabels: Record<string, string> = {
   opencode: 'OpenCode',
 }
 
+/** The built-in harnesses by name, for a form that offers a harness without a template (ADR 0112). */
+export const builtInHarnesses: readonly string[] = Object.keys(harnessLabels)
+
 export function harnessLabel(name: string): string {
   if (name === '') return 'Default'
   return harnessLabels[name] ?? name
@@ -133,6 +136,22 @@ const connectionStatusLabels: Record<ConnectionStatus, string> = {
 
 export function connectionStatusLabel(s: ConnectionStatus): string {
   return connectionStatusLabels[s] ?? 'Unknown'
+}
+
+/** orgRoleLabel names a member's role in an org (the org switcher). */
+export function orgRoleLabel(r: OrgRole): string {
+  switch (r) {
+    case OrgRole.OWNER:
+      return 'Owner'
+    case OrgRole.ADMIN:
+      return 'Admin'
+    case OrgRole.MEMBER:
+      return 'Member'
+    case OrgRole.VIEWER:
+      return 'Viewer'
+    default:
+      return 'Unknown'
+  }
 }
 
 /** The roles an API token can have; viewers and members cannot hold one. */

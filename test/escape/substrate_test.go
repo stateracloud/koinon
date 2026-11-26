@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/guestauth"
@@ -139,7 +141,7 @@ func scanRootsGuest() []string {
 	if l := splitList(os.Getenv("KOINON_ESCAPE_SCAN_ROOTS")); len(l) > 0 {
 		return l
 	}
-	return []string{"/etc", "/home", "/root", "/run", "/var", "/srv", "/mnt", "/opt", "/tmp", "/sandbox", "/workspace"}
+	return []string{"/etc", "/home", "/root", "/run", "/var", "/srv", "/mnt", "/opt", "/tmp", "/dev/shm", "/sandbox", "/workspace"}
 }
 
 // denial names are the results of a connect that the sandbox or the network refused. "open" is the
@@ -251,14 +253,58 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 		}
 	}, NodeTimeout(4*time.Minute))
 
-	// ADR 0120 section 1.2: the execution layer injects a short-lived actor identity token outside the
-	// guest. No code mints or injects one into an actor yet (actortoken has no caller outside tests), so
-	// the guest cannot hold one and a scan would pass with nothing to find. The result is "not applicable"
-	// until the injection exists; the contract specs above pin the minted token. The JWT scan above
-	// already finds a token of that shape the day one is injected somewhere the agent can read.
-	It("holds no actor identity token that it could read", func(ctx SpecContext) {
-		Skip(notApplicable + "tier " + string(rig.tier) + ": the execution layer injects no actor identity token into a guest yet; needs main: an issue for the injection, and then a spec with a real token and a control that the gateway accepts it")
-	})
+	// ADR 0120 section 1.2 and its amendment of 2026-11-26, an INTERIM whose exit is issue #1386:
+	// koinon-agentd mints the actor token outside the guest and writes it into one file,
+	// codehost.SandboxEgressToken, with codehost.WriteEgressTokenCommand. Git reads that file as the
+	// agent user, so the agent can read the token while a run is live. The spec writes a real token with
+	// the production command, in a sandbox of its own, and fails if the token, or any other JWT-shaped
+	// value, is in any other place the agent can read: another file (the home too), the environment or
+	// the command line of a process. When #1386 is done, the guest holds no token, and this spec expects
+	// the scan to find nothing.
+	It("holds the actor token only in the egress token file that koinon-agentd writes", func(ctx SpecContext) {
+		name := rig.sandbox(ctx, rig.workspace, fmt.Sprintf("kesb-tok-%d", suffix()))
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		Expect(err).NotTo(HaveOccurred())
+		m, err := actortoken.NewMinter("koinon-escape", "k1", priv)
+		Expect(err).NotTo(HaveOccurred())
+		tok, err := m.Mint(actortoken.Actor{Org: "org-a", Agent: "agent-1", Run: "run-1"}, 15*time.Minute)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("control: the gateway's verifier accepts the token")
+		v, err := actortoken.NewVerifier("koinon-escape", map[string]ed25519.PublicKey{"k1": pub})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = v.Verify(tok)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("koinon-agentd's command writes the token file")
+		cfg, ok := codehost.EgressTokenGitConfig("http://koinon-gateway.koinon.svc:8081", tok)
+		Expect(ok).To(BeTrue())
+		_, stderr, code := rig.exec(ctx, rig.workspace, name, string(cfg), codehost.WriteEgressTokenCommand()...)
+		Expect(code).To(Equal(0), stderr)
+
+		needle := hex.EncodeToString([]byte(tok))
+		res := rig.probeIn(ctx, rig.workspace, name,
+			check{"id": "token", "op": "scan", "roots": scanRootsGuest(), "needles": []string{needle}},
+			check{"id": "jwt", "op": "scan", "roots": scanRootsGuest(), "pattern": jwtShape},
+			check{"id": "env", "op": "env"},
+		)
+		found := res["token"].(map[string]any)
+		GinkgoWriter.Printf("scanned %v files\n", found["files"])
+		Expect(found["files"]).To(BeNumerically(">", 100), "the scan read too few files to mean anything")
+		Expect(found["found"]).To(ConsistOf(codehost.SandboxEgressToken),
+			"control: the agent can read the token file; and the token is in no other file, environment or command line")
+		Expect(res["jwt"].(map[string]any)["found"]).To(ConsistOf(codehost.SandboxEgressToken), "a JWT-shaped value outside the token file")
+		for k, v := range res["env"].(map[string]any) {
+			Expect(v).NotTo(ContainSubstring(tok), k)
+		}
+
+		By("the command that ends a run removes the token")
+		_, stderr, code = rig.exec(ctx, rig.workspace, name, "", codehost.RemoveEgressTokenCommand()...)
+		Expect(code).To(Equal(0), stderr)
+		res = rig.probeIn(ctx, rig.workspace, name,
+			check{"id": "token", "op": "scan", "roots": scanRootsGuest(), "needles": []string{needle}})
+		Expect(res["token"].(map[string]any)["found"]).To(BeEmpty(), "the token after the remove command")
+	}, NodeTimeout(8*time.Minute))
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
 		expectNoPrivileges(ctx, probe)

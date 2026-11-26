@@ -81,13 +81,17 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 					}
 				}
 				if len(now) > 0 {
-					safego.Do(r.log, "mcp-probe", func() { r.probeEach(ctx, now) })
+					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) { r.probeEach(ctx, now) })
 				}
 				if len(held) > 0 {
-					safego.Do(r.log, "mcp-probe", func() {
+					// A goroutine, not the loop: the wait for the acks takes up to MCPAckWait, and a copy that
+					// never acks must not stop the interval probes and the other wakes (#1347).
+					safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) {
 						if r.awaitGatewayAcked(ctx, rev) {
 							r.probeEach(ctx, held)
-						} // else held back, not recorded; the interval probe waits for the ack too
+						} else if ctx.Err() == nil {
+							r.m.MCPProbesSkipped.Inc() // held back, not recorded; the interval probe waits for the ack too
+						}
 					})
 				}
 			}
@@ -108,7 +112,10 @@ func (r *Reconciler) ProbeAll(ctx context.Context) {
 func (r *Reconciler) probeTick(ctx context.Context) {
 	if latest, err := staterev.Latest(ctx, r.pool); err == nil && latest != nil {
 		if ok, err := r.gatewayAckedNow(ctx, latest.GetRevision()); err == nil && !ok {
-			r.log.Debug("MCP interval probe skipped: not every gateway copy acked the newest State revision", "revision", latest.GetRevision())
+			// Warn, not Debug: a copy whose apply keeps failing stays live and serves an old revision, so
+			// this repeats every interval until the copy applies it or turns unready (#1347).
+			r.m.MCPProbesSkipped.Inc()
+			r.log.Warn("MCP interval probe skipped: not every gateway copy acked the newest State revision; a copy may be stuck on an old revision", "revision", latest.GetRevision())
 			return
 		}
 	}
@@ -325,17 +332,30 @@ func (g *keyGate) waits(ctx context.Context, w *work) (bool, int64) {
 	if rev == 0 {
 		return false, 0
 	}
+	return !g.ackedRev(ctx, rev), rev
+}
+
+// ackedRev reports whether every live koinon-gateway copy acked the MCP half of State revision rev
+// (staterev.AllAcked). With no live copy it is true: nothing serves from the stream. When the copy list
+// or the acks cannot be read it is false, so the work that needs them waits.
+func (g *keyGate) ackedRev(ctx context.Context, rev int64) bool {
+	if g.liveErr != nil {
+		return false
+	}
+	if len(g.live) == 0 {
+		return true
+	}
 	done, seen := g.acked[rev]
 	if !seen {
 		var err error
 		done, err = staterev.AllAcked(ctx, g.r.pool, rev, gwv1.Half_HALF_MCP, g.live)
 		if err != nil {
-			g.r.log.Warn("reading the gateway acks failed; sandbox work waits for the acks", "err", err)
+			g.r.log.Warn("reading the gateway acks failed; the work that needs them waits", "err", err)
 			done = false
 		}
 		g.acked[rev] = done
 	}
-	return !done, rev
+	return done
 }
 
 // split returns the work items of idx that may go now, and those that wait with the highest revision

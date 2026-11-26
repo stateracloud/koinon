@@ -172,7 +172,7 @@ var _ = Describe("Ensure with an Ed25519 key", func() {
 		Expect(out.String()).NotTo(ContainSubstring(string(got.Data["key"])))
 	})
 
-	It("keeps a valid seed and rejects a malformed one without changing it", func(ctx SpecContext) {
+	It("keeps a valid seed (adding only its public key) and rejects a malformed one without changing it", func(ctx SpecContext) {
 		good := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "guest-key", Namespace: "koinon"},
 			Data:       map[string][]byte{"key": []byte("1111111111111111111111111111111111111111111111111111111111111111")},
@@ -182,7 +182,11 @@ var _ = Describe("Ensure with an Ed25519 key", func() {
 		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
 		Expect(err).NotTo(HaveOccurred())
 		got, _ := client.CoreV1().Secrets("koinon").Get(ctx, "guest-key", metav1.GetOptions{})
-		Expect(got).To(Equal(good))
+		// The rc.30 guest key had no public.pem: Ensure adds it from the seed and keeps the seed
+		// (#1086 part C2; ed25519_test.go has the details).
+		Expect(got.Data["key"]).To(Equal(good.Data["key"]))
+		Expect(got.Data).To(HaveKey("public.pem"))
+		Expect(got.Data).To(HaveLen(2))
 		bad := good.DeepCopy()
 		bad.Data["key"] = []byte("short")
 		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)

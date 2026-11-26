@@ -61,14 +61,15 @@ function setup(opts: { platformAdmin?: boolean; destination?: boolean; ceiling?:
       },
     })
   })
-  renderApp(transport, '/platform/observability')
+  renderApp(transport, '/platform/settings/observability')
   return calls
 }
 
 describe('Platform observability page', () => {
-  it('is for platform admins only', async () => {
+  it('is for platform admins only: any other user goes to the org area', async () => {
     const calls = setup({ platformAdmin: false })
-    expect(await screen.findByText('Only platform admins can manage platform observability.')).toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
     expect(calls.gets).toBe(0)
   })
 

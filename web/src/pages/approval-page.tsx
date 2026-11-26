@@ -6,7 +6,7 @@ import { ApprovalView } from '@/components/approval-view'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/approvals/$approvalId')
+const route = getRouteApi('/app/org/approvals/$approvalId')
 
 /** ApprovalPage shows one approval request outside its task. */
 export function ApprovalPage() {
@@ -18,7 +18,7 @@ export function ApprovalPage() {
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
       <div className="flex gap-4 text-sm">
-        <Link to="/" className="text-muted-foreground hover:underline">
+        <Link to="/inbox" className="text-muted-foreground hover:underline">
           ← Inbox
         </Link>
         {ticketId && (

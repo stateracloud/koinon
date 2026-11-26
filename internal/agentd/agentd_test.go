@@ -179,7 +179,7 @@ var _ = Describe("Pool", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindSystem,
-			Payload: []byte(`{"text":"summarise yesterday's issues","source":"schedule"}`),
+			Payload: []byte(`{"text":"summarise yesterday's issues","source":"schedule"}`), Prompt: true,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, t)

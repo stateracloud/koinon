@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -476,6 +477,90 @@ var _ = Describe("fake Gitea", func() {
 			git(one, "commit", "-q", "-m", "big")
 			git(one, "push", "-q", "origin", "HEAD:refs/heads/big")
 			Expect(f.Snapshot("widgets").Branches["big"]).To(Equal(strings.TrimSpace(git(one, "rev-parse", "HEAD"))))
+		})
+
+		It("fetches into a clone that has diverged, with a gzip request body", func() {
+			tmp := GinkgoT().TempDir()
+			one := filepath.Join(tmp, "one")
+			git(tmp, "clone", "-q", cloneURL(fakegitea.DefaultToken), one)
+			// Many local commits make many haves. The rounds of the negotiation grow (16, 32, 64 haves), and
+			// git gzips an upload-pack request above 1 KiB. fast-import makes the commits in one process.
+			var stream strings.Builder
+			for i := range 300 {
+				msg := fmt.Sprintf("local %d\n", i)
+				fmt.Fprintf(&stream, "commit refs/heads/main\ncommitter t <t@example.test> %d +0000\ndata %d\n%s", 1700000000+i, len(msg), msg)
+				if i == 0 {
+					stream.WriteString("from refs/heads/main^0\n")
+				}
+				stream.WriteString("\n")
+			}
+			imp := exec.CommandContext(context.Background(), "git", "fast-import", "--quiet", "--force")
+			imp.Dir, imp.Stdin = one, strings.NewReader(stream.String())
+			out, err := imp.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+			// Without the remote-tracking refs the client finds the common commit only after several rounds.
+			git(one, "update-ref", "-d", "refs/remotes/origin/HEAD")
+			git(one, "update-ref", "-d", "refs/remotes/origin/main")
+			ch := doAuth(f, "POST", repo+"/contents", map[string]any{
+				"branch": "main", "message": "upstream",
+				"files": []map[string]any{{"operation": "create", "path": "up.txt", "content": base64.StdEncoding.EncodeToString([]byte("up\n"))}},
+			}, "token "+fakegitea.DefaultToken)
+			Expect(ch.Status).To(Equal(201), string(ch.Body))
+			cmd := exec.CommandContext(context.Background(), "git", "-c", "protocol.version=0", "fetch", "origin", "main")
+			cmd.Dir = one
+			cmd.Env = append(os.Environ(), "GIT_TRACE_CURL=1", "GIT_TRACE_CURL_NO_DATA=1", "GIT_TERMINAL_PROMPT=0")
+			out, err = cmd.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+			Expect(string(out)).To(ContainSubstring("Content-Encoding: gzip"), "the fetch sent a gzip body")
+			Expect(git(one, "log", "--format=%s", "-1", "FETCH_HEAD")).To(Equal("upstream\n"))
+		})
+
+		It("serves only the smart protocol's requests", func() {
+			call := func(method, path, contentType, encoding string, body []byte) int {
+				GinkgoHelper()
+				req, err := http.NewRequestWithContext(context.Background(), method, f.Server.URL+"/acme/widgets.git/"+path, bytes.NewReader(body))
+				Expect(err).NotTo(HaveOccurred())
+				req.SetBasicAuth("x", fakegitea.DefaultToken)
+				if contentType != "" {
+					req.Header.Set("Content-Type", contentType)
+				}
+				if encoding != "" {
+					req.Header.Set("Content-Encoding", encoding)
+				}
+				res, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				return res.StatusCode
+			}
+			Expect(call("GET", "info/refs?service=git-upload-pack", "", "", nil)).To(Equal(http.StatusOK))
+			Expect(call("GET", "info/refs", "", "", nil)).To(Equal(http.StatusForbidden), "the dumb protocol")
+			Expect(call("GET", "HEAD", "", "", nil)).To(Equal(http.StatusForbidden), "the dumb protocol")
+			Expect(call("GET", "info/refs?service=--upload-pack=x", "", "", nil)).To(Equal(http.StatusForbidden), "a service that is not known")
+			Expect(call("POST", "git-upload-pack", "text/plain", "", []byte("0000"))).To(Equal(http.StatusUnsupportedMediaType))
+			Expect(call("POST", "git-upload-pack", "application/x-git-upload-pack-request", "gzip", []byte("not gzip"))).To(Equal(http.StatusBadRequest))
+		})
+
+		It("answers 404 for a repository name that is not a known repository", func() {
+			noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			for _, path := range []string{
+				"/acme/-widgets.git/info/refs?service=git-upload-pack",
+				"/acme/--upload-pack=touch.git/info/refs?service=git-upload-pack",
+				"/acme/..%2Fwidgets.git/info/refs?service=git-upload-pack",
+				"/acme/widgets.git/..%2F..%2Fother.git/git-upload-pack",
+				"/acme/%2E%2E.git/info/refs?service=git-upload-pack",
+			} {
+				req, err := http.NewRequestWithContext(context.Background(), "GET", f.Server.URL+path, nil)
+				Expect(err).NotTo(HaveOccurred())
+				req.SetBasicAuth("x", fakegitea.DefaultToken)
+				res, err := noRedirect.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				Expect(res.StatusCode).To(BeElementOf(http.StatusNotFound, http.StatusForbidden), path)
+			}
+		})
+
+		It("checks at startup that it can serve git", func() {
+			Expect(f.CheckServe()).To(Succeed())
 		})
 
 		It("serves the owner/repo path case-insensitively", func() {

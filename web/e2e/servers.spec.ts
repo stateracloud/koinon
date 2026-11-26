@@ -103,7 +103,7 @@ test('owner edits the agent allowlist', async ({ page }) => {
   expect(seen.allow).toMatchObject({ orgId: org, agentId: 'a-1', servers: [{ serverId: 's-docs', tools: ['search'] }] })
 })
 
-test('a member does not see the Servers link or the allowlist', async ({ page }) => {
+test('a member does not see the MCP servers link or the allowlist', async ({ page }) => {
   const { handlers } = api('ORG_ROLE_MEMBER')
   await mockApi(page, handlers)
   await page.goto('/servers')

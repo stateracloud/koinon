@@ -21,7 +21,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Add destination' }).click()
     await page.getByLabel('Backend', { exact: true }).selectOption('Opik')
     await page.screenshot({ path: `${dir}/org-add-destination-${scheme}.png`, fullPage: true })
-    await page.goto('/platform/observability')
+    await page.goto('/platform/settings/observability')
     await page.getByRole('form', { name: 'Content ceiling' }).waitFor()
     await page.getByRole('form', { name: 'Content ceiling' }).getByRole('radio', { name: /Redacted/ }).check()
     await page.screenshot({ path: `${dir}/platform-observability-${scheme}.png`, fullPage: true })

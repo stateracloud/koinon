@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RepoPicker } from '@/components/repo-picker'
+import { SaveAsTemplateFields } from '@/components/save-as-template'
+import { noTemplate, templateChoiceError, useTakenTemplateSlugs, type TemplateChoice } from '@/hooks/use-new-agent'
+import { useOrg } from '@/lib/org-context'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
@@ -20,7 +23,8 @@ import { cn } from '@/lib/utils'
 export type NewAgent = { templateId: string; displayName: string; harness: string; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[]; ephemeral?: boolean }
 
 export type AgentWizardProps = {
-  templates: readonly Template[]
+  /** The template the user chose in the gallery. */
+  template: Template
   connections: readonly Connection[]
   /** Target patterns by connector type, from the connector type documents. */
   targetPatterns?: ReadonlyMap<string, string>
@@ -36,14 +40,17 @@ export type AgentWizardProps = {
    * owners): the repository inputs then suggest the installation's.
    */
   canListRepos?: boolean
-  onCreate: (a: NewAgent) => void
+  onCreate: (a: NewAgent, template: TemplateChoice) => void
   pending?: boolean
   error?: string
 }
 
 type Binding = { connectionId: string; repositories: string[] }
 
-const steps = ['Template', 'Harness', 'Access', 'Review'] as const
+const steps = ['Harness', 'Access', 'Review'] as const
+const HARNESS = 0
+const ACCESS = 1
+const REVIEW = 2
 
 function bounds(g: Grant) {
   return { min: g.targetsMin, max: g.targetsMax }
@@ -57,24 +64,24 @@ function boundsText(g: Grant): string {
 }
 
 /**
- * AgentWizard creates a draft agent from a template (ADR 0020): template,
- * harness, the GitHub grant (connection and repositories within the
- * template's bounds), then a summary of what the draft will propose.
+ * AgentWizard creates a draft agent from the template chosen in the gallery (ADR 0020, ADR 0126
+ * section 5): harness, access (connection and repositories within the template's bounds), then a
+ * review that lists every choice with a "Change" link back to its step.
  */
-export function AgentWizard({ templates, connections, targetPatterns, codeHosts, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
-  const [step, setStep] = useState(0)
-  const [templateId, setTemplateId] = useState(templates.length === 1 ? templates[0].id : '')
-  const template = templates.find((t) => t.id === templateId)
+export function AgentWizard({ template, connections, targetPatterns, codeHosts, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
+  const [step, setStep] = useState(HARNESS)
   const [harness, setHarness] = useState('')
-  const [name, setName] = useState('')
+  const [name, setName] = useState(template.displayName)
   const [bindings, setBindings] = useState<Record<number, Binding>>({})
   const [showErrors, setShowErrors] = useState(false)
+  const [saveAs, setSaveAs] = useState<TemplateChoice>(noTemplate)
+  const taken = useTakenTemplateSlugs(useOrg().org.orgId)
   // Unset follows the template; the toggle overrides it for this agent.
   const [ephemeralChoice, setEphemeralChoice] = useState<boolean | undefined>(undefined)
 
-  const chosenHarness = template && template.allowedHarnesses.includes(harness) ? harness : (template?.defaultHarness ?? '')
-  const ephemeral = ephemeralChoice ?? template?.ephemeral ?? false
-  const targetGrants = (template?.grants ?? []).map((g, i) => ({ g, i })).filter(({ g }) => grantNeedsTargets(g))
+  const chosenHarness = template.allowedHarnesses.includes(harness) ? harness : template.defaultHarness
+  const ephemeral = ephemeralChoice ?? template.ephemeral
+  const targetGrants = template.grants.map((g, i) => ({ g, i })).filter(({ g }) => grantNeedsTargets(g))
 
   function binding(i: number, g: Grant): Binding {
     const b = bindings[i]
@@ -97,12 +104,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
     return errs
   }
 
-  const stepValid = [
-    !!template,
-    !!template && chosenHarness !== '',
-    targetGrants.every(({ g, i }) => grantErrors(i, g).length === 0),
-    !!name.trim(),
-  ]
+  const stepValid = [chosenHarness !== '', targetGrants.every(({ g, i }) => grantErrors(i, g).length === 0), !!name.trim() && !templateChoiceError(saveAs, taken)]
 
   function next() {
     if (!stepValid[step]) {
@@ -110,27 +112,37 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
       return
     }
     setShowErrors(false)
-    if (step === 0 && template && !name) setName(template.displayName)
-    setStep((s) => Math.min(s + 1, steps.length - 1))
+    setStep((s) => Math.min(s + 1, REVIEW))
+  }
+
+  /** change goes back to a step from the review; Next on that step returns through the steps after it. */
+  function change(to: number) {
+    setShowErrors(false)
+    setStep(to)
   }
 
   function submit(e: FormEvent) {
     e.preventDefault()
-    if (step < steps.length - 1) return next()
-    if (!template || !stepValid.every(Boolean)) {
+    if (step < REVIEW) return next()
+    const firstInvalid = stepValid.findIndex((v) => !v)
+    if (firstInvalid >= 0) {
       setShowErrors(true)
+      setStep(firstInvalid)
       return
     }
-    onCreate({
-      templateId: template.id,
-      displayName: name.trim(),
-      harness: chosenHarness,
-      ephemeral: ephemeral === (template.ephemeral ?? false) ? undefined : ephemeral,
-      grants: targetGrants.map(({ g, i }) => {
-        const b = binding(i, g)
-        return { connector: g.connector, connectionId: b.connectionId, repositories: b.repositories.map((r) => r.trim()).filter(Boolean) }
-      }),
-    })
+    onCreate(
+      {
+        templateId: template.id,
+        displayName: name.trim(),
+        harness: chosenHarness,
+        ephemeral: ephemeral === template.ephemeral ? undefined : ephemeral,
+        grants: targetGrants.map(({ g, i }) => {
+          const b = binding(i, g)
+          return { connector: g.connector, connectionId: b.connectionId, repositories: b.repositories.map((r) => r.trim()).filter(Boolean) }
+        }),
+      },
+      saveAs,
+    )
   }
 
   return (
@@ -143,23 +155,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
         ))}
       </ol>
 
-      {step === 0 && (
-        <fieldset className="grid gap-2">
-          <legend className="mb-2 font-semibold">Choose a template</legend>
-          {templates.length === 0 && <p className="text-muted-foreground text-sm">This install ships no templates.</p>}
-          {templates.map((t) => (
-            <label key={t.id} className={cn('bg-card flex cursor-pointer gap-3 rounded-lg border p-3', t.id === templateId && 'ring-ring ring-2')}>
-              <input type="radio" name="template" value={t.id} checked={t.id === templateId} onChange={() => setTemplateId(t.id)} className="mt-1" />
-              <span>
-                <span className="font-medium">{t.displayName}</span> <span className="text-muted-foreground text-xs">v{t.version}</span>
-                <span className="text-muted-foreground block text-sm">{t.description}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      )}
-
-      {step === 1 && template && (
+      {step === HARNESS && (
         <fieldset className="grid gap-2">
           <legend className="mb-2 font-semibold">Choose a harness</legend>
           <p className="text-muted-foreground text-sm">The harness the agent runs on in its sandbox.</p>
@@ -173,7 +169,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
         </fieldset>
       )}
 
-      {step === 2 && template && (
+      {step === ACCESS && (
         <div className="grid gap-4">
           {targetGrants.length === 0 && <p className="text-muted-foreground text-sm">This template needs no connections.</p>}
           {targetGrants.map(({ g, i }) => (
@@ -193,7 +189,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
         </div>
       )}
 
-      {step === 3 && template && (
+      {step === REVIEW && (
         <div className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="agent-name">Name</Label>
@@ -213,10 +209,15 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
             <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
               <dt className="text-muted-foreground">Template</dt>
               <dd>
-                {template.displayName} v{template.version}
+                {template.displayName} v{template.version}{' '}
+                <Link to="/agents/new" className="text-sm underline" aria-label="Change template">
+                  Change
+                </Link>
               </dd>
               <dt className="text-muted-foreground">Harness</dt>
-              <dd>{harnessLabel(chosenHarness)}</dd>
+              <dd>
+                {harnessLabel(chosenHarness)} <ChangeLink label="Change harness" onClick={() => change(HARNESS)} />
+              </dd>
               <dt className="text-muted-foreground">Model</dt>
               <dd>{template.model || 'default'}</dd>
               <dt className="text-muted-foreground">Sandbox</dt>
@@ -242,7 +243,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
               return (
                 <div key={i} className="border-t pt-2">
                   <p className="font-medium">
-                    {g.connector} grant · {presetLabel(g.preset)}
+                    {g.connector} grant · {presetLabel(g.preset)} {b && <ChangeLink label={`Change ${g.connector} access`} onClick={() => change(ACCESS)} />}
                   </p>
                   <p className="text-muted-foreground">Scopes: {g.scopes.join(', ')}</p>
                   {codeHosts?.get(g.connector)?.weakerCredential && <WeakerCredential host={codeHosts.get(g.connector)!} />}
@@ -255,6 +256,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
               Creating it makes a draft. Nothing is granted until an org admin or owner reviews and activates it.
             </p>
           </section>
+          <SaveAsTemplateFields value={saveAs} onChange={setSaveAs} showErrors={showErrors} defaultName={name} taken={taken} />
         </div>
       )}
 
@@ -263,18 +265,18 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {showErrors && step < 2 && !stepValid[step] && (
+      {showErrors && step === HARNESS && !stepValid[HARNESS] && (
         <p className="text-destructive text-sm" role="alert">
-          {step === 0 ? 'Choose a template.' : 'Choose a harness.'}
+          Choose a harness.
         </p>
       )}
       <div className="flex gap-2">
-        {step > 0 && (
+        {step > HARNESS && (
           <Button type="button" variant="outline" onClick={() => setStep((s) => s - 1)}>
             Back
           </Button>
         )}
-        {step < steps.length - 1 ? (
+        {step < REVIEW ? (
           // Distinct keys: reusing one element would turn the clicked Next into a
           // submit button before the click finishes, and submit the form.
           <Button key="next" type="button" className="ml-auto" onClick={next}>
@@ -287,6 +289,15 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
         )}
       </div>
     </form>
+  )
+}
+
+/** ChangeLink is the "Change" link of a review row: it goes back to the step of that choice. */
+function ChangeLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button type="button" variant="link" size="sm" className="h-auto p-0 font-normal underline" aria-label={label} onClick={onClick}>
+      Change
+    </Button>
   )
 }
 

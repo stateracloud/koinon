@@ -557,6 +557,24 @@ prefix in the guest, the egress listener in the chart and a kind e2e) and part C
 transition profile) follow. Prior art: Fly.io's Tokenizer, the MCP credential path of decision 12
 (`mcpgateway.StaticCredentials`, the credential scrubber).
 
+Record (2026-11-25, #1086 part C2): the actor token and the egress listener. `gateway.mcp.koinon.egress`
+turns on koinon-gateway's egress listener (its own port, default 8081, never the MCP port; it needs
+`gateway.mcp.driver=koinon`). The ensure-secrets Job makes one Ed25519 key; koinon-agentd mounts only its
+seed and koinon-gateway only its public key, as `<key ID>.pub`. koinon-agentd mints the actor token outside
+the guest for both drivers: a compact JWS with the org slug, the agent ID and the run ID, 15 minutes
+long, written again every 5 minutes. It writes the token and the git prefix
+(`url.<gateway>/egress/<host>/.insteadOf`, with the token in `http.extraHeader` as `Koinon-Actor-Token`)
+into the sandbox through the driver's exec, to `/tmp/.koinon-egress`: outside the home, so no checkpoint
+holds it, and it removes the file when the run ends. The token is never logged. No forge credential is in
+the guest. The reconciler adds an enforced L7 sandbox rule (`koinon_egress`) for the listener: it mirrors
+each allow and deny rule of the forge read grant under `/egress/<host[:port]>`, so the guest reaches the
+same paths through the gateway as it did directly. `--egress-ca-file` (`gateway.mcp.koinon.egress.caBundle`) adds private
+roots for the upstreams of the listener only. The network policies let sandboxes reach the egress port
+only. A run of an agent whose grant gives no read access gets 503 `credential_unavailable` from the
+gateway: it fails closed. The kind e2e clones from a fake Gitea over HTTPS through the listener.
+Prior art: SPIFFE JWT-SVIDs (a short-lived identity, not a credential), git's
+`insteadOf` and `http.extraHeader`.
+
 **The fallback.** agentgateway stays selectable for v0.2 only, for an install that hits a Koinon
 gateway bug. It is the v0.1 setup (agentgateway on both paths), so MCP sign-in and the passport need
 Koinon's gateway. _(inferred: the maintainer named the fallback, not its scope)_
@@ -1166,6 +1184,68 @@ list only when it matches what an admin approved.
 
 This completes decision 4 of ADR 0091 for tool lists. It does not change the tiers: an approved text is
 not an `auto` grant.
+
+### 14. Availability and limits (amendment 2026-11-25, #1347)
+
+A review of koinon-gateway before v0.1.0 found gaps that cut or stop agent tool calls in production. Each rule
+below has a test. Slice 1 holds these rules; the other gaps of #1347 follow in later slices of the same issue.
+
+- **A database error does not make the pod unready.** After one good pass, the key loader stays ready on its
+  last good keyring when the list of key rows or the load report fails (a Postgres restart, a CNPG
+  switchover). The pass still returns the error, and the loader logs it. Before the first good pass, and for a
+  missing key or a missing migration, the loader stays not ready. A cause that comes from the keys themselves
+  is never transient.
+- **`/readyz` needs the guard's database.** The pod is ready only after the guard reached its database once
+  (the ping and the grant check of `GatewayGuard.Load`). The guard opens a lazy pool and retries every 2 s, so a
+  broken login showed as a ready pod with every org target closed, and a rollout did not stop. A later outage
+  is not checked in `/readyz`: the guard refuses on its own then (fail closed, section 2 of ADR 0120), and a
+  database blip must not remove every endpoint.
+- **The drain covers a call in flight.** A tool call is never retried. One request has two stages, each bounded
+  by the call timeout (`mcpgateway.DefaultCallTimeout`, 2 minutes): the guard check, which may wait for a
+  person's approval, and the upstream call. The rule is one number: `--drain-timeout` is at least twice the
+  call timeout (`mcpgateway.MinDrain`, 4 minutes) when the MCP path is on. The process refuses a smaller value
+  at start, and the chart refuses `gateway.mcp.koinon.drainTimeoutSeconds` below 240. The default is 270 s,
+  so the pod grace period is 305 s with the default shutdown delay. The grace period is only a ceiling: the
+  pod exits as soon as its calls end. A later change may end the approval waits at drain (a refusal that the
+  agent retries; nothing went upstream), and then the rule could fall to one call timeout.
+- **One bound on each upstream reply.** The Go SDK client reads a JSON reply with no limit, and it bounds one
+  SSE event only (16 MiB). The pod limit is shared by all orgs, so one org's server could make both copies run
+  out of memory. The gateway wraps each upstream client: a reply of type `application/json` may carry at most
+  `Options.MaxResponseBytes` (default 4 MiB, `DefaultMaxResponseBytes`) in total, and one SSE event is bounded
+  by the same value. A reply over the bound fails its call and logs one warning with the target name and the
+  limit. The log line has no argument and no result. The bound is per reply, not per pod: the gateway has no
+  cap on concurrent calls or on bytes in flight yet, so many large replies at once can still exceed the pod
+  limit. A per-org concurrency cap or a budget of bytes in flight is open work.
+- **v0.1 sends no progress notifications, so a call has one time limit.** The gateway answers each request with
+  one JSON reply (`JSONResponse`). It sends nothing while the upstream call runs, and a tool call that runs
+  longer than the call timeout (2 minutes) fails. A client that resets its timeout on progress gets no help
+  from the gateway. The harness config therefore sets the OpenCode request timeout of the `koinon` MCP server
+  (`timeout`, in ms, in `harnesses/opencode/etc/koinon/opencode/opencode.jsonc`) to 270 s, at or above
+  `MinDrain` (4 minutes), because one call has two stages (approval wait and upstream call). A client that
+  gives up earlier would leave the write running while the agent sees an error. The OpenCode default is 60 s,
+  so without this value the client gives up first. A spec in `internal/mcpgateway` reads the config and checks
+  the value against `MinDrain`, so the two cannot drift. The later fix
+  is to forward upstream progress notifications on an SSE reply. Build it when an org MCP server needs calls
+  longer than the call timeout. It changes the reply type and the response bound, so it needs its own slice.
+- **A copy that cannot apply a State revision turns unready, and the prober keeps its interval.** A copy whose
+  `ApplyMCP` keeps failing stays live on its old revision, and it still accepts keys revoked since. The State
+  client (`stateclient.Client.Stale`) reports a half that has failed to apply for `DefaultStaleAfter` (2
+  minutes), and `/readyz` returns 503 for that time. The copy keeps serving what it has; the rollout and the
+  Service stop trusting it. The cost: a revision that every copy refuses makes every copy unready after 2
+  minutes, so a bad config can remove all endpoints. This is accepted, because the other choice is to serve
+  revoked keys for as long as the config stays bad, and the failure shows in the log and in
+  `koinon_gateway_state_revisions_applied_total{half="mcp",result="failed"}`. On the reconciler side, the first probe of a new server
+  waits for the acks in its own goroutine, not in the prober loop, so a copy that never acks (bounded by
+  `MCPAckWait`, 1 minute) no longer stops the interval probes and the other wakes. An interval probe held back by
+  a missing ack logs a warning and counts in `koinon_reconciler_mcp_probes_skipped_total` (no labels).
+- **Accepted for v0.1: no `list_changed` and a tool list that can be partial.** The gateway is stateless
+  (`JSONResponse`, no session): it holds no stream to send `notifications/tools/list_changed` on. A tool that an
+  admin approves during an agent session shows in the next session. This fits v0.1: an agent session starts,
+  lists its tools once, and ends; no harness of v0.1 re-lists tools during a session. `tools/list` skips a target
+  that fails or that the guard holds, and logs one warning with the target name (`tools/list: target skipped`).
+  The agent sees a shorter list, not an error, which is the fail-open choice for a list (a call to a missing
+  tool still fails closed). The later fix needs a stream: a stateful mode with SSE, together with the progress
+  forwarding above. Build both when an org needs tools that change within one session.
 
 ## Alternatives considered
 

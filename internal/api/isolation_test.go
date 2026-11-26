@@ -836,6 +836,18 @@ var isolationCases = map[string]isolationCase{
 			return c.orgsettings.SetRunContentRetention(ctx, &orgsettingsv1alpha1.SetRunContentRetentionRequest{OrgId: org, Days: 7})
 		},
 	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceGetRunLimitsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.GetRunLimits(ctx, &orgsettingsv1alpha1.GetRunLimitsRequest{OrgId: org})
+		},
+	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceSetRunLimitsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.SetRunLimits(ctx, &orgsettingsv1alpha1.SetRunLimitsRequest{OrgId: org, MaxConcurrentRuns: proto.Int32(12)})
+		},
+	},
 	orgsettingsv1alpha1connect.OrgSettingsServiceGetHomeBackupRetentionProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

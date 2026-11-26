@@ -6,8 +6,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,6 +86,35 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		Expect(os.WriteFile(bad, []byte(`{"routes":[{"name":"a","class":"registry","org":"acme","host":"pypi.org","methods":["GET"],"pathPrefixes":["/"]}]}`), 0o600)).To(Succeed())
 		cfg.egressRoutesFile = bad
 		Expect(run(ctx, cfg)).To(MatchError(ContainSubstring("unknown field")))
+	}, SpecTimeout(20*time.Second))
+
+	It("adds the roots of --egress-ca-file to the system roots, and refuses a file without a certificate (#1086 part C2)", func(ctx SpecContext) {
+		pool, err := egressRoots("")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pool).To(BeNil(), "the system roots")
+
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		DeferCleanup(srv.Close)
+		ca := filepath.Join(GinkgoT().TempDir(), "ca.pem")
+		Expect(os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)).To(Succeed())
+		pool, err = egressRoots(ca)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = srv.Certificate().Verify(x509.VerifyOptions{Roots: pool, DNSName: "example.com"})
+		Expect(err).NotTo(HaveOccurred(), "the private root verifies its server")
+
+		empty := filepath.Join(GinkgoT().TempDir(), "empty.pem")
+		Expect(os.WriteFile(empty, []byte("not a certificate\n"), 0o600)).To(Succeed())
+		_, err = egressRoots(empty)
+		Expect(err).To(MatchError(ContainSubstring("no PEM certificate")))
+		_, err = egressRoots(filepath.Join(GinkgoT().TempDir(), "missing.pem"))
+		Expect(err).To(MatchError(ContainSubstring("--egress-ca-file")))
+
+		writeActorKey(keysDir, "k1")
+		cfg := config{
+			mcpPath: true, stateURL: stateURL, stateTokenFile: tokenFile, listenAddr: "127.0.0.1:0", drain: time.Second,
+			egressAddr: "127.0.0.1:0", actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, namespace: "koinon", egressCAFile: empty,
+		}
+		Expect(run(ctx, cfg)).To(MatchError(ContainSubstring("--egress-ca-file")), "a bad file stops the start")
 	}, SpecTimeout(20*time.Second))
 
 	It("serves the platform routes on their own listener, refuses what no route allows and drains on the signal", func(specCtx SpecContext) {

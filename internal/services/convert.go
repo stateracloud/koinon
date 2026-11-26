@@ -18,6 +18,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/tasks"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -153,9 +154,13 @@ func taskProto(t store.Task) *taskv1alpha1.Task {
 }
 
 // taskEventProto converts an event. names maps a user ID to a display name (see eventActorNames);
-// a user it lacks leaves actor_display_name empty.
+// a user it lacks leaves actor_display_name empty. event is the typed event that tasks.Decode reads
+// from the row; it is not set for a kind or a payload that the reader cannot read, and payload
+// still carries the stored JSON.
 func taskEventProto(e store.TaskEvent, names map[string]string) *taskv1alpha1.TaskEvent {
+	event, _ := tasks.Decode(e.Kind, e.PayloadVersion, e.Payload)
 	return &taskv1alpha1.TaskEvent{
+		Event:            event,
 		ActorDisplayName: names[idString(e.ActorUserID)],
 		Seq:              e.Seq,
 		Kind:             e.Kind,

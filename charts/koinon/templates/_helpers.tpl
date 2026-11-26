@@ -292,6 +292,27 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "mcp-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
 {{- end }}
 
+{{/* True when koinon-gateway serves the egress listener (gateway.mcp.koinon.egress.enabled, #1086 part
+C2). It needs gateway.mcp.driver=koinon: only koinon-gateway opens the sealed forge credentials. */}}
+{{- define "koinon.egressListener" -}}
+{{- if .Values.gateway.mcp.koinon.egress.enabled -}}
+{{- if not (include "koinon.mcpKoinon" .) -}}
+{{- fail "gateway.mcp.koinon.egress.enabled needs gateway.mcp.driver=koinon: only koinon-gateway holds the key the forge credentials are sealed to" -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* The base URL of the egress listener, as sandboxes and koinon-agentd name it. */}}
+{{- define "koinon.egressURL" -}}
+{{- printf "http://%s:%d" (include "koinon.mcpGatewayHost" .) (int .Values.gateway.mcp.koinon.egress.port) -}}
+{{- end }}
+
+{{/* The Secret with the actor token key (ensure-secrets kind ed25519-key): key, the seed (koinon-agentd only), and public.pem (koinon-gateway only). */}}
+{{- define "koinon.actorTokenKeyName" -}}
+{{- .Values.gateway.mcp.koinon.egress.actorToken.existingSecret | default (include "koinon.componentName" (list . "actor-token-key")) -}}
+{{- end }}
+
 {{/* The URL koinon-api sends approved MCP calls to. */}}
 {{- define "koinon.gatewayMCPURL" -}}
 {{- if include "koinon.mcpKoinon" . -}}
@@ -745,6 +766,39 @@ actor template carries only the public key.
 {{- end }}
 {{- end }}
 
+{{/*
+The provisioner (ADR 0128): "true" with execution.driver=substrate and execution.substrate.provisioner.enabled. Its
+ServiceAccount is the only Koinon principal that holds a global role in Substrate.
+*/}}
+{{- define "koinon.provisioner" -}}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.execution.substrate.provisioner.enabled -}}true{{- end -}}
+{{- end }}
+
+{{- define "koinon.provisionerTokenDir" -}}
+/var/run/koinon/provisioner
+{{- end }}
+
+{{/* The reconciler's token for the provisioner (audience execution.substrate.provisioner.tokenAudience). Only the reconciler mounts it. */}}
+{{- define "koinon.provisionerVolumeMount" -}}
+{{- if include "koinon.provisioner" . -}}
+- name: provisioner-token
+  mountPath: {{ include "koinon.provisionerTokenDir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.provisionerVolume" -}}
+{{- if include "koinon.provisioner" . -}}
+- name: provisioner-token
+  projected:
+    sources:
+      - serviceAccountToken:
+          audience: {{ .Values.execution.substrate.provisioner.tokenAudience | quote }}
+          expirationSeconds: 3600
+          path: token
+{{- end }}
+{{- end }}
+
 {{- define "koinon.substrateVolume" -}}
 {{- if eq (include "koinon.substrate" .) "true" -}}
 - name: substrate-token
@@ -839,6 +893,9 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- end -}}
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
+{{- end -}}
+{{- if and (include "koinon.egressListener" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.actorTokenKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "agentd")))) -}}
 {{- end -}}
 {{- $specs | toJson -}}
 {{- end }}
@@ -1563,6 +1620,17 @@ it carries no credentials.
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL
   value: {{ . | quote }}
+{{- end }}
+{{- if include "koinon.egressListener" . }}
+{{- /* Git through the gateway's egress listener (#1086 part C2): agentd mints the actor token with the seed, outside the guest. */}}
+- name: KOINON_EGRESS_URL
+  value: {{ include "koinon.egressURL" . | quote }}
+- name: KOINON_ACTOR_TOKEN_KEY_FILE
+  value: /secrets/actor-token/key
+- name: KOINON_ACTOR_TOKEN_KEY_ID
+  value: {{ .Values.gateway.mcp.koinon.egress.actorToken.keyId | quote }}
+- name: KOINON_ACTOR_TOKEN_ISSUER
+  value: {{ .Values.gateway.mcp.koinon.egress.actorToken.issuer | quote }}
 {{- end }}
 {{- with include "koinon.agentMCPURL" . }}
 {{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}

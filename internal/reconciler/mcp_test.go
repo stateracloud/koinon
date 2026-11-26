@@ -21,6 +21,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -481,6 +482,25 @@ var _ = Describe("Org MCP servers", func() {
 				Eventually(func() string { return healthOf(ctx, s.ID) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal("healthy"))
 				Expect(tiers(ctx, s)).To(HaveKey("read"))
 				Expect(g.refused.Load()).To(BeZero(), "no probe got a 401, so none was recorded as a failure")
+			})
+
+			It("counts and warns about every interval probe held back by a copy that never acks (#1347)", func(ctx SpecContext) {
+				server(ctx, org, "wiki", "", nil)
+				g := newKeyedGW(slug+"-wiki", "read")
+				DeferCleanup(g.stop)
+				const copyID = "koinon-gateway-stuck/boot1"
+				Expect(staterev.TouchCopy(ctx, pool, copyID, "test-stream", true)).To(Succeed())
+				DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, copyID, "test-stream") })
+				m := reconciler.NewMetrics(nil)
+				rr := probing(ctx, g.host, g.port, fast, func(c *reconciler.Config) {
+					c.MCPProbeInterval = racescale.D(100 * time.Millisecond)
+					c.Metrics = m
+				})
+				runProber(rr)
+				Expect(rr.ReconcileAll(ctx)).To(Succeed()) // stores a revision the copy never acks
+				Eventually(func() float64 { return testutil.ToFloat64(m.MCPProbesSkipped) }).
+					WithTimeout(racescale.D(10 * time.Second)).Should(BeNumerically(">=", 2))
+				Expect(g.seen.Load()).To(BeZero(), "a stuck copy gets no probe")
 			})
 
 			It("waits the same after a reconciler restart: a second reconciler probes a changed server after the acks", func(ctx SpecContext) {

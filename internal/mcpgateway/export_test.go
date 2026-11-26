@@ -4,6 +4,7 @@ package mcpgateway
 
 import (
 	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"time"
 )
@@ -27,3 +28,8 @@ func (s *CredentialScrub) AddFor(org string, values ...string) { s.addFor(org, v
 
 // Add records values for no org by value.
 func (s *CredentialScrub) Add(values ...string) { s.addFor("", values...) }
+
+// LimitTransport wraps base with the bound on an upstream reply, as connect does.
+func LimitTransport(base http.RoundTripper, max int64, onLimit func()) http.RoundTripper {
+	return &limitTransport{base: base, max: max, onLimit: onLimit}
+}

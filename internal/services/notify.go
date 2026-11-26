@@ -167,6 +167,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: in.Org, TaskID: t.ID, Kind: KindMessage, ActorKind: store.TaskActorKindSystem,
 					Payload: jsonPayload(in.eventPayload(fire, map[string]any{"text": in.Message})),
+					Prompt:  true,
 				}); err != nil {
 					return "", pgtype.UUID{}, err
 				}
