@@ -7,7 +7,9 @@
 // The migration Job runs before the new pods start, so a rolling upgrade always finds the schema
 // at the new version; the gate matters when an app-only rollback leaves older pods on a newer
 // schema, when a pod starts before the Job has finished, and when a database is restored from an
-// older backup. Without it the pod passes its probes and fails at its first query.
+// older backup. Without it the pod passes its probes and fails at its first query. A component
+// that takes work from the database by itself also runs its work loop under Gate.Hold, so the loop
+// does not start, and stops, while the schema is unsupported (issue 680).
 package schemagate
 
 import (
@@ -88,6 +90,12 @@ type Gate struct {
 	mu      sync.Mutex
 	checked bool
 	err     error
+	// rejected counts the checks that read the schema and judged it unsupported (not the checks
+	// that failed to read it); Hold stops its work when it grows. checks is replaced and closed
+	// after every check, so a waiter wakes up and reads the new state. Build a Gate with New or
+	// NewFunc.
+	rejected uint64
+	checks   chan struct{}
 }
 
 // New returns a gate over a database connection, not Ready until its first check passes.
@@ -100,18 +108,27 @@ func NewFunc(read func(context.Context) (Schema, error), r Range, log *slog.Logg
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Gate{read: read, rng: r, log: log, interval: DefaultInterval}
+	return &Gate{read: read, rng: r, log: log, interval: DefaultInterval, checks: make(chan struct{})}
 }
 
 // Check reads the version once, records the verdict and logs it when it changes.
 func (g *Gate) Check(ctx context.Context) error {
 	sc, err := g.read(ctx)
+	rejected := false
 	if err == nil {
 		err = Judge(sc, g.rng)
+		rejected = err != nil
 	}
 	g.mu.Lock()
 	changed := !g.checked || (g.err == nil) != (err == nil) || (err != nil && g.err.Error() != err.Error())
 	g.checked, g.err = true, err
+	if rejected {
+		g.rejected++
+	}
+	if g.checks != nil {
+		close(g.checks)
+	}
+	g.checks = make(chan struct{})
 	g.mu.Unlock()
 	switch {
 	case err != nil && changed:
