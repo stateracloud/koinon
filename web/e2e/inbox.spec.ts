@@ -31,8 +31,8 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
     { id: 't-7', orgId: org, title: 'Old experiment', state: 'TASK_STATE_CANCELED', agentId: 'a-1', updatedAt: new Date((at - 6000) * 1000).toISOString() },
   ]
   const events = [
-    { seq: '1', kind: 'task.created', actorKind: 'ACTOR_KIND_SYSTEM', payload: { title: 'Write release notes' }, createdAt: now() },
-    { seq: '2', kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text: 'Summarise this week into release notes.' }, createdAt: now() },
+    { seq: '1', kind: 'task.created', actorKind: 'ACTOR_KIND_SYSTEM', event: { taskCreated: { title: 'Write release notes' } }, createdAt: now() },
+    { seq: '2', kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text: 'Summarise this week into release notes.' } }, createdAt: now() },
   ]
   const approval = () => ({
     id: 'ap-1',
@@ -71,7 +71,7 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
       }),
       'koinon.task.v1alpha1.TaskService/AppendMessage': (req) => {
         messages.push(req)
-        events.push({ seq: String(events.length + 1), kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text: String(req.text) }, createdAt: now() })
+        events.push({ seq: String(events.length + 1), kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text: String(req.text) } }, createdAt: now() })
         return { event: events.at(-1) }
       },
       'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: pending ? [approval()] : [] }),
