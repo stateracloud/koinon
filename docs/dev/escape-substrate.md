@@ -32,6 +32,15 @@ The full list, with defaults, is in the header of `test/escape/substrate_harness
   one PEM file) and, when the CA differs from the ateapi CA, `KOINON_ESCAPE_SUBSTRATE_ROUTER_CA` (issue #1446).
 - `KOINON_ESCAPE_SUBSTRATE_IMAGE`: the actor image.
 - `KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS`: the runtime class of the tier.
+- `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES`: the gateway routes, a comma-separated list of `host:port`. The driver
+  refuses to create a sandbox without a gateway route (issue #1444), and the suite cannot start without one
+  (issue #1508). Use the DNS name of the gateway Service, for example `koinon-gateway.koinon-system.svc:8080`.
+  The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of
+  every sandbox. They are the only destinations that policy allows: default-deny stays for every other
+  destination (ADR 0120). The egress gateway spec is the one exception: it replaces the policy of its own
+  sandbox with an allow-all rule, as its control. Do not name a host that a deny probe targets (for example in
+  `KOINON_ESCAPE_API` or `KOINON_ESCAPE_INTERNAL`) as a route, or that deny spec fails. The suite sends no traffic to them. A run without this input fails at once, with or
+  without `KOINON_REQUIRE`; it does not skip.
 
 `make test-escape-substrate` sets `KOINON_REQUIRE`, so a missing input below fails its spec; it does not skip.
 Set these:
@@ -63,7 +72,7 @@ policies off. The refusal spec also needs the DNS names above to resolve from th
 ```sh
 export KUBECONFIG=/dev/null
 export KOINON_ESCAPE_SUBSTRATE_CONTROL=... KOINON_ESCAPE_SUBSTRATE_ROUTER=...
-export KOINON_ESCAPE_SUBSTRATE_IMAGE=...
+export KOINON_ESCAPE_SUBSTRATE_IMAGE=... KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES=koinon-gateway.koinon-system.svc:8080
 export KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS=... KOINON_ESCAPE_HOST_KERNEL="$(ssh node uname -r)"
 make test-escape-substrate
 ```

@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +54,11 @@ import (
 //	                                       sandbox-substrate overlay (guest front and launcher) (required)
 //	KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS  the Substrate runtime class of the tier under test, for
 //	                                       example the gVisor class of the install (required)
+//	KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES comma-separated host:port gateway routes (required), for example
+//	                                       koinon-gateway.koinon-system.svc:8080. The driver writes them into
+//	                                       the egress policy of every sandbox (issue #1444, #1508): the only
+//	                                       destinations that policy allows. A host is a lowercase DNS name,
+//	                                       never an IP address. The suite sends no traffic to them
 //	KOINON_ESCAPE_TIER                     the isolation tier of that class: hardened (default), vm or dev
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS  comma-separated host=target entries, as --substrate-image-mirrors
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY registry that replaces the host of an image with no mirror entry
@@ -77,6 +84,7 @@ import (
 var substrateEnvNames = []string{
 	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER",
 	"KOINON_ESCAPE_SUBSTRATE_IMAGE", "KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS",
+	"KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES",
 }
 
 // missingSubstrateEnv names the required variables that are empty.
@@ -113,6 +121,28 @@ func splitList(s string) []string {
 	return out
 }
 
+// parseGatewayRoutes parses a comma-separated list of host:port gateway routes (issue #1508). It applies the
+// checks of the driver (ValidateGatewayRoutes), so a bad input fails with a clear message before any call to
+// Substrate. The list must not be empty: the driver refuses a sandbox without a route (issue #1444).
+func parseGatewayRoutes(raw string) ([]substrate.GatewayRoute, error) {
+	var routes []substrate.GatewayRoute
+	for _, entry := range splitList(raw) {
+		host, portText, err := net.SplitHostPort(entry)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: want host:port: %w", entry, err)
+		}
+		port, err := strconv.ParseUint(portText, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: the port is not a number in 1-65535", entry)
+		}
+		routes = append(routes, substrate.GatewayRoute{Host: host, Port: uint32(port)})
+	}
+	if err := substrate.ValidateGatewayRoutes(routes, nil); err != nil {
+		return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES %q: %w", raw, err)
+	}
+	return routes, nil
+}
+
 // buildSubstrate builds the driver from the environment: the same settings type the binaries use, so
 // the run qualifies the code path the reconciler takes.
 func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, error) {
@@ -142,7 +172,12 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 			return nil, nil, err
 		}
 	}
+	routes, err := parseGatewayRoutes(get("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES"))
+	if err != nil {
+		return nil, nil, err
+	}
 	s := cli.Substrate{
+		GatewayRoutes:     routes,
 		ControlAddress:    get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
 		RouterAddress:     get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
 		RouterCAFile:      get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CA"),
