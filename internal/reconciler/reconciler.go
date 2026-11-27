@@ -1586,7 +1586,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
 	}
 	// A driver that can revert keeps the home of a crashed sandbox, or finds a silent front (issue #1481).
-	if done, err := r.sealRestored(ctx, w, ws, names.Sandbox, sb, hash, act); done || err != nil {
+	if done, err := r.sealRestored(ctx, w, ws, names.Sandbox, sb, hash, act, tune); done || err != nil {
 		return err
 	}
 	if handled, err := r.revertCrashed(ctx, w, ws, names.Sandbox, sb, hash); handled || err != nil {

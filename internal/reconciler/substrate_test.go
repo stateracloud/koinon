@@ -51,6 +51,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		org  pgtype.UUID
 		user pgtype.UUID
 		r    *reconciler.Reconciler
+		// newR makes a second reconciler on the same backend and database: a leader change.
+		newR func() *reconciler.Reconciler
 		now  atomic.Pointer[time.Time]
 		ws   string
 		ctl  ateapiv1.ControlClient
@@ -114,31 +116,35 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		org, user = newOrg(ctx)
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
-		r, err = reconciler.New(pool, execution.WithoutEgress(d), &fakeModelGateway{},
-			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
-				Prices:         prices.NewResolver(pricing.Embedded()),
-				Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-				Egress:         &reconciler.Endpoint{Host: fakeate.GatewayHost, Port: fakeate.EgressPort},
-				GitHub:         fixedTokens{},
-				Keys:           ring,
-				ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
-				ProviderKeyDir: "/secrets/providers",
-				URLPolicy:      testPolicy,
-				Harnesses: map[string]reconciler.Harness{
-					harness.OpenCode: {Image: substrateImage, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
-				},
-				RuntimeClassName: "kata",
-				MCPAckWait:       300 * time.Millisecond, MCPAckPoll: 20 * time.Millisecond,
-				KeepWarmPerOrg: 2,
-				Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
-				Now: func() time.Time {
-					if t := now.Load(); t != nil {
-						return *t
-					}
-					return time.Now()
-				},
-			})
-		Expect(err).NotTo(HaveOccurred())
+		newR = func() *reconciler.Reconciler {
+			rr, err := reconciler.New(pool, execution.WithoutEgress(d), &fakeModelGateway{},
+				reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+					Prices:         prices.NewResolver(pricing.Embedded()),
+					Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+					Egress:         &reconciler.Endpoint{Host: fakeate.GatewayHost, Port: fakeate.EgressPort},
+					GitHub:         fixedTokens{},
+					Keys:           ring,
+					ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
+					ProviderKeyDir: "/secrets/providers",
+					URLPolicy:      testPolicy,
+					Harnesses: map[string]reconciler.Harness{
+						harness.OpenCode: {Image: substrateImage, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
+					},
+					RuntimeClassName: "kata",
+					MCPAckWait:       300 * time.Millisecond, MCPAckPoll: 20 * time.Millisecond,
+					KeepWarmPerOrg: 2,
+					Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
+					Now: func() time.Time {
+						if t := now.Load(); t != nil {
+							return *t
+						}
+						return time.Now()
+					},
+				})
+			Expect(err).NotTo(HaveOccurred())
+			return rr
+		}
+		r = newR()
 	})
 
 	It("creates an actor, suspends it when idle and resumes it for a run", func(ctx SpecContext) {
@@ -359,33 +365,87 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		It("takes a SYNC suspend after a home restore, so a later revert keeps the restored home", func(ctx SpecContext) {
+		It("takes a SYNC suspend of the idle sandbox after a home restore, also after a leader change", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			pass(ctx)
 			actor := sandboxRow(ctx, agent.ID).ActorName.String
 			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			coolDown(ctx, org, agent.ID) // keep-warm sandboxes are not sealed
 			restoreHome(ctx, agent, false)
 			pass(ctx)
 			restoreHome(ctx, agent, true)
+			Expect(sandboxRow(ctx, agent.ID).RestoredCheckpointID.Valid).To(BeTrue(), "the mark is in Postgres")
+			r = newR() // the leader changed: no memory of the restore
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "the sandbox is not idle yet")
+			advance(2 * time.Hour)
 			pass(ctx)
 			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED), "the restored home is snapshotted")
 			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the seal of the restore")
+			pass(ctx)
+			Expect(sandboxRow(ctx, agent.ID).RestoredCheckpointID.Valid).To(BeFalse(), "the stop took the snapshot: no mark")
 		})
 
-		It("does not revert a crash before the restored home is sealed; the repair path restores it", func(ctx SpecContext) {
+		It("does not stop a keep-warm sandbox for the seal", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			pass(ctx)
 			actor := sandboxRow(ctx, agent.ID).ActorName.String
 			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
-			queueRun(ctx, org, user, agent.ID) // a run holds the sandbox: the seal waits
 			restoreHome(ctx, agent, false)
-			pass(ctx)
 			restoreHome(ctx, agent, true)
+			advance(2 * time.Hour)
 			pass(ctx)
-			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "a run holds the sandbox: no seal yet")
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(cl.Calls("SuspendActor")).To(Equal(1), "only the seal of the first boot")
+		})
+
+		It("does not stop a sandbox with a run for the seal", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			queueRun(ctx, org, user, agent.ID)
+			restoreHome(ctx, agent, false)
+			restoreHome(ctx, agent, true)
+			advance(2 * time.Hour)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(cl.Calls("SuspendActor")).To(Equal(1), "only the seal of the first boot")
+		})
+
+		It("reverts a crash before the seal and points the restore at the checkpoint again", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			r = newR()
 			cl.Crash(ws, actor, "guest kernel panic")
 			pass(ctx)
-			Expect(cl.Calls("RevertActor")).To(BeZero(), "the first-boot snapshot has an empty home")
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			got := sandboxRow(ctx, agent.ID)
+			Expect(got.RestoreCheckpointID).To(Equal(restored), "the next run restores the home again")
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.UnhealthyAt.Valid).To(BeFalse())
+		})
+
+		It("keeps no mark for a recreated sandbox that got no restore", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			restoreHome(ctx, agent, true)
+			_, err := pool.Exec(ctx, `UPDATE agent_sandboxes SET sandbox_id = 'another' WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+			Expect(err).NotTo(HaveOccurred())
+			cl.Crash(ws, actor, "guest kernel panic")
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeFalse(), "the mark of another sandbox does not count")
 		})
 
 		It("stops a front that fails the wakeup probe at every resume, and never deletes the reverted actor", func(ctx SpecContext) {

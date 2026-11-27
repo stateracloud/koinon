@@ -180,7 +180,10 @@ type Querier interface {
 	// Clears the org's default model when no model of that name is left (it was deleted); the old value
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
+	// The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+	// (issue #1481); the reconciler clears it after the stop that takes the snapshot.
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
+	ClearSandboxRestoredMark(ctx context.Context, arg ClearSandboxRestoredMarkParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
 	// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
@@ -406,6 +409,8 @@ type Querier interface {
 	DeleteTraceDestination(ctx context.Context, arg DeleteTraceDestinationParams) (int64, error)
 	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
+	// Nothing was restored (an ephemeral agent starts empty): no mark.
+	DropSandboxRestore(ctx context.Context, arg DropSandboxRestoreParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
 	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
 	// Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and

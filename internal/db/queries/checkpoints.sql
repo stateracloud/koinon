@@ -365,7 +365,21 @@ UPDATE agent_sandboxes SET restore_claimed_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
 -- name: ClearSandboxRestore :exec
+-- The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+-- (issue #1481); the reconciler clears it after the stop that takes the snapshot.
+UPDATE agent_sandboxes
+SET restored_checkpoint_id = restore_checkpoint_id,
+    restored_sandbox_id = sandbox_id,
+    restore_checkpoint_id = NULL, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: DropSandboxRestore :exec
+-- Nothing was restored (an ephemeral agent starts empty): no mark.
 UPDATE agent_sandboxes SET restore_checkpoint_id = NULL, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: ClearSandboxRestoredMark :exec
+UPDATE agent_sandboxes SET restored_sandbox_id = NULL, restored_checkpoint_id = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
 -- name: FailStaleHomeCheckpoints :many
