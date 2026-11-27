@@ -284,7 +284,10 @@ e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` lab
 amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
 `hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
-explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
+explains. To start a run by hand, use `hack/e2e-dispatch.sh --ref <branch or tag> [--suite go|web|drill] [--backup-restore]`:
+it dispatches, finds the new run on that ref and prints `run=<id> url=<url>` (issue 1488). Do not chain `gh workflow run`, a
+sleep and `gh run list`: the sleep hook refuses that chain, and the list can return another person's run.
+The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
@@ -330,7 +333,7 @@ kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <ru
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the `drill` job of
 `e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 55` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
-branch): nightly, on every release tag (rc and final) and on `gh workflow run e2e-kind.yml -f suite=drill --ref <tag>`, which runs only the
+branch): nightly, on every release tag (rc and final) and on `hack/e2e-dispatch.sh --ref <tag> --suite drill`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
 merge queue check: it is not a merge check, it is a release check (`hack/release-gate.sh` demands it for every tag; listed in `hack/ci-required.txt` in that sense). A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,

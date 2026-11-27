@@ -117,6 +117,8 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 - **Non-interactive shell.** No pagers and no prompts: `git --no-pager`, `GH_PAGER=cat`, `PAGER=cat`, `gh ... --json` or
   `--jq` instead of tables. Use the real tool, not a shell alias (`/bin/ls`, not an `ls` that is really `eza`), and do
   not assume your human's aliases or interactive shell setup exist.
+- **No token on a screen.** Never screenshot or snapshot a page that shows a token or a key; read the value from the
+  secret store.
 
 ## Principles
 
