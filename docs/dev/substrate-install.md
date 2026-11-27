@@ -798,6 +798,14 @@ install check for any point in this section. The operator must do each point.
 3. **Substrate has no snapshot checksums.** Substrate does not check a snapshot when it restores it. A
    damaged or changed object in the bucket is not found. Use the object versioning of your store when you need
    to find a change. Do not use object lock on the bucket: it can block the deletes that Substrate makes.
+   The snapshot store is therefore trusted. Write access to it gives control of the suspended agents.
+4. **Size the snapshot store.** The default is 10Gi (`--rustfs-storage-size`). Use this rule: add the memory
+   in use of all agents that can be suspended at one time. Use the memory limit of each agent as the worst
+   case. Each suspend replaces the old snapshot of that agent, and deleting the agent empties its prefix. A
+   snapshot is about the size of the touched memory that does not compress, not the limit. Lab values
+   (Substrate v1.0.0, gVisor class, issue #1090): idle 3.4 MB; 0.5 GiB in use, 541 MB; 1 GiB in use, 1.08 GB;
+   4 GiB in use, about 4.2 GB. The case of a full store is not tested yet. Until it is, keep free space in
+   the store above the sum from this rule.
 
 ## Substrate database: not in the Koinon backup
 
