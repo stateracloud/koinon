@@ -331,6 +331,21 @@ var _ = Describe("PrepareLogDir", func() {
 		Entry("0700", os.FileMode(0o700)),
 		Entry("0550", os.FileMode(0o550)),
 	)
+	// The platform decides the group of a new directory (BSD, macOS and a setgid parent give it the group
+	// of the parent), so the front sets its own group on a directory that it makes.
+	It("sets its own group on a directory that it makes below a parent of another group", func() {
+		if os.Geteuid() != 0 {
+			Skip("changing the group of the parent needs root")
+		}
+		base := realTemp()
+		Expect(os.Chown(base, 0, 12345)).To(Succeed())
+		Expect(os.Chmod(base, 0o755|os.ModeSetgid)).To(Succeed())
+		d := filepath.Join(base, "jobs")
+		Expect(guestfront.PrepareLogDir(d)).To(Succeed())
+		st, err := os.Stat(d)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Sys().(*syscall.Stat_t).Gid).To(BeEquivalentTo(os.Getegid()))
+	})
 	It("refuses a last part of another group", func() {
 		if os.Geteuid() != 0 {
 			Skip("changing the group needs root")

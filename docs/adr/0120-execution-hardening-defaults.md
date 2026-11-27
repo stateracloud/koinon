@@ -926,8 +926,8 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   out, because Landlock would grant their targets. The launcher reads the directories when it starts the payload,
   after the front has made `/run/koinon`. A file that a service makes later in `/run` is not readable for the payload.
   `/run` itself is not granted any more, so a tool that lists `/run` fails, and a symlink in `/run` that points
-  outside the granted paths does not work. The payload makes no file in `/run` itself (it cannot write there). The front is not under Landlock, so it is not
-  affected. The policy refuses a `hidden` path that is inside a `read_write`, `devices` or `list_dirs` entry, because
+  outside the granted paths does not work. The payload makes no file in `/run` itself (it cannot write there). The
+  front is not under Landlock, so it is not affected. The policy refuses a `hidden` path that is inside a `read_write`, `devices` or `list_dirs` entry, because
   Landlock cannot take back a right of a parent. A read error of a directory stops the start. Reads under `/var/log`
   stay open on purpose: `/var/log` is `read_write` for the payload, and the front writes no log there.
 
@@ -943,8 +943,8 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   entry of either image policy covers `/run/koinon/ate-jobs`. The unit specs of `guestfront.PrepareLogDir` refuse a
   symlink as the directory or in its path, a directory that others can write or read (0755), a file, a relative path
   and `/`. The policy specs also check `hidden` in both image policies, and `ReadExecVisible` on a temporary tree.
-  The container specs have no read probe of `/run/koinon` yet, so the Landlock grant itself is proved only by the
-  lab run on a `vm` worker.
+  The container probe lists `/run/koinon/ate-jobs` (a directory that anyone can read in the test image) and expects
+  `EACCES` with both image policies; the control run without the launcher shows it open.
 - **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
   run (clone, build, push).
 

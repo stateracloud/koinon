@@ -110,14 +110,9 @@ var _ = Describe("ParsePolicy", func() {
 	})
 })
 
-// covers says whether a rule on dir reaches path: dir itself, or anything below it. The root "/" holds
-// every path (a prefix test on dir+"/" would test "//" and miss it, issue #1516).
-func covers(dir, path string) bool {
-	return dir == path || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
-}
-
-var _ = DescribeTable("covers",
-	func(dir, path string, want bool) { Expect(covers(dir, path)).To(Equal(want)) },
+// pathCovers is the check that Validate runs; "/" holds every path (a prefix test on dir+"/" would test "//", issue #1516).
+var _ = DescribeTable("pathCovers",
+	func(dir, path string, want bool) { Expect(guestlaunch.PathCovers(dir, path)).To(Equal(want)) },
 	Entry("the root holds every path", "/", "/run/koinon/ate-jobs", true),
 	Entry("a parent", "/run", "/run/koinon/ate-jobs", true),
 	Entry("the same path", "/run/koinon/ate-jobs", "/run/koinon/ate-jobs", true),
@@ -218,7 +213,7 @@ var _ = Describe("the image policies", func() {
 			p := load(name)
 			Expect(p.Landlock.ReadExec).To(ContainElement("/run"), "readable, never writable")
 			for _, rw := range p.Landlock.ReadWrite {
-				Expect(covers(rw, logDir)).To(BeFalse(), "read_write %s covers the job log directory", rw)
+				Expect(guestlaunch.PathCovers(rw, logDir)).To(BeFalse(), "read_write %s covers the job log directory", rw)
 				Expect(rw).NotTo(HavePrefix(logDir))
 			}
 			for _, dev := range p.Landlock.Devices {

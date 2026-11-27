@@ -55,6 +55,10 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for _, d := range []string{"tmp", "sandbox", "etc", "usr", "var", "bin", "run"} {
 			Expect(tw.WriteHeader(&tar.Header{Name: d + "/", Typeflag: tar.TypeDir, Mode: 0o1777})).To(Succeed())
 		}
+		// Issue #1516: the job log directory exists and is readable by anyone, so Landlock alone is the control.
+		for _, d := range []string{"run/koinon", "run/koinon/ate-jobs"} {
+			Expect(tw.WriteHeader(&tar.Header{Name: d + "/", Typeflag: tar.TypeDir, Mode: 0o755})).To(Succeed())
+		}
 		add := func(name, from string, mode int64) {
 			b, err := os.ReadFile(from)
 			Expect(err).NotTo(HaveOccurred())
@@ -164,6 +168,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
 		// Issue #1503: the job log directory of the guest front is under /run, read-only for the payload.
 		"write:/run/koinon-probe", "symlink:/run/koinon-link",
+		// Issue #1516: nor may it read the job logs (the image policies list /run/koinon as hidden).
+		"read:/run/koinon/ate-jobs",
 		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
 	}, fdAttempts...)
 	// inherit runs argv after the probe has played the guest server: a socket at fd 7 without
@@ -187,7 +193,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for _, a := range []string{
 			"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3",
 			"inherited_fd", "proc_fd_list_other", "proc_environ_other", "ptrace_other", "pidfd_getfd_other",
-			"kill_other", "pidfd_signal_other", "socket_raw", "write:/run/koinon-probe", "symlink:/run/koinon-link",
+			"kill_other", "pidfd_signal_other", "socket_raw", "write:/run/koinon-probe", "symlink:/run/koinon-link", "read:/run/koinon/ate-jobs",
 		} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}
