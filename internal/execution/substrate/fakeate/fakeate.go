@@ -395,6 +395,35 @@ func (c *Cluster) Files(atespace, name string) map[string][]byte {
 	return maps.Clone(a.files)
 }
 
+// KillFront makes the guest of a running actor answer nothing, as when pid 1 has exited: the actor
+// stays RUNNING with no crash record (issue #1481). A SuspendActor then ends in CRASHED; RevertActor
+// brings the front back.
+func (c *Cluster) KillFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontDead = true
+	}
+}
+
+// DropSnapshots removes the snapshots of an actor, as for an actor that never suspended.
+func (c *Cluster) DropSnapshots(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.snapshots = nil
+	}
+}
+
+// FailNextReverts makes the next n RevertActor calls for an actor fail with ResourceExhausted.
+func (c *Cluster) FailNextReverts(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failRevert = n
+	}
+}
+
 // FailNextResumes makes the next n ResumeActor calls for an actor fail with Unavailable and leave
 // it as it was.
 func (c *Cluster) FailNextResumes(atespace, name string, n int) {

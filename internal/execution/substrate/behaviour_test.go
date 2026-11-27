@@ -285,7 +285,7 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
 			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
 			Expect(cl.RouterResumes(ws, "sb")).To(Equal(1), "the late request landed and resumed the actor")
-			Expect(cl.Calls("SuspendActor")).To(Equal(2))
+			Expect(cl.Calls("SuspendActor")).To(Equal(3), "the seal after the first boot, the suspend, the suspend again")
 			Expect(d.Resuspends("retried")).To(Equal(1.0))
 			Expect(d.Resuspends("failed")).To(BeZero())
 
@@ -305,7 +305,7 @@ var _ = Describe("the Substrate driver", func() {
 			sb, err := d.SuspendSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
-			Expect(cl.Calls("SuspendActor")).To(Equal(3))
+			Expect(cl.Calls("SuspendActor")).To(Equal(4), "the seal after the first boot, then the suspend and two more")
 			_, err = d.ResumeSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
 			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
@@ -314,7 +314,7 @@ var _ = Describe("the Substrate driver", func() {
 			cl.ResumeAfterSuspends(ws, "sb", 1000) // a router request that never stops
 			_, err = d.SuspendSandbox(ctx, ws, "sb")
 			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
-			Expect(cl.Calls("SuspendActor")).To(Equal(3+4), "one suspend and three more")
+			Expect(cl.Calls("SuspendActor")).To(Equal(4+4), "one suspend and three more")
 			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 			Expect(d.Resuspends("retried")).To(Equal(2.0 + 3.0))
 			Expect(d.Resuspends("failed")).To(Equal(1.0))
@@ -510,7 +510,7 @@ var _ = Describe("the Substrate driver", func() {
 			dd, c := newDriver()
 			_, err := dd.CreateSandbox(ctx, ws, spec("a"))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(c.Calls("ResumeActor")).To(Equal(1))
+			Expect(c.Calls("ResumeActor")).To(Equal(2), "the first boot, and the resume after its seal (issue #1481)")
 			_, err = dd.WaitPhase(ctx, ws, "a", execution.PhaseReady)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -671,7 +671,7 @@ var _ = Describe("the Substrate driver", func() {
 			cl.FailGetActorsAfterSuspend(ws, "src", 1) // settled fails: the actor is suspended
 			_, err := d.SnapshotSandbox(ctx, ws, "src")
 			Expect(err).To(HaveOccurred())
-			Expect(cl.Calls("SuspendActor")).To(Equal(1))
+			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal after the first boot, and the snapshot")
 			sb, err := d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
 			Expect(err).NotTo(HaveOccurred(), "the snapshot resumed the sandbox it suspended")
 			Expect(sb.Phase).To(Equal(execution.PhaseReady))

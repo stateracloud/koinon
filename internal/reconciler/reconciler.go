@@ -265,6 +265,8 @@ type Reconciler struct {
 	db      leaderterm.DB
 	q       *store.Queries
 	backend execution.Backend
+	// crash holds the counters of the crash and liveness path (crash.go).
+	crash   crashTracker
 	gw      gateway.ModelGateway
 	secrets SecretStore
 	// states stores the revisions of the gateway State (the State stream, ADR 0097).
@@ -1582,6 +1584,13 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
+	}
+	// A driver that can revert keeps the home of a crashed sandbox, or finds a silent front (issue #1481).
+	if handled, err := r.revertCrashed(ctx, w, ws, names.Sandbox, sb, hash); handled || err != nil {
+		return err
+	}
+	if forced, err := r.checkFront(ctx, w, ws, names.Sandbox, sb, hash); forced || err != nil {
+		return err
 	}
 	if (sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted) && !act.HasRunning && !w.agent.UnhealthyAt.Valid {
 		// The sandbox's main process exited or it failed. A running run has lost it anyway and is

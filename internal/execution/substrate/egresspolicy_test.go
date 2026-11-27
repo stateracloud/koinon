@@ -21,7 +21,7 @@ var _ = Describe("the actor egress policy", func() {
 	It("gives a created actor the gateway route before it runs, and nothing else", func(ctx SpecContext) {
 		d, c := newDriver()
 		ready(ctx, d, "a")
-		Expect(c.Calls("ResumeActor")).To(Equal(1))
+		Expect(c.Calls("ResumeActor")).To(Equal(2), "the first boot, and the resume after its seal (issue #1481)")
 		Expect(c.Calls("ResumeWithoutEgressPolicy")).To(BeZero(), "the actor ran before its policy was written")
 
 		p := c.EgressPolicy(ws, "a")
@@ -263,7 +263,7 @@ var _ = Describe("the egress listener in the actor egress policy", func() {
 		Expect(after.Phase).To(Equal(execution.PhaseReady), "it keeps running")
 		Expect(c.Calls("DeleteActor")).To(BeZero())
 		Expect(c.Calls("CreateActor")).To(Equal(1))
-		Expect(c.Calls("ResumeActor")).To(Equal(1), "no restart")
+		Expect(c.Calls("ResumeActor")).To(Equal(2), "no restart: the first boot and its seal only")
 
 		By("a new grant applies in place too")
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())

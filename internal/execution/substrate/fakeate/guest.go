@@ -110,6 +110,9 @@ func (g *guestServer) target(ctx context.Context, method string) (*actor, error)
 	}
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		if a.frontDead { // pid 1 exited: the actor still runs and nothing answers
+			return nil, status.Errorf(codes.Unavailable, "actor %s: the guest does not answer", v[0])
+		}
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 		g.c.resumes[k]++
 		a.state = ateapiv1.ActorState_ACTOR_STATE_RUNNING

@@ -188,6 +188,10 @@ type Driver struct {
 	// after a restart until the reconciler sets it again.
 	access map[key]execution.GatewayAccess
 
+	// snapAt holds when the driver last suspended each actor with a saved snapshot. A revert reports it,
+	// so the caller can tell what the revert lost. It is empty after a restart: the age is then unknown.
+	snapAt map[key]time.Time
+
 	resuspends *prometheus.CounterVec
 }
 
@@ -217,6 +221,7 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		owed:       map[key]bool{},
 		tiers:      map[key]harness.Tier{},
 		access:     map[key]execution.GatewayAccess{},
+		snapAt:     map[key]time.Time{},
 		lineage:    lineages{m: map[string]lineage{}},
 		resuspends: newResuspends(),
 	}
@@ -455,6 +460,9 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	d.setOwed(k, false)
 	d.forgetLineage(k)
 	d.forgetAccess(k)
+	d.mu.Lock()
+	delete(d.snapAt, k)
+	d.mu.Unlock()
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}
@@ -520,6 +528,7 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 		}
 		switch actor.GetStatus().GetState() {
 		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
+			d.noteSnapshot(k)
 			return sandboxFrom(workspace, actor), sent, nil
 		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		default:
@@ -538,11 +547,23 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 	}
 }
 
+// noteSnapshot records that a snapshot of the actor was just saved.
+func (d *Driver) noteSnapshot(k key) {
+	d.mu.Lock()
+	d.snapAt[k] = time.Now()
+	d.mu.Unlock()
+}
+
 // settled reads the actor until it is not in a transition (resuming or suspending), bounded by
 // DrainTimeout. It reads the control API only, which never resumes the actor. When the bound ends,
 // during a read or between two, it fails with ErrUnavailable.
 func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.cfg.DrainTimeout)
+	return d.settledWithin(ctx, op, k, d.cfg.DrainTimeout)
+}
+
+// settledWithin is settled with another bound.
+func (d *Driver) settledWithin(ctx context.Context, op string, k key, bound time.Duration) (*ateapiv1.Actor, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	for {
 		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
@@ -571,12 +592,58 @@ func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execut
 	if err := d.ensureEgressPolicy(ctx, op, key{workspace, name}); err != nil {
 		return execution.Sandbox{}, err
 	}
-	resp, err := d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+	k := key{workspace, name}
+	// An actor with no snapshot boots for the first time. A revert of it would give an empty home, so
+	// it gets one synchronous suspend as soon as it runs (issue #1481, decision 8).
+	first := false
+	if before, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)}); err == nil {
+		first = before.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED && len(before.GetStatus().GetSnapshots()) == 0
+	}
+	resp, err := d.retryResume(ctx, workspace, name)
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
-	d.setOwed(key{workspace, name}, false)
+	d.setOwed(k, false)
+	if first && resp.GetResumed() {
+		if sb, ok := d.sealFirstBoot(ctx, op, k); ok {
+			return sb, nil
+		}
+	}
 	return sandboxFrom(workspace, resp.GetActor()), nil
+}
+
+// retryResume sends ResumeActor, again with a growing wait while Substrate answers ResourceExhausted.
+func (d *Driver) retryResume(ctx context.Context, workspace, name string) (resp *ateapiv1.ResumeActorResponse, err error) {
+	err = d.retryExhausted(ctx, func() error {
+		var rerr error
+		resp, rerr = d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+		return rerr
+	})
+	return resp, err
+}
+
+// sealFirstBoot waits for a first boot to finish, takes one synchronous suspend, and resumes the actor.
+// It is best effort: when the boot does not finish in GuestReadyTimeout, or the actor crashes, it
+// returns false and the caller reports the actor as the resume left it. An actor that is not sealed
+// reverts to an empty home, so every failure here is logged.
+func (d *Driver) sealFirstBoot(ctx context.Context, op string, k key) (execution.Sandbox, bool) {
+	actor, err := d.settledWithin(ctx, op, k, d.cfg.GuestReadyTimeout)
+	if err != nil || actor.GetStatus().GetState() != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
+		d.cfg.Logger.Warn("substrate: the first boot did not reach running; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	if _, _, err := d.suspend(ctx, op, k.atespace, k.actor); err != nil {
+		d.cfg.Logger.Warn("substrate: the suspend after the first boot failed; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	resp, err := d.retryResume(ctx, k.atespace, k.actor)
+	if err != nil {
+		// The actor is suspended and holds its snapshot: the next resume starts it.
+		d.cfg.Logger.Warn("substrate: the resume after the first suspend failed", "op", op, "sandbox", k.String(), "err", err)
+		d.setOwed(k, true)
+		return execution.Sandbox{}, false
+	}
+	return sandboxFrom(k.atespace, resp.GetActor()), true
 }
 
 // requireRunning reads the actor from the control API, which never resumes it, and fails unless it

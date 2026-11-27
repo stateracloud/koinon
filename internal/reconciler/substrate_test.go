@@ -284,7 +284,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
 		}}))
 
-		By("a crashed actor is replaced by one with a new name and a new UID")
+		By("a crashed actor with no snapshot is replaced by one with a new name and a new UID")
+		cl.DropSnapshots(ws, first.ActorName.String) // a revert would give an empty home: the repair path runs
 		cl.Crash(ws, first.ActorName.String, "guest kernel panic")
 		Eventually(func(g Gomega) string {
 			g.Expect(r.ReconcileAll(ctx)).To(Succeed())
@@ -300,6 +301,69 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Atespace: ws, Name: second.ActorName.String, UID: second.ActorUid.String,
 			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
 		}}), "only the current actor")
+	})
+
+	// Issue #1481: the crash and liveness path.
+	Describe("the crash and liveness path", func() {
+		running := func(actor string) func() ateapiv1.ActorState {
+			return func() ateapiv1.ActorState { return cl.State(ws, actor) }
+		}
+		It("reverts a crashed actor and keeps it, its name and its UID", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			before := sandboxRow(ctx, agent.ID)
+			actor := before.ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+			pass(ctx)
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			after := sandboxRow(ctx, agent.ID)
+			Expect(after.ActorName.String).To(Equal(actor), "reverted, not recreated")
+			Expect(after.ActorUid.String).To(Equal(before.ActorUid.String))
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(after.Message).To(ContainSubstring("lost: the writes after"))
+		})
+
+		It("finds a running actor whose front is silent, forces the fault and reverts it", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.KillFront(ws, actor)
+			advance(0)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "a short silence is not a fault")
+			advance(time.Minute)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_CRASHED), "the silence lasted: the fault is forced")
+			pass(ctx)
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			pass(ctx)
+			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the forced fault; a front that answers is left alone")
+		})
+
+		It("stops at the retry cap, marks the agent unhealthy and reverts no more", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			for i := range 3 {
+				Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "revert %d", i)
+				cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+				pass(ctx)
+			}
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(cl.Calls("RevertActor")).To(Equal(3))
+			cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(3), "the cap is reached")
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			Expect(a.UnhealthyReason.String).To(ContainSubstring("the front kept failing"))
+		})
 	})
 
 	// Issue #1489: the model listener checks the actor JWT against the actor table of its own copy, so the

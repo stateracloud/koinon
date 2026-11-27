@@ -227,8 +227,24 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(home()).To(BeNil(), "the new actor has a fresh root filesystem")
 		})
 
-		It("loses the home when the repair recreates a crashed actor", func(ctx SpecContext) {
+		It("keeps the actor and the home when a crashed actor is reverted (issue #1481)", func(ctx SpecContext) {
 			dirtyHome(ctx, org, user, agent.ID)
+			name := actor()
+			cl.Crash(ws, name, "guest kernel panic")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("RevertActor")
+			}).Should(Equal(1))
+			running()
+			Expect(actor()).To(Equal(name))
+			Expect(cl.Calls("CreateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(home()).To(Equal(markerBody))
+		})
+
+		It("loses the home when the repair recreates a crashed actor that has no snapshot", func(ctx SpecContext) {
+			dirtyHome(ctx, org, user, agent.ID)
+			cl.DropSnapshots(ws, actor()) // a revert would give an empty home
 			cl.Crash(ws, actor(), "guest kernel panic")
 			Expect(home()).To(Equal(markerBody), "the crashed actor still has its files")
 			Eventually(func(g Gomega) int {

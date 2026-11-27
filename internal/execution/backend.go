@@ -188,6 +188,45 @@ func ActorNamerOf(b Backend) (ActorNamer, bool) {
 	return nil, false
 }
 
+// Reverter is an optional capability of a driver: revert a crashed sandbox to its last snapshot and
+// check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
+type Reverter interface {
+	// RevertSandbox reverts a CRASHED sandbox to its last snapshot and resumes it. It fails with
+	// ErrNoSnapshot when the sandbox never suspended: a revert would give an empty home.
+	RevertSandbox(ctx context.Context, workspace, name string) (RevertResult, error)
+	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
+	// answers and ErrFrontDown when it does not answer in time. It never resumes the sandbox.
+	CheckFront(ctx context.Context, workspace, name string) error
+	// FaultSandbox forces a running sandbox with a dead front into the crashed state, so that the
+	// next RevertSandbox can run. It does not wait for the sandbox to settle.
+	FaultSandbox(ctx context.Context, workspace, name string) error
+}
+
+// RevertResult says what a revert did.
+type RevertResult struct {
+	Sandbox Sandbox
+	// SnapshotAt is when the snapshot that the sandbox came back from was taken. It is zero when the
+	// driver does not know (for example after a restart of the driver).
+	SnapshotAt time.Time
+}
+
+// ReverterOf returns the [Reverter] of b, or false when b has none. It looks through wrappers like
+// [ActorNamerOf].
+func ReverterOf(b Backend) (Reverter, bool) {
+	var cur any = b
+	for range 8 {
+		if n, ok := cur.(Reverter); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
 // SnapshotKind says what a snapshot holds.
 type SnapshotKind string
 

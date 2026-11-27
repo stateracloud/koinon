@@ -40,6 +40,10 @@ var (
 	ErrUnreachable = errors.New("unreachable")
 	// ErrUnsupported: the gateway does not support something Koinon requires.
 	ErrUnsupported = errors.New("unsupported")
+	// ErrNoSnapshot means a revert has no snapshot to go back to: the sandbox never suspended.
+	ErrNoSnapshot = errors.New("no snapshot")
+	// ErrFrontDown means the guest front of a running sandbox did not answer in time.
+	ErrFrontDown = errors.New("guest front does not answer")
 	// ErrStreamClosed: an exec stream ended without an exit status.
 	ErrStreamClosed = errors.New("exec stream ended without exit status")
 )

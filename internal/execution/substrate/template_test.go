@@ -62,3 +62,21 @@ var _ = Describe("the capability set of the actor template", func() {
 		Expect(substrate.GVisorCapAdd()).NotTo(ContainElement("SYS_ADMIN"))
 	})
 })
+
+// Issue #1481: every template has the wakeup probe on the front, on every tier.
+var _ = Describe("the wakeup probe of the actor template", func() {
+	It("polls /readyz on port 80 of the front, on every tier", func() {
+		for _, class := range []string{"", "kata", "gvisor"} {
+			t, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest, RuntimeClassName: class}, substrate.Config{
+				GuestSigner:       fakeate.Signer(),
+				DefaultTier:       harness.TierDev,
+				RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM, "gvisor": harness.TierHardened},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			p := t.GetContainers()[0].GetWakeupProbe()
+			Expect(p.GetHttpGet().GetPath()).To(Equal("/readyz"), "class %q", class)
+			Expect(p.GetHttpGet().GetPort()).To(BeEquivalentTo(80))
+			Expect(p.GetTimeoutSeconds()).To(BeEquivalentTo(substrate.FrontProbeTimeoutSeconds))
+		}
+	})
+})

@@ -131,6 +131,13 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 			Image:        image,
 			Env:          []*ateapiv1.EnvVar{{Name: guestauth.VerifyKeysEnv, Value: keys}},
 			VolumeMounts: []*ateapiv1.VolumeMount{{Name: HomeVolume, MountPath: HomeMountPath}},
+			// The guest front answers /readyz on port 80 without a token. Substrate polls it on every
+			// wakeup; a front that does not answer crashes the actor, and the crash path of issue #1481
+			// reverts it.
+			WakeupProbe: &ateapiv1.WakeupProbe{
+				HttpGet:        &ateapiv1.HttpGetAction{Path: FrontProbePath, Port: FrontProbePort},
+				TimeoutSeconds: FrontProbeTimeoutSeconds,
+			},
 		}},
 		Volumes: []*ateapiv1.Volume{{Name: HomeVolume, DurableDir: &ateapiv1.DurableDirVolumeSource{}}},
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
@@ -155,11 +162,18 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		t.Containers[0].SecurityContext = &ateapiv1.SecurityContext{Capabilities: &ateapiv1.Capabilities{Drop: capDrop, Add: capAdd}}
 	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v5\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q\x00%q\x00%t", workspace, image, spec.Command, cpu, mem,
+	_, _ = fmt.Fprintf(h, "v6\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q\x00%q\x00%t", workspace, image, spec.Command, cpu, mem,
 		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath, capDrop, capAdd, cfg.GoldenSnapshots)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
 }
+
+// The wakeup probe of the guest front (issue #1481). The front serves /readyz on port 80 (package guestfront).
+const (
+	FrontProbePath           = "/readyz"
+	FrontProbePort           = 80
+	FrontProbeTimeoutSeconds = 30
+)
 
 // goldenMode is the template's golden snapshot mode: disabled unless an admin turns it on (issue #1492).
 func goldenMode(on bool) ateapiv1.GoldenSnapshotMode {

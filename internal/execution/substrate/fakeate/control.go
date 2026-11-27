@@ -67,8 +67,12 @@ type actor struct {
 	failOut   int // the next output streams that fail at once with Unavailable
 	failWrite int // the next tar upload streams that end with Unavailable at their close message
 	failRes   int // the next ResumeActor calls that fail with Unavailable
-	streams   map[int]context.CancelFunc
-	nextSID   int
+	// frontDead: pid 1 exited. The actor stays RUNNING and the guest answers nothing (KillFront).
+	frontDead bool
+	// failRevert is how many RevertActor calls fail with ResourceExhausted before one works.
+	failRevert int
+	streams    map[int]context.CancelFunc
+	nextSID    int
 }
 
 func (a *actor) dropStreams() {
@@ -310,6 +314,12 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		if a.frontDead { // a dead front cannot be snapshotted: the suspend ends in a crash
+			a.state, a.crash = ateapiv1.ActorState_ACTOR_STATE_CRASHED, "snapshot failed: the guest does not answer"
+			out := a.pb()
+			c.mu.Unlock()
+			return &ateapiv1.SuspendActorResponse{Actor: out}, nil
+		}
 		a.state = ateapiv1.ActorState_ACTOR_STATE_SUSPENDED
 		tmpl := c.templates[key{k.atespace, a.template}]
 		fid := tmpl.GetSnapshotConfig().GetPreferredFidelity()
@@ -349,6 +359,30 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 		<-dl.landed
 	}
 	return &ateapiv1.SuspendActorResponse{Actor: out}, nil
+}
+
+func (s *controlServer) RevertActor(_ context.Context, r *ateapiv1.RevertActorRequest) (*ateapiv1.RevertActorResponse, error) {
+	c := s.c
+	c.count("RevertActor")
+	k := key{r.GetActor().GetAtespace(), r.GetActor().GetName()}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a, ok := c.actors[k]
+	if !ok {
+		return nil, notFound("actor", k.name)
+	}
+	if a.failRevert > 0 {
+		a.failRevert--
+		return nil, status.Errorf(codes.ResourceExhausted, "actor %q: no worker has room", k.name)
+	}
+	if a.state != ateapiv1.ActorState_ACTOR_STATE_CRASHED {
+		return nil, status.Errorf(codes.FailedPrecondition, "actor %q is %s", k.name, a.state)
+	}
+	if len(a.snapshots) == 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "actor %q has no snapshot", k.name)
+	}
+	a.state, a.crash, a.frontDead = ateapiv1.ActorState_ACTOR_STATE_SUSPENDED, "", false
+	return &ateapiv1.RevertActorResponse{Actor: a.pb()}, nil
 }
 
 func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRequest) (*ateapiv1.ResumeActorResponse, error) {
