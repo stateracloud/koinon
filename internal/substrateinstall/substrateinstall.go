@@ -478,10 +478,6 @@ func (i *Installer) Install(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Corrections of the egress gateway apply on every platform (egress.go, issue #1486). File work only.
-	if err := i.Profile.ApplyEgressCorrections(setup.Dir()); err != nil {
-		return err
-	}
 	// After a failed ate-setup the build stays: the cleanup command below runs the same pinned binary.
 	keepBuild := false
 	defer func() {
@@ -489,6 +485,10 @@ func (i *Installer) Install(ctx context.Context) error {
 			setup.Cleanup()
 		}
 	}()
+	// Corrections of the egress gateway apply on every platform (egress.go, issue #1486). File work only.
+	if err := i.Profile.ApplyEgressCorrections(setup.Dir()); err != nil {
+		return err
+	}
 	var setupEnv []string
 	switch platform {
 	case PlatformGeneric:
