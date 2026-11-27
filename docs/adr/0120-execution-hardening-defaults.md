@@ -886,13 +886,16 @@ and adds one control.
 5. **The home owner differs between tiers.** The home files are owned by uid 0 in the Substrate guest of v0.1 (the
    guest has no `CAP_SETUID`, [#1462](https://github.com/stateracloud/koinon/issues/1462)). They are owned by uid
    10001 when the drop succeeds, and on the gVisor tiers.
+6. **The job log directory is out of the payload's reach** (issue
+   [#1503](https://github.com/stateracloud/koinon/issues/1503)). The guest front runs as root and writes the job logs.
+   See "The root front writes only where the payload cannot write" below.
 
 The harnesses need none of the removed capabilities: OpenCode, git and package installs into the home (npm, pip, go)
 run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` tier") gives each capability, the
 control that removes it and the harness need.
 
 This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): the `vm` tier keeps
-its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets one more control.
+its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets two more controls: the Landlock signal scope and the job log directory rule (consequences).
 
 ### Consequences
 
@@ -901,6 +904,20 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   it from another exec must keep both in one exec (or one process tree).
 - The guest kernel of the `vm` tier must offer Landlock ABI 6 (Linux 6.12). Phase 0 measured ABI 7 in the Substrate
   guest.
+- **The root front writes only where the payload cannot write** (issue #1503). The upstream process tracker opens
+  each job log with `os.OpenFile` (`O_CREATE` and `O_TRUNC`) and makes the directory with `MkdirAll`. Both follow
+  symlinks. The upstream default directory, `/var/log/ate-jobs`, is under `/var/log`, and the payload can write
+  there (`read_write` in `policy-vm.json`). A root payload could plant a symlink with the name of a job log, and the
+  front would then truncate or create the target file. The rule is: every path that the root front opens for writing
+  is under a directory that the payload cannot write. The front uses `/run/koinon/ate-jobs`. On the `vm` tier, Landlock
+  (mode `require`) is the control: `/run` is in `read_exec`, so Landlock refuses create, symlink, rename and remove
+  beneath it. On the gVisor tiers, Landlock is best effort. There the control is the non-root payload (uid 10001) and a
+  directory that root owns, with mode 0750, under a `/run` that root owns. The front makes the directory before the
+  payload exists. It walks the path from `/` with `openat` and `O_NOFOLLOW`, and makes a missing part with `mkdirat`
+  on the open parent. So it never follows a symlink and has no gap between a check and an open. It refuses a part
+  that is not a directory, that another user than root or the front owns, or that group or others can write (a parent
+  with the sticky bit excepted). A new path that the front writes needs a
+  policy spec that no `read_write` entry covers it.
 
 ### Proof
 
@@ -909,6 +926,10 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   `CapEff` and `CapAmb` 0 and `NoNewPrivs` 1. Signal 0 to an outside root process (`kill` and
   `pidfd_send_signal`), `ptrace` of that process, `mount`, `finit_module`, `reboot` and a raw socket are refused. A
   signal to its own child works. No committed spec clears the signal scope. The review ran that case by hand and saw both signal attempts open.
+- **Docker, issue #1503.** In the container specs, with the image policies, a write of a file and a symlink under `/run`
+  are refused, and the control run without the launcher shows both open. The policy specs check that no `read_write`
+  entry of either image policy covers `/run/koinon/ate-jobs`. The unit specs of `guestfront.PrepareLogDir` refuse a
+  symlink as the directory or in its path, a directory that others can write, a file and a relative path.
 - **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
   run (clone, build, push).
 
@@ -921,5 +942,8 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
 - **Kata Containers.** The kata-agent runs as root in the guest, next to the container processes, and Kata treats the
   VM as the boundary to the host. We keep the VM as the boundary too, and we add the capability drop and the signal
   scope so that the payload cannot stop or trace the guest front.
+- **Firecracker jailer and the Kata agent.** Both make the directories of the privileged process before the
+  untrusted workload starts, and give the workload no write access to them. We do the same for the job log
+  directory, and we move it from `/var/log` to `/run`, which the payload cannot write.
 - **Docker's default capability set.** Docker keeps `KILL`, `NET_RAW` and `SETUID` for a root container. We remove
   every capability, because the harnesses need none.

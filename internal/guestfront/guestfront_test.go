@@ -77,7 +77,7 @@ var _ = Describe("Front", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ws = GinkgoT().TempDir()
 		f, err := guestfront.New(guestfront.Config{
-			Workspace: ws, LogDir: GinkgoT().TempDir(),
+			Workspace: ws, LogDir: realTemp(),
 			Keys: []ed25519.PublicKey{signer.PublicKey()}, NoReap: noReap,
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -273,6 +273,53 @@ var _ = Describe("Gate", func() {
 		Expect(strings.Count(buf.String(), "guest API call refused")).To(Equal(1))
 	})
 })
+
+var _ = Describe("PrepareLogDir", func() {
+	It("makes the directory with mode 0750", func() {
+		d := filepath.Join(realTemp(), "a", "jobs")
+		Expect(guestfront.PrepareLogDir(d)).To(Succeed())
+		st, err := os.Stat(d)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Mode().Perm()&0o027).To(BeZero(), "no group write, no access for others")
+	})
+	It("refuses a symlink as the directory", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
+		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "jobs"))).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "jobs"))).To(MatchError(ContainSubstring("without following a symlink")))
+	})
+	It("refuses a symlink in a parent part", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
+		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "link"))).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "link", "jobs"))).To(MatchError(ContainSubstring("without following a symlink")))
+	})
+	It("refuses a directory that others can write", func() {
+		d := filepath.Join(realTemp(), "jobs")
+		Expect(os.Mkdir(d, 0o755)).To(Succeed())
+		Expect(os.Chmod(d, 0o777)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(d)).To(MatchError(ContainSubstring("lets group or others write")))
+	})
+	It("refuses a parent that others can write, without the sticky bit", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "open"), 0o755)).To(Succeed())
+		Expect(os.Chmod(filepath.Join(base, "open"), 0o777)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "open", "jobs"))).To(MatchError(ContainSubstring("lets group or others write")))
+	})
+	It("refuses a file and a relative path", func() {
+		f := filepath.Join(realTemp(), "file")
+		Expect(os.WriteFile(f, nil, 0o600)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(f)).To(MatchError(ContainSubstring("not a directory")))
+		Expect(guestfront.PrepareLogDir("jobs")).To(MatchError(ContainSubstring("not an absolute path")))
+	})
+})
+
+// realTemp is a temporary directory whose path has no symlink.
+func realTemp() string {
+	d, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	return d
+}
 
 // zombieChildren lists the zombie children of the test process (the front is a subreaper here).
 func zombieChildren() []string {
