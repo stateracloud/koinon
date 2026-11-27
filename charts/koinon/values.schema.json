@@ -486,7 +486,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "driver": {"enum": ["agentgateway", "koinon"]},
+            "driver": {"enum": ["", "agentgateway", "koinon"], "description": "Empty: koinon with execution.driver=substrate, agentgateway otherwise."},
             "koinon": {
               "type": "object",
               "additionalProperties": false,

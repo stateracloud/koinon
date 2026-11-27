@@ -4,7 +4,7 @@
 # Chart assertions: the Substrate control plane reaches the gateway (issue #1469), and Substrate refuses
 # gateway.mode=kubernetes (issue #1489). atenet-egress carries the actors' model and MCP calls to the gateway and adds an
 # actor JWT that only koinon-gateway checks. koinon-gateway is a chart pod only in standalone mode, so Substrate needs
-# gateway.mode=standalone; the kubernetes mode is frozen (ADR 0097 decision 4) and the chart refuses the pair. Sourced in
+# gateway.mode=standalone; the kubernetes mode is not supported with Substrate in v0.1.0 (ADR 0097 amendment of 2026-11-27) and the chart refuses the pair. Sourced in
 # order by hack/chart-check.sh; it uses that script's helpers (render, fail, ...) and docof and nocomment of
 # 44-substrate-worker.sh.
 
@@ -26,4 +26,5 @@ if render -f "$CHART/ci/substrate-values.yaml" --set gateway.mode=kubernetes --s
 	fail "Substrate with gateway.mode=kubernetes must not render"
 else
 	grep -q 'gateway.mode=standalone' "$out/sgw-k8s.err" || fail "the refusal of Substrate in kubernetes mode does not name gateway.mode=standalone"
+	grep -q 'gateway.mode=kubernetes is not supported with execution.driver=substrate in v0.1.0' "$out/sgw-k8s.err" || fail "the refusal of Substrate in kubernetes mode does not say it is unsupported in v0.1.0"
 fi
