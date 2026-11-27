@@ -35,7 +35,8 @@ lacks "no model gateway monitor with the agentgateway model driver" 'model-gatew
 # counts MCP bytes, not disk, so it cannot fire on a full home.
 has "home filesystem alert with the Substrate driver" 'alert: KoinonSandboxHomeFilesystemFilling$' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
 has "home filesystem alert reads the /var/lib/ate mount point" 'node_filesystem_avail_bytes\{mountpoint="/var/lib/ate"\}' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
-has "home filesystem alert threshold is a value" '< 15$' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
-has "home filesystem alert threshold and wait are values" 'for: "5m"$' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.for=5m --show-only templates/prometheusrule.yaml
+has "home filesystem alert default threshold" '< 15$' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
+has "home filesystem alert threshold is a value" '< 20$' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.freeBelowPercent=20 --show-only templates/prometheusrule.yaml
+has "home filesystem alert wait is a value" 'for: "5m"$' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.for=5m --show-only templates/prometheusrule.yaml
 lacks "no home filesystem alert when switched off" 'KoinonSandboxHomeFilesystemFilling' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.enabled=false --show-only templates/prometheusrule.yaml
 lacks "no home filesystem alert with the OpenShell driver" 'KoinonSandboxHomeFilesystemFilling' "${pr[@]}" --show-only templates/prometheusrule.yaml

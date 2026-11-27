@@ -6,7 +6,7 @@ package preflight
 
 import "errors"
 
-// SameFilesystem is what the probe pod runs; it needs Linux.
-func SameFilesystem() (bool, error) {
-	return false, errors.New("the /var/lib/ate probe runs on Linux only")
+// SharedFilesystems is what the probe pod runs; it needs Linux.
+func SharedFilesystems() ([]string, bool, error) {
+	return nil, false, errors.New("the /var/lib/ate probe runs on Linux only")
 }

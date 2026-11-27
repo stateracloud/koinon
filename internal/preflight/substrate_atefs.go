@@ -6,12 +6,13 @@ package preflight
 // /var/lib/ate/actors/<uid> on the node, in every tier. Kubelet does not see that hostPath. A home that fills up
 // fills the filesystem that holds /var/lib/ate, and kubelet reports 0 bytes used. v0.1 has no hard cap per home, so
 // the protection of the node is a filesystem of its own for /var/lib/ate. The check warns when /var/lib/ate is on
-// the same filesystem as the node root. It reads the device number of both mount points from a short pod on each node.
+// the same filesystem as the node root or as /var/lib/kubelet. It reads the device numbers from a short pod on each node.
+// The pod mounts only the node root; the container runtime binds it recursively, so the mounts below it are visible.
+// Limit: a btrfs subvolume or a ZFS dataset has its own device number and shares the space. The check cannot see that.
 
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,16 +26,22 @@ const (
 	SubstrateAteFSProbeMarker = "koinon-atefs-probe"
 	// AteDir is the base directory of the Substrate workers on a node.
 	AteDir = "/var/lib/ate"
-	// ateFSProbeRoot and ateFSProbeAte are the mount points of the node root and of AteDir in the probe pod.
+	// ateFSProbeRoot is the mount point of the node root in the probe pod. The paths below it are the node's paths.
 	ateFSProbeRoot = "/probe/root"
-	ateFSProbeAte  = "/probe/ate"
+	// AteFSMissing is the probe answer of a node that has no AteDir yet (no worker ran there).
+	AteFSMissing = "missing"
+	// AteFSSeparate is the probe answer of a node where AteDir shares no filesystem with the root or kubelet.
+	AteFSSeparate = "none"
 )
 
 // NodeAteFS is what the probe pod of one node saw.
 type NodeAteFS struct {
 	Node string
-	// SameAsRoot is true when AteDir and the node root are on one filesystem.
-	SameAsRoot bool
+	// Shared names what AteDir shares a filesystem with: "root" (the node root), "kubelet" (/var/lib/kubelet), or both.
+	// It is empty when AteDir has a filesystem of its own.
+	Shared []string
+	// Missing is true when the node has no AteDir yet.
+	Missing bool
 	// Skipped is why the node was not probed (see skipReason).
 	Skipped string
 	// Err is why the node could not be probed.
@@ -46,40 +53,52 @@ type AteFSProber interface {
 	ProbeAteFS(ctx context.Context) ([]NodeAteFS, error)
 }
 
-// AteFSLine formats the probe line.
-func AteFSLine(sameAsRoot bool) string {
-	return fmt.Sprintf("%s same_as_root=%t", SubstrateAteFSProbeMarker, sameAsRoot)
+// AteFSLine formats the probe line: shared is the list of what AteDir shares a filesystem with, or empty.
+// missing is true when AteDir does not exist.
+func AteFSLine(shared []string, missing bool) string {
+	v := AteFSSeparate
+	switch {
+	case missing:
+		v = AteFSMissing
+	case len(shared) > 0:
+		v = strings.Join(shared, ",")
+	}
+	return fmt.Sprintf("%s shared=%s", SubstrateAteFSProbeMarker, v)
 }
 
 // ParseAteFSOutput reads the probe line from the probe pod's log.
-func ParseAteFSOutput(log string) (bool, error) {
+func ParseAteFSOutput(log string) (shared []string, missing bool, err error) {
 	for _, line := range strings.Split(log, "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), SubstrateAteFSProbeMarker+" same_as_root=")
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), SubstrateAteFSProbeMarker+" shared=")
 		if !ok {
 			continue
 		}
-		same, err := strconv.ParseBool(rest)
-		if err != nil {
-			return false, fmt.Errorf("malformed probe output %q", truncate(line, 200))
+		switch rest {
+		case AteFSSeparate:
+			return nil, false, nil
+		case AteFSMissing:
+			return nil, true, nil
 		}
-		return same, nil
+		for _, w := range strings.Split(rest, ",") {
+			if w != "root" && w != "kubelet" {
+				return nil, false, fmt.Errorf("malformed probe output %q", truncate(line, 200))
+			}
+			shared = append(shared, w)
+		}
+		return shared, false, nil
 	}
-	return false, fmt.Errorf("no %q line in the probe pod's log: %q", SubstrateAteFSProbeMarker, truncate(log, 200))
+	return nil, false, fmt.Errorf("no %q line in the probe pod's log: %q", SubstrateAteFSProbeMarker, truncate(log, 200))
 }
 
-// AteFSPod is the probe pod of one node. It mounts the node root and AteDir read-only, and compares the device
-// numbers of the two mount points. It names the node and tolerates every taint, as the user-namespace probe does.
-// The AteDir volume is a plain Directory: a node whose workers never ran has no AteDir yet, and the pod then
-// reports a mount error that the check turns into a warning.
+// AteFSPod is the probe pod of one node. It mounts the node root read-only and compares the device numbers of
+// /var/lib/ate, /var/lib/kubelet and the root below it. It names the node and tolerates every taint, as the
+// user-namespace probe does. It mounts only "/" (a path that always exists), so a node without /var/lib/ate gets
+// an answer ("missing") and not a pod that waits for a mount.
 func (p KubeSubstrateProber) AteFSPod(node string) *corev1.Pod {
-	host := func(name, path string, t corev1.HostPathType) corev1.Volume {
-		return corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: path, Type: ptr.To(t)}}}
-	}
-	volumes := []corev1.Volume{host("root", "/", corev1.HostPathDirectory), host("ate", AteDir, corev1.HostPathDirectory)}
-	mounts := []corev1.VolumeMount{
-		{Name: "root", MountPath: ateFSProbeRoot, ReadOnly: true},
-		{Name: "ate", MountPath: ateFSProbeAte, ReadOnly: true},
-	}
+	volumes := []corev1.Volume{{Name: "root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{
+		Path: "/", Type: ptr.To(corev1.HostPathDirectory),
+	}}}}
+	mounts := []corev1.VolumeMount{{Name: "root", MountPath: ateFSProbeRoot, ReadOnly: true}}
 	pod := p.pod("atefs-probe", []string{"preflight", "atefs-probe"}, volumes, mounts)
 	pod.Spec.NodeName = node
 	pod.Spec.Tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
@@ -105,7 +124,7 @@ func (p KubeSubstrateProber) ProbeAteFS(ctx context.Context) ([]NodeAteFS, error
 		}
 		log, err := p.run(ctx, p.AteFSPod(node.Name))
 		if err == nil {
-			res.SameAsRoot, err = ParseAteFSOutput(log)
+			res.Shared, res.Missing, err = ParseAteFSOutput(log)
 		}
 		res.Err = err
 		out = append(out, res)
@@ -114,9 +133,9 @@ func (p KubeSubstrateProber) ProbeAteFS(ctx context.Context) ([]NodeAteFS, error
 }
 
 // AteFSFix is the Fix text of the warning.
-const AteFSFix = "Put /var/lib/ate on its own filesystem on each worker node (a separate disk or partition, mounted before kubelet " +
-	"starts), so that a full sandbox home fills that filesystem and not the root or the kubelet filesystem of the node. " +
-	"Optionally put /var/lib/ate/snapshots on its own disk too. v0.1 has no hard cap per home (issue #1495). " +
+const AteFSFix = "Put /var/lib/ate on its own filesystem on each worker node: a separate disk or partition that is mounted before kubelet starts. " +
+	"Then a full sandbox home fills that filesystem and not the root or the kubelet filesystem of the node. " +
+	"You can also mount /var/lib/ate/snapshots on its own disk. v0.1 has no hard cap per home (issue #1495). " +
 	"See docs/dev/substrate-install.md, section \"Node protection: /var/lib/ate on its own filesystem\"."
 
 func (c *Checker) checkAteFS(ctx context.Context) Result {
@@ -132,7 +151,7 @@ func (c *Checker) checkAteFS(ctx context.Context) Result {
 			Fix:     "fix the cause above (the namespace, Pod Security, image pull, the node selector or scheduling), then run the check again",
 		}
 	}
-	var shared, broken, skipped []string
+	var shared, missing, broken, skipped []string
 	probed := 0
 	for _, n := range nodes {
 		if n.Skipped != "" {
@@ -143,8 +162,10 @@ func (c *Checker) checkAteFS(ctx context.Context) Result {
 		switch {
 		case n.Err != nil:
 			broken = append(broken, fmt.Sprintf("%s: %v", n.Node, n.Err))
-		case n.SameAsRoot:
-			shared = append(shared, n.Node)
+		case n.Missing:
+			missing = append(missing, n.Node)
+		case len(n.Shared) > 0:
+			shared = append(shared, n.Node+" (with "+strings.Join(n.Shared, " and ")+")")
 		}
 	}
 	note := ""
@@ -155,15 +176,21 @@ func (c *Checker) checkAteFS(ctx context.Context) Result {
 	case len(shared) > 0:
 		return Result{
 			Check: check, Status: Warn,
-			Message: fmt.Sprintf("/var/lib/ate is on the same filesystem as the node root on %s: a sandbox home that fills up fills the node root, "+
-				"and kubelet reports 0 bytes used%s", strings.Join(shared, ", "), note),
+			Message: fmt.Sprintf("/var/lib/ate is on the same filesystem as the node root or the kubelet filesystem on %s: a sandbox home that becomes full fills that filesystem, "+
+				"and kubelet reports 0 bytes used for it%s", strings.Join(shared, ", "), note),
 			Fix: AteFSFix,
+		}
+	case len(missing) > 0:
+		return Result{
+			Check: check, Status: Warn,
+			Message: fmt.Sprintf("/var/lib/ate does not exist yet on %s, so its filesystem is not checked%s", strings.Join(missing, ", "), note),
+			Fix:     "Mount a filesystem at /var/lib/ate on these nodes before the first worker starts, then run the check again.",
 		}
 	case len(broken) > 0:
 		return Result{
 			Check: check, Status: Warn,
 			Message: fmt.Sprintf("the /var/lib/ate probe pod did not report on %d of %d nodes: %s%s", len(broken), probed, strings.Join(broken, "; "), note),
-			Fix:     "fix the cause above (a node without /var/lib/ate has run no worker yet: create the mount first), then run the check again",
+			Fix:     "fix the cause above then run the check again",
 		}
 	case probed == 0:
 		return Result{

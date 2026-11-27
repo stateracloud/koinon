@@ -209,7 +209,8 @@ The kubeconfig of the installer needs these rules:
   See "Talos: user namespaces for gVisor".
 - `/var/lib/ate` has a filesystem of its own on each worker node (a read-only probe pod per node, the same
   node selection as the user-namespace check). The check only warns: a node where `/var/lib/ate` shares the
-  filesystem of the node root gets a warning. See "Node protection: /var/lib/ate on its own filesystem".
+  filesystem of the node root or of `/var/lib/kubelet` gets a warning. A node without `/var/lib/ate` gets a
+  warning too. See "Node protection: /var/lib/ate on its own filesystem".
 - Substrate's api server can validate service-account tokens. The probe pod runs in the probe namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -251,8 +252,9 @@ Why the node needs this:
 
 - The gVisor home is a tmpfs that a file under `/var/lib/ate/actors/<uid>` backs. The microVM home is a host
   directory in the same place. `/var/lib/ate` is a hostPath that kubelet does not see.
-- A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it, so the usual
-  disk-pressure eviction does not react.
+- A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it in the pod stats of
+  the sandbox. When `/var/lib/ate` shares the node filesystem, kubelet sees the free space fall and sets disk
+  pressure. It then evicts pods by their reported use, so it evicts the wrong pods and the large home stays.
 - Substrate sets the hostPath of the worker in its own code, and one worker can hold up to 1000 actors. A volume
   for each worker therefore cannot cap one home.
 
@@ -260,16 +262,21 @@ What to do on each worker node:
 
 1. Mount a separate disk or partition at `/var/lib/ate` before kubelet starts. Then a full home fills that
    filesystem. The root filesystem and the kubelet filesystem stay free.
-2. Optional: mount a separate disk at `/var/lib/ate/snapshots` too. Snapshot data then cannot fill the home
+2. You can also mount a separate disk at `/var/lib/ate/snapshots`. Snapshot data then cannot fill the home
    filesystem. See Substrate `docs/guides/node-storage.md`.
-3. Size the filesystem for the number of homes that you expect and a margin, as no cap limits one home. On Talos,
-   use a `machine.disks` partition mounted at `/var/lib/ate`. On other Linux nodes, use an `/etc/fstab` entry or a
-   systemd mount unit.
+3. Make the filesystem large enough for the homes that you expect, plus a margin, because no cap limits one home.
+   How you mount it depends on the node OS: on kubeadm nodes, use an `/etc/fstab` entry or a systemd mount unit.
+   On Talos, `/var` is the only writable filesystem, and a Talos user volume mounts under `/var/mnt`. The mount
+   at `/var/lib/ate` then needs a bind mount from that path (a kubelet `extraMounts` entry). This Talos path is
+   not verified on a cluster yet.
+
+The check compares device numbers. A btrfs subvolume or a ZFS dataset has its own device number, but it shares
+the space of its pool. The preflight does not see this case, so it reports no warning for it.
 
 How Koinon helps you check it:
 
 - **Preflight.** `koinon-api preflight --driver substrate` and `koinon-api substrate install` warn on each node
-  where `/var/lib/ate` is on the same filesystem as the node root. The warning does not stop the install.
+  where `/var/lib/ate` is on the same filesystem as the node root or as `/var/lib/kubelet`. The warning does not stop the install.
   The chart's pre-install hook does not run the probe pod, as for the other probe checks.
 - **Alert.** With `metrics.prometheusRule.enabled` and `execution.driver: substrate`, the rule
   `KoinonSandboxHomeFilesystemFilling` fires when less than 15 percent of the filesystem at `/var/lib/ate` is free

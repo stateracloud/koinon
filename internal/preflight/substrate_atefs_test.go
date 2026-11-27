@@ -39,9 +39,9 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 	})
 
 	It("warns, and does not fail, on a node that shares the root filesystem, and names the fix and the missing cap", func(ctx SpecContext) {
-		r := find(cluster(preflight.NodeAteFS{Node: "a"}, preflight.NodeAteFS{Node: "w2", SameAsRoot: true}).run(ctx), check)
+		r := find(cluster(preflight.NodeAteFS{Node: "a"}, preflight.NodeAteFS{Node: "w2", Shared: []string{"root", "kubelet"}}).run(ctx), check)
 		Expect(r.Status).To(Equal(preflight.Warn))
-		Expect(r.Message).To(And(ContainSubstring("w2"), ContainSubstring("same filesystem as the node root"), ContainSubstring("0 bytes")))
+		Expect(r.Message).To(And(ContainSubstring("w2"), ContainSubstring("w2 (with root and kubelet)"), ContainSubstring("same filesystem as the node root or the kubelet filesystem"), ContainSubstring("0 bytes")))
 		Expect(r.Message).NotTo(ContainSubstring("a,"))
 		Expect(r.Fix).To(And(ContainSubstring("own filesystem"), ContainSubstring("no hard cap per home"), ContainSubstring("#1495"), ContainSubstring("substrate-install.md")))
 	})
@@ -57,6 +57,10 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 		Expect(r.Status).To(Equal(preflight.Warn))
 		Expect(r.Message).To(And(ContainSubstring("1 of 2"), ContainSubstring("b: FailedMount")))
 
+		r = find(cluster(preflight.NodeAteFS{Node: "a"}, preflight.NodeAteFS{Node: "new", Missing: true}).run(ctx), check)
+		Expect(r.Status).To(Equal(preflight.Warn))
+		Expect(r.Message).To(ContainSubstring("does not exist yet on new"))
+
 		r = find(cluster(preflight.NodeAteFS{Node: "w"}, preflight.NodeAteFS{Node: "cp", Skipped: "cordoned"}).run(ctx), check)
 		Expect(r.Status).To(Equal(preflight.Pass))
 		Expect(r.Message).To(And(ContainSubstring("1 node(s)"), ContainSubstring("not probed: cp (cordoned)")))
@@ -71,11 +75,20 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 	})
 
 	It("reads the probe line", func() {
-		Expect(preflight.ParseAteFSOutput("noise\n" + preflight.AteFSLine(true) + "\n")).To(BeTrue())
-		Expect(preflight.ParseAteFSOutput(preflight.AteFSLine(false))).To(BeFalse())
-		_, err := preflight.ParseAteFSOutput("nothing\n")
+		shared, missing, err := preflight.ParseAteFSOutput("noise\n" + preflight.AteFSLine([]string{"root", "kubelet"}, false) + "\n")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shared).To(Equal([]string{"root", "kubelet"}))
+		Expect(missing).To(BeFalse())
+		shared, missing, err = preflight.ParseAteFSOutput(preflight.AteFSLine(nil, false))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shared).To(BeEmpty())
+		Expect(missing).To(BeFalse())
+		_, missing, err = preflight.ParseAteFSOutput(preflight.AteFSLine(nil, true))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(missing).To(BeTrue())
+		_, _, err = preflight.ParseAteFSOutput("nothing\n")
 		Expect(err).To(HaveOccurred())
-		_, err = preflight.ParseAteFSOutput(preflight.SubstrateAteFSProbeMarker + " same_as_root=maybe\n")
+		_, _, err = preflight.ParseAteFSOutput(preflight.SubstrateAteFSProbeMarker + " shared=maybe\n")
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -94,7 +107,7 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 				pod.Status.Phase = corev1.PodSucceeded
 				return false, nil, nil
 			})
-			logs := map[string]string{"probe-a": preflight.AteFSLine(false) + "\n", "probe-b": preflight.AteFSLine(true) + "\n"}
+			logs := map[string]string{"probe-a": preflight.AteFSLine(nil, false) + "\n", "probe-b": preflight.AteFSLine([]string{"root"}, false) + "\n"}
 			p := preflight.KubeSubstrateProber{
 				Client: client, Namespace: "ate-system", NamePrefix: "x", Image: "img", NodeSelector: map[string]string{"pool": "workers"},
 				Timeout: time.Second, PollInterval: time.Millisecond,
@@ -102,7 +115,7 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 			}
 			got, err := p.ProbeAteFS(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(got).To(Equal([]preflight.NodeAteFS{{Node: "a"}, {Node: "b", SameAsRoot: true}}))
+			Expect(got).To(Equal([]preflight.NodeAteFS{{Node: "a"}, {Node: "b", Shared: []string{"root"}}}))
 			left, err := client.CoreV1().Pods("ate-system").List(ctx, metav1.ListOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(left.Items).To(BeEmpty(), "the probe pods are deleted")
@@ -112,7 +125,7 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 			Expect(err).To(MatchError(ContainSubstring("no node matches")))
 		})
 
-		It("is a read-only pod that mounts the node root and /var/lib/ate read-only, bound to the node", func() {
+		It("is a read-only pod that mounts only the node root, read-only, bound to the node", func() {
 			pod := preflight.KubeSubstrateProber{Namespace: "ate-system", NamePrefix: "x", Image: "img"}.AteFSPod("a")
 			Expect(pod.Spec.NodeName).To(Equal("a"))
 			Expect(pod.Spec.Tolerations).To(ConsistOf(corev1.Toleration{Operator: corev1.TolerationOpExists}))
@@ -120,7 +133,7 @@ var _ = Describe("Substrate /var/lib/ate filesystem check", func() {
 			for _, v := range pod.Spec.Volumes {
 				paths[v.Name] = v.HostPath.Path
 			}
-			Expect(paths).To(Equal(map[string]string{"root": "/", "ate": "/var/lib/ate"}))
+			Expect(paths).To(Equal(map[string]string{"root": "/"}))
 			for _, m := range pod.Spec.Containers[0].VolumeMounts {
 				Expect(m.ReadOnly).To(BeTrue(), m.Name)
 			}
