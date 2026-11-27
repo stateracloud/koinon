@@ -213,6 +213,23 @@ def status(_):
     return {k: fields[k].strip() for k in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp") if k in fields}
 
 
+def ids(_):
+    """The real, effective and saved uid and gid, and the supplementary groups, from the system calls.
+    The spec does not read them from /proc/self/status: the line format of that file can differ in
+    gVisor."""
+    return {"uid": list(os.getresuid()), "gid": list(os.getresgid()), "groups": os.getgroups()}
+
+
+def open_write(c):
+    """Opens an existing file for writing, with no create and no truncate, and closes it: "ok", or the
+    errno name. The file is not changed, so the probe can test a platform file without harm."""
+    try:
+        os.close(os.open(c["path"], os.O_WRONLY))
+        return "ok"
+    except OSError as e:
+        return err_name(e)
+
+
 def write(c):
     """Creates (and removes) a file: "ok", or the errno name."""
     try:
@@ -470,6 +487,7 @@ def kernel(_):
 
 
 OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
-       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners, "egress_http": egress_http}
+       "find": find, "mounts": mounts, "status": status, "ids": ids, "write": write, "open_write": open_write, "mode": mode,
+       "syscall": syscall, "kernel": kernel, "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners,
+       "egress_http": egress_http}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

@@ -152,6 +152,11 @@ no cluster.
   replaces a value that the guest sends, ignores forwarded-identity headers, and adds nothing through TLS. A
   token of a deleted actor gets `403`.
 - No capabilities, `no_new_privs` and a seccomp filter. Privileged syscalls fail.
+- On the gVisor tiers, the agent runs as the sandbox user: the real, effective and saved uid and gid
+  (`getresuid`, `getresgid`) are 10001, and the supplementary groups are empty (issue #1387). The agent cannot open
+  `koinon-guest-launcher` or `policy-gvisor.json` for writing, and cannot create a file in their
+  directories. On the `vm` tier this spec reports **not applicable**: the payload may run as root in the
+  microVM (issue #1496).
 - The guest agent and the guest server are closed to the agent user.
 - Another org's actor on the same node is unreachable, and its sandbox is invisible to this org's driver.
 - A restore with a wrong digest returns `ErrInvalid`, a restore into another org's workspace returns

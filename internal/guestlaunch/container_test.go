@@ -67,7 +67,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		policy := []byte(`{
   "capabilities": {"allow": ["CAP_SYS_ADMIN", "CAP_SYS_PTRACE"]},
   "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"]},
-  "seccomp": {"mode": "require"}
+  "seccomp": {"mode": "require"},
+  "user": {"mode": "off"}
 }`)
 		// The image policies, as the overlay carries them (cmd/koinon-guest-launcher).
 		images := map[string][]byte{}
@@ -209,14 +210,18 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 	// The two image policies of ADR 0120 section 4.2 and 4.3.
 	Describe("the image policies in the shape the Substrate guest gives a payload", func() {
-		// Root with only CAP_KILL, CAP_NET_BIND_SERVICE and CAP_AUDIT_WRITE (phase 0 result, issue #1087).
+		// vm tier: root with only CAP_KILL, CAP_NET_BIND_SERVICE and CAP_AUDIT_WRITE (phase 0 result,
+		// issue #1087; the Substrate default set, until issue #1462).
 		substrate := []string{"--cap-drop=ALL", "--cap-add=KILL", "--cap-add=NET_BIND_SERVICE", "--cap-add=AUDIT_WRITE"}
+		// gVisor tiers: root with the set of the actor template (substrate.GVisorCapAdd, issue #1387).
+		gvisor := []string{"--cap-drop=ALL", "--cap-add=KILL", "--cap-add=SETGID", "--cap-add=SETPCAP", "--cap-add=SETUID"}
 
 		DescribeTable("leave the payload no capability and set no_new_privs",
-			func(policy string) {
-				out, code := runWith(substrate, inherit("/launcher", "--policy", "/"+policy, "--", "/bin/probe")...)
+			func(policy string, shape []string, uid string) {
+				out, code := runWith(shape, inherit("/launcher", "--policy", "/"+policy, "--", "/bin/probe")...)
 				skipWithoutLandlock(out, code)
 				Expect(code).To(Equal(0), out)
+				Expect(out).To(ContainSubstring("uid "+uid+"\n"), out)
 				for _, f := range []string{"CapPrm", "CapEff", "CapAmb"} {
 					Expect(out).To(MatchRegexp(`status `+f+`: 0+\b`), f+"\n"+out)
 				}
@@ -229,19 +234,38 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 					Expect(bv).To(Equal("blocked"), out)
 				}
 			},
-			Entry("vm tier", "policy-vm.json"),
-			Entry("gVisor tiers", "policy-gvisor.json"),
+			Entry("vm tier", "policy-vm.json", substrate, "0"),
+			Entry("gVisor tiers", "policy-gvisor.json", gvisor, "10001"),
 		)
 
+		It("shrinks the bounding set to nothing on the gVisor tiers", func() {
+			out, code := runWith(gvisor, inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
+			skipWithoutLandlock(out, code)
+			Expect(code).To(Equal(0), out)
+			Expect(out).To(MatchRegexp(`status CapBnd: 0+\b`), out)
+			Expect(out).To(ContainSubstring("status NoNewPrivs: 1"))
+		})
+
+		// Issue #1387: a gVisor sandbox whose guest cannot drop to the non-root user does not start.
+		// The vm shape (no CAP_SETUID or CAP_SETGID) is such a guest.
+		It("refuses to start the payload on the gVisor tiers when the guest cannot drop to non-root", func() {
+			out, code := runWith(substrate, "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
+			Expect(code).To(Equal(70), out)
+			Expect(out).To(ContainSubstring("user drop to 10001:10001 required but failed"))
+			Expect(out).NotTo(ContainSubstring("ptrace"), "the payload never started")
+		})
+
 		// A host without a syscall is simulated by a Docker seccomp profile that answers it ENOSYS.
-		hideWith := func(syscall string, errno int) []string {
+		hideWithIn := func(shape []string, syscall string, errno int) []string {
 			prof := fmt.Sprintf(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":[%q],"action":"SCMP_ACT_ERRNO","errnoRet":%d}]}`, syscall, errno)
 			path := filepath.Join(dir, fmt.Sprintf("no-%s-%d.json", syscall, errno))
 			Expect(os.WriteFile(path, []byte(prof), 0o600)).To(Succeed())
-			return append([]string{"--security-opt=seccomp=" + path}, substrate...)
+			return append([]string{"--security-opt=seccomp=" + path}, shape...)
 		}
+		hideWith := func(syscall string, errno int) []string { return hideWithIn(substrate, syscall, errno) }
 		hide := func(syscall string) []string { return hideWith(syscall, 38) }
 		noLandlock := func() []string { return hide("landlock_create_ruleset") }
+		noLandlockGVisor := func() []string { return hideWithIn(gvisor, "landlock_create_ruleset", 38) }
 
 		It("closes inherited descriptors through /proc/self/fd when close_range is missing", func() {
 			out, code := runWith(hide("close_range"), inherit("/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")...)
@@ -257,12 +281,13 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 			Expect(verdicts(out)).To(HaveKeyWithValue("inherited_fd", "blocked"), out)
 		})
 
-		It("keeps the outside process's descriptors closed to a root payload without Landlock", func() {
-			// No Landlock domain: the kernel's capability rule (the target's permitted set is not a
-			// subset of the payload's empty one) is what refuses the access.
-			out, code := runWith(noLandlock(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
+		It("keeps the outside process's descriptors closed to the payload without Landlock", func() {
+			// No Landlock domain. The launcher closes the inherited descriptors before it starts the
+			// payload. The kernel's ptrace access check refuses the /proc reads: the payload has another
+			// uid than the outside process and no CAP_SYS_PTRACE.
+			out, code := runWith(noLandlockGVisor(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
 			Expect(code).To(Equal(0), out)
-			Expect(out).To(ContainSubstring("uid 0"))
+			Expect(out).To(ContainSubstring("uid 10001\n"))
 			v := verdicts(out)
 			for _, a := range slices.Concat(fdAttempts, procReadAttempts) {
 				Expect(v).To(HaveKeyWithValue(a, "blocked"), a+"\n"+out)
@@ -277,7 +302,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		})
 
 		It("starts on the gVisor tiers when Landlock is unavailable and says what the control is", func() {
-			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
+			out, code := runWith(noLandlockGVisor(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("filesystem rules NOT applied"))
 			Expect(out).To(ContainSubstring("writable root by decision"))

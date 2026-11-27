@@ -20,7 +20,9 @@ var _ = Describe("ParsePolicy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(p).To(Equal(guestlaunch.DefaultPolicy()))
 		Expect(p.Capabilities.Allow).To(BeEmpty(), "every capability is dropped by default")
-		Expect(p.User.Mode).To(Equal(guestlaunch.ModeBestEffort), "the user drop continues as root when the guest cannot do it")
+		Expect(p.User.Mode).To(Equal(guestlaunch.ModeRequire), "a payload that cannot drop to the non-root user does not start (issue #1387)")
+		Expect(p.User.UID).To(BeEquivalentTo(guestlaunch.DefaultUID))
+		Expect(p.User.GID).To(BeEquivalentTo(guestlaunch.DefaultUID))
 		Expect(p.Seccomp.Mode).To(Equal(guestlaunch.ModeRequire))
 	})
 
@@ -64,15 +66,18 @@ var _ = Describe("ParsePolicy", func() {
 		Entry("unknown deny name", `{"seccomp":{"deny":["ptrace","not_a_syscall"]}}`, "unknown syscall"),
 		Entry("unknown deny_extra name", `{"seccomp":{"deny_extra":["ptrcae"]}}`, "unknown syscall"),
 		Entry("relative list dir", `{"landlock":{"list_dirs":["dev"]}}`, "not absolute"),
-		Entry("require root", `{"user":{"mode":"require"}}`, "non-zero uid"),
+		Entry("require root", `{"user":{"mode":"require","uid":0}}`, "non-zero uid"),
+		Entry("require the root group", `{"user":{"mode":"require","uid":10001,"gid":0}}`, "non-zero gid"),
 		Entry("not JSON", `nope`, "guest launcher policy"),
 	)
 })
 
 func jsonList(l []string) string { return `["` + strings.Join(l, `","`) + `"]` }
 
-// The two image policies differ in the Landlock mode only (ADR 0120 section 4.2 and 4.3): the vm
-// tier fails closed, the gVisor tiers record the gap when the kernel has no Landlock (their root is writable by decision, issue #1150).
+// The two image policies differ in the Landlock and user modes only (ADR 0120 section 4.2 and 4.3,
+// amendment of 2026-11-26): the vm tier fails closed without Landlock and keeps a best_effort user
+// drop until its proof (issue #1462); the gVisor tiers record the gap when the kernel has no Landlock
+// (their root is writable by decision, issue #1150) and fail closed without the non-root user (issue #1387).
 var _ = Describe("the image policies", func() {
 	load := func(name string) guestlaunch.Policy {
 		f, err := os.Open("../../cmd/koinon-guest-launcher/" + name)
@@ -84,13 +89,14 @@ var _ = Describe("the image policies", func() {
 	}
 
 	DescribeTable("parse and keep the guarantees the image contract promises",
-		func(name string, landlock guestlaunch.Mode) {
+		func(name string, landlock, user guestlaunch.Mode) {
 			p := load(name)
 			Expect(p.Landlock.Mode).To(Equal(landlock))
+			Expect(p.User.Mode).To(Equal(user))
 			Expect(p.Seccomp.Mode).To(Equal(guestlaunch.ModeRequire))
 			Expect(p.Capabilities.Allow).To(BeEmpty())
 			Expect(p.User.UID).To(BeEquivalentTo(10001))
-			Expect(p.User.Mode).NotTo(Equal(guestlaunch.ModeRequire), "the guest lacks CAP_SETUID until Substrate offers it (issue #1087)")
+			Expect(p.User.GID).To(BeEquivalentTo(10001))
 			Expect(p.Landlock.Devices).To(ConsistOf(guestlaunch.DefaultDevices), "single device nodes, never /dev as a whole")
 			Expect(p.Landlock.Devices).NotTo(ContainElement("/dev"))
 			Expect(p.Landlock.ListDirs).To(Equal([]string{"/dev"}))
@@ -98,13 +104,13 @@ var _ = Describe("the image policies", func() {
 				Expect(rw).NotTo(HavePrefix("/dev"))
 			}
 		},
-		Entry("vm tier", "policy-vm.json", guestlaunch.ModeRequire),
-		Entry("gVisor tiers", "policy-gvisor.json", guestlaunch.ModeBestEffort),
+		Entry("vm tier", "policy-vm.json", guestlaunch.ModeRequire, guestlaunch.ModeBestEffort),
+		Entry("gVisor tiers", "policy-gvisor.json", guestlaunch.ModeBestEffort, guestlaunch.ModeRequire),
 	)
 
-	It("differ in nothing but the Landlock mode", func() {
+	It("differ in nothing but the Landlock and user modes", func() {
 		vm, gv := load("policy-vm.json"), load("policy-gvisor.json")
-		vm.Landlock.Mode = gv.Landlock.Mode
+		vm.Landlock.Mode, vm.User.Mode = gv.Landlock.Mode, gv.User.Mode
 		Expect(vm).To(Equal(gv))
 	})
 })

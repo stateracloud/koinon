@@ -278,6 +278,7 @@ script-check - inputs=hack/hooks/grilling-question-check_test.sh,hack/hooks/gril
 script-check - inputs=hack/hooks/prose-question-stop-check_test.sh,hack/hooks/prose-question-stop-check.sh hack/hooks/prose-question-stop-check_test.sh
 script-check - inputs=hack/hooks/question-checklist-check_test.sh,hack/hooks/question-checklist-check.sh hack/hooks/question-checklist-check_test.sh
 script-check - inputs=hack/agent-state-test.sh,hack/agent-state.sh hack/agent-state-test.sh
+script-check - inputs=hack/backup-restore-mode-test.sh,test/e2e/backup-restore.sh hack/backup-restore-mode-test.sh
 script-check - inputs=hack/dep-age-check-test.sh,hack/dep-age-check.sh,hack/e2e-toolchain/Dockerfile,hack/e2e-toolchain/web.Dockerfile hack/dep-age-check-test.sh
 script-check - inputs=hack/testdata/ubuntu-snapshot/,hack/ubuntu-snapshot-bump_test.sh,hack/ubuntu-snapshot-bump.sh hack/ubuntu-snapshot-bump_test.sh
 script-check - inputs=hack/buf-breaking-against-test.sh,hack/buf-breaking-against.sh hack/buf-breaking-against-test.sh

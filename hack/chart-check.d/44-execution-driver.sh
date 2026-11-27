@@ -77,6 +77,10 @@ if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null
 grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
 env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
 
+# Golden snapshots are off by default and an admin turns them on (#1492).
+has "golden snapshots are off by default" 'goldenSnapshots: false' "${sub[@]}" --show-only templates/config.yaml
+has "an admin turns golden snapshots on" 'goldenSnapshots: true' "${sub[@]}" --set execution.substrate.goldenSnapshots=true --show-only templates/config.yaml
+
 # The tiers reach both components: the driver starts no guest process without one (#1088).
 env_is KOINON_SUBSTRATE_DEFAULT_TIER '"dev"' "${sub[@]}"
 has "the default tier is in the reconciler config" 'defaultTier: "dev"' "${sub[@]}" --show-only templates/config.yaml

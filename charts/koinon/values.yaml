@@ -920,6 +920,12 @@ execution:
     # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
     # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
+    # Golden snapshots of a template (Substrate builds one actor per template and clones it). Off by default
+    # in every tier (issue #1492, ADR 0120 section 5.2): a clone copies memory from one sandbox to another,
+    # and a golden build holds a pool slot for about 20 s each time a template changes. Cold start is
+    # about the same without it (p50 1.0 s gVisor, 2.7 s vm). Setting true is an exception to the
+    # no-memory-clone rule; see docs/dev/substrate-install.md.
+    goldenSnapshots: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
     # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the
     # gateway NetworkPolicy under substrate.
@@ -1536,6 +1542,14 @@ metrics:
     # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
     # a sweep (a minute).
     durableStrandedFor: 15m
+    # With execution.driver=substrate: the alert on a filling /var/lib/ate filesystem on a worker node (issue #1494).
+    # It reads node-exporter's node_filesystem_* series of the mount point /var/lib/ate, so it needs node-exporter and
+    # a filesystem of its own for that path. The byte-cap alert of the leak guard does not cover disk.
+    ateFilesystem:
+      enabled: true
+      # The alert fires when the free space of that filesystem is below this percent for the time in `for`.
+      freeBelowPercent: 15
+      for: 10m
   grafanaDashboard:
     # Grafana dashboards as a ConfigMap for the Grafana dashboard sidecar (templates/grafana-dashboard.yaml;
     # today one row, the leak guard). Needs no CRD. Every query uses only fixed label sets (ADR 0023).

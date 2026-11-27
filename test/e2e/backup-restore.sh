@@ -52,6 +52,9 @@ t_start=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) backup/restore: $*"; }
 wait_a_bit() { command sleep "${1:-2}"; }
 fail() { echo "backup/restore FAILED: $*" >&2; exit 1; }
+# file_mode prints the octal mode of a file. GNU stat first, BSD stat (macOS) second, as in hack/agent-state.sh (#1474).
+# hack/backup-restore-mode-test.sh extracts this line by its name.
+file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 # blk runs one block of the command file, as the guide shows it, in the working directory that holds the
 # dump and the key backup.
@@ -127,7 +130,8 @@ if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   gwon=1
   gwfile=$work/koinon-gateway-key-backup.yaml
   [[ -s $gwfile ]] || fail "the install has a gateway key Secret and backup-gateway-key wrote no file"
-  [[ $(stat -c %a "$gwfile") == 600 ]] || fail "the gateway key backup is readable by others: $(stat -c %a "$gwfile")"
+  gwmode=$(file_mode "$gwfile") || gwmode=
+  [[ $gwmode == 600 ]] || fail "the gateway key backup is readable by others: ${gwmode:-unknown mode}"
   gw_before=$(gwdigest)
   backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template="$gwdata" | sha256sum)
   [[ $backup_digest == "$gw_before" ]] || fail "the gateway key backup differs from the Secret"

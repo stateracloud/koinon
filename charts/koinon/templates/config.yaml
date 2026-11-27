@@ -69,6 +69,7 @@ data:
         controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
         routerAddress: {{ .Values.execution.substrate.routerAddress | quote }}
         allowUnhardened: {{ .Values.execution.substrate.allowUnhardened | default false }}
+        goldenSnapshots: {{ .Values.execution.substrate.goldenSnapshots | default false }}
         {{- with .Values.execution.substrate.defaultTier }}
         defaultTier: {{ . | quote }}
         {{- end }}

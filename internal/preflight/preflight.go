@@ -189,7 +189,9 @@ type Checker struct {
 	IssuerProbe IssuerProber
 	Devices     DevicesProber
 	UserNS      UserNamespacesProber
-	Config      Config
+	// AteFS serves the /var/lib/ate filesystem check; nil disables it (a warning).
+	AteFS  AteFSProber
+	Config Config
 	// CallTimeout bounds each API and gateway call; the probes have their own timeouts.
 	CallTimeout time.Duration
 }

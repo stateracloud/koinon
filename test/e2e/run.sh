@@ -249,17 +249,9 @@ for tls in fakemcp-tls fakegitea-tls; do
   "${K[@]}" -n "$FAKES" create secret generic "$tls" --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
     --dry-run=client -o yaml | "${K[@]}" apply -f -
 done
-# koinon-values.yaml holds the line `caBundle: "@E2E_EGRESS_CA@"`; it becomes a block with this run's CA.
-awk -v ca="$FAKETLS/ca.crt" '
-  index($0, "\"@E2E_EGRESS_CA@\"") {
-    ind = substr($0, 1, match($0, /[^ ]/) - 1); print ind "caBundle: |"
-    while ((getline l < ca) > 0) print ind "  " l
-    close(ca); found = 1; next
-  }
-  { print }
-  END { if (!found) { print "run.sh: no @E2E_EGRESS_CA@ line in the install values" > "/dev/stderr"; exit 1 } }
-' "$OUT/quickstart/values.yaml" >"$OUT/quickstart/values.yaml.new"
-mv "$OUT/quickstart/values.yaml.new" "$OUT/quickstart/values.yaml"
+# koinon-values.yaml holds the line `caBundle: "@E2E_EGRESS_CA@"`; it becomes a block with this run's CA. The restore
+# drill fills the same line with the same function (test/e2e/kindvalues, #1487).
+(cd "$root" && go run ./test/e2e/kindvalues/fill-egress-ca -values "$OUT/quickstart/values.yaml" -ca "$FAKETLS/ca.crt")
 sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
 "${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea >/dev/null
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea --timeout=120s
