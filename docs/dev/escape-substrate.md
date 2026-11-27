@@ -37,7 +37,9 @@ The full list, with defaults, is in the header of `test/escape/substrate_harness
   (issue #1508). Use the DNS name of the gateway Service, for example `koinon-gateway.koinon-system.svc:8080`.
   The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of
   every sandbox. They are the only destinations that policy allows: default-deny stays for every other
-  destination (ADR 0120). The suite sends no traffic to them. A run without this input fails at once, with or
+  destination (ADR 0120). The egress gateway spec is the one exception: it replaces the policy of its own
+  sandbox with an allow-all rule, as its control. Do not name a host that a deny probe targets (for example in
+  `KOINON_ESCAPE_API` or `KOINON_ESCAPE_INTERNAL`) as a route, or that deny spec fails. The suite sends no traffic to them. A run without this input fails at once, with or
   without `KOINON_REQUIRE`; it does not skip.
 
 `make test-escape-substrate` sets `KOINON_REQUIRE`, so a missing input below fails its spec; it does not skip.

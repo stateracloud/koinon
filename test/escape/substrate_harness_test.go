@@ -133,7 +133,7 @@ func parseGatewayRoutes(raw string) ([]substrate.GatewayRoute, error) {
 		}
 		port, err := strconv.ParseUint(portText, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: the port is not a number", entry)
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: the port is not a number in 1-65535", entry)
 		}
 		routes = append(routes, substrate.GatewayRoute{Host: host, Port: uint32(port)})
 	}
