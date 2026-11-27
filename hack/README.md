@@ -27,6 +27,8 @@ names what needs the upstream project's rights and what still works from a fork.
 | `e2e-status.sh` | posting a commit status |
 | `e2e-remote.sh` | the lab target (`--local` needs none) |
 | `e2e-bisect.sh` | the upstream CI's token |
+| `e2e-dispatch.sh` | write access to dispatch `e2e-kind.yml` |
+| `relay-classify.sh` | nothing: it only reads |
 | `drill-issue.sh` | the upstream CI's token |
 | `release-gate.sh` | nothing: it only reads (the release workflow runs it) |
 | `release-base-mirror.sh` | the release registry (the release workflow runs it before GoReleaser) |

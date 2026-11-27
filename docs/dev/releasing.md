@@ -108,7 +108,7 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
    renamed spec cannot pass silently) and the browser sign-in on in its topology summary. Only the artifact of
    the tag's own run counts (its ref is the tag): never a release asset, never a result someone uploaded, never
    the nightly run. To make one without a new tag push, dispatch on the tag:
-   `gh workflow run e2e-kind.yml -f suite=drill --ref vX.Y.Z-rc.N` (not with `-f commit=`, and not on a
+   `hack/e2e-dispatch.sh --ref vX.Y.Z-rc.N --suite drill` (it prints `run=<id> url=<url>`; not with `--commit`, and not on a
    branch: the gate matches the run's own commit and ref). The drill takes about half an hour, so the
    release `gate` job first runs `hack/release-drill-wait.sh`: it waits (75 minutes at most) for the tag push's
    `e2e-kind` run to finish, and only waits. It never reads a result and cannot make anything pass; the gate

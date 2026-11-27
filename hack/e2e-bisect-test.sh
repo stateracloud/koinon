@@ -35,12 +35,14 @@ chart1=$(git rev-parse HEAD~3)
 fail=0
 check() { if grep -q -- "$2" <<<"$1"; then echo "ok: $3"; else echo "FAIL: $3 (missing '$2')" >&2; fail=1; fi; }
 nocheck() { if grep -q -- "$2" <<<"$1"; then echo "FAIL: $3 (found '$2')" >&2; fail=1; else echo "ok: $3"; fi; }
+# The dispatch tool runs from the real checkout (go tool needs its module).
+export E2E_DISPATCH="$repo/hack/e2e-dispatch.sh"
 b() { hack/e2e-bisect.sh --dry-run "$@" 2>&1; }
 
 # Two relevant merges; the second fails.
 out=$(b --green "$green" --head HEAD --results "${chart2:0:7}=fail")
 check "$out" "e2e-relevant candidates: 2" "finds the two chart merges among five"
-check "$out" "would dispatch: gh workflow run e2e-kind.yml -f commit=$chart2 -f bisect_id=" "dispatches the second with the bisect id"
+check "$out" "would dispatch: gh workflow run e2e-kind.yml --ref main -f suite=go -f backup_restore=true -f commit=$chart2 -f bisect_id=" "dispatches the second with the bisect id"
 nocheck "$out" "feat(web)" "the web-only merge is not a candidate"
 check "$out" "Culprit: .* fix(chart): the culprit" "names the culprit"
 check "$out" "fix forward within 2 hours" "states the policy"
@@ -108,7 +110,7 @@ check "$out" "feat(chart): the real PR title" "uses the PR title for a merge com
 nocheck "$out" "Merge pull request" "never the merge subject"
 
 # Non-dry-run against a stub gh: the dispatched run is matched exactly (commit and bisect id).
-export GITHUB_RUN_ID=999 POLL_SECONDS=1 CANDIDATE_TIMEOUT=2
+export GITHUB_RUN_ID=999 POLL_SECONDS=1 CANDIDATE_TIMEOUT=2 DISPATCH_TIMEOUT=1s
 head=$(git rev-parse HEAD)
 fx="$tmp-gh"
 mkdir -p "$fx"
