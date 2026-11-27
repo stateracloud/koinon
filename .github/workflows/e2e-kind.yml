@@ -571,9 +571,6 @@ jobs:
     # The measured run takes 26 to 28 minutes (#1039); the limits below grow from it: suite 45, step 55, job 60.
     # hack/release-drill-wait.sh waits 75 and the release gate job has 90.
     timeout-minutes: 60
-    env:
-      # The image of web-e2e in ci.yml (the same tag and digest; hack/ci-playwright-image-test.sh checks both).
-      KOINON_DRILL_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
     defaults:
       run:
         shell: bash
@@ -635,6 +632,12 @@ jobs:
 
       - name: Install web dependencies (browser sign-in)
         run: pnpm --dir web install --frozen-lockfile
+
+      # The image of web-e2e in ci.yml: both read hack/playwright-image.env (hack/ci-playwright-image-test.sh checks it).
+      - name: Choose the Playwright image (browser sign-in)
+        run: |
+          image=$(hack/playwright-image.sh)
+          echo "KOINON_DRILL_PLAYWRIGHT_IMAGE=$image" >>"$GITHUB_ENV"
 
       - name: Pull the Playwright image (browser sign-in)
         run: docker pull "$KOINON_DRILL_PLAYWRIGHT_IMAGE"

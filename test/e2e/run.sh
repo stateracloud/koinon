@@ -172,6 +172,7 @@ diagnostics() {
   # koinon-mcp-gateway runs two replicas at least, and a request can reach any of them: every pod's log,
   # each line prefixed with its pod.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=mcp-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-mcp-gateway.log" 2>&1 || true
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=model-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-model-gateway.log" 2>&1 || true
   # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
   for c in fakemodel fakegithub fakemcp fakegitea; do

@@ -92,20 +92,30 @@ func Dial(ep Endpoint, cfg Config, opts ...grpc.DialOption) (*Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	creds, err := routerCredentials(ep)
+	router, refusal, err := dialRouter(ep, opts...)
 	if err != nil {
 		_ = control.Close()
 		return nil, err
 	}
+	d := New(control, router, cfg)
+	d.routerRefusal = refusal
+	d.closers = []io.Closer{control, router}
+	return d, nil
+}
+
+// dialRouter connects to the atenet router. The second result returns the identity refusal that a router
+// call error carries, or nil.
+func dialRouter(ep Endpoint, opts ...grpc.DialOption) (*grpc.ClientConn, func(error) error, error) {
+	creds, err := routerCredentials(ep)
+	if err != nil {
+		return nil, nil, err
+	}
 	ropts := append([]grpc.DialOption{grpc.WithTransportCredentials(creds)}, opts...)
 	router, err := grpc.NewClient(ep.RouterAddr, ropts...)
 	if err != nil {
-		_ = control.Close()
-		return nil, fmt.Errorf("substrate: connect to %s: %w", ep.RouterAddr, err)
+		return nil, nil, fmt.Errorf("substrate: connect to %s: %w", ep.RouterAddr, err)
 	}
-	d := New(control, router, cfg)
-	d.closers = []io.Closer{control, router}
-	return d, nil
+	return router, creds.(*routerCreds).refused.matches, nil
 }
 
 // fileToken sends the contents of a file as a bearer token.

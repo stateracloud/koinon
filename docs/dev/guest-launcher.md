@@ -63,8 +63,8 @@ architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`
 ### The guest API channel
 
 The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService` only: the guest
-front has no file service, see Upload below) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
-which selects the actor by the `ate-target-actor` header and removes that header before it forwards
+front has no file service, see Upload below) in TLS on port 443 of the atenet router (the client certificate is the pod certificate of agentd) and then plain HTTP/2 (h2c) from the router to TCP port 80 of the actor. The router
+selects the actor by the `ate-target-actor` header and removes that header before it forwards
 the call. The payload runs in the same network namespace in both tiers, so it can reach port 80 on
 `127.0.0.1` or on the pod address. The upstream guest server has no authentication, so the guest
 front owns the only listener (ADR 0120 section 4.7, issue #1309):
