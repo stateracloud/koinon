@@ -282,7 +282,7 @@ Scope:
 - **Supply chain (#238).** One mirrored, digest-pinned agentgateway image for the chart, the Go tests
   and kind; no test pulls from `cr.agentgateway.dev`.
 - **Kubernetes mode is frozen, then dropped, not ported** (#274; maintainer decision 2026-11-06,
-  second review). It keeps passing the suite in v0.1 and gets no new features; Koinon's gateway never gets a
+  second review). It keeps passing the suite in v0.1 (except with the Substrate driver: section 16) and gets no new features; Koinon's gateway never gets a
   Kubernetes mode, and it is deleted with agentgateway in step 3. A platform that runs its own
   Kubernetes gateway puts it behind Koinon's (decision 10). Shared mode (ADR 0058) is not built: an
   existing gateway an org already runs is reached as a provider upstream, as ADR 0058 decision 2
@@ -1283,6 +1283,21 @@ An upstream provider can echo its provider key in a response body, most often in
 - **Later.** A scrubber that removes the key from the stream can reuse the same matcher: it holds back the
   `len(key) - 1` tail bytes in place of only reading them. It needs its own decision, because it changes the
   bytes that a client sees (lengths, SSE event bounds) and the time at which it sees them.
+
+### 16. Kubernetes mode is not supported with the Substrate driver in v0.1.0 (amendment 2026-11-27, #1489)
+
+On Agent Substrate, atenet-egress adds an actor JWT to every model and MCP call from the guest. Only
+koinon-gateway checks that JWT. agentgateway (`gateway.mode=kubernetes`) does not check it. A gateway key in the
+guest would replace the JWT, but a credential in a sandbox is forbidden (ADR 0120, no secrets in sandboxes). The
+maintainer decided on 2026-11-27:
+
+- **Not supported.** `gateway.mode=kubernetes` (agentgateway as the model gateway) is not supported with
+  `execution.driver=substrate` in v0.1.0. The line in section 4, "keeps passing the suite in v0.1", does not hold
+  for this pair.
+- **In the chart.** With `execution.driver=substrate` and no `gateway.model.driver`, the chart uses `koinon`. An
+  explicit `gateway.model.driver=agentgateway`, an agentgateway MCP driver or `gateway.mode=kubernetes` with
+  Substrate does not render, and the error names the value to set.
+- **Later.** The pair can return when agentgateway checks the actor token. That needs its own decision.
 
 ## Alternatives considered
 

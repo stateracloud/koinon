@@ -55,7 +55,7 @@ const markGatewayAgentForgeServed = `-- name: MarkGatewayAgentForgeServed :exec
 UPDATE gateway_agent_forge
 SET served_at = now(), updated_at = now()
 WHERE org_id = $1 AND agent_id = $2 AND state_revision = $3
-  AND failure = '' AND served_at IS NULL
+  AND served_at IS NULL
 `
 
 type MarkGatewayAgentForgeServedParams struct {
@@ -64,7 +64,8 @@ type MarkGatewayAgentForgeServedParams struct {
 	StateRevision pgtype.Int8
 }
 
-// Every live copy acked the revision that holds the agent's credential.
+// Every live copy acked the revision that holds the agent's credential or actor. A row with a failure may be
+// marked too: it then proves only the actor revision (agentd ignores the failure when the run needs no credential).
 func (q *Queries) MarkGatewayAgentForgeServed(ctx context.Context, arg MarkGatewayAgentForgeServedParams) error {
 	_, err := q.db.Exec(ctx, markGatewayAgentForgeServed, arg.OrgID, arg.AgentID, arg.StateRevision)
 	return err

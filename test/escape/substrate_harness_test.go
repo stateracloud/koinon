@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +54,11 @@ import (
 //	                                       sandbox-substrate overlay (guest front and launcher) (required)
 //	KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS  the Substrate runtime class of the tier under test, for
 //	                                       example the gVisor class of the install (required)
+//	KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES comma-separated host:port gateway routes (required), for example
+//	                                       koinon-gateway.koinon-system.svc:8080. The driver writes them into
+//	                                       the egress policy of every sandbox (issue #1444, #1508): the only
+//	                                       destinations that policy allows. A host is a lowercase DNS name,
+//	                                       never an IP address. The suite sends one HTTP request to the first, as the positive control of the deny specs
 //	KOINON_ESCAPE_TIER                     the isolation tier of that class: hardened (default), vm or dev
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS  comma-separated host=target entries, as --substrate-image-mirrors
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY registry that replaces the host of an image with no mirror entry
@@ -68,6 +75,22 @@ import (
 //	KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT, _REGION, _BUCKET, _ACCESS_KEY_FILE, _SECRET_KEY_FILE
 //	                                       the snapshot bucket (read-only key), as --substrate-snapshot-*;
 //	                                       the restore spec needs them, and fails closed without
+//	KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES comma-separated host:port gateway listeners that the driver writes
+//	                                       into the egress policy of every actor, as the reconciler's model
+//	                                       and MCP routes (issue #1444, required).
+//	                                       Without routes the driver refuses every create
+//	KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY host:port (a DNS name) of the identity stand-in that this
+//	                                       process serves (substrate_identity_rig_test.go). The driver writes
+//	                                       it as the code-host egress route, with the actor-token effect of
+//	                                       issue #1386. atenet-egress must resolve it to this machine and reach
+//	                                       it. The actor identity specs need it, and fail without it
+//	KOINON_ESCAPE_SUBSTRATE_IDENTITY_LISTEN local listen address of the stand-in (default :<port of the above>)
+//	KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER the issuer of the install's actor JWTs, as --actor-jwt-issuer
+//	                                       (for example https://idp.ate-system.svc); this machine must reach it
+//	KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE the CA that signs the issuer's certificate, as --actor-jwt-ca-file
+//	KOINON_ESCAPE_SUBSTRATE_GATEWAY_DIRECT comma-separated host:port of the installed gateway's egress
+//	                                       listener (its Service name, Service IP and pod IP): the spec that
+//	                                       checks that no route skips atenet-egress connects to each
 //
 // The actor needs the sandbox-substrate overlay: the driver puts the guest launcher in front of every
 // command, so an image without it cannot run a probe.
@@ -77,6 +100,7 @@ import (
 var substrateEnvNames = []string{
 	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER",
 	"KOINON_ESCAPE_SUBSTRATE_IMAGE", "KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS",
+	"KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES",
 }
 
 // missingSubstrateEnv names the required variables that are empty.
@@ -97,6 +121,10 @@ type substrateRig struct {
 	image, class              string
 	tier                      harness.Tier
 	snapshots                 bool
+	// identity is the code-host egress route of the run: the identity stand-in, or nil when
+	// KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY is not set. Only a sandbox with CodeHostEgress access
+	// (SetGatewayAccess before the create) gets it in its egress policy.
+	identity *substrate.GatewayRoute
 }
 
 // rig is the one rig of the run; the suite's BeforeSuite sets it when KOINON_ESCAPE_DRIVER=substrate.
@@ -108,6 +136,43 @@ func splitList(s string) []string {
 	for _, p := range strings.Split(s, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseGatewayRoutes parses a comma-separated list of host:port gateway routes (issue #1508). It applies the
+// checks of the driver (ValidateGatewayRoutes), so a bad input fails with a clear message before any call to
+// Substrate. The list must not be empty: the driver refuses a sandbox without a route (issue #1444).
+func parseGatewayRoutes(raw string) ([]substrate.GatewayRoute, error) {
+	var routes []substrate.GatewayRoute
+	for _, entry := range splitList(raw) {
+		host, portText, err := net.SplitHostPort(entry)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: want host:port: %w", entry, err)
+		}
+		port, err := strconv.ParseUint(portText, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: the port is not a number in 1-65535", entry)
+		}
+		routes = append(routes, substrate.GatewayRoute{Host: host, Port: uint32(port)})
+	}
+	if err := substrate.ValidateGatewayRoutes(withListeners(routes), nil); err != nil {
+		return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES %q: %w", raw, err)
+	}
+	return routes, nil
+}
+
+// withListeners: the first route is the model route, every other route an MCP route. It gives each parsed route the header and audience of a gateway listener (issue #1489): the
+// first route is the model listener, every other one an MCP listener. The specs never call these routes; the
+// driver needs valid ones to write a policy.
+func withListeners(routes []substrate.GatewayRoute) []substrate.GatewayRoute {
+	out := make([]substrate.GatewayRoute, len(routes))
+	for i, r := range routes {
+		if i == 0 {
+			out[i] = substrate.ModelRoute(r.Host, r.Port)
+		} else {
+			out[i] = substrate.MCPRoute(r.Host, r.Port)
 		}
 	}
 	return out
@@ -142,19 +207,37 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 			return nil, nil, err
 		}
 	}
+	routes, err := parseGatewayRoutes(get("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES"))
+	if err != nil {
+		return nil, nil, err
+	}
+	routes = withListeners(routes)
+	// The code-host egress route is the identity stand-in, so atenet-egress adds the actor JWT on its way
+	// there (issue #1386) and the identity specs can see what the gateway gets.
+	var identity *substrate.GatewayRoute
+	if id := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY")); id != "" {
+		r, err := parseGatewayRoutes(id)
+		if err != nil || len(r) != 1 {
+			return nil, nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY must be one host:port: %q", id)
+		}
+		e := substrate.EgressRoute(r[0].Host, r[0].Port)
+		identity = &e
+	}
 	s := cli.Substrate{
-		ControlAddress:    get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
-		RouterAddress:     get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
-		RouterCAFile:      get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CA"),
-		RouterServerName:  get("KOINON_ESCAPE_SUBSTRATE_ROUTER_SERVER_NAME"),
-		RouterCertFile:    get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CERT"),
-		CAFile:            get("KOINON_ESCAPE_SUBSTRATE_CA"),
-		ServerName:        get("KOINON_ESCAPE_SUBSTRATE_SERVER_NAME"),
-		BearerTokenFile:   get("KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE"),
-		RuntimeClassTiers: []string{class + "=" + string(tier)},
-		ImageMirrors:      splitList(get("KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS")),
-		ImageRegistry:     get("KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY"),
-		GuestKeyFile:      keyFile,
+		GatewayRoutes:       routes,
+		CodeHostEgressRoute: identity,
+		ControlAddress:      get("KOINON_ESCAPE_SUBSTRATE_CONTROL"),
+		RouterAddress:       get("KOINON_ESCAPE_SUBSTRATE_ROUTER"),
+		RouterCAFile:        get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CA"),
+		RouterServerName:    get("KOINON_ESCAPE_SUBSTRATE_ROUTER_SERVER_NAME"),
+		RouterCertFile:      get("KOINON_ESCAPE_SUBSTRATE_ROUTER_CERT"),
+		CAFile:              get("KOINON_ESCAPE_SUBSTRATE_CA"),
+		ServerName:          get("KOINON_ESCAPE_SUBSTRATE_SERVER_NAME"),
+		BearerTokenFile:     get("KOINON_ESCAPE_SUBSTRATE_TOKEN_FILE"),
+		RuntimeClassTiers:   []string{class + "=" + string(tier)},
+		ImageMirrors:        splitList(get("KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS")),
+		ImageRegistry:       get("KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY"),
+		GuestKeyFile:        keyFile,
 		SnapshotStore: cli.SnapshotStore{
 			Endpoint:      get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT"),
 			Region:        get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_REGION"),
@@ -185,7 +268,7 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 	}
 	return d, &substrateRig{
 		driver: d, workspace: ws, otherWorkspace: other, image: get("KOINON_ESCAPE_SUBSTRATE_IMAGE"),
-		class: class, tier: tier, snapshots: s.SnapshotStore.Endpoint != "",
+		class: class, tier: tier, snapshots: s.SnapshotStore.Endpoint != "", identity: identity,
 	}, nil
 }
 

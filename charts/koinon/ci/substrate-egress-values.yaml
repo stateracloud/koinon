@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Agent Substrate with koinon-gateway's egress listener (ADR 0120, amendment of issue #1386, item 4): the
+# gateway starts with --actor-token-verifier=substrate, the issuer of execution.substrate.actorJwt and the
+# CA bundle of the issuer's TLS (the ClusterTrustBundle projection; the smoke writes a fake CA). The verifier
+# does not contact the issuer at start, so the smoke needs no ate-idp-server. No Ed25519 actor token key
+# is made or mounted. The rest is substrate-values.yaml.
+execution:
+  driver: substrate
+  substrate:
+    controlAddress: api.ate-system.svc.cluster.local:443
+    routerAddress: atenet-router.ate-system.svc:443
+    tokenAudience: ateapi
+    allowUnhardened: true
+    # The worker namespace objects (issue #1089): the policies guard the Substrate objects too, the
+    # NetworkPolicy fences the Substrate namespaces.
+    workerPolicy:
+      installerIdentities: [system:admin]
+    # The tier of openshell.runtimeClassName, the class the reconciler puts on every sandbox (#1245).
+    defaultTier: dev
+sandboxObserver:
+  enabled: false
+sandboxNetworkPolicy:
+  enabled: false
+sandboxLimitRange:
+  enabled: false
+# Substrate needs koinon-gateway on the model and MCP paths: only it checks the actor JWT (issue #1489).
+gateway:
+  mode: standalone
+  model:
+    driver: koinon
+  mcp:
+    driver: koinon
+    koinon:
+      egress:
+        enabled: true
+postgres:
+  cnpg:
+    instances: 1
+# Substrate runs a harness image only when it is pinned by digest (issue #1192): the reconciler
+# refuses to start without one. The digest is a fake: CI never pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

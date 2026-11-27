@@ -29,7 +29,8 @@ var _ = Describe("the actor egress policy", func() {
 		Expect(p.GetMetadata().GetName()).To(Equal("default"))
 		Expect(p.GetRules()).To(HaveLen(1))
 		Expect(p.GetRules()[0].GetHttp().GetHostnames()).To(Equal([]string{gw}))
-		Expect(p.GetRules()[0].GetHttp().GetEffects()).To(BeNil(), "the rule holds no credential")
+		Expect(p.GetRules()[0].GetHttp().GetEffects().GetReplaceHeaders()).To(HaveLen(1), "the rule holds only the actor JWT effect")
+		Expect(p.GetRules()[0].GetHttp().GetEffects().GetReplaceHeaders()[0].GetCredentialUri()).To(BeEmpty(), "and no credential")
 		Expect(p.GetRules()[0].GetHttps()).To(BeNil())
 		Expect(p.GetRules()[0].GetTlsPassthrough()).To(BeNil())
 
@@ -163,19 +164,19 @@ var _ = Describe("the actor egress policy", func() {
 		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
 	})
 
-	It("writes one rule per gateway host with all of its ports, in a fixed order", func(ctx SpecContext) {
+	It("writes one rule per gateway host and port, in a fixed order", func(ctx SpecContext) {
 		d, c := newDriver(substrate.Config{GatewayRoutes: []substrate.GatewayRoute{
-			{Host: "mcp.koinon.svc.cluster.local", Port: 8080},
-			{Host: gw, Port: 9090},
-			{Host: gw, Port: gwPort},
-			{Host: gw, Port: gwPort},
+			substrate.MCPRoute("mcp.koinon.svc.cluster.local", 8080),
+			substrate.MCPRoute(gw, 9090),
+			substrate.ModelRoute(gw, gwPort),
 		}})
 		ready(ctx, d, "a")
 		rules := c.EgressPolicy(ws, "a").GetRules()
-		Expect(rules).To(HaveLen(2))
+		Expect(rules).To(HaveLen(3))
 		Expect(rules[0].GetHttp().GetHostnames()).To(Equal([]string{gw}))
-		Expect(rules[0].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(gwPort), 9090}))
-		Expect(rules[1].GetHttp().GetHostnames()).To(Equal([]string{"mcp.koinon.svc.cluster.local"}))
+		Expect(rules[0].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(gwPort)}))
+		Expect(rules[1].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{9090}))
+		Expect(rules[2].GetHttp().GetHostnames()).To(Equal([]string{"mcp.koinon.svc.cluster.local"}))
 		Expect(c.EgressAllowed(ws, "a", gw, 9090)).To(BeTrue())
 		Expect(c.EgressAllowed(ws, "a", "mcp.koinon.svc.cluster.local", 8080)).To(BeTrue())
 		Expect(c.EgressAllowed(ws, "a", "mcp.koinon.svc.cluster.local", 9090)).To(BeFalse())
@@ -231,6 +232,18 @@ var _ = Describe("the egress listener in the actor egress policy", func() {
 		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
 		Expect(c.PolicyWrites(ws, "a")).To(Equal(1), "written once, before the first resume")
 		Expect(c.Calls("ResumeWithoutEgressPolicy")).To(BeZero())
+	})
+
+	// Issue #1386: the reconciler drops the record of an old actor name, so that no later actor gets it.
+	It("forgets the recorded access of a name without a call to the control plane", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		calls := c.Calls("DeleteActor")
+		d.ForgetGatewayAccess(ws, "a")
+		Expect(c.Calls("DeleteActor")).To(Equal(calls))
+		ready(ctx, d, "a")
+		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeFalse(), "no access recorded: the driver fails closed")
+		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
 	})
 
 	It("takes the egress listener away from a running actor when the grant goes, without a replacement", func(ctx SpecContext) {
@@ -343,42 +356,36 @@ var _ = DescribeTable("ValidateGatewayRoutes",
 			Expect(err).To(HaveOccurred())
 		}
 	},
-	Entry("a cluster DNS name", []substrate.GatewayRoute{{Host: "koinon-gateway.koinon.svc.cluster.local", Port: 8080}}, true),
-	Entry("a short name", []substrate.GatewayRoute{{Host: "gateway", Port: 80}}, true),
+	Entry("a cluster DNS name", []substrate.GatewayRoute{substrate.ModelRoute("koinon-gateway.koinon.svc.cluster.local", 8080)}, true),
+	Entry("a short name", []substrate.GatewayRoute{substrate.MCPRoute("gateway", 80)}, true),
+	Entry("model and MCP on one host", []substrate.GatewayRoute{substrate.ModelRoute("gateway", 8080), substrate.MCPRoute("gateway", 8081)}, true),
 	Entry("no route", []substrate.GatewayRoute(nil), false),
-	Entry("an IPv4 address", []substrate.GatewayRoute{{Host: "10.0.0.1", Port: 8080}}, false),
-	Entry("an IPv6 address", []substrate.GatewayRoute{{Host: "::1", Port: 8080}}, false),
-	Entry("a bracketed IPv6 address", []substrate.GatewayRoute{{Host: "[::1]", Port: 8080}}, false),
-	Entry("upper case", []substrate.GatewayRoute{{Host: "Gateway.svc", Port: 8080}}, false),
-	Entry("a trailing dot", []substrate.GatewayRoute{{Host: "gateway.svc.", Port: 8080}}, false),
-	Entry("a wildcard", []substrate.GatewayRoute{{Host: "*.svc", Port: 8080}}, false),
-	Entry("a port in the host", []substrate.GatewayRoute{{Host: "gateway:8080", Port: 8080}}, false),
-	Entry("an empty label", []substrate.GatewayRoute{{Host: "gateway..svc", Port: 8080}}, false),
-	Entry("a label that starts with a hyphen", []substrate.GatewayRoute{{Host: "-gateway.svc", Port: 8080}}, false),
-	Entry("port 0", []substrate.GatewayRoute{{Host: "gateway", Port: 0}}, false),
-	Entry("a port over 65535", []substrate.GatewayRoute{{Host: "gateway", Port: 70000}}, false),
-	Entry("17 ports on one host", func() []substrate.GatewayRoute {
-		var r []substrate.GatewayRoute
-		for p := range uint32(17) {
-			r = append(r, substrate.GatewayRoute{Host: "gateway", Port: 8000 + p})
-		}
-		return r
-	}(), false),
+	Entry("an IPv4 address", []substrate.GatewayRoute{substrate.ModelRoute("10.0.0.1", 8080)}, false),
+	Entry("an IPv6 address", []substrate.GatewayRoute{substrate.ModelRoute("::1", 8080)}, false),
+	Entry("a bracketed IPv6 address", []substrate.GatewayRoute{substrate.ModelRoute("[::1]", 8080)}, false),
+	Entry("upper case", []substrate.GatewayRoute{substrate.ModelRoute("Gateway.svc", 8080)}, false),
+	Entry("a trailing dot", []substrate.GatewayRoute{substrate.ModelRoute("gateway.svc.", 8080)}, false),
+	Entry("a wildcard", []substrate.GatewayRoute{substrate.ModelRoute("*.svc", 8080)}, false),
+	Entry("a port in the host", []substrate.GatewayRoute{substrate.ModelRoute("gateway:8080", 8080)}, false),
+	Entry("an empty label", []substrate.GatewayRoute{substrate.ModelRoute("gateway..svc", 8080)}, false),
+	Entry("a label that starts with a hyphen", []substrate.GatewayRoute{substrate.ModelRoute("-gateway.svc", 8080)}, false),
+	Entry("port 0", []substrate.GatewayRoute{substrate.ModelRoute("gateway", 0)}, false),
+	Entry("a port over 65535", []substrate.GatewayRoute{substrate.ModelRoute("gateway", 70000)}, false),
+	Entry("two listeners on one host and port", []substrate.GatewayRoute{substrate.ModelRoute("gateway", 8080), substrate.MCPRoute("gateway", 8080)}, false),
+	Entry("one listener twice", []substrate.GatewayRoute{substrate.ModelRoute("gateway", 8080), substrate.ModelRoute("gateway", 8080)}, false),
+	Entry("no header", []substrate.GatewayRoute{{Host: "gateway", Port: 8080, Audience: substrate.AudienceModel}}, false),
+	Entry("no audience", []substrate.GatewayRoute{{Host: "gateway", Port: 8080, Header: "Authorization"}}, false),
+	Entry("the Ed25519 audience", []substrate.GatewayRoute{{Host: "gateway", Port: 8080, Header: "Authorization", Audience: "koinon-gateway"}}, false),
 )
 
 var _ = It("ValidateGatewayRoutes keeps the egress route apart from the routes of every actor", func() {
-	routes := []substrate.GatewayRoute{{Host: "gateway", Port: 8080}}
-	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).To(Succeed())
-	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "gateway", Port: 8080})).
+	routes := []substrate.GatewayRoute{substrate.ModelRoute("gateway", 8080)}
+	Expect(substrate.ValidateGatewayRoutes(routes, ptr(substrate.EgressRoute("gateway", 8081)))).To(Succeed())
+	Expect(substrate.ValidateGatewayRoutes(routes, ptr(substrate.EgressRoute("gateway", 8080)))).
 		To(MatchError(ContainSubstring("cannot gate it")))
-	Expect(substrate.ValidateGatewayRoutes(routes, &substrate.GatewayRoute{Host: "10.0.0.1", Port: 8081})).To(HaveOccurred())
-	Expect(substrate.ValidateGatewayRoutes(nil, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).
+	Expect(substrate.ValidateGatewayRoutes(routes, ptr(substrate.EgressRoute("10.0.0.1", 8081)))).To(HaveOccurred())
+	Expect(substrate.ValidateGatewayRoutes(nil, ptr(substrate.EgressRoute("gateway", 8081)))).
 		To(HaveOccurred(), "the egress route alone is not enough")
-	var many []substrate.GatewayRoute
-	for p := range uint32(16) {
-		many = append(many, substrate.GatewayRoute{Host: "gateway", Port: 9000 + p})
-	}
-	Expect(substrate.ValidateGatewayRoutes(many, nil)).To(Succeed())
-	Expect(substrate.ValidateGatewayRoutes(many, &substrate.GatewayRoute{Host: "gateway", Port: 8081})).
-		To(MatchError(ContainSubstring("more than 16 ports")), "the egress port counts toward the limit of one rule")
+	Expect(substrate.ValidateGatewayRoutes(routes, ptr(substrate.MCPRoute("gateway", 8081)))).
+		To(MatchError(ContainSubstring("audience")), "the egress route has the egress audience")
 })

@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
+	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	"github.com/stateracloud/koinon/internal/harness"
 )
 
@@ -41,6 +42,10 @@ var unguarded bool
 // latency is the boot and resume time of the fake's actors (fakeate.Cluster.Latency; zero is 1 ms).
 var latency time.Duration
 
+// lastControl is the control connection of the fake that the latest newDriver started: a spec that checks the
+// admission of the fake calls the control API through it.
+var lastControl ateapiv1.ControlClient
+
 // newDriver starts a fake Substrate and returns a driver on it, with the workspace made.
 func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	cl := fakeate.New()
@@ -50,6 +55,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(cl.Stop)
 	DeferCleanup(control.Close)
+	lastControl = ateapiv1.NewControlClient(control)
 	DeferCleanup(router.Close)
 	c := substrate.Config{PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond}
 	if len(cfg) > 0 {
@@ -64,7 +70,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	}
 	if c.GatewayRoutes == nil && !noGatewayRoutes {
 		c.GatewayRoutes = gatewayRoutes
-		c.CodeHostEgressRoute = &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort}
+		c.CodeHostEgressRoute = ptr(substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort))
 	}
 	if c.ContentDigest == nil && !noContentDigest {
 		// The fake has no object store: the object's content is its address.
@@ -77,7 +83,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 }
 
 // gatewayRoutes is the one gateway route of the specs' driver.
-var gatewayRoutes = []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}}
+var gatewayRoutes = []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)}
 
 // img is the actor image of the specs: the driver refuses one that is not pinned by digest.
 const img = "img" + digest

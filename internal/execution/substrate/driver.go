@@ -14,8 +14,8 @@
 //   - StopSandbox and SuspendSandbox are one operation, SuspendActor: Substrate has no stopped
 //     state that is not a suspended one. Both report [execution.PhaseSuspended];
 //   - Exec has no control-API call (upstream issue 185), so it runs over the in-guest
-//     ProcessService, and Upload over FileSystemService, both through the atenet router with the
-//     header ate-target-actor;
+//     ProcessService, and so does Upload (a tar stream on the stdin of a process), both through the
+//     atenet router with the header ate-target-actor. The guest has no FileSystemService (#1478);
 //   - a snapshot is a Substrate tag on a suspended actor, with a Koinon-side SHA-256 digest that
 //     RestoreSandbox verifies (Substrate has no digest of its own; upstream T-25).
 //
@@ -164,7 +164,6 @@ func (c Config) withDefaults() Config {
 type Driver struct {
 	control ateapiv1.ControlClient
 	process ateenvv1alpha.ProcessServiceClient
-	files   ateenvv1alpha.FileSystemServiceClient
 	router  grpc.ClientConnInterface // signs every call (signedConn)
 	// routerState reports the state of the router connection, or is nil when the connection has none to
 	// report (a test double). routerDown reads it.
@@ -226,7 +225,6 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		d.routerState = cc.GetState
 	}
 	d.process = ateenvv1alpha.NewProcessServiceClient(d.router)
-	d.files = ateenvv1alpha.NewFileSystemServiceClient(d.router)
 	return d
 }
 

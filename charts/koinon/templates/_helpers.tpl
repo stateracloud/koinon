@@ -282,9 +282,17 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- if eq .Values.gateway.mcp.driver "koinon" }}true{{ end -}}
 {{- end }}
 
-{{/* True when koinon-gateway serves the model path (gateway.model.driver=koinon). Empty otherwise. */}}
+{{/* The model driver. gateway.model.driver when set; empty means koinon with execution.driver=substrate (only
+koinon-gateway checks the actor JWT, issue #1489, ADR 0097 amendment of 2026-11-27) and agentgateway otherwise. */}}
+{{- define "koinon.modelDriver" -}}
+{{- if .Values.gateway.model.driver }}{{ .Values.gateway.model.driver }}
+{{- else if eq (include "koinon.substrate" .) "true" }}koinon
+{{- else }}agentgateway{{ end -}}
+{{- end }}
+
+{{/* True when koinon-gateway serves the model path (see koinon.modelDriver). Empty otherwise. */}}
 {{- define "koinon.modelKoinon" -}}
-{{- if eq .Values.gateway.model.driver "koinon" }}true{{ end -}}
+{{- if eq (include "koinon.modelDriver" .) "koinon" }}true{{ end -}}
 {{- end }}
 
 {{/* The MCP gateway's Service, fully qualified like koinon.gatewayHost. */}}
@@ -311,6 +319,141 @@ true
 {{/* The Secret with the actor token key (ensure-secrets kind ed25519-key): key, the seed (koinon-agentd only), and public.pem (koinon-gateway only). */}}
 {{- define "koinon.actorTokenKeyName" -}}
 {{- .Values.gateway.mcp.koinon.egress.actorToken.existingSecret | default (include "koinon.componentName" (list . "actor-token-key")) -}}
+{{- end }}
+
+{{/*
+Which verifier checks the actor token of the egress listener (ADR 0120, amendment of issue #1386, item 4). Until #1094
+removes the OpenShell driver, the execution driver selects it:
+- koinon.ed25519ActorToken: openshell. koinon-agentd signs with the Ed25519 seed and writes the interim token file into
+  the guest; the gateway verifies with the public key. Exit: #1386 PR B, after #1094, removes it.
+- koinon.substrateActorJWT: substrate. atenet-egress adds a token that ateapi mints, outside the guest; the gateway
+  verifies it against Substrate's issuer (ate-idp-server). No Ed25519 key exists, and agentd signs nothing.
+*/}}
+{{- define "koinon.ed25519ActorToken" -}}
+{{- if and (include "koinon.egressListener" .) (ne (include "koinon.substrate" .) "true") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/* Substrate: koinon-gateway checks the actor JWT on the model, MCP and egress listeners (issue #1489). */}}
+{{- define "koinon.substrateActorJWT" -}}
+{{- if eq (include "koinon.substrate" .) "true" -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+The verifier flags of a koinon-gateway pod on Substrate (issue #1489). The audience of each listener is fixed in the
+binary (actortoken.AudienceModel, AudienceMCP, AudienceEgress), so the chart names only the issuer and its CA.
+*/}}
+{{- define "koinon.substrateActorJWTArgs" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+- --actor-token-verifier=substrate
+- {{ printf "--actor-jwt-issuer=%s" (include "koinon.substrateActorJWTIssuer" .) | quote }}
+- --actor-jwt-ca-file={{ include "koinon.substrateActorJWTCADir" . }}/ca.crt
+{{- end }}
+{{- end }}
+
+{{/*
+The ingress peer of a gateway listener on Substrate (ADR 0120 amendment of 2026-11-27, issue #1489): only atenet-egress,
+which adds the actor JWT. A pod that skips that hop, a sandbox pod included, gets no answer.
+*/}}
+{{- define "koinon.atenetEgressPeer" -}}
+{{- $sel := .Values.execution.substrate.workerNetworkPolicy.atenetEgressSelector | default dict }}
+{{- if not (or $sel.matchLabels $sel.matchExpressions) }}
+{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let every pod of the Substrate namespace reach the gateway listeners" }}
+{{- end -}}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ .Values.execution.substrate.namespace | quote }}
+  podSelector:
+    {{- toYaml $sel | nindent 4 }}
+{{- end }}
+
+{{/* The egress rule of a koinon-gateway pod to Substrate's issuer (ate-idp-server), for its key set. */}}
+{{- define "koinon.substrateIdPEgress" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+{{- $aj := .Values.execution.substrate.actorJwt }}
+{{- $idpSel := $aj.idpPodSelector | default dict }}
+{{- if not (or $idpSel.matchLabels $idpSel.matchExpressions) }}
+{{- fail "execution.substrate.actorJwt.idpPodSelector needs matchLabels or matchExpressions: an empty selector would let the gateway reach every pod in the Substrate namespace" }}
+{{- end -}}
+# The Substrate verifier (ADR 0120, amendment of issue #1386, item 7): the discovery document and the key set of
+# ate-idp-server. The pod port (8443, named https), not the Service port 443: a NetworkPolicy matches the port after
+# the Service maps it. No route to ateapi.
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .Values.execution.substrate.namespace | quote }}
+      podSelector:
+        {{- toYaml $idpSel | nindent 8 }}
+  ports:
+    - {port: {{ int $aj.idpPort }}, protocol: TCP}
+{{- end }}
+{{- end }}
+
+{{/* The model gateway's Service, fully qualified like koinon.gatewayHost. */}}
+{{- define "koinon.modelGatewayHost" -}}
+{{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "model-gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
+{{- end }}
+
+{{/* koinon-gateway's model listener as sandboxes and the reconciler name it (gateway.model.driver=koinon). */}}
+{{- define "koinon.modelGatewayURL" -}}
+{{- printf "http://%s:%d" (include "koinon.modelGatewayHost" .) (int .Values.gateway.model.koinon.port) -}}
+{{- end }}
+
+{{/* The one issuer the gateway trusts (execution.substrate.actorJwt.issuer). Empty: Substrate's installer default,
+https://idp.<execution.substrate.namespace>.svc (ate-setup actorJWT.issuer; the Service idp of ate-idp-server). */}}
+{{- define "koinon.substrateActorJWTIssuer" -}}
+{{- $i := .Values.execution.substrate.actorJwt.issuer | default (printf "https://idp.%s.svc" .Values.execution.substrate.namespace) -}}
+{{- if not (regexMatch "^https://[^/?#]+$" $i) -}}
+{{- fail (printf "execution.substrate.actorJwt.issuer %q must be https://<host> with no path, query or fragment, as Substrate's issuer" $i) -}}
+{{- end -}}
+{{- $i -}}
+{{- end }}
+
+{{- define "koinon.substrateActorJWTCADir" -}}
+/etc/koinon/substrate-idp-ca
+{{- end }}
+
+{{/* The CA bundle that verifies the issuer's TLS certificate: public certificates only, never a key. */}}
+{{- define "koinon.substrateActorJWTCAVolumeMount" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+- name: substrate-idp-ca
+  mountPath: {{ include "koinon.substrateActorJWTCADir" . }}
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{/*
+Default: the ClusterTrustBundle of Substrate's servicedns signer, which signs the serving certificate of ate-idp-server
+(manifests/ate-install/ate-idp-server.yaml, podCertificate servicedns.podcert.ate.dev/identity). The kubelet keeps the
+file in step with the bundle, so a CA rotation needs no chart change. execution.substrate.actorJwt.ca.configMap
+replaces it, for an issuer that a different CA signs (an issuer outside the cluster).
+*/}}
+{{- define "koinon.substrateActorJWTCAVolume" -}}
+{{- if include "koinon.substrateActorJWT" . -}}
+{{- $ca := .Values.execution.substrate.actorJwt.ca }}
+- name: substrate-idp-ca
+  projected:
+    defaultMode: 0444
+    sources:
+      {{- if $ca.configMap }}
+      - configMap:
+          name: {{ $ca.configMap | quote }}
+          items:
+            - key: {{ $ca.configMapKey | quote }}
+              path: ca.crt
+      {{- else }}
+      - clusterTrustBundle:
+          signerName: {{ required "execution.substrate.actorJwt.ca.signerName is required without execution.substrate.actorJwt.ca.configMap" $ca.signerName | quote }}
+          {{- with $ca.labelSelector }}
+          labelSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          path: ca.crt
+      {{- end }}
+{{- end }}
 {{- end }}
 
 {{/* The URL koinon-api sends approved MCP calls to. */}}
@@ -933,7 +1076,7 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if not .Values.installMark.existingSecret -}}
 {{- $specs = append $specs (dict "name" (include "koinon.installMarkName" .) "type" "Opaque" "kind" "bearer-token" "labels" (fromYaml (include "koinon.generatedLabels" (list . "reconciler")))) -}}
 {{- end -}}
-{{- if and (include "koinon.egressListener" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
+{{- if and (include "koinon.ed25519ActorToken" .) (not .Values.gateway.mcp.koinon.egress.actorToken.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.actorTokenKeyName" .) "type" "Opaque" "kind" "ed25519-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "agentd")))) -}}
 {{- end -}}
 {{- $specs | toJson -}}
@@ -1544,6 +1687,17 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if not .Values.execution.substrate.tokenAudience }}
 {{- fail "execution.substrate.tokenAudience is required with execution.driver=substrate" }}
 {{- end }}
+{{- /* Issue #1489, ADR 0120 amendment of 2026-11-27: the guest holds no gateway key; atenet-egress adds the actor JWT,
+and only koinon-gateway checks it. agentgateway cannot, so the model and MCP paths must be koinon-gateway's. */}}
+{{- if eq .Values.gateway.mode "kubernetes" }}
+{{- fail "gateway.mode=kubernetes is not supported with execution.driver=substrate in v0.1.0: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to a model or MCP call, so agentgateway cannot carry them (issue #1489, ADR 0097 amendment of 2026-11-27). Use gateway.mode=standalone with gateway.model.driver=koinon and gateway.mcp.driver=koinon" }}
+{{- end }}
+{{- if not (include "koinon.modelKoinon" .) }}
+{{- fail "execution.driver=substrate needs gateway.model.driver=koinon (the default with Substrate): the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to a model call (issue #1489). Remove gateway.model.driver=agentgateway. gateway.mode=kubernetes is not supported with the Substrate driver in v0.1.0 (ADR 0097 amendment of 2026-11-27)" }}
+{{- end }}
+{{- if not (include "koinon.mcpKoinon" .) }}
+{{- fail "execution.driver=substrate needs gateway.mcp.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to an MCP call (issue #1489). Set gateway.mode=standalone: gateway.mode=kubernetes is not supported with the Substrate driver in v0.1.0 (ADR 0097 amendment of 2026-11-27)" }}
+{{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
 {{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
 {{- end }}
@@ -1661,6 +1815,10 @@ it carries no credentials.
 {{- end }}
 {{- end }}
 {{- $gatewayURL := .Values.agentd.gatewayURL }}
+{{- if and (not $gatewayURL) (eq (include "koinon.substrate" .) "true") }}
+{{- /* Substrate (issue #1489): the agents' model calls go to koinon-gateway's model path, which checks the actor JWT. */}}
+{{- $gatewayURL = include "koinon.modelGatewayURL" . }}
+{{- end }}
 {{- if not $gatewayURL }}
 {{- $gatewayURL = printf "http://%s:%s" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) }}
 {{- end }}
@@ -1669,15 +1827,17 @@ it carries no credentials.
   value: {{ . | quote }}
 {{- end }}
 {{- if include "koinon.egressListener" . }}
-{{- /* Git through the gateway's egress listener (#1086 part C2): agentd mints the actor token with the seed, outside the guest. */}}
+{{- /* Git through the gateway's egress listener (#1086 part C2). On openshell agentd mints the actor token with the seed, outside the guest. On substrate atenet-egress adds the token, so agentd gets no key (issue #1386). */}}
 - name: KOINON_EGRESS_URL
   value: {{ include "koinon.egressURL" . | quote }}
+{{- if include "koinon.ed25519ActorToken" . }}
 - name: KOINON_ACTOR_TOKEN_KEY_FILE
   value: /secrets/actor-token/key
 - name: KOINON_ACTOR_TOKEN_KEY_ID
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.keyId | quote }}
 - name: KOINON_ACTOR_TOKEN_ISSUER
   value: {{ .Values.gateway.mcp.koinon.egress.actorToken.issuer | quote }}
+{{- end }}
 {{- end }}
 {{- with include "koinon.agentMCPURL" . }}
 {{- /* gateway.mcp.driver=koinon: the agents' MCP calls go to koinon-gateway; the model path stays on KOINON_GATEWAY_URL (ADR 0097 decision 5, #1239). */}}

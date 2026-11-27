@@ -432,7 +432,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	generation := sb.HomeGeneration.String
 
 	var stderr tail
-	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
+	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.ActorRef(), execution.ExecRequest{
 		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "--hard-dereference", "-cf", "-", ".")...)...),
 		Stderr:  &stderr, Timeout: c.Timeout,
 	})
@@ -603,9 +603,9 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 }
 
 // restoreOne streams one checkpoint into the sandbox's home through the execution layer's upload
-// channel. Exec stdin is not used: it has no flow control, and the supervisor kills a command
-// whose unread stdin passes 4 MiB (ADR 0032, 2026-10-27, issue 169). The archive is shaped by
-// checkpoint.WriteTar for the upload's fixed `tar xf - -C /sandbox`.
+// channel. The Substrate driver sends the archive as a tar stream on exec stdin (#1478): tar reads
+// every byte, so the 4 MiB stdin cap of the supervisor does not apply. The archive is shaped by
+// checkpoint.WriteTar for `tar -x -f - -C /sandbox`.
 func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo checkpoint.Repository, cp store.HomeCheckpoint) error {
 	c := r.p.cfg.Checkpoints
 	// The restore stages the snapshot on the scratch disk: only so many at once.
@@ -628,7 +628,7 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()
-	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.SandboxName, checkpoint.HomeDir, pr)
+	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.ActorRef(), checkpoint.HomeDir, pr)
 	if uerr == nil {
 		// The upload read an end-of-file, so the writer is done.
 		return <-restored

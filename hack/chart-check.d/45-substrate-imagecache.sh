@@ -6,7 +6,7 @@
 # script's helpers (render, has, lacks, ...). The operator image source (imageCache.enabled=false) is in
 # 44-substrate-worker.sh.
 
-isub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
+isub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)

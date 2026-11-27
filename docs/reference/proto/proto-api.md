@@ -2537,6 +2537,20 @@ AgentRef names an agent.
 | agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
 | grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
 
+### Message EgressActor
+
+EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no
+token, only names.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| atespace | 1 | `string` | singular |  | atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave the actor: the three must all be equal to the claims of the token. |
+| name | 2 | `string` | singular |  |  |
+| uid | 3 | `string` | singular |  |  |
+| org | 4 | `string` | singular |  | org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the sandbox, empty when the State does not name one. |
+| agent | 5 | `string` | singular |  |  |
+| run | 6 | `string` | singular |  |  |
+
 ### Message EgressCredential
 
 EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
@@ -2582,6 +2596,7 @@ route file. A route that fails to load closes all org routes; it never opens one
 | --- | --- | --- | --- | --- | --- |
 | routes | 1 | `koinon.gateway.v1alpha1.EgressRoute` | repeated |  |  |
 | credentials | 2 | `koinon.gateway.v1alpha1.EgressCredential` | repeated |  | credentials say where the gateway reads each credential that a route names, and how it sends it (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable). |
+| actors | 3 | `koinon.gateway.v1alpha1.EgressActor` | repeated |  | actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5): the gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is not here, or a UID that is not equal, is refused. |
 
 ### Message Key
 

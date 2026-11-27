@@ -234,8 +234,11 @@ if [ -n "$config_content" ]; then
 fi
 
 # The agentgateway key under a name no built-in OpenCode provider reads: with OPENAI_API_KEY
-# set, OpenCode's built-in openai provider activates on its own.
-export KOINON_MODEL_KEY="${OPENAI_API_KEY:-}"
+# set, OpenCode's built-in openai provider activates on its own. On Agent Substrate the guest has
+# no key: it sends the fixed public placeholder (actortoken.Placeholder), and atenet-egress, outside
+# the guest, replaces the Authorization header with the actor's JWT for the model listener
+# (issue #1489, ADR 0120). The gateway refuses the placeholder itself with 401.
+export KOINON_MODEL_KEY="${OPENAI_API_KEY:-koinon-actor-placeholder}"
 unset OPENAI_API_KEY
 koinon_export_endpoints
 # Koinon's retry policy, the options of the koinon.retry plugin in opencode.jsonc (see README.md,

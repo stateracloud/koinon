@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
@@ -660,6 +661,39 @@ type EgressState struct {
 	// EgressCredentials say where the gateway reads each credential that EgressRoutes name (#1086
 	// part C): a sealed file, never a value. A route whose credential is not here is refused.
 	EgressCredentials []route.Credential
+	// EgressActors are Koinon's record of the Agent Substrate actors of sandboxes that are not deleted or
+	// archived (issue #1386, ADR 0120 amendment item 5). The gateway finds the org and the agent of an actor
+	// JWT here (ActorLookup), never in the token. They hold names only, no token.
+	EgressActors []EgressActor
+}
+
+// EgressActor is one Agent Substrate actor: the workspace (atespace), the actor name and the UID that
+// Substrate gave it, and the org slug, agent and run it acts for. Run is empty when the State names no run.
+type EgressActor struct {
+	Atespace, Name, UID string
+	Org, Agent, Run     string
+}
+
+// ActorLookup returns the actors of e by their Substrate identity, for the gateway's check of an actor
+// JWT. An actor that does not name its workspace, name, UID, org and agent, or an identity that two actors
+// give, fails the whole lookup: the caller then knows no actor and refuses every token (fail closed).
+func (e EgressState) ActorLookup() (map[actortoken.SubstrateActor]actortoken.Actor, error) {
+	out := make(map[actortoken.SubstrateActor]actortoken.Actor, len(e.EgressActors))
+	for _, a := range e.EgressActors {
+		k := actortoken.SubstrateActor{Atespace: a.Atespace, Name: a.Name, UID: a.UID}
+		if k.Atespace == "" || k.Name == "" || k.UID == "" {
+			return nil, fmt.Errorf("gateway: egress actor %q of workspace %q names no workspace, name or UID", a.Name, a.Atespace)
+		}
+		actor := actortoken.Actor{Org: a.Org, Agent: a.Agent, Run: a.Run}
+		if err := actor.Validate(); err != nil {
+			return nil, fmt.Errorf("gateway: egress actor %s/%s: %w", a.Atespace, a.Name, err)
+		}
+		if _, dup := out[k]; dup {
+			return nil, fmt.Errorf("gateway: egress actor %s/%s (uid %s) is in the State twice", a.Atespace, a.Name, a.UID)
+		}
+		out[k] = actor
+	}
+	return out, nil
 }
 
 // ModelConfig is what the model path is handed: the keys and the model half of a State. A driver

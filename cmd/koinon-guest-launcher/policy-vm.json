@@ -3,9 +3,11 @@
   "landlock": {
     "mode": "require",
     "read_exec": ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/etc", "/opt", "/proc", "/sys", "/run", "/var/lib"],
+    "hidden": ["/run/koinon"],
     "read_write": ["/sandbox", "/tmp", "/var/tmp", "/home", "/root", "/var/cache", "/var/log"],
     "devices": ["/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"],
-    "list_dirs": ["/dev"]
+    "list_dirs": ["/dev"],
+    "scoped": ["signal"]
   },
   "seccomp": { "mode": "require" },
   "user": { "mode": "best_effort", "uid": 10001, "gid": 10001 }

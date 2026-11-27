@@ -193,9 +193,47 @@ SET sandbox_name = @sandbox_name,
     restore_claimed_at = NULL,
     sandbox_id = NULL,
     home_generation = NULL,
-    home_dirtied_at = NULL
+    home_dirtied_at = NULL,
+    -- The task sandbox is a new actor: it gets a new actor name (issue #1386).
+    actor_name = NULL,
+    actor_uid = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
+
+-- name: SetAgentSandboxActorName :one
+-- Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
+-- The name is new and never used again; the new actor has no observed UID yet. It also resets the agent's
+-- forge row, so no run passes waitForge on a State revision of the old actor before the new UID is
+-- recorded (SetAgentSandboxActorUID resets it again).
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    WHERE f.org_id = @org_id AND f.agent_id = @agent_id
+)
+UPDATE agent_sandboxes a
+SET actor_name = @actor_name::text,
+    actor_uid = NULL
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+RETURNING a.*;
+
+-- name: SetAgentSandboxActorUID :one
+-- Records the UID of the observed actor actor_name (issue #1386). A new UID also resets the agent's forge
+-- row: its run waits again until every live koinon-gateway copy acked a State revision that holds the
+-- actor (gateway_agent_forge, agentd waitForge). No row: the name is not the recorded one, or the UID is
+-- recorded already.
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    FROM agent_sandboxes s
+    WHERE f.org_id = @org_id AND f.agent_id = @agent_id
+      AND s.org_id = f.org_id AND s.agent_id = f.agent_id
+      AND s.actor_name = @actor_name::text AND s.actor_uid IS DISTINCT FROM @actor_uid::text
+)
+UPDATE agent_sandboxes a
+SET actor_uid = @actor_uid::text
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+  AND a.actor_name = @actor_name::text AND a.actor_uid IS DISTINCT FROM @actor_uid::text
+RETURNING a.*;
 
 -- name: WakeAgentSandbox :one
 -- The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to

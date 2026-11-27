@@ -146,6 +146,10 @@ type GatewayAccessSetter interface {
 	// time). A sandbox that does not exist yet gets it when it is created or restored. A
 	// driver that has no access recorded for a sandbox gives it the zero value: it fails closed.
 	SetGatewayAccess(ctx context.Context, workspace, name string, access GatewayAccess) error
+	// ForgetGatewayAccess drops the access recorded for sandbox name, with no call to the control plane.
+	// The reconciler calls it for a name that no sandbox uses again (an old Substrate actor name, issue
+	// #1386), so that the record does not outlive the name.
+	ForgetGatewayAccess(workspace, name string)
 }
 
 // GatewayAccessSetterOf returns the capability of b, or nil when b has none. It looks through the
@@ -156,6 +160,32 @@ func GatewayAccessSetterOf(b any) GatewayAccessSetter {
 	}
 	s, _ := b.(GatewayAccessSetter)
 	return s
+}
+
+// ActorNamer is an optional capability of a driver whose sandbox runs as an actor with its own identity (Agent
+// Substrate, issue #1386). Substrate signs a JWT for the actor, and the gateway maps the actor name to an agent run,
+// so a name must never come back for another run: a new actor gets a new name, never a reused one.
+type ActorNamer interface {
+	// NewActorName returns a new, unique name for the actor of sandbox. It is "<sandbox>-<8 hex>" on Substrate.
+	// The driver does not shorten a name that is too long for its backend; the create then fails with ErrInvalid.
+	NewActorName(sandbox string) string
+}
+
+// ActorNamerOf returns the [ActorNamer] of b, or false when b has none (the OpenShell driver has none). It looks
+// through the adapter of [WithoutEgress] and any wrapper with an Unwrap method that returns a [Compute].
+func ActorNamerOf(b Backend) (ActorNamer, bool) {
+	var cur any = b
+	for range 8 { // bounded: a wrapper chain is short, and a cycle must not hang
+		if n, ok := cur.(ActorNamer); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
 }
 
 // SnapshotKind says what a snapshot holds.

@@ -1890,6 +1890,8 @@ type AgentSandbox struct {
 	Reason              string
 	HomeDirtiedAt       pgtype.Timestamptz
 	Enforcement         string
+	ActorName           pgtype.Text
+	ActorUid            pgtype.Text
 }
 
 type AgentVersion struct {

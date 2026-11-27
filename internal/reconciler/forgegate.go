@@ -11,11 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
 
-// The forge gate (#1086 part C2). An agent with a forge read grant clones through koinon-gateway's
-// egress listener, and the gateway attaches the agent's sealed code-host token there. A new credential
+// The forge gate (#1086 part C2), and on Agent Substrate the actor gate (issue #1489). An agent with a
+// forge read grant clones through koinon-gateway's egress listener, and the gateway attaches the agent's sealed code-host token there. A new credential
 // reaches the gateway only after its file settled in the gateway pod (gatewayplan settleForge), and then
 // every live copy must apply the State revision that holds it. Until then a clone fails with 503
 // credential_unavailable. So the reconciler records, per agent, the revision that serves the credential,
@@ -69,26 +70,56 @@ func (r *Reconciler) forgeRev(name string) (int64, bool) {
 	return rev, ok
 }
 
-// forgeWant is what the active agent w expects of its forge credential, and false when it expects
-// none. The rule is agentEgress's (forgeExpects): the install has the egress listener and the agent has
-// a forge read grant (codehost.Registry.ReadGrant, which koinon-agentd reads too). An agent that expects
-// a credential and has none gets its cause.
+// forgeWant is what the active agent w expects of its forge credential and, on a backend that names
+// actors, of its actor; false when it expects neither. The forge rule is agentEgress's (forgeExpects):
+// the install has the egress listener and the agent has a forge read grant (codehost.Registry.ReadGrant,
+// which koinon-agentd reads too). An agent that expects a credential and has none gets its cause.
+//
+// On a backend that names actors (Agent Substrate) every active agent gets a row, also without a forge
+// grant (issue #1489): koinon-gateway checks the actor JWT on the model, MCP and egress listeners, and
+// knows an actor only from the State revision that carries it. So the row waits for the later of the
+// credential's and the actor's revisions, and koinon-agentd starts the harness only when every live copy
+// acked it (agentd waitForge). The wait goes through the State stream and the database: no kubelet volume
+// sync is on its path.
 func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
-	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects {
+	_, names := execution.ActorNamerOf(r.backend)
+	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects && !names {
 		return forgeRow{}, false
 	}
-	if w.forgeErr != nil || w.forge == nil {
-		cause := "no credential was made"
-		if w.forgeErr != nil {
-			cause = w.forgeErr.Error()
+	var (
+		rev     int64
+		failure string
+	)
+	if w.forgeExpects {
+		if w.forgeErr != nil || w.forge == nil {
+			cause := "no credential was made"
+			if w.forgeErr != nil {
+				cause = w.forgeErr.Error()
+			}
+			failure = forgeFailure(cause)
+		} else {
+			var ok bool
+			if rev, ok = r.forgeRev(w.forge.Name); !ok {
+				return forgeRow{}, true
+			}
 		}
-		return forgeRow{failure: forgeFailure(cause)}, true
 	}
-	rev, ok := r.forgeRev(w.forge.Name)
+	if !names {
+		return forgeRow{rev: rev, failure: failure}, true
+	}
+	// The gateway knows a Substrate actor only from the revision that carries it (issues #1386 and #1489):
+	// the run waits for the later of the two revisions. A backend that names actors and has no actor for w
+	// yet (its sandbox is not made, or it was deleted): the gateway refuses its requests, so the run waits.
+	// A credential failure keeps the actor revision in its row: a run pinned to a version without a forge
+	// grant ignores the failure and waits only for its actor.
+	if w.actor == nil {
+		return forgeRow{failure: failure}, true
+	}
+	arev, ok := r.actorRev(*w.actor)
 	if !ok {
-		return forgeRow{}, true
+		return forgeRow{failure: failure}, true
 	}
-	return forgeRow{rev: rev}, true
+	return forgeRow{rev: max(rev, arev), failure: failure}, true
 }
 
 // recordForge writes what each agent of the pass expects of its forge credential (gateway_agent_forge)
@@ -123,15 +154,15 @@ func (r *Reconciler) recordForge(ctx context.Context, items []*work, wait bool) 
 	}
 	var gate *keyGate
 	if maxRev > 0 {
-		if wait && !r.newKeyGate(ctx, nil).ackedRev(ctx, maxRev) {
-			r.awaitGatewayAcked(ctx, maxRev)
+		if wait && !r.newKeyGate(ctx, nil).actorAckedRev(ctx, maxRev) {
+			r.awaitActorAcked(ctx, maxRev)
 		}
 		gate = r.newKeyGate(ctx, nil)
 	}
 	var errs []error
 	for k, row := range want {
 		if row.rev > 0 && !row.served {
-			row.served = gate.ackedRev(ctx, row.rev)
+			row.served = gate.actorAckedRev(ctx, row.rev)
 		}
 		old, had := r.forgeRows[k]
 		if !had || old.rev != row.rev || old.failure != row.failure {

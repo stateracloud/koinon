@@ -55,7 +55,6 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		org   pgtype.UUID
 		user  pgtype.UUID
 		agent store.Agent
-		names execution.AgentNames
 		ws    string
 		now   atomic.Pointer[time.Time]
 	)
@@ -80,14 +79,16 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		Expect(err).NotTo(HaveOccurred())
 		return sb
 	}
-	state := func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }
+	// actor is the name of the agent's current Substrate actor: each new actor gets a new one (issue #1386).
+	actor := func() string { return row(context.Background()).ActorRef() }
+	state := func() ateapiv1.ActorState { return cl.State(ws, actor()) }
 	running := func() {
 		GinkgoHelper()
 		Eventually(state).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	}
 	// home is the marker file in the actor's guest, or nil when the actor or the file is not there.
 	home := func() []byte {
-		b, ok := cl.File(ws, names.Sandbox, markerPath)
+		b, ok := cl.File(ws, actor(), markerPath)
 		if !ok {
 			return nil
 		}
@@ -103,7 +104,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		_, err := tw.Write(markerBody)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tw.Close()).To(Succeed())
-		Expect(d.Upload(ctx, ws, names.Sandbox, checkpoint.HomeDir, &buf)).To(Succeed())
+		Expect(d.Upload(ctx, ws, actor(), checkpoint.HomeDir, &buf)).To(Succeed())
 		Expect(home()).To(Equal(markerBody))
 	}
 	// idleStop plays a harness run that wrote the home and ended, then moves the clock past the
@@ -125,7 +126,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		DeferCleanup(router.Close)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-			GatewayRoutes:     []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
+			GatewayRoutes:     []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 			GuestSigner:       fakeate.Signer(),
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
@@ -164,7 +165,6 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		GinkgoHelper()
 		build()
 		agent = newAgent(ctx, org, user)
-		names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		pass(ctx)
 		running()
 		Expect(cl.Calls("CreateActor")).To(Equal(1))
@@ -191,7 +191,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(cl.Calls("CreateActor")).To(Equal(1), "resumed, not re-created")
 			Expect(cl.Calls("DeleteActor")).To(BeZero())
 			Expect(home()).To(Equal(markerBody))
-			Expect(cl.RouterResumes(ws, names.Sandbox)).To(BeZero(), "the reconciler resumed it, not a guest request")
+			Expect(cl.RouterResumes(ws, actor())).To(BeZero(), "the reconciler resumed it, not a guest request")
 		})
 
 		It("never archives: the suspended actor, and the home in its snapshot, stay without a time limit", func(ctx SpecContext) {
@@ -229,7 +229,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 
 		It("loses the home when the repair recreates a crashed actor", func(ctx SpecContext) {
 			dirtyHome(ctx, org, user, agent.ID)
-			cl.Crash(ws, names.Sandbox, "guest kernel panic")
+			cl.Crash(ws, actor(), "guest kernel panic")
 			Expect(home()).To(Equal(markerBody), "the crashed actor still has its files")
 			Eventually(func(g Gomega) int {
 				g.Expect(r.ReconcileAll(ctx)).To(Succeed())

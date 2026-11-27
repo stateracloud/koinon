@@ -12,7 +12,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -494,8 +494,8 @@ var _ = Describe("fake Gitea", func() {
 				}
 				stream.WriteString("\n")
 			}
-			imp := exec.CommandContext(context.Background(), "git", "fast-import", "--quiet", "--force")
-			imp.Dir, imp.Stdin = one, strings.NewReader(stream.String())
+			imp := gitenv.Command(context.Background(), one, one, "fast-import", "--quiet", "--force")
+			imp.Stdin = strings.NewReader(stream.String())
 			out, err := imp.CombinedOutput()
 			Expect(err).NotTo(HaveOccurred(), string(out))
 			// Without the remote-tracking refs the client finds the common commit only after several rounds.
@@ -506,9 +506,8 @@ var _ = Describe("fake Gitea", func() {
 				"files": []map[string]any{{"operation": "create", "path": "up.txt", "content": base64.StdEncoding.EncodeToString([]byte("up\n"))}},
 			}, "token "+fakegitea.DefaultToken)
 			Expect(ch.Status).To(Equal(201), string(ch.Body))
-			cmd := exec.CommandContext(context.Background(), "git", "-c", "maintenance.auto=false", "-c", "protocol.version=0", "fetch", "origin", "main")
-			cmd.Dir = one
-			cmd.Env = append(os.Environ(), "GIT_TRACE_CURL=1", "GIT_TRACE_CURL_NO_DATA=1", "GIT_TERMINAL_PROMPT=0")
+			cmd := gitenv.Command(context.Background(), one, one, "-c", "maintenance.auto=false", "-c", "protocol.version=0", "fetch", "origin", "main")
+			cmd.Env = gitenv.Env(one, "GIT_TRACE_CURL=1", "GIT_TRACE_CURL_NO_DATA=1")
 			out, err = cmd.CombinedOutput()
 			Expect(err).NotTo(HaveOccurred(), string(out))
 			Expect(string(out)).To(ContainSubstring("Content-Encoding: gzip"), "the fetch sent a gzip body")
@@ -600,13 +599,9 @@ var noMaintenanceEnv = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=maintena
 
 // gitErr runs git hermetically in dir and returns its combined output.
 func gitErr(dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", args...)
-	cmd.Dir = dir
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
-		"GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.invalid",
-		"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.invalid",
-	}
+	cmd := gitenv.Command(context.Background(), dir, dir, args...)
+	cmd.Env = gitenv.Env(dir, "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.invalid",
+		"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.invalid")
 	cmd.Env = append(cmd.Env, noMaintenanceEnv...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -684,17 +679,17 @@ var _ = Describe("fake Gitea permissions", func() {
 	Describe("git over HTTP", func() {
 		clone := func(tok, name string) (string, error) {
 			dir := GinkgoT().TempDir()
-			out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok,
+			out, err := gitenv.Command(context.Background(), dir, dir, "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok,
 				"clone", "-q", f.URL()+"/acme/"+name+".git", filepath.Join(dir, "c")).CombinedOutput()
 			return string(out), err
 		}
 		push := func(tok, name string) (string, error) {
 			dir := GinkgoT().TempDir()
 			run := func(args ...string) (string, error) {
-				out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+				out, err := gitenv.Command(context.Background(), dir, dir, args...).CombinedOutput()
 				return string(out), err
 			}
-			if out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+writeTok,
+			if out, err := gitenv.Command(context.Background(), dir, dir, "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+writeTok,
 				"clone", "-q", f.URL()+"/acme/"+name+".git", dir).CombinedOutput(); err != nil {
 				return string(out), err
 			}

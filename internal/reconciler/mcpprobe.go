@@ -427,6 +427,48 @@ func (g *keyGate) ackedRev(ctx context.Context, rev int64) bool {
 	return done
 }
 
+// actorAckedRev reports whether every live koinon-gateway copy acked State revision rev. The model listener
+// checks the actor JWT against the actor table of its own copy (issue #1489), so a run that waits for an
+// actor waits for the copies that serve only the model half too, not only the MCP copies (ackedRev). A copy
+// counts when it acked either half: a copy that serves one half acks only that half, and a copy that serves
+// both applies both in one step. With no live copy it is true. When the copy list or the acks cannot be
+// read it is false.
+func (g *keyGate) actorAckedRev(ctx context.Context, rev int64) bool {
+	if !g.ackedRev(ctx, rev) {
+		return false
+	}
+	key := -rev // the all-copies check has its own cache entry
+	if done, seen := g.acked[key]; seen {
+		return done
+	}
+	done := g.allCopiesAcked(ctx, rev)
+	g.acked[key] = done
+	return done
+}
+
+func (g *keyGate) allCopiesAcked(ctx context.Context, rev int64) bool {
+	live, err := staterev.LiveCopies(ctx, g.r.pool, 0, gwv1.Half_HALF_MODEL)
+	if err != nil {
+		g.r.log.Warn("reading the live gateway copies failed; the work that needs them waits", "err", err)
+		return false
+	}
+	for _, c := range live {
+		acked := false
+		for _, half := range []gwv1.Half{gwv1.Half_HALF_MCP, gwv1.Half_HALF_MODEL} {
+			ok, err := staterev.AllAcked(ctx, g.r.pool, rev, half, []string{c})
+			if err != nil {
+				g.r.log.Warn("reading the gateway acks failed; the work that needs them waits", "err", err)
+				return false
+			}
+			acked = acked || ok
+		}
+		if !acked {
+			return false
+		}
+	}
+	return true
+}
+
 // split returns the work items of idx that may go now, and those that wait with the highest revision
 // they wait for.
 func (g *keyGate) split(ctx context.Context, items []*work, idx []int) (goNow, wait []int, maxRev int64) {
@@ -481,6 +523,15 @@ const (
 // rev (keyGate.ackedRev), and reports whether the probe may start. It returns true at once when rev
 // is 0. It returns false when ctx ends or the wait runs out; the probe is then not recorded.
 func (r *Reconciler) awaitGatewayAcked(ctx context.Context, rev int64) bool {
+	return r.awaitAcked(ctx, rev, func(g *keyGate) bool { return g.ackedRev(ctx, rev) })
+}
+
+// awaitActorAcked is awaitGatewayAcked for a revision that holds an actor: the model copies must ack it too.
+func (r *Reconciler) awaitActorAcked(ctx context.Context, rev int64) bool {
+	return r.awaitAcked(ctx, rev, func(g *keyGate) bool { return g.actorAckedRev(ctx, rev) })
+}
+
+func (r *Reconciler) awaitAcked(ctx context.Context, rev int64, acked func(*keyGate) bool) bool {
 	if rev <= 0 {
 		return true
 	}
@@ -495,7 +546,7 @@ func (r *Reconciler) awaitGatewayAcked(ctx context.Context, rev int64) bool {
 	defer deadline.Stop()
 	for {
 		// A new gate each time: the live copies change while it waits. A read that fails logs and waits.
-		if r.newKeyGate(ctx, nil).ackedRev(ctx, rev) {
+		if acked(r.newKeyGate(ctx, nil)) {
 			return true
 		}
 		select {

@@ -52,7 +52,11 @@ The values are not secret. The key is never an argument: in a sandbox `$OPENAI_A
 OpenShell provider placeholder that the proxy swaps for the agent's agentgateway key. The entry
 script moves it to `KOINON_MODEL_KEY` and unsets `OPENAI_API_KEY`, because OpenCode activates
 any built-in provider whose environment variable is set (`packages/core/src/integration.ts`), and
-the built-in `openai` provider reads that one.
+the built-in `openai` provider reads that one. On Agent Substrate the sandbox has no key and no
+`$OPENAI_API_KEY`: the script sets `KOINON_MODEL_KEY` to the fixed public placeholder
+`koinon-actor-placeholder`, and Substrate's egress proxy, outside the guest, replaces the
+`Authorization` header with a short-lived actor JWT for koinon-gateway's model listener (issue
+#1489, ADR 0120).
 
 ## Instructions
 

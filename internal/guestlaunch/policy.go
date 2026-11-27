@@ -10,8 +10,12 @@ package guestlaunch
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path"
 	"slices"
 	"strings"
 )
@@ -58,7 +62,26 @@ type LandlockPolicy struct {
 	// ListDirs are directories whose entries may be listed and nothing else: /dev is listed so
 	// tools work, but a node in it that Devices does not name cannot be opened or created.
 	ListDirs []string `json:"list_dirs"`
+	// Hidden are paths below a ReadExec entry that the payload may not read, list or execute, even as
+	// root (issue #1516: the job logs of the guest front under /run/koinon). Landlock only adds rights,
+	// so the launcher grants the siblings of a hidden path and leaves the path out (ReadExecVisible).
+	Hidden []string `json:"hidden,omitempty"`
+	// Scoped lists the Landlock IPC scopes (ABI 6). The one known scope is "signal": the payload
+	// cannot send a signal to a process outside its Landlock domain, such as the guest front and
+	// the other Koinon processes of the guest, even when it runs as the same uid (issue #1496). The
+	// scope follows Mode: in require mode a kernel below ABI 6 stops the start.
+	Scoped []string `json:"scoped,omitempty"`
 }
+
+// ScopeSignal is the Landlock scope that blocks signals to processes outside the payload's domain.
+const ScopeSignal = "signal"
+
+// RootAllowedCapabilities are the only capabilities that a payload which can run as root may keep
+// (issue #1496). Any other capability could trace, signal or reconfigure the Koinon processes of
+// the guest, create device nodes (CAP_MKNOD) or widen the guest kernel's attack surface. It is an
+// allowlist, so a capability that a later kernel adds is refused by default. Validate refuses a
+// policy whose allowlist holds any other capability unless the user drop is required.
+var RootAllowedCapabilities = []string{"CAP_NET_BIND_SERVICE", "CAP_AUDIT_WRITE"}
 
 // SeccompPolicy is the deny filter: every other syscall stays allowed.
 type SeccompPolicy struct {
@@ -125,6 +148,7 @@ func DefaultPolicy() Policy {
 			ReadWrite: []string{"/sandbox", "/tmp", "/var/tmp", "/home", "/root", "/var/cache", "/var/log"},
 			Devices:   slices.Clone(DefaultDevices),
 			ListDirs:  []string{"/dev"},
+			Hidden:    []string{"/run/koinon"},
 		},
 		Seccomp: SeccompPolicy{Mode: ModeRequire},
 		// Uid and gid 10001 are the sandbox user of the harness images (docs/dev/images.md).
@@ -148,7 +172,7 @@ func ParsePolicy(r io.Reader) (Policy, error) {
 		return Policy{}, fmt.Errorf("guest launcher policy: %w", err)
 	}
 	if raw.Landlock != nil {
-		p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs = nil, nil, nil, nil
+		p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs, p.Landlock.Hidden = nil, nil, nil, nil, nil
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -178,14 +202,57 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("guest launcher policy: seccomp mode %q is refused: it must be require", p.Seccomp.Mode)
 	}
 	for _, c := range p.Capabilities.Allow {
-		if _, ok := capNumber(c); !ok {
+		n, ok := capNumber(c)
+		if !ok {
 			return fmt.Errorf("guest launcher policy: unknown capability %q", c)
 		}
+		// A policy without a required drop can leave the payload root (the vm tier, issue #1496).
+		if p.User.Mode != ModeRequire {
+			allowed := false
+			for _, a := range RootAllowedCapabilities {
+				if an, _ := capNumber(a); an == n {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("guest launcher policy: capability %s is refused for a payload that can run as root (user mode %q); allowed: %s", c, p.User.Mode, strings.Join(RootAllowedCapabilities, ", "))
+			}
+		}
 	}
-	for _, list := range [][]string{p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs} {
+	for _, s := range p.Landlock.Scoped {
+		if s != ScopeSignal {
+			return fmt.Errorf("guest launcher policy: unknown landlock scope %q (known: %s)", s, ScopeSignal)
+		}
+	}
+	for _, list := range [][]string{p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs, p.Landlock.Hidden} {
 		for _, path := range list {
 			if !strings.HasPrefix(path, "/") {
 				return fmt.Errorf("guest launcher policy: landlock path %q is not absolute", path)
+			}
+		}
+	}
+	for _, h := range p.Landlock.Hidden {
+		if path.Clean(h) == "/" {
+			return fmt.Errorf("guest launcher policy: landlock hidden path %q is the root directory", h)
+		}
+		// A read rule on or below a hidden path would grant it again.
+		for _, e := range p.Landlock.ReadExec {
+			if pathCovers(h, e) {
+				return fmt.Errorf("guest launcher policy: landlock read_exec path %q is inside hidden path %q", e, h)
+			}
+		}
+		// Rights on a writable parent cannot be taken back, and a hidden path must not be writable.
+		for _, rw := range p.Landlock.ReadWrite {
+			if pathCovers(rw, h) {
+				return fmt.Errorf("guest launcher policy: landlock hidden path %q is inside read_write path %q", h, rw)
+			}
+		}
+		for _, list := range [][]string{p.Landlock.Devices, p.Landlock.ListDirs} {
+			for _, e := range list {
+				if pathCovers(e, h) {
+					return fmt.Errorf("guest launcher policy: landlock hidden path %q is inside path %q", h, e)
+				}
 			}
 		}
 	}
@@ -206,4 +273,67 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("guest launcher policy: user mode require needs a non-zero gid")
 	}
 	return nil
+}
+
+// pathCovers says whether a rule on dir reaches p: dir itself, or anything below it.
+func pathCovers(dir, p string) bool {
+	dir, p = path.Clean(dir), path.Clean(p)
+	return dir == p || strings.HasPrefix(p, strings.TrimSuffix(dir, "/")+"/")
+}
+
+// ReadExecVisible is ReadExec without the Hidden paths. Landlock has no deny rule, so an entry that
+// holds a hidden path is replaced by its children (and their children, down to the hidden path), read
+// at the time of the call. The payload then reads nothing that the front or another service makes
+// in a directory above a hidden path after this call; the front makes its own directory first
+// (guestfront.PrepareLogDir) and the launcher runs after it. A directory that does not exist is
+// skipped, as Landlock skips a missing path. Any other read error is returned: the caller must not
+// start the payload with a wider rule than the policy says.
+func (l LandlockPolicy) ReadExecVisible() ([]string, error) {
+	var out []string
+	for _, e := range l.ReadExec {
+		got, err := without(path.Clean(e), l.Hidden)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
+}
+
+// without returns dir, or the entries below it that are not hidden, when a hidden path is at or below dir.
+func without(dir string, hidden []string) ([]string, error) {
+	var below []string
+	for _, h := range hidden {
+		h = path.Clean(h)
+		if h == dir {
+			return nil, nil
+		}
+		if pathCovers(dir, h) {
+			below = append(below, h)
+		}
+	}
+	if len(below) == 0 {
+		return []string{dir}, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("guest launcher policy: list %s to hide %s: %w", dir, below[0], err)
+	}
+	var out []string
+	for _, ent := range entries {
+		// A symlink is skipped: Landlock follows it and would grant its target, which the policy never
+		// granted (a read through the link is checked against the target).
+		if ent.Type()&fs.ModeSymlink != 0 {
+			continue
+		}
+		got, err := without(path.Join(dir, ent.Name()), below)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
 }

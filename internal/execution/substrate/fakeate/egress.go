@@ -61,6 +61,9 @@ func checkPolicyBody(actor *ateapiv1.ObjectRef, p *ateapiv1.EgressPolicy) error 
 		if len(h.GetHostnames()) == 0 {
 			return status.Error(codes.InvalidArgument, "rules: an http rule needs a hostname")
 		}
+		if err := checkEffects(h.GetEffects()); err != nil {
+			return err
+		}
 		ports := []string{"80"}
 		switch {
 		case h.GetPorts().GetAll() != nil && len(h.GetPorts().GetNumbers()) > 0:
@@ -193,6 +196,87 @@ func (s *controlServer) DeleteActorEgressPolicy(_ context.Context, r *ateapiv1.D
 	}
 	delete(c.policies, k)
 	return p, nil
+}
+
+// checkEffects checks the effects of an HTTP rule as ateapi admits them (apivalidation/egress_policy.go and the
+// ActorJwtSource tags of api/ateapi/v1/ateapi.proto, Substrate commit 20778a6d): a header name is an HTTP token;
+// exactly one of credential_uri and actor_jwt is set; an actor_jwt has 1 to 16 distinct audiences of 1 to 512
+// characters and a lifetime of 300 to 3600 seconds. The fake does not check the format of a credential_uri.
+func checkEffects(e *ateapiv1.HttpRuleEffects) error {
+	for i, ch := range e.GetReplaceHeaders() {
+		at := "effects.replace_headers[" + strconv.Itoa(i) + "]"
+		if !validHeaderName(ch.GetHeader()) {
+			return status.Errorf(codes.InvalidArgument, "%s.header: must be an HTTP header name", at)
+		}
+		jwt := ch.GetActorJwt()
+		switch {
+		case (ch.GetCredentialUri() != "") == (jwt != nil):
+			return status.Errorf(codes.InvalidArgument, "%s: exactly one of credential_uri and actor_jwt must be set", at)
+		case jwt == nil:
+			continue
+		case len(jwt.GetAudiences()) < 1 || len(jwt.GetAudiences()) > 16:
+			return status.Errorf(codes.InvalidArgument, "%s.actor_jwt.audiences: 1 to 16 items", at)
+		case jwt.GetExpirationSeconds() < 300 || jwt.GetExpirationSeconds() > 3600:
+			return status.Errorf(codes.InvalidArgument, "%s.actor_jwt.expiration_seconds: must be 300 to 3600", at)
+		}
+		seen := map[string]bool{}
+		for _, a := range jwt.GetAudiences() {
+			if a == "" || len(a) > 512 || seen[a] {
+				return status.Errorf(codes.InvalidArgument, "%s.actor_jwt.audiences: %q is empty, longer than 512 or repeated", at, a)
+			}
+			seen[a] = true
+		}
+	}
+	return nil
+}
+
+func validHeaderName(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, c := range []byte(v) {
+		if ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c)); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// EgressEffects returns the effects that atenet-egress applies to a request to host:port: the effects of the one
+// rule that decides. Of the HTTP rules that match, the winner has an exact hostname over a wildcard, then an exact
+// port number over all ports ("Only the winning rule's effects are applied", api/ateapi/v1/ateapi.proto). It
+// returns nil when no rule matches or the winner has no effects.
+func (c *Cluster) EgressEffects(atespace, actor, host string, port uint32) *ateapiv1.HttpRuleEffects {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.policies[key{atespace, actor}]
+	if !ok {
+		return nil
+	}
+	var best *ateapiv1.HttpRule
+	bestScore := -1
+	for _, r := range p.GetRules() {
+		h := r.GetHttp()
+		if h == nil || !portIn(h.GetPorts(), port) {
+			continue
+		}
+		for _, pat := range h.GetHostnames() {
+			if !hostMatch(pat, host) {
+				continue
+			}
+			score := 0
+			if !strings.Contains(pat, "*") {
+				score += 2
+			}
+			if h.GetPorts().GetAll() == nil {
+				score++
+			}
+			if score > bestScore {
+				best, bestScore = h, score
+			}
+		}
+	}
+	return proto.Clone(best.GetEffects()).(*ateapiv1.HttpRuleEffects)
 }
 
 // EgressPolicy is the egress policy of an actor, or nil when it has none.

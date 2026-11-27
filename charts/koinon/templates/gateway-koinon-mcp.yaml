@@ -151,11 +151,19 @@ spec:
             # reconciler publishes none) and deny-all, as the held standalone gateway of issue #530.
             - --restore-hold
             {{- end }}
+            {{- with include "koinon.substrateActorJWTArgs" . | trim }}
+            # Substrate (ADR 0120, amendments of issues #1386 and #1489): atenet-egress adds the actor JWT that ateapi
+            # mints, with one audience for each listener (MCP and egress). The gateway trusts one issuer, from these
+            # values only, and checks its TLS with the CA bundle.
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- if $egress }}
             # The egress listener (#1086 part C2): the forge routes of the State stream, behind the actor token.
             - --egress-addr=:{{ int $eg.port }}
+            {{- if include "koinon.ed25519ActorToken" . }}
             - {{ printf "--actor-token-issuer=%s" $eg.actorToken.issuer | quote }}
             - --actor-token-keys-dir=/etc/koinon/actor-token-keys
+            {{- end }}
             {{- with concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
             - --egress-allowed-hosts={{ join "," . }}
             {{- end }}
@@ -226,15 +234,21 @@ spec:
             {{- include "koinon.dbVolumeMount" . | nindent 12 }}
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
             {{- if $egress }}
+            {{- if include "koinon.ed25519ActorToken" . }}
             # The public actor token key only, as <key id>.pub: the gateway verifies, it cannot sign.
             - name: actor-token-keys
               mountPath: /etc/koinon/actor-token-keys
               readOnly: true
+            {{- end }}
             {{- if $eg.caBundle }}
             - name: egress-ca
               mountPath: /etc/koinon/egress-ca
               readOnly: true
             {{- end }}
+            {{- end }}
+            {{- with include "koinon.substrateActorJWTCAVolumeMount" . | trim }}
+            # The CA bundle of the Substrate issuer (issues #1386 and #1489): public certificates only.
+            {{- . | nindent 12 }}
             {{- end }}
             {{- if $gwKey }}
             # The wrapped private keys (ADR 0097 12.3): only this Deployment mounts them. The Secret may not
@@ -273,6 +287,7 @@ spec:
         {{- include "koinon.dbVolume" . | nindent 8 }}
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
         {{- if $egress }}
+        {{- if include "koinon.ed25519ActorToken" . }}
         - name: actor-token-keys
           secret:
             secretName: {{ include "koinon.actorTokenKeyName" . }}
@@ -280,11 +295,15 @@ spec:
             items:
               - key: public.pem
                 path: {{ $eg.actorToken.keyId }}.pub
+        {{- end }}
         {{- if $eg.caBundle }}
         - name: egress-ca
           configMap:
             name: {{ $name }}-egress-ca
         {{- end }}
+        {{- end }}
+        {{- with include "koinon.substrateActorJWTCAVolume" . | trim }}
+        {{- . | nindent 8 }}
         {{- end }}
         {{- if $gwKey }}
         - name: gateway-key

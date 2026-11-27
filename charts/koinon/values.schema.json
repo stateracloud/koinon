@@ -486,7 +486,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "driver": {"enum": ["agentgateway", "koinon"]},
+            "driver": {"enum": ["", "agentgateway", "koinon"], "description": "Empty: koinon with execution.driver=substrate, agentgateway otherwise."},
             "koinon": {
               "type": "object",
               "additionalProperties": false,
@@ -858,6 +858,25 @@
               }
             },
             "gatewayClientNamespaceSelector": {"type": "object"},
+            "actorJwt": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "issuer": {"type": "string", "pattern": "^(https://[^/?#]+)?$"},
+                "ca": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "signerName": {"type": "string"},
+                    "labelSelector": {"type": "object"},
+                    "configMap": {"type": "string"},
+                    "configMapKey": {"$ref": "#/definitions/nonEmpty"}
+                  }
+                },
+                "idpPodSelector": {"type": "object"},
+                "idpPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+              }
+            },
             "namespace": {"$ref": "#/definitions/nonEmpty"},
             "workerNamespace": {"$ref": "#/definitions/nonEmpty"},
             "workerObserver": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},

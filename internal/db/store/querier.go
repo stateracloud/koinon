@@ -1359,7 +1359,8 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
-	// Every live copy acked the revision that holds the agent's credential.
+	// Every live copy acked the revision that holds the agent's credential or actor. A row with a failure may be
+	// marked too: it then proves only the actor revision (agentd ignores the failure when the run needs no credential).
 	MarkGatewayAgentForgeServed(ctx context.Context, arg MarkGatewayAgentForgeServedParams) error
 	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
@@ -1618,6 +1619,16 @@ type Querier interface {
 	SetAgentPlacement(ctx context.Context, arg SetAgentPlacementParams) (Agent, error)
 	// Replaces the agent's overrides. A NULL argument clears that override.
 	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
+	// Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
+	// The name is new and never used again; the new actor has no observed UID yet. It also resets the agent's
+	// forge row, so no run passes waitForge on a State revision of the old actor before the new UID is
+	// recorded (SetAgentSandboxActorUID resets it again).
+	SetAgentSandboxActorName(ctx context.Context, arg SetAgentSandboxActorNameParams) (AgentSandbox, error)
+	// Records the UID of the observed actor actor_name (issue #1386). A new UID also resets the agent's forge
+	// row: its run waits again until every live koinon-gateway copy acked a State revision that holds the
+	// actor (gateway_agent_forge, agentd waitForge). No row: the name is not the recorded one, or the UID is
+	// recorded already.
+	SetAgentSandboxActorUID(ctx context.Context, arg SetAgentSandboxActorUIDParams) (AgentSandbox, error)
 	// The network enforcement mode observed in the sandbox's policy (ADR 0045): enforce, audit, none or
 	// unknown. Kept apart from RecordAgentSandbox, which many paths call without an observed sandbox.
 	SetAgentSandboxEnforcement(ctx context.Context, arg SetAgentSandboxEnforcementParams) error

@@ -198,7 +198,8 @@ jobs:
       # and nobody reviewed those as a tree. hack/e2e-bisect.sh dispatches first-parent commits of main only.
       # This step runs before the checkout. It fetches the commit graph only (no file of any commit) and runs no
       # code of the commit. The drill job has the same step.
-      - name: The commit input is a first-parent commit of the dispatch ref
+      - id: dispatchrev
+        name: The commit input is a first-parent commit of the dispatch ref
         if: inputs.commit != ''
         env:
           COMMIT: ${{ inputs.commit }}
@@ -219,10 +220,13 @@ jobs:
             echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
             exit 1
           fi
+          # The output is the line of the commit graph that matched, not the input string: the checkout below takes a
+          # value that this step validated (a full sha of a first-parent commit), never the raw input.
+          echo "rev=$(grep -xF "$COMMIT" "$graph.list")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit }} # empty: the event's own ref
+          ref: ${{ steps.dispatchrev.outputs.rev }} # empty: the event's own ref (no commit input)
           persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
@@ -575,7 +579,8 @@ jobs:
         shell: bash
     steps:
       # Only a first-parent commit of the dispatch ref runs here: the reason is at the same step of the quickstart job.
-      - name: The commit input is a first-parent commit of the dispatch ref
+      - id: dispatchrev
+        name: The commit input is a first-parent commit of the dispatch ref
         if: inputs.commit != ''
         env:
           COMMIT: ${{ inputs.commit }}
@@ -595,10 +600,13 @@ jobs:
             echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
             exit 1
           fi
+          # The output is the line of the commit graph that matched, not the input string: the checkout below takes a
+          # value that this step validated (a full sha of a first-parent commit), never the raw input.
+          echo "rev=$(grep -xF "$COMMIT" "$graph.list")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ steps.dispatchrev.outputs.rev }} # empty: the event's own ref (no commit input)
           persist-credentials: false
 
       - name: Tool versions (hack/versions.env)

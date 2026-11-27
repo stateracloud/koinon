@@ -7,10 +7,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"strings"
@@ -19,7 +19,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/guestauth"
@@ -145,9 +144,10 @@ func scanRootsGuest() []string {
 	return []string{"/etc", "/home", "/root", "/run", "/var", "/srv", "/mnt", "/opt", "/tmp", "/dev/shm", "/sandbox", "/workspace"}
 }
 
-// denial names are the results of a connect that the sandbox or the network refused. "open" is the
-// only result that fails a spec; a name that is not here fails it too, so a new way of failing is read
-// before it counts as a denial.
+// denial names are the results of a connect that the sandbox or the network refused. On Substrate a connect
+// that succeeds proves nothing (issue #1515): the deny specs send bytes (substrate_payload_test.go) and use
+// these names as the part of the denial that is a failed connect. A name that is not here fails a spec, so a
+// new way of failing is read before it counts as a denial.
 var denial = []any{"EACCES", "EPERM", "ENETUNREACH", "EHOSTUNREACH", "ECONNREFUSED", "ECONNRESET", "timeout", "gaierror"}
 
 // The driver-neutral threats of ADR 0025 and ADR 0120, on a Substrate sandbox of the tier under test.
@@ -163,14 +163,7 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 	}
 	denied := func(ctx context.Context, ts []target) {
 		GinkgoHelper()
-		checks := make([]check, 0, len(ts))
-		for _, t := range ts {
-			checks = append(checks, tcp2(t))
-		}
-		res := probe(ctx, checks...)
-		for _, c := range checks {
-			Expect(res[c["id"].(string)]).To(BeElementOf(denial...), c["id"])
-		}
+		expectNoBytes(ctx, probe, ts)
 	}
 
 	BeforeAll(func(ctx SpecContext) {
@@ -254,58 +247,9 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 		}
 	}, NodeTimeout(4*time.Minute))
 
-	// ADR 0120 section 1.2 and its amendment of 2026-11-26, an INTERIM whose exit is issue #1386:
-	// koinon-agentd mints the actor token outside the guest and writes it into one file,
-	// codehost.SandboxEgressToken, with codehost.WriteEgressTokenCommand. Git reads that file as the
-	// agent user, so the agent can read the token while a run is live. The spec writes a real token with
-	// the production command, in a sandbox of its own, and fails if the token, or any other JWT-shaped
-	// value, is in any other place the agent can read: another file (the home too), the environment or
-	// the command line of a process. When #1386 is done, the guest holds no token, and this spec expects
-	// the scan to find nothing.
-	It("holds the actor token only in the egress token file that koinon-agentd writes", func(ctx SpecContext) {
-		name := rig.sandbox(ctx, rig.workspace, fmt.Sprintf("kesb-tok-%d", suffix()))
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
-		Expect(err).NotTo(HaveOccurred())
-		m, err := actortoken.NewMinter("koinon-escape", "k1", priv)
-		Expect(err).NotTo(HaveOccurred())
-		tok, err := m.Mint(actortoken.Actor{Org: "org-a", Agent: "agent-1", Run: "run-1"}, 15*time.Minute)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("control: the gateway's verifier accepts the token")
-		v, err := actortoken.NewVerifier("koinon-escape", map[string]ed25519.PublicKey{"k1": pub})
-		Expect(err).NotTo(HaveOccurred())
-		_, err = v.Verify(tok)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("koinon-agentd's command writes the token file")
-		cfg, ok := codehost.EgressTokenGitConfig("http://koinon-gateway.koinon.svc:8081", tok)
-		Expect(ok).To(BeTrue())
-		_, stderr, code := rig.exec(ctx, rig.workspace, name, string(cfg), codehost.WriteEgressTokenCommand()...)
-		Expect(code).To(Equal(0), stderr)
-
-		needle := hex.EncodeToString([]byte(tok))
-		res := rig.probeIn(ctx, rig.workspace, name,
-			check{"id": "token", "op": "scan", "roots": scanRootsGuest(), "needles": []string{needle}},
-			check{"id": "jwt", "op": "scan", "roots": scanRootsGuest(), "pattern": jwtShape},
-			check{"id": "env", "op": "env"},
-		)
-		found := res["token"].(map[string]any)
-		GinkgoWriter.Printf("scanned %v files\n", found["files"])
-		Expect(found["files"]).To(BeNumerically(">", 100), "the scan read too few files to mean anything")
-		Expect(found["found"]).To(ConsistOf(codehost.SandboxEgressToken),
-			"control: the agent can read the token file; and the token is in no other file, environment or command line")
-		Expect(res["jwt"].(map[string]any)["found"]).To(ConsistOf(codehost.SandboxEgressToken), "a JWT-shaped value outside the token file")
-		for k, v := range res["env"].(map[string]any) {
-			Expect(v).NotTo(ContainSubstring(tok), k)
-		}
-
-		By("the command that ends a run removes the token")
-		_, stderr, code = rig.exec(ctx, rig.workspace, name, "", codehost.RemoveEgressTokenCommand()...)
-		Expect(code).To(Equal(0), stderr)
-		res = rig.probeIn(ctx, rig.workspace, name,
-			check{"id": "token", "op": "scan", "roots": scanRootsGuest(), "needles": []string{needle}})
-		Expect(res["token"].(map[string]any)["found"]).To(BeEmpty(), "the token after the remove command")
-	}, NodeTimeout(8*time.Minute))
+	// The actor token of ADR 0120 section 1.2 (issue #1386) is never in a Substrate guest: atenet-egress adds
+	// it outside the guest. The specs of "Substrate actor identity" (substrate_identity_test.go) show that,
+	// with the controls (a) to (h) of the amendment of 2026-11-26.
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
 		expectNoPrivileges(ctx, probe)
@@ -395,14 +339,21 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			Expect(code).To(Equal(0), stderr)
 			addr, err := netip.ParseAddr(strings.TrimSpace(out))
 			Expect(err).NotTo(HaveOccurred(), "the address of org B's actor: %q", out)
-			Expect(addr.IsLoopback()).To(BeFalse(), "an address that org A could route to, not loopback")
+			Expect(addr.IsLoopback()).To(BeFalse(), "an address in org B's own network namespace, not loopback")
 
-			By("controls: the address is org B's own, and its listener answers on that address")
+			// Each actor has its own network namespace, and the address in it is the same constant in every
+			// actor (169.254.17.2 on Substrate). It is not a collision: the address says nothing about the
+			// other actor (issue #1515). So the spec uses the address as a control, and tests reach to org B
+			// through the addresses that org A can route to.
+			By("controls: org B's own listener answers on its own address")
 			own, ownErr, code := rig.exec(ctx, rig.workspace, probeSandbox, "", "python3", "-c", "import socket;print(socket.gethostbyname(socket.gethostname()))")
 			Expect(code).To(Equal(0), ownErr)
-			Expect(strings.TrimSpace(own)).NotTo(Equal(addr.String()), "both actors share one address: a refused connect would prove nothing")
-			Expect(rig.probeIn(ctx, rig.otherWorkspace, other, check{"id": "self", "op": "tcp", "host": addr.String(), "port": 8099})["self"]).To(Equal("open"),
-				"org B cannot reach its own listener on the address that org A is tested against")
+			same := strings.TrimSpace(own) == addr.String()
+			GinkgoWriter.Printf("org A's address %s, org B's address %s (same constant: %v)\n", strings.TrimSpace(own), addr, same)
+			peer := payloadCheck(target{addr.String(), 8099})
+			peerID := peer["id"].(string)
+			Expect(rig.probeIn(ctx, rig.otherWorkspace, other, peer)[peerID]).To(MatchRegexp(`^status \d{3} `),
+				"org B cannot reach its own listener on its own address with bytes")
 			obsA, err := rig.driver.Observe(ctx, rig.workspace, probeSandbox)
 			Expect(err).NotTo(HaveOccurred())
 			obsB, err := rig.driver.Observe(ctx, rig.otherWorkspace, other)
@@ -410,10 +361,24 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			Expect(obsA.Worker).NotTo(BeEmpty())
 			Expect(obsB.Worker).To(Equal(obsA.Worker), "the two actors must share a worker node (use a worker pool of one node); a denial across nodes is not the claim")
 
-			By("org A gets no answer: a refusal would mean no listener, so it counts as a failure here")
-			peer := tcp2(target{addr.String(), 8099})
-			res := probe(ctx, peer)
-			Expect(res[peer["id"].(string)]).To(BeElementOf("EACCES", "EPERM", "ENETUNREACH", "EHOSTUNREACH", "timeout"))
+			By("org A gets ECONNREFUSED on that address while org B's listener is up: nothing listens in org A's namespace")
+			got := probe(ctx, peer)[peerID]
+			if same {
+				Expect(got).To(Equal("ECONNREFUSED"), "org A got an answer on an address that is in its own namespace")
+			} else {
+				Expect(payloadDenied(got)).To(BeTrue(), "org A got %v from org B's address", got)
+			}
+
+			By("org A gets no byte from org B's port on the addresses it can route to: the worker pod and the router")
+			testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_SUBSTRATE_PEER_ADDRS"))
+			var routable []target
+			for _, h := range splitList(os.Getenv("KOINON_ESCAPE_SUBSTRATE_PEER_ADDRS")) {
+				routable = append(routable, target{h, 8099})
+			}
+			if host, _, err := net.SplitHostPort(os.Getenv("KOINON_ESCAPE_SUBSTRATE_ROUTER")); err == nil {
+				routable = append(routable, target{host, 8099})
+			}
+			expectNoBytes(ctx, probe, routable)
 		}, NodeTimeout(10*time.Minute))
 
 		It("is invisible to this org's driver calls: no get, no exec, no delete by name", func(ctx SpecContext) {
@@ -476,8 +441,3 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 		}, NodeTimeout(15*time.Minute))
 	})
 })
-
-// tcp2 is a TCP connect check.
-func tcp2(t target) check {
-	return check{"id": "tcp " + t.String(), "op": "tcp", "host": t.host, "port": t.port}
-}

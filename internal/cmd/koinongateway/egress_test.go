@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"io"
 	"net/http"
@@ -66,6 +67,83 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		}
 	})
 
+	It("selects the actor token verifier: ed25519 by default, substrate with its issuer and CA file (issue #1386)", func() {
+		eg := []string{"--egress-addr", ":8090", "--namespace", "koinon"}
+		ed := []string{"--actor-token-issuer", actorIssuer, "--actor-token-keys-dir", keysDir}
+		sub := []string{"--actor-token-verifier", "substrate", "--actor-jwt-issuer", "https://idp.ate-system.svc", "--actor-jwt-ca-file", "/etc/koinon/substrate-idp-ca/ca.crt"}
+		check := func(args ...[]string) error {
+			all := []string{}
+			for _, a := range args {
+				all = append(all, a...)
+			}
+			return cli.Check(NewRootCommand(), base(all...), nil)
+		}
+		Expect(check(eg, ed)).To(Succeed())
+		Expect(check(eg, ed, []string{"--actor-token-verifier", "ed25519"})).To(Succeed())
+		Expect(check(eg, sub)).To(Succeed(), "substrate needs no Ed25519 key")
+
+		Expect(check(eg, sub[:4])).To(MatchError(ContainSubstring("--actor-jwt-ca-file")))
+		Expect(check(eg, sub[:2], sub[4:])).To(MatchError(ContainSubstring("--actor-jwt-issuer")))
+		Expect(check(eg, sub, ed)).To(MatchError(ContainSubstring("are for --actor-token-verifier=ed25519")))
+		Expect(check(eg, ed, sub[2:])).To(MatchError(ContainSubstring("need --actor-token-verifier=substrate")))
+		Expect(check(eg, ed, []string{"--actor-token-verifier", "none"})).To(MatchError(ContainSubstring(`not "none"`)))
+		Expect(check(eg, ed, []string{"--actor-token-verifier", ""})).To(MatchError(ContainSubstring("must be ed25519 or substrate")))
+	})
+
+	It("starts the substrate verifier without contacting the issuer, refuses on a bad config, and fails closed (issue #1386)", func(specCtx SpecContext) {
+		// A reserved host: no request in this spec is allowed, so nothing dials it.
+		routes := filepath.Join(GinkgoT().TempDir(), "routes.json")
+		Expect(os.WriteFile(routes, []byte(`{"routes":[{"name":"reg","class":"registry","host":"registry.example.test","methods":["GET"],"pathPrefixes":["/"]}]}`), 0o600)).To(Succeed())
+		cfg := config{
+			mcpPath: true, stateURL: "http://" + freeAddr(), stateTokenFile: tokenFile, listenAddr: freeAddr(), healthAddr: freeAddr(), egressAddr: freeAddr(),
+			drain: 5 * time.Second, podName: "koinon-gateway-0", namespace: "koinon", egressRoutesFile: routes,
+			// No server listens at the issuer: the start must not need it.
+			actorTokenVerifier: verifierSubstrate, actorJWTIssuer: "https://" + freeAddr(),
+			actorJWTCAFile: filepath.Join(GinkgoT().TempDir(), "missing.pem"),
+		}
+		Expect(run(specCtx, cfg)).To(MatchError(ContainSubstring("Substrate CA file")), "a missing CA file stops the start")
+		notPEM := filepath.Join(GinkgoT().TempDir(), "ca.pem")
+		Expect(os.WriteFile(notPEM, []byte("not a certificate\n"), 0o600)).To(Succeed())
+		cfg.actorJWTCAFile = notPEM
+		Expect(run(specCtx, cfg)).To(MatchError(ContainSubstring("no PEM certificate")))
+		bad := cfg
+		bad.actorJWTIssuer = "http://idp.ate-system.svc"
+		Expect(run(specCtx, bad)).To(MatchError(ContainSubstring("https URL")))
+
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		srv.Close()
+		ca := filepath.Join(GinkgoT().TempDir(), "ca.pem")
+		Expect(os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)).To(Succeed())
+		cfg.actorJWTCAFile = ca
+
+		ctx, term := context.WithCancel(context.Background())
+		DeferCleanup(term)
+		done := make(chan error, 1)
+		go func() { done <- run(ctx, cfg) }()
+		get := func(tok string) (int, string) {
+			req, err := http.NewRequestWithContext(specCtx, http.MethodGet, "http://"+cfg.egressAddr+"/egress/registry.example.test/x", nil)
+			Expect(err).NotTo(HaveOccurred())
+			if tok != "" {
+				req.Header.Set(route.TokenHeader, tok)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return 0, ""
+			}
+			_ = resp.Body.Close()
+			return resp.StatusCode, resp.Header.Get(egress.RefusalHeader)
+		}
+		Eventually(func() int { c, _ := get(""); return c }, racescale.D(10*time.Second), 50*time.Millisecond).
+			Should(Equal(http.StatusUnauthorized))
+		code, reason := get(actortoken.Placeholder)
+		Expect([]any{code, reason}).To(Equal([]any{http.StatusUnauthorized, string(route.ReasonBadToken)}))
+		// A well-formed token makes the verifier read the issuer's keys; the issuer is down, so it refuses.
+		code, reason = get(unsignedLookingJWT())
+		Expect([]any{code, reason}).To(Equal([]any{http.StatusServiceUnavailable, string(route.ReasonIdentityUnavailable)}))
+		term()
+		Eventually(done, racescale.D(10*time.Second)).Should(Receive(BeNil()))
+	}, SpecTimeout(40*time.Second))
+
 	It("refuses the MCP listener's address and a bad allowed host", func() {
 		on := []string{"--actor-token-issuer", actorIssuer, "--actor-token-keys-dir", keysDir, "--namespace", "koinon"}
 		Expect(cli.Check(NewRootCommand(), base(append(on, "--egress-addr", ":8080", "--listen-addr", ":8080")...), nil)).
@@ -77,7 +155,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 	It("refuses to start without a usable key directory or with a bad route file", func(ctx SpecContext) {
 		cfg := config{
 			mcpPath: true, stateURL: stateURL, stateTokenFile: tokenFile, listenAddr: "127.0.0.1:0", drain: time.Second,
-			egressAddr: "127.0.0.1:0", actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, namespace: "koinon",
+			egressAddr: "127.0.0.1:0", actorTokenVerifier: verifierEd25519, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, namespace: "koinon",
 		}
 		Expect(run(ctx, cfg)).To(MatchError(ContainSubstring("actortoken")), "an empty key directory")
 
@@ -112,7 +190,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		writeActorKey(keysDir, "k1")
 		cfg := config{
 			mcpPath: true, stateURL: stateURL, stateTokenFile: tokenFile, listenAddr: "127.0.0.1:0", drain: time.Second,
-			egressAddr: "127.0.0.1:0", actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, namespace: "koinon", egressCAFile: empty,
+			egressAddr: "127.0.0.1:0", actorTokenVerifier: verifierEd25519, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, namespace: "koinon", egressCAFile: empty,
 		}
 		Expect(run(ctx, cfg)).To(MatchError(ContainSubstring("--egress-ca-file")), "a bad file stops the start")
 	}, SpecTimeout(20*time.Second))
@@ -126,7 +204,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 			listenAddr: freeAddr(), healthAddr: freeAddr(), egressAddr: freeAddr(),
 			mcpPath: true, stateURL: "http://" + freeAddr(), stateTokenFile: tokenFile, podName: "koinon-gateway-0",
 			drain: 5 * time.Second, shutdownDelay: time.Second,
-			actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, egressRoutesFile: routes, namespace: "koinon",
+			actorTokenVerifier: verifierEd25519, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, egressRoutesFile: routes, namespace: "koinon",
 		}
 		ctx, term := context.WithCancel(context.Background())
 		DeferCleanup(term)
@@ -187,7 +265,7 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 			cfg := config{
 				listenAddr: freeAddr(), healthAddr: freeAddr(), egressAddr: freeAddr(),
 				mcpPath: true, stateURL: "http://" + freeAddr(), stateTokenFile: tokenFile, podName: "koinon-gateway-0",
-				drain: time.Second, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, egressRoutesFile: routesFile,
+				drain: time.Second, actorTokenVerifier: verifierEd25519, actorTokenIssuer: actorIssuer, actorTokenKeysDir: keysDir, egressRoutesFile: routesFile,
 				namespace: "koinon", restoreHold: held,
 			}
 			ctx, term := context.WithCancel(context.Background())
@@ -241,3 +319,12 @@ var _ = Describe("koinon-gateway's egress listener", func() {
 		stop()
 	}, SpecTimeout(60*time.Second))
 })
+
+// unsignedLookingJWT is a compact ES256 JWS with a kid and a zero signature: well formed, so the
+// Substrate verifier reads the issuer's keys before it can refuse it. It verifies under no key.
+func unsignedLookingJWT() string {
+	enc := base64.RawURLEncoding
+	header := enc.EncodeToString([]byte(`{"alg":"ES256","kid":"koinon-test-kid","typ":"JWT"}`))
+	payload := enc.EncodeToString([]byte(`{"sub":"actor/koinon-test/koinon-test"}`))
+	return header + "." + payload + "." + enc.EncodeToString(make([]byte, 64))
+}

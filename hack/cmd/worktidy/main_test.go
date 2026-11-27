@@ -4,16 +4,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 )
 
 func TestWorktidy(t *testing.T) {
@@ -261,10 +264,13 @@ var _ = Describe("patch and docker helpers", func() {
 	})
 	It("never reuses a patch directory", func() {
 		repo := GinkgoT().TempDir()
+		// execGit starts git with the process environment: isolate it for this spec.
+		for _, kv := range gitenv.Env(repo) {
+			k, v, _ := strings.Cut(kv, "=")
+			GinkgoT().Setenv(k, v)
+		}
 		for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "x"}} {
-			c := exec.Command("git", args...)
-			c.Dir = repo
-			Expect(c.Run()).To(Succeed())
+			Expect(gitenv.Command(context.Background(), repo, repo, args...).Run()).To(Succeed())
 		}
 		Expect(os.WriteFile(filepath.Join(repo, "new.txt"), []byte("hi\n"), 0o600)).To(Succeed())
 		dir := filepath.Join(GinkgoT().TempDir(), "patches")

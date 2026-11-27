@@ -196,6 +196,14 @@ type Config struct {
 	// actor identity token with it, outside the guest (actortoken.go). Nil keeps git on the
 	// execution driver's own egress.
 	ActorTokens *actortoken.Minter
+	// ActorIdentityOutside says the execution driver adds the actor identity outside the guest
+	// (Agent Substrate, issue #1386, ADR 0120 amendment of 2026-11-26): atenet-egress replaces the
+	// placeholder in the actor token header with the actor's own token. With an EgressURL, git of a
+	// run whose agent has a code-host connection then goes through the gateway's egress prefix, and
+	// agentd writes no token into the guest and needs no ActorTokens: the guest's git configuration
+	// sends only actortoken.Placeholder (codehost.EgressPlaceholderGitConfig). It excludes
+	// ActorTokens, and EgressURL must be http: the header is replaced only on the clear-text rule.
+	ActorIdentityOutside bool
 	// EgressURL is the gateway's egress listener as sandboxes reach it, for example
 	// http://koinon-mcp-gateway.koinon.svc:8081. Required with ActorTokens; it must not carry
 	// credentials, a path, a query or a fragment.
