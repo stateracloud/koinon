@@ -281,9 +281,12 @@ var _ = Describe("Substrate actor token verifier", func() {
 			}))
 		})
 
-		It("accepts an RS256 token", func() {
+		It("refuses an RS256 token, also when the issuer publishes an RS256 key, and names the alg", func() {
 			_, err := v.Verify(mintWith(rsaKey, jose.RS256, rsaKID, substrateClaims(iss, now, 900*time.Second)))
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).To(MatchError(actortoken.ErrAlgorithm))
+			Expect(err).To(MatchError(actortoken.ErrInvalid))
+			Expect(err.Error()).To(ContainSubstring(`alg "RS256" is not ES256`))
+			Expect(actortoken.Reason(err)).To(Equal("alg"))
 		})
 
 		It("fetches the keys once for many concurrent requests", func() {
@@ -344,8 +347,14 @@ var _ = Describe("Substrate actor token verifier", func() {
 			idp.set(func(f *fakeIDP) {
 				f.keys = []jose.JSONWebKey{publicJWK(ecKey, ecKID, jose.ES256), publicJWK(rsaKey, rsaKID, jose.ES256)}
 			})
-			_, err := v.Verify(mintWith(rsaKey, jose.RS256, rsaKID, substrateClaims(iss, now, 900*time.Second)))
+			_, err := v.Verify(mintWith(ecKey, jose.ES256, rsaKID, substrateClaims(iss, now, 900*time.Second)))
 			Expect(err).To(MatchError(actortoken.ErrUnknownKey))
+		})
+
+		It("does not use an RS256 key from the JWK set", func() {
+			idp.set(func(f *fakeIDP) { f.keys = []jose.JSONWebKey{publicJWK(rsaKey, rsaKID, jose.RS256)} })
+			_, err := v.Verify(good())
+			Expect(err).To(MatchError(actortoken.ErrUnavailable))
 		})
 
 		It("refuses while the issuer is down and recovers after the refetch interval", func() {
@@ -383,23 +392,36 @@ var _ = Describe("Substrate actor token verifier", func() {
 			hdr, _ := json.Marshal(map[string]string{"alg": "none", "kid": ecKID, "typ": "JWT"})
 			body, _ := json.Marshal(substrateClaims(iss, now, 900*time.Second))
 			_, err := v.Verify(enc(hdr) + "." + enc(body) + ".")
-			Expect(err).To(MatchError(actortoken.ErrMalformed))
+			Expect(err).To(MatchError(actortoken.ErrAlgorithm))
+			Expect(err.Error()).To(ContainSubstring(`alg "none"`))
 		})
 
 		It("refuses HS256", func() {
 			tok := mintWith([]byte("koinon_test_not-a-real-hmac-key-aaaaaaaa"), jose.HS256, ecKID, substrateClaims(iss, now, 900*time.Second))
 			_, err := v.Verify(tok)
-			Expect(err).To(MatchError(actortoken.ErrMalformed))
+			Expect(err).To(MatchError(actortoken.ErrAlgorithm))
+			Expect(err.Error()).To(ContainSubstring(`alg "HS256"`))
 		})
 
 		It("refuses RS384", func() {
 			_, err := v.Verify(mintWith(rsaKey, jose.RS384, rsaKID, substrateClaims(iss, now, 900*time.Second)))
-			Expect(err).To(MatchError(actortoken.ErrMalformed))
+			Expect(err).To(MatchError(actortoken.ErrAlgorithm))
 		})
 
 		It("refuses an alg that is not the alg of the named key", func() {
 			_, err := v.Verify(mintWith(rsaKey, jose.RS256, ecKID, substrateClaims(iss, now, 900*time.Second)))
-			Expect(err).To(MatchError(actortoken.ErrUnknownKey))
+			Expect(err).To(MatchError(actortoken.ErrAlgorithm))
+		})
+
+		It("refuses an empty alg and caps a long alg in the error", func() {
+			enc := base64.RawURLEncoding.EncodeToString
+			body, _ := json.Marshal(substrateClaims(iss, now, 900*time.Second))
+			for _, alg := range []string{"", strings.Repeat("A", 200)} {
+				hdr, _ := json.Marshal(map[string]string{"alg": alg, "kid": ecKID, "typ": "JWT"})
+				_, err := v.Verify(enc(hdr) + "." + enc(body) + ".c2ln")
+				Expect(err).To(MatchError(actortoken.ErrAlgorithm), "alg %q", alg)
+				Expect(len(err.Error())).To(BeNumerically("<", 100))
+			}
 		})
 
 		It("refuses a token with no kid", func() {

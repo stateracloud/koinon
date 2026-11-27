@@ -596,8 +596,9 @@ it (`no_token`).
    - The gateway verifies the TLS certificate of the issuer with a CA bundle from the chart values (the CA of
      the Substrate install, which signs the certificate of `ate-idp-server`). There is no option to skip the
      check. Without the CA bundle, the gateway does not start the Substrate verifier.
-   - The gateway accepts only `ES256` and `RS256`, which the installer uses. It refuses all other values of
-     `alg`, `none` and `HS*` included.
+   - The gateway accepts only `ES256`: ate-idp-server signs `ES256` only (lab test of 2026-11-27). It refuses
+     all other values of `alg`, `RS256`, `none` and `HS*` included, with an error that names the `alg`, and
+     it does not use a published key with another `alg`.
    - The token must have the gateway audience in `aud`, a valid `exp` and `nbf`, and a lifetime of 300 to
      3600 seconds (section 1.2). The lifetime is `exp - iat`. ateapi sets `nbf` to 5 minutes before `iat`
      (`cmd/ateapi/internal/controlapi/actor.go`), so `exp - nbf` is the lifetime plus 300 seconds. Its `sub` must be `actor/<atespace>/<name>`, and the claim `actor.ate.dev`
@@ -736,8 +737,8 @@ it (`no_token`).
   (`cmd/atenet/internal/router/egress/actorjwt/actorjwt.go`), and a new actor with a reused name got a token with
   the UID of a deleted actor for up to a third of the lifetime, also after its atespace was made again. So a name
   is never used again, and the gateway keys an actor by atespace, name and UID together, never by UID alone. The
-  JWT is ES256 only in the lab, with `exp - iat` = 900 s, and the guest cannot steer the identity with fake XFCC or
-  `Ate-Target-Actor` headers.
+  JWT is ES256 only in the lab, with `exp - iat` = 900 s, so the gateway now accepts ES256 only (main's
+  decision). The guest cannot steer the identity with fake XFCC or `Ate-Target-Actor` headers.
 
 ### Prior art
 

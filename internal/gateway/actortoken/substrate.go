@@ -6,9 +6,9 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,8 +60,23 @@ const (
 	wellKnownPath        = "/.well-known/openid-configuration"
 )
 
-// substrateAlgs are the only signature algorithms the Substrate verifier accepts.
-var substrateAlgs = []jose.SignatureAlgorithm{jose.ES256, jose.RS256}
+// substrateAlgs are the only signature algorithms the Substrate verifier accepts. ate-idp-server
+// signs ES256 only (lab test of 2026-11-27, ADR 0120 amendment for #1386), so every other alg fails
+// closed with ErrAlgorithm.
+var substrateAlgs = []jose.SignatureAlgorithm{jose.ES256}
+
+// maxAlgInError caps the alg text that an algError repeats: the value comes from the token.
+const maxAlgInError = 16
+
+// algError is ErrAlgorithm with the alg the token named, so the error says which alg was refused.
+type algError struct{ alg string }
+
+func (e *algError) Error() string {
+	return fmt.Sprintf("%s: alg %q is not %s", ErrAlgorithm.Error(), e.alg, jose.ES256)
+}
+
+// Unwrap makes an algError match ErrAlgorithm (and so ErrInvalid), and lets Reason find "alg".
+func (e *algError) Unwrap() error { return ErrAlgorithm }
 
 // reasonError is a token failure with a fixed reason. Every reasonError matches ErrInvalid with
 // errors.Is, so a caller that only needs "invalid" can test for that.
@@ -79,8 +94,11 @@ var (
 	ErrPlaceholder error = &reasonError{"placeholder"}
 	// ErrTokenTooLarge means the token is longer than MaxTokenSize.
 	ErrTokenTooLarge error = &reasonError{"too_large"}
-	// ErrMalformed means the token is not a compact JWS with one signature and an allowed alg.
+	// ErrMalformed means the token is not a compact JWS with one signature.
 	ErrMalformed error = &reasonError{"malformed"}
+	// ErrAlgorithm means the token's alg is not ES256 (none, HS* and RS256 included). The error
+	// from Verify names the alg.
+	ErrAlgorithm error = &reasonError{"alg"}
 	// ErrUnknownKey means the token has no kid, a kid the issuer does not publish, or an alg that
 	// is not the alg of that key.
 	ErrUnknownKey error = &reasonError{"unknown_key"}
@@ -274,6 +292,12 @@ func (v *SubstrateVerifier) Verify(token string) (SubstrateClaims, error) {
 	if token == Placeholder {
 		return SubstrateClaims{}, ErrPlaceholder
 	}
+	if alg, ok := headerAlg(token); ok && alg != string(jose.ES256) {
+		if len(alg) > maxAlgInError {
+			alg = alg[:maxAlgInError]
+		}
+		return SubstrateClaims{}, &algError{alg: alg}
+	}
 	tok, err := jwt.ParseSigned(token, substrateAlgs)
 	if err != nil || len(tok.Headers) != 1 {
 		return SubstrateClaims{}, ErrMalformed
@@ -294,6 +318,26 @@ func (v *SubstrateVerifier) Verify(token string) (SubstrateClaims, error) {
 		return SubstrateClaims{}, ErrSignature
 	}
 	return v.check(&w)
+}
+
+// headerAlg returns the alg of the protected header of a compact JWS, and false if the header does
+// not decode. It does not check the token: ParseSigned does that after it.
+func headerAlg(token string) (string, bool) {
+	seg, _, found := strings.Cut(token, ".")
+	if !found {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(seg)
+	if err != nil {
+		return "", false
+	}
+	var h struct {
+		Alg string `json:"alg"`
+	}
+	if err := json.Unmarshal(raw, &h); err != nil {
+		return "", false
+	}
+	return h.Alg, true
 }
 
 func (v *SubstrateVerifier) check(w *substrateWire) (SubstrateClaims, error) {
@@ -421,27 +465,22 @@ func (v *SubstrateVerifier) fetchKeys() (map[string]jose.JSONWebKey, error) {
 		keys[k.KeyID] = k
 	}
 	if len(keys) == 0 {
-		return nil, errors.New("actortoken: the JWK set has no usable ES256 or RS256 key")
+		return nil, errors.New("actortoken: the JWK set has no usable ES256 key")
 	}
 	return keys, nil
 }
 
-// usableKey reports whether k is a public signing key with a kid and an alg the verifier accepts,
-// and whether the key type fits the alg: ES256 needs a P-256 key, RS256 an RSA key of at least
-// 2048 bits.
+// usableKey reports whether k is a public signing key with a kid and the alg ES256 on a P-256 key.
+// A key with any other alg, RS256 included, is not used.
 func usableKey(k jose.JSONWebKey) bool {
 	if k.KeyID == "" || (k.Use != "" && k.Use != "sig") || !k.Valid() || !k.IsPublic() {
 		return false
 	}
-	switch k.Algorithm {
-	case string(jose.ES256):
-		pk, ok := k.Key.(*ecdsa.PublicKey)
-		return ok && pk.Curve == elliptic.P256()
-	case string(jose.RS256):
-		pk, ok := k.Key.(*rsa.PublicKey)
-		return ok && pk.N.BitLen() >= 2048
+	if k.Algorithm != string(jose.ES256) {
+		return false
 	}
-	return false
+	pk, ok := k.Key.(*ecdsa.PublicKey)
+	return ok && pk.Curve == elliptic.P256()
 }
 
 func (v *SubstrateVerifier) fetchJSON(target string, out any) error {
