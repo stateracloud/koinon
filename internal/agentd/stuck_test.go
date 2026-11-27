@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
@@ -399,9 +400,8 @@ var _ = Describe("savework.sh", func() {
 		work := GinkgoT().TempDir()
 		repo := filepath.Join(work, "widgets")
 		git := func(args ...string) string {
-			c := exec.Command("git", append([]string{"-C", repo}, args...)...)
-			c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-				"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+			c := gitenv.Command(context.Background(), repo, repo, args...)
+			c.Env = gitenv.Env(repo, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
 			out, err := c.CombinedOutput()
 			Expect(err).NotTo(HaveOccurred(), string(out))
 			return strings.TrimSpace(string(out))
@@ -478,9 +478,8 @@ var _ = Describe("savework.sh", func() {
 			return p
 		}
 		git := func(args ...string) {
-			c := exec.Command("git", append([]string{"-C", repo}, args...)...)
-			c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-				"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+			c := gitenv.Command(context.Background(), repo, repo, args...)
+			c.Env = gitenv.Env(repo, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
 			out, err := c.CombinedOutput()
 			Expect(err).NotTo(HaveOccurred(), string(out))
 		}
@@ -500,7 +499,8 @@ var _ = Describe("savework.sh", func() {
 		}
 		run := func(env ...string) ([]byte, error) {
 			c := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
-			c.Env = append(os.Environ(), env...)
+			// The script runs git: no real HOME or global config, unless a spec sets them in env.
+			c.Env = gitenv.Env(GinkgoT().TempDir(), env...)
 			return c.Output()
 		}
 		ran := func() string {
@@ -565,7 +565,7 @@ var _ = Describe("savework.sh", func() {
 			// Not the cat-like canary: an upload-pack that waits on its input would hang the fetch.
 			c := filepath.Join(GinkgoT().TempDir(), "canary")
 			Expect(os.WriteFile(c, []byte("#!/bin/sh\necho \"$0 $*\" >> "+canary+"\nexit 1\n"), 0o700)).To(Succeed())
-			blob, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD:a.txt").Output()
+			blob, err := gitenv.Command(context.Background(), repo, repo, "rev-parse", "HEAD:a.txt").Output()
 			Expect(err).NotTo(HaveOccurred())
 			id := strings.TrimSpace(string(blob))
 			Expect(os.Remove(filepath.Join(repo, ".git", "objects", id[:2], id[2:]))).To(Succeed())
@@ -630,8 +630,7 @@ var _ = Describe("savework.sh", func() {
 		testenv.Require(testenv.Binary("git"))
 		work := GinkgoT().TempDir()
 		for _, args := range [][]string{{"init", "-q", "."}, {"remote", "add", "origin", "https://gitlab.example.test/a/b.git"}} {
-			c := exec.Command("git", append([]string{"-C", work}, args...)...)
-			Expect(c.Run()).To(Succeed())
+			Expect(gitenv.Command(context.Background(), work, work, args...).Run()).To(Succeed())
 		}
 		out, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000").Output()
 		Expect(err).NotTo(HaveOccurred())
@@ -648,9 +647,8 @@ var _ = Describe("savework.sh", func() {
 			dir := filepath.Join(work, filepath.Base(strings.TrimSuffix(origin, ".git")))
 			Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
 			git := func(args ...string) {
-				c := exec.Command("git", append([]string{"-C", dir}, args...)...)
-				c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-					"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+				c := gitenv.Command(context.Background(), dir, dir, args...)
+				c.Env = gitenv.Env(dir, "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
 				out, err := c.CombinedOutput()
 				Expect(err).NotTo(HaveOccurred(), string(out))
 			}
