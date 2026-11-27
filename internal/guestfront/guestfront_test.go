@@ -324,6 +324,8 @@ var _ = Describe("PrepareLogDir", func() {
 		func(mode os.FileMode) {
 			d := filepath.Join(realTemp(), "jobs")
 			Expect(os.Mkdir(d, 0o700)).To(Succeed())
+			// BSD and macOS give a new directory the group of its parent; the front wants its own.
+			Expect(os.Chown(d, -1, os.Getegid())).To(Succeed())
 			Expect(os.Chmod(d, mode)).To(Succeed())
 			Expect(guestfront.PrepareLogDir(d)).To(Succeed())
 		},
