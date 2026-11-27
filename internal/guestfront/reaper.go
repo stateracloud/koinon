@@ -11,14 +11,14 @@ import (
 	"time"
 )
 
-// DefaultReapGrace is how long a zombie child must stay unreaped before the reaper takes it.
-const DefaultReapGrace = time.Second
+// ownedRecheck is how long the reaper waits before it looks again at a zombie that the tracker owns.
+// It only guards against a late state update in the tracker. The tracker's own wait takes the zombie
+// first in nearly every case, so the reaper is idle.
+const ownedRecheck = time.Second
 
-// zombie names one zombie child of the front. Start is the process start time from the kernel,
-// so a reused PID is a different zombie.
+// zombie names one zombie child of the front.
 type zombie struct {
-	PID   int
-	Start uint64
+	PID int
 }
 
 // reaper reaps the orphans that the front adopts as PID 1.
@@ -28,34 +28,32 @@ type zombie struct {
 //
 // A plain wait4(-1) loop is wrong here. The upstream guest server starts the payload with os/exec
 // and waits for each child by PID (cmd.Wait). A wait4(-1) would take the exit status of those
-// children, and cmd.Wait would fail with ECHILD. The reaper cannot tell a child that the front
-// started from an adopted orphan, so it uses time: cmd.Wait starts right after the start of the
-// child and reaps it at once when it exits. A zombie that is still there after a grace period is an
-// orphan, and the reaper waits for exactly that PID.
+// children, and cmd.Wait would fail with ECHILD. A timer is wrong too: under load cmd.Wait can be
+// late by more than any fixed time. So the front records the PID of each process that it starts
+// (ownedProcesses) and the reaper takes only a zombie whose PID is not recorded, by exact PID.
+// This is the rule of tini and dumb-init (take every child) narrowed by the PIDs that the front
+// itself waits for.
 type reaper struct {
-	grace  time.Duration
 	logger *slog.Logger
 	// list returns the zombie children of this process.
 	list func() ([]zombie, error)
-	// reap waits for one zombie. It reports whether it took the status.
+	// reap waits for one zombie by PID. It reports whether it took the status.
 	reap func(pid int) bool
-
-	seen map[zombie]time.Time
+	// owns reports whether the front started the process and still waits for it.
+	owns func(pid int) bool
+	// exclusive stops the start of new processes until the returned function runs.
+	exclusive func() func()
 }
 
-func newReaper(grace time.Duration, logger *slog.Logger) *reaper {
-	if grace <= 0 {
-		grace = DefaultReapGrace
-	}
+func newReaper(own *ownedProcesses, logger *slog.Logger) *reaper {
 	return &reaper{
-		grace: grace, logger: logger,
-		list: listZombieChildren, reap: reapPID,
-		seen: map[zombie]time.Time{},
+		logger: logger,
+		list:   listZombieChildren, reap: reapPID,
+		owns: own.owns, exclusive: own.exclusive,
 	}
 }
 
-// run reaps until ctx ends. It wakes on SIGCHLD, and after a scan that leaves a young zombie it wakes
-// again when the grace period of that zombie ends. It does not poll when nothing is waiting.
+// run reaps until ctx ends. It wakes on SIGCHLD. It does not poll when nothing is waiting.
 func (r *reaper) run(ctx context.Context) {
 	enableSubreaper(r.logger)
 	sig := make(chan os.Signal, 1)
@@ -65,10 +63,10 @@ func (r *reaper) run(ctx context.Context) {
 	timer.Stop()
 	defer timer.Stop()
 	// Scan once at the start: orphans can exist before the first signal.
-	next := r.scan(time.Now())
+	again := r.scan()
 	for {
-		if next > 0 {
-			timer.Reset(next)
+		if again {
+			timer.Reset(ownedRecheck)
 		}
 		select {
 		case <-ctx.Done():
@@ -77,45 +75,30 @@ func (r *reaper) run(ctx context.Context) {
 		case <-timer.C:
 		}
 		timer.Stop()
-		next = r.scan(time.Now())
+		again = r.scan()
 	}
 }
 
-// scan reaps the zombies that are older than the grace period. It returns the time until the next
-// scan is due, or 0 when no zombie is waiting.
-func (r *reaper) scan(now time.Time) time.Duration {
+// scan reaps the zombie children that the front did not start. It reports whether it left a zombie
+// that the tracker owns, so the caller looks again later.
+func (r *reaper) scan() (again bool) {
+	// No process starts during the scan, so every process that is running is in the set.
+	defer r.exclusive()()
 	zs, err := r.list()
 	if err != nil {
 		r.logger.Warn("guest front: list zombie children", "err", err)
-		return r.grace
+		return true
 	}
-	live := make(map[zombie]struct{}, len(zs))
-	var next time.Duration
 	for _, z := range zs {
-		live[z] = struct{}{}
-		first, ok := r.seen[z]
-		if !ok {
-			r.seen[z] = now
-			first = now
-		}
-		if age := now.Sub(first); age < r.grace {
-			if left := r.grace - age; next == 0 || left < next {
-				next = left
-			}
+		if r.owns(z.PID) {
+			again = true
 			continue
 		}
 		if r.reap(z.PID) {
-			r.logger.Debug("guest front: reaped an orphan", "pid", z.PID)
-		}
-		delete(r.seen, z)
-		delete(live, z)
-	}
-	for z := range r.seen {
-		if _, ok := live[z]; !ok {
-			delete(r.seen, z)
+			r.logger.Info("guest front: reaped an orphan", "pid", z.PID)
 		}
 	}
-	return next
+	return again
 }
 
 // reapPID waits for one child by PID and does not block.

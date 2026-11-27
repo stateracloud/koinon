@@ -13,7 +13,7 @@ var _ = Describe("parseZombie", func() {
 	It("reads a zombie child, with a name that holds brackets", func() {
 		z, ok := parseZombie(123, stat, 77)
 		Expect(ok).To(BeTrue())
-		Expect(z).To(Equal(zombie{PID: 123, Start: 4242}))
+		Expect(z).To(Equal(zombie{PID: 123}))
 	})
 	It("skips a zombie of another parent", func() {
 		_, ok := parseZombie(123, stat, 1)

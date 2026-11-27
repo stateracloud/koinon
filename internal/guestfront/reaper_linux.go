@@ -55,16 +55,12 @@ func parseZombie(pid int, stat string, parent int) (zombie, bool) {
 		return zombie{}, false
 	}
 	f := strings.Fields(stat[i+1:])
-	// f[0] state, f[1] ppid, ..., f[19] starttime (field 22).
-	if len(f) < 20 || f[0] != "Z" {
+	// f[0] state, f[1] ppid.
+	if len(f) < 2 || f[0] != "Z" {
 		return zombie{}, false
 	}
 	if ppid, err := strconv.Atoi(f[1]); err != nil || ppid != parent {
 		return zombie{}, false
 	}
-	start, err := strconv.ParseUint(f[19], 10, 64)
-	if err != nil {
-		return zombie{}, false
-	}
-	return zombie{PID: pid, Start: start}, true
+	return zombie{PID: pid}, true
 }

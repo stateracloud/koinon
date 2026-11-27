@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/agent-substrate/env/guest"
+	"github.com/agent-substrate/env/guest/process"
+	ateenvv1alpha "github.com/agent-substrate/env/proto/ateenv/v1alpha"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -42,9 +44,8 @@ type Config struct {
 	// Keys verify the tokens. Required.
 	Keys   []ed25519.PublicKey
 	Logger *slog.Logger
-	// ReapGrace is how long an orphaned zombie waits before the front reaps it. Default
-	// DefaultReapGrace. See reaper.
-	ReapGrace time.Duration
+	// NoReap turns the reaper off. Only a test that needs an orphan to stay sets it.
+	NoReap bool
 }
 
 // KeysFromEnv reads the verify keys from guestauth.VerifyKeysEnv and removes the variable from the
@@ -67,6 +68,7 @@ type Front struct {
 	cfg      Config
 	verifier *guestauth.Verifier
 	grpc     *grpc.Server
+	own      *ownedProcesses
 	cleanup  func()
 	srv      *http.Server
 }
@@ -83,18 +85,32 @@ func New(cfg Config) (*Front, error) {
 	if err != nil {
 		return nil, fmt.Errorf("guestfront: %w", err)
 	}
+	// The upstream server builds the gRPC server and the other services. The front builds the process
+	// service itself, from the same upstream package and the same settings as guest.NewServer, so it
+	// can record the processes that it starts (ownedProcesses, for the reaper).
 	gs, cleanup, err := guest.NewServer(guest.Config{
 		ListenAddr:       cfg.Listen,
 		LogDir:           cfg.LogDir,
 		Workspace:        cfg.Workspace,
-		EnableProcess:    true,
+		EnableProcess:    false,
 		EnableFileSystem: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("guestfront: upstream guest server: %w", err)
 	}
+	trackerCfg := process.DefaultConfig(cfg.LogDir)
+	if cfg.Workspace != "" {
+		trackerCfg.Workspace = cfg.Workspace
+	}
+	tracker, err := process.NewTracker(trackerCfg)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("guestfront: process tracker: %w", err)
+	}
+	own := newOwnedProcesses(process.NewService(tracker))
+	ateenvv1alpha.RegisterProcessServiceServer(gs, &ownedService{Service: own.svc, own: own})
 	gs.RegisterService(&frontService, struct{}{})
-	f := &Front{cfg: cfg, verifier: v, grpc: gs, cleanup: cleanup}
+	f := &Front{cfg: cfg, verifier: v, grpc: gs, own: own, cleanup: func() { cleanup(); tracker.Close() }}
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
@@ -115,13 +131,15 @@ func (f *Front) Handler() http.Handler {
 // Serve serves on lis until ctx ends, then stops gracefully.
 func (f *Front) Serve(ctx context.Context, lis net.Listener) error {
 	defer f.cleanup()
-	rctx, stopReaper := context.WithCancel(ctx)
-	reaped := make(chan struct{})
-	go func() {
-		defer close(reaped)
-		newReaper(f.cfg.ReapGrace, f.cfg.Logger).run(rctx)
-	}()
-	defer func() { stopReaper(); <-reaped }()
+	if !f.cfg.NoReap {
+		rctx, stopReaper := context.WithCancel(ctx)
+		reaped := make(chan struct{})
+		go func() {
+			defer close(reaped)
+			newReaper(f.own, f.cfg.Logger).run(rctx)
+		}()
+		defer func() { stopReaper(); <-reaped }()
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
