@@ -1681,10 +1681,10 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- /* Issue #1489, ADR 0120 amendment of 2026-11-27: the guest holds no gateway key; atenet-egress adds the actor JWT,
 and only koinon-gateway checks it. agentgateway cannot, so the model and MCP paths must be koinon-gateway's. */}}
 {{- if not (include "koinon.modelKoinon" .) }}
-{{- fail "execution.driver=substrate needs gateway.model.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to a model call (issue #1489)" }}
+{{- fail "execution.driver=substrate needs gateway.model.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to a model call (issue #1489). Set gateway.mode=standalone: gateway.mode=kubernetes is frozen (ADR 0097) and cannot carry this" }}
 {{- end }}
 {{- if not (include "koinon.mcpKoinon" .) }}
-{{- fail "execution.driver=substrate needs gateway.mcp.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to an MCP call (issue #1489)" }}
+{{- fail "execution.driver=substrate needs gateway.mcp.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to an MCP call (issue #1489). Set gateway.mode=standalone: gateway.mode=kubernetes is frozen (ADR 0097) and cannot carry this" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
 {{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
