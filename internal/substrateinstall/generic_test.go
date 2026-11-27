@@ -41,6 +41,7 @@ func pinnedKindFiles() map[string]string {
 		kind + "atelet/kustomization.yaml":   ateletOverlay,
 		kind + "postgres/kustomization.yaml": postgresOverlay,
 		"cmd/ate-setup/main.go":              "main",
+		egressPath:                           egressFixture,
 	}
 }
 
@@ -459,11 +460,15 @@ func TestGenericInstallRunsAteSetupWithTheCorrectedTreeAndNoDocker(t *testing.T)
 	store, fetch := stageEnv(t)
 	i.GVisorFetcher = fetch
 	i.GVisorStore = func(context.Context) (substrateinstall.AssetStore, func(), error) { return store, func() {}, nil }
-	var sawTree string
-	r.onSetup = func(dir string) { sawTree = readFile(t, dir, "manifests/ate-install/kind/atelet/kustomization.yaml") }
+	var sawTree, sawEgress string
+	r.onSetup = func(dir string) {
+		sawTree = readFile(t, dir, "manifests/ate-install/kind/atelet/kustomization.yaml")
+		sawEgress = readFile(t, dir, egressPath)
+	}
 	// The full preflight after the install fails (no Substrate api server in the fake cluster); the install ran.
 	g.Expect(i.Install(t.Context())).To(MatchError(preflight.ErrFailed))
 
+	checkEgressTLSCache(g, envoyClusters(g, sawEgress)) // issue #1486: ate-setup reads the corrected egress manifest
 	calls := r.setupCalls()
 	g.Expect(calls).To(HaveLen(1))
 	g.Expect(calls[0]).To(ContainElements("--kind", "--sandbox-classes=gvisor", "--storage-bucket-name=koinon-snaps"))

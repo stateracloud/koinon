@@ -132,6 +132,7 @@ func newSubstrateCommand() *cobra.Command {
 	f.StringVar(&profile.PostgresStorageSize, "postgres-storage-size", "", "generic platform: size of the bundled PostgreSQL volume (default "+substrateinstall.DefaultPostgresStorageSize+"); its class is --postgres-storage-class")
 	f.StringVar(&profile.GCPProjectID, "gcp-project-id", "", "gke platform: Google Cloud project (ate-setup --gcp-project-id); default PROJECT_ID of the environment")
 	f.StringVar(&profile.SnapshotTransferGSAName, "snapshot-transfer-gsa-name", "", "gke platform: Google service account that snapshot transfers run as (ate-setup --snapshot-transfer-gsa-name); default SNAPSHOT_TRANSFER_GSA_NAME of the environment")
+	f.BoolVar(&profile.EgressDNSV4Preferred, "egress-dns-v4-preferred", false, "resolve upstream names IPv4-first in the egress gateway (dns_lookup_family V4_PREFERRED instead of ALL). Use it on a cluster without an IPv6 route, where calls can fail at random with 503 \"Network is unreachable\"")
 	f.StringVar(&koinonNamespace, "koinon-namespace", "koinon", "namespace of the Koinon release: the installer makes its provisioner an owner in Substrate's global access policy (ADR 0128)")
 	f.StringVar(&koinonRelease, "koinon-release", "koinon", "name of the Koinon Helm release, which names the provisioner's ServiceAccount (<release>-provisioner, or <release>-koinon-provisioner when the release name has no \"koinon\" in it)")
 	f.StringVar(&apiCAFile, "api-ca-file", "", "PEM CA that verifies ate-api-server's certificate; default is the ClusterTrustBundle of Substrate's servicedns signer")
