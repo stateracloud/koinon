@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/stateracloud/koinon/test/drill"
 )
 
@@ -287,5 +289,47 @@ func TestEveryImageTheDrillRequiresIsPublishedOrAllowlisted(t *testing.T) {
 		if _, ok := fields[name]; !ok {
 			t.Errorf("allowlist names %s, which is not a Topology image field", name)
 		}
+	}
+}
+
+// The kind base values turn koinon-gateway's egress listener on with a CA placeholder; the drill must fill it, or
+// the gateway refuses to start (#1487). A base file without the placeholder stays as it is.
+func TestTheBaseValuesGetTheRunsEgressCA(t *testing.T) {
+	top, err := drill.LoadTopology("topology/kind.yaml", "a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := drill.FakeMCPTLS("koinon-drill-fakes-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := drill.BaseValues(top.Path("../..", top.ValuesFile), set.CA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Gateway struct {
+			MCP struct {
+				Koinon struct {
+					Egress struct {
+						CABundle string `yaml:"caBundle"`
+					} `yaml:"egress"`
+				} `yaml:"koinon"`
+			} `yaml:"mcp"`
+		} `yaml:"gateway"`
+	}
+	if err := yaml.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Gateway.MCP.Koinon.Egress.CABundle != string(set.CA) {
+		t.Fatalf("caBundle %q, want the run's CA", v.Gateway.MCP.Koinon.Egress.CABundle)
+	}
+
+	own := filepath.Join(t.TempDir(), "own.yaml")
+	if err := os.WriteFile(own, []byte("gateway:\n  mode: standalone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := drill.BaseValues(own, set.CA); err != nil || string(b) != "gateway:\n  mode: standalone\n" {
+		t.Fatalf("an own base file changed: %q, %v", b, err)
 	}
 }

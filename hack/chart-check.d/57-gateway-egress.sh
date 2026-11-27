@@ -41,9 +41,26 @@ lacks "the gateway never mounts the seed" 'key: key$' "${eg[@]}" "${eg_gw[@]}"
 has "the egress dialer allows the platform's internal hosts" '--egress-allowed-hosts=git.example.test:443$' "${eg[@]}" \
   --set 'egress.allowedInternalHosts={git.example.test:443}' "${eg_gw[@]}"
 lacks "no CA file without a bundle" '--egress-ca-file' "${eg[@]}" "${eg_gw[@]}"
+# An obviously fake bundle in PEM form (the body is base64 of "koinon-test-not-a-real-ca"): the chart checks the
+# form only, the gateway parses the certificate.
+eg_ca="$out/egress-ca.pem"
+printf -- '-----BEGIN CERTIFICATE-----\na29pbm9uLXRlc3Qtbm90LWEtcmVhbC1jYQ==\n-----END CERTIFICATE-----\n' >"$eg_ca"
 has "a CA bundle is a file for the egress upstreams" '--egress-ca-file=/etc/koinon/egress-ca/ca.crt$' "${eg[@]}" \
-  --set-string gateway.mcp.koinon.egress.caBundle=koinon-test-not-a-real-ca "${eg_gw[@]}"
+  --set-file gateway.mcp.koinon.egress.caBundle="$eg_ca" "${eg_gw[@]}"
 has "the CA bundle is a ConfigMap" 'name: koinon-mcp-gateway-egress-ca$' "${eg[@]}" \
+  --set-file gateway.mcp.koinon.egress.caBundle="$eg_ca" "${eg_gw[@]}"
+# A bundle without a PEM certificate fails the render (#1487): the gateway would refuse the file and crash-loop.
+# The kind e2e values hold such a placeholder until test/e2e/kindvalues fills it; unfilled, they must not render.
+for bad in koinon-test-not-a-real-ca '@E2E_EGRESS_CA@' '-----BEGIN CERTIFICATE-----'; do
+  if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${eg[@]}" \
+    --set-string gateway.mcp.koinon.egress.caBundle="$bad" >/dev/null 2>&1; then
+    fail "the egress CA bundle '$bad' renders, but it holds no PEM certificate"
+  fi
+done
+msg=$("$HELM" template koinon "$CHART" --namespace koinon -f test/e2e/kind/koinon-values.yaml 2>&1 >/dev/null || true)
+[[ $msg == *"egress.caBundle holds no PEM certificate"* ]] ||
+  fail "the kind e2e values with an unfilled egress CA placeholder render, or fail for another reason: $msg"
+has "the egress CA guard is off with the listener off" 'kind: Deployment' --set gateway.mcp.driver=koinon \
   --set-string gateway.mcp.koinon.egress.caBundle=koinon-test-not-a-real-ca "${eg_gw[@]}"
 
 # koinon-agentd: the URL, the seed (data key "key") only, the key ID and the issuer.
