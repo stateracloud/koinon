@@ -1359,7 +1359,8 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
-	// Every live copy acked the revision that holds the agent's credential.
+	// Every live copy acked the revision that holds the agent's credential or actor. A row with a failure may be
+	// marked too: it then proves only the actor revision (agentd ignores the failure when the run needs no credential).
 	MarkGatewayAgentForgeServed(ctx context.Context, arg MarkGatewayAgentForgeServedParams) error
 	// The checkpoint's snapshot is not in the bucket: it is failed, not deleted, so its history stays
 	// (the snapshot ID goes into @error; a complete checkpoint is one with a snapshot).
