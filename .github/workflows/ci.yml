@@ -77,6 +77,7 @@ jobs:
       fuzz: ${{ steps.paths.outputs.fuzz }}
       shell: ${{ steps.paths.outputs.shell }}
       scripts: ${{ steps.paths.outputs.scripts }}
+      playwright_image: ${{ steps.pin.outputs.playwright_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -118,6 +119,13 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
+      # The Playwright image of web-e2e lives in hack/playwright-image.env, so a bump touches no .github path.
+      - id: pin
+        run: |
+          # shellcheck source=hack/playwright-image.env
+          . hack/playwright-image.env
+          test -n "$PLAYWRIGHT_IMAGE"
+          echo "playwright_image=$PLAYWRIGHT_IMAGE" >>"$GITHUB_OUTPUT"
 
   # The Go checks run as parallel jobs (old issue 217). They share one module and build cache
   # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every
@@ -583,7 +591,8 @@ jobs:
   # are in the image, so no run installs OS packages from a live apt mirror or downloads a browser
   # (#569; run 43041438017 failed on `playwright install --with-deps` when security.ubuntu.com did not
   # resolve). The image tag must carry the exact @playwright/test version of web/package.json
-  # (hack/ci-playwright-image-test.sh checks it); a Playwright bump changes both in one change.
+  # (hack/ci-playwright-image-test.sh checks it); the image comes from hack/playwright-image.env through the
+  # `changes` job, and a Playwright bump changes web/, web.Dockerfile and that file, with no .github path.
   # --ipc=host and --init are what the Playwright CI docs ask of a Chromium container.
   web-e2e:
     needs: changes
@@ -592,7 +601,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      image: ${{ needs.changes.outputs.playwright_image }} # zizmor: ignore[unpinned-images] the value is the digest pin of hack/playwright-image.env; hack/ci-playwright-image-test.sh requires the digest
       options: --init --ipc=host
     defaults:
       run:
