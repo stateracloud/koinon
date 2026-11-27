@@ -770,6 +770,54 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
   the same, add the gateway's SPIFFE ID to that list.
 
+## Snapshot bucket: encryption, credential, checksums
+
+Substrate stores the snapshot of each sandbox in the snapshot bucket (`--storage-bucket`). Substrate does not
+encrypt these objects. Per-org encryption is planned for v0.2 (ADR 0120 section 5.3). In v0.1 there is no
+install check for any point in this section. The operator must do each point.
+
+1. **Turn on server-side encryption (SSE) for the bucket.** Without it, the plain text of every file in a
+   home, also a file with mode 0600, is readable in the snapshot objects. The lab bucket had no SSE, and the
+   objects `fs/pages.img.zstd` (gVisor), `durable-dir-home.tar.zstd` and `memory-ranges.zstd` (vm tier) held
+   plain data. Set the default encryption of the bucket before the first sandbox starts:
+   - AWS S3: default encryption on the bucket, `SSE-S3` or `SSE-KMS` (`aws s3api put-bucket-encryption`).
+   - Google Cloud Storage: a default customer-managed key on the bucket (`gcloud storage buckets update
+     --default-encryption-key`). Google encrypts at rest with its own key when you set none.
+   - MinIO: bucket encryption with a KMS key (`mc encrypt set`).
+   - rustfs (the bundled store): follow the rustfs documentation for server-side encryption. Also use an
+     encrypted StorageClass or an encrypted disk for the `rustfs-data` volume.
+   Encryption at rest protects the stored object against loss of a disk or a bucket export. It does not
+   protect against a holder of the bucket credential: the store decrypts for that holder (point 2).
+2. **Limit who holds the bucket credential.** The credential reads every home, including 0600 files, and
+   the root key can also write and delete every snapshot. Give the Koinon reconciler its own read-only key
+   (see [What `generic` corrects](#what-generic-corrects)). Keep the root key out of CI, out of sandboxes and
+   out of the Koinon namespace. Limit who can read the Secret `koinon-rustfs-credentials` in the Substrate
+   namespace.
+3. **Substrate has no snapshot checksums.** Substrate does not check a snapshot when it restores it. A
+   damaged or changed object in the bucket is not found. Use the version and the object-lock functions of
+   your store when you need to detect or prevent a change.
+
+## Substrate database: not in the Koinon backup
+
+Substrate keeps its own state in its own database: the StatefulSet `ate-system/postgres`, database
+`atepg`. The Koinon CNPG backup does not include this database. The Koinon backup restores homes only from
+kopia, not from the snapshots in the Substrate bucket.
+
+- To keep the Substrate state, the operator must back up `atepg` and the snapshot bucket, and restore
+  them together. A restore of one without the other gives a mismatch between the actors and their
+  snapshots. Use `pg_dump` of `atepg` or a volume snapshot of the `postgres` claim.
+- Without such a backup, a lost Substrate database loses the actors and their snapshots. Koinon can still
+  restore the homes from kopia and create new sandboxes.
+
+### Storage of the Substrate database
+
+Put the Substrate PostgreSQL on storage that does not share a disk with the snapshot store. Substrate ends
+an actor lease when one PostgreSQL commit stalls for more than about 10 s. The lease renews every 10 s and
+has a fixed deadline of 20 s (`lease.go`). A suspend that loses its lease fails after 20.9 s with a
+`Canceled` error and writes no log line. On koinon-lab, the snapshot upload loaded the same disk as the
+PostgreSQL write-ahead log. Commits stalled for 8 to 9.1 s: 0.4 s from the limit. Use `--postgres-storage-class`
+for a class on a separate disk (see [Options](#options)).
+
 ## Verified and unverified
 
 Verified against the Substrate v1.0.1 source (commit `20778a6d`), its `ate-setup --help` and
