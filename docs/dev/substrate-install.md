@@ -260,8 +260,7 @@ yet.
 
 The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and on the Deployments
 `ate-api-server` and `atenet-router` by name (a ClusterRole, because Substrate's namespace may not exist yet),
-plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
-Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
+plus the CNPG read of the chosen mode. The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
 get pod logs, and create and delete NetworkPolicies.
 
 ## Node protection: /var/lib/ate on its own filesystem

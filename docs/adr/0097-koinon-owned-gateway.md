@@ -1297,7 +1297,9 @@ maintainer decided on 2026-11-27:
 - **In the chart.** With `execution.driver=substrate` and no `gateway.model.driver`, the chart uses `koinon`. An
   explicit `gateway.model.driver=agentgateway`, an agentgateway MCP driver or `gateway.mode=kubernetes` with
   Substrate does not render, and the error names the value to set.
-- **Later.** The pair can return when agentgateway checks the actor token. That needs its own decision.
+- **Later.** The kubernetes mode does not return with Substrate: section 4 freezes it and step 3 deletes it with
+  agentgateway. An agentgateway model or MCP driver with Substrate can return only if agentgateway checks the actor
+  token. That needs its own decision, and step 3 removes agentgateway.
 
 ## Alternatives considered
 
