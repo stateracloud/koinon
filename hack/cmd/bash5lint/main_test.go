@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -137,6 +138,11 @@ var _ = Describe("run", func() {
 	It("takes the files from git in a checkout, untracked ones included, ignored ones not", func() {
 		testenv.Require(testenv.Binary("git"))
 		root := GinkgoT().TempDir()
+		// bash5lint starts git itself with the process environment: isolate it for this spec.
+		for _, kv := range gitenv.Env(root) {
+			k, v, _ := strings.Cut(kv, "=")
+			GinkgoT().Setenv(k, v)
+		}
 		Expect(gitenv.Command(context.Background(), root, root, "init", "-q").Run()).To(Succeed())
 		write(root, ".gitignore", "ignored/\n")
 		write(root, "g.sh", "#!/bin/bash\n")

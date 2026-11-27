@@ -432,7 +432,7 @@ var _ = Describe("savework.sh", func() {
 		Expect(os.Symlink("a.txt", filepath.Join(repo, "link"))).To(Succeed())
 		status := git("status", "--short")
 
-		out, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000").Output()
+		out, err := saveworkCmd("savework", work, "1000000").Output()
 		Expect(err).NotTo(HaveOccurred())
 		works, skipped, err := agentd.ParseSaveOutput(out)
 		Expect(err).NotTo(HaveOccurred())
@@ -456,7 +456,7 @@ var _ = Describe("savework.sh", func() {
 		Expect(m.Validate()).To(Succeed())
 		Expect(git("status", "--short")).To(Equal(status), "the repository's index and tree are untouched")
 
-		over, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "10").CombinedOutput()
+		over, err := saveworkCmd("savework", work, "10").CombinedOutput()
 		var ee *exec.ExitError
 		Expect(errors.As(err, &ee)).To(BeTrue())
 		Expect(ee.ExitCode()).To(Equal(3), string(over))
@@ -498,7 +498,7 @@ var _ = Describe("savework.sh", func() {
 			put("b.txt", "new\n")
 		}
 		run := func(env ...string) ([]byte, error) {
-			c := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
+			c := saveworkCmd("savework", work, "1000000")
 			// The script runs git: no real HOME or global config, unless a spec sets them in env.
 			c.Env = gitenv.Env(GinkgoT().TempDir(), env...)
 			return c.Output()
@@ -549,7 +549,7 @@ var _ = Describe("savework.sh", func() {
 			for _, f := range []string{"bin", "etc", "work"} {
 				Expect(os.WriteFile(filepath.Join(cwd, f), nil, 0o600)).To(Succeed())
 			}
-			cmd := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000")
+			cmd := saveworkCmd("savework", work, "1000000")
 			cmd.Dir = cwd
 			out, err := cmd.Output()
 			Expect(err).NotTo(HaveOccurred())
@@ -632,7 +632,7 @@ var _ = Describe("savework.sh", func() {
 		for _, args := range [][]string{{"init", "-q", "."}, {"remote", "add", "origin", "https://gitlab.example.test/a/b.git"}} {
 			Expect(gitenv.Command(context.Background(), work, work, args...).Run()).To(Succeed())
 		}
-		out, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000").Output()
+		out, err := saveworkCmd("savework", work, "1000").Output()
 		Expect(err).NotTo(HaveOccurred())
 		works, skipped, err := agentd.ParseSaveOutput(out)
 		Expect(err).NotTo(HaveOccurred())
@@ -660,7 +660,7 @@ var _ = Describe("savework.sh", func() {
 			git("update-ref", "refs/remotes/origin/main", "HEAD")
 			Expect(os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o600)).To(Succeed())
 		}
-		out, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000", "ghes.example.test:8443").Output()
+		out, err := saveworkCmd("savework", work, "1000000", "ghes.example.test:8443").Output()
 		Expect(err).NotTo(HaveOccurred())
 		works, skipped, err := agentd.ParseSaveOutput(out)
 		Expect(err).NotTo(HaveOccurred())
@@ -675,3 +675,11 @@ var _ = Describe("savework.sh", func() {
 		Expect(err).To(HaveOccurred())
 	})
 })
+
+// saveworkCmd runs the savework script with the isolated git environment of gitenv: the script runs
+// git, which must not read or write the real HOME (#1427).
+func saveworkCmd(args ...string) *exec.Cmd {
+	c := exec.CommandContext(context.Background(), "sh", append([]string{"-c", agentd.SaveworkScript}, args...)...)
+	c.Env = gitenv.Env(GinkgoT().TempDir())
+	return c
+}

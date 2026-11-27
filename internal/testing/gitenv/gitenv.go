@@ -28,6 +28,10 @@ func Env(home string, extra ...string) []string {
 		"GIT_TERMINAL_PROMPT=0",
 		"LC_ALL=C",
 	}
+	// A sandbox can allow writes only under TMPDIR, so pass it on.
+	if v, ok := os.LookupEnv("TMPDIR"); ok {
+		env = append(env, "TMPDIR="+v)
+	}
 	return append(env, extra...)
 }
 

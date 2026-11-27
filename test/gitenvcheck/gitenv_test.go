@@ -14,15 +14,17 @@ import (
 )
 
 // gitExec finds a test that starts the git binary on the host.
-var gitExec = regexp.MustCompile(`exec\.Command(?:Context)?\((?:[\w.()]+,\s*)?"git"`)
+// It also finds a call that spans lines and an absolute path to git.
+var gitExec = regexp.MustCompile(`exec\.Command(?:Context)?\(\s*(?:[\w.()]+,\s*)?"(?:[^"]*/)?git"`)
 
 // exemptMarker in a test file says the file runs git on purpose with the real environment.
-// The marker must carry a reason.
+// The marker must carry a reason. Scope: only *_test.go files. A helper for tests that is not a
+// test file (internal/testing/fakegitea) builds its own git environment.
 const exemptMarker = "gitenv-exempt:"
 
 // These specs fail when a Go test file starts git without internal/testing/gitenv. A git process
 // that inherits os.Environ() reads and writes the real HOME and the global git configuration of the
-// person or the runner (#1427). The check is on the file: a file that starts git must use gitenv.
+// person or the runner (#1427). A test starts git through gitenv.Command; a raw exec of git is a failure.
 var _ = Describe("git in Go tests", func() {
 	It("runs only with the isolated environment of internal/testing/gitenv", func() {
 		bad, err := offenders(repoRoot())
@@ -37,7 +39,9 @@ var _ = Describe("git in Go tests", func() {
 		Expect(bad).To(ConsistOf(filepath.Join("old", "old_style_test.go")))
 	})
 
-	It("finds a test file that starts git with os.Environ()", func() {
+	It("matches a git exec with and without a context, on one line or on several", func() {
+		Expect(gitExec.MatchString("exec.Command(\n\t\"git\", \"init\")")).To(BeTrue())
+		Expect(gitExec.MatchString(`exec.Command("/usr/bin/git", "init")`)).To(BeTrue())
 		Expect(gitExec.MatchString(`c := exec.Command("git", "init")`)).To(BeTrue())
 		Expect(gitExec.MatchString(`exec.CommandContext(ctx, "git", args...)`)).To(BeTrue())
 		Expect(gitExec.MatchString(`exec.Command("docker", "git")`)).To(BeFalse())
@@ -83,7 +87,7 @@ func offenders(root string) ([]string, error) {
 			return err
 		}
 		src := string(b)
-		if gitExec.MatchString(src) && !strings.Contains(src, "gitenv.") && !strings.Contains(src, exemptMarker) {
+		if gitExec.MatchString(src) && !strings.Contains(src, exemptMarker) {
 			rel, _ := filepath.Rel(root, path)
 			bad = append(bad, rel)
 		}

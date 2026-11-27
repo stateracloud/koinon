@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,6 +264,11 @@ var _ = Describe("patch and docker helpers", func() {
 	})
 	It("never reuses a patch directory", func() {
 		repo := GinkgoT().TempDir()
+		// execGit starts git with the process environment: isolate it for this spec.
+		for _, kv := range gitenv.Env(repo) {
+			k, v, _ := strings.Cut(kv, "=")
+			GinkgoT().Setenv(k, v)
+		}
 		for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "x"}} {
 			Expect(gitenv.Command(context.Background(), repo, repo, args...).Run()).To(Succeed())
 		}

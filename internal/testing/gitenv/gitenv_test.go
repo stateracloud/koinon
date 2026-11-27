@@ -8,34 +8,48 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/testing/gitenv"
 )
 
-func TestEnvIsolatesHomeAndConfig(t *testing.T) {
-	home := t.TempDir()
-	env := strings.Join(gitenv.Env(home, "GIT_CONFIG_GLOBAL=override"), "\n")
-	for _, want := range []string{"HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0"} {
-		if !strings.Contains(env, want) {
-			t.Errorf("env lacks %q", want)
+var _ = Describe("Env", func() {
+	It("points HOME to the given directory and turns the global and system config off", func() {
+		home := GinkgoT().TempDir()
+		env := gitenv.Env(home)
+		Expect(env).To(ContainElements("HOME="+home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0"))
+		var homes []string
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "HOME=") {
+				homes = append(homes, kv)
+			}
 		}
-	}
-	if strings.Contains(env, os.Getenv("HOME")+"\n") && os.Getenv("HOME") != home {
-		t.Error("env carries the real HOME")
-	}
-}
+		Expect(homes).To(Equal([]string{"HOME=" + home}))
+	})
 
-func TestCommandIgnoresGlobalConfig(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not found")
-	}
-	home := t.TempDir()
-	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = leaked\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, _ := gitenv.Command(context.Background(), home, home, "config", "--global", "--get", "user.name").CombinedOutput()
-	if strings.Contains(string(out), "leaked") {
-		t.Errorf("git read the home config: %s", out)
-	}
-}
+	It("puts the extra entries last, so that they win", func() {
+		env := gitenv.Env(GinkgoT().TempDir(), "GIT_CONFIG_GLOBAL=override")
+		Expect(env[len(env)-1]).To(Equal("GIT_CONFIG_GLOBAL=override"))
+	})
+
+	It("passes TMPDIR on when it is set", func() {
+		home := GinkgoT().TempDir()
+		GinkgoT().Setenv("TMPDIR", "/tmp/koinon-gitenv-test")
+		Expect(gitenv.Env(home)).To(ContainElement("TMPDIR=/tmp/koinon-gitenv-test"))
+	})
+})
+
+var _ = Describe("Command", func() {
+	It("does not read the global config of the home", func() {
+		_, err := exec.LookPath("git")
+		if err != nil {
+			Skip("git not found")
+		}
+		home := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = leaked\n"), 0o600)).To(Succeed())
+		out, _ := gitenv.Command(context.Background(), home, home, "config", "--get", "user.name").CombinedOutput()
+		Expect(string(out)).NotTo(ContainSubstring("leaked"))
+	})
+})
