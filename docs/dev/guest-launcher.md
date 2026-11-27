@@ -216,8 +216,10 @@ Tracked on #1087 until the maintainer files separate issues:
    a memory restore must step the guest clock forward; the lab probe record (ADR 0119 P-C) must confirm it.
 7. On the gVisor tiers without Landlock (best effort), the root filesystem is writable (#1150). The
    payload runs as uid 10001 (issue #1387), so it cannot replace `koinon-guest-launcher` or its policy
-   file where the image makes them owned by root and not writable by others. The proof run on the lab
-   (issue #1387) must confirm this with the real front image before `allowUnhardened` is removed.
+   file where the image makes them owned by root and not writable by others. The escape spec "runs the
+   agent as the non-root sandbox user, who cannot replace the launcher or its policy"
+   (`test/escape/substrate_test.go`) checks this. The proof run on the lab (issue #1387) must pass it
+   with the real front image before `allowUnhardened` is removed.
 
 ## Tests
 
