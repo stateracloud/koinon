@@ -94,6 +94,42 @@ pinned commit in `KOINON_SUBSTRATE_SOURCE`, and `kubectl`. Without them it skips
 The storage preflight of `generic` fails, before anything is created, when a named StorageClass does not
 exist, or when a volume has no named class and the cluster has no default class.
 
+## Egress gateway corrections
+
+The egress gateway of Substrate (`atenet-egress`, Envoy) is the same on every platform. The installer edits its
+manifest in the exported tree before `ate-setup` reads it (`internal/substrateinstall/egress.go`). Each edit fails
+the install when the pinned text is not there the expected number of times.
+
+1. **No upstream TLS session reuse** (always on, issue [#1486](https://github.com/stateracloud/koinon/issues/1486)).
+   Envoy keeps one upstream TLS session cache for each forward-proxy cluster. The cache is not keyed by SNI and keeps
+   only the newest session. Cloudflare can resume a session of one host under the SNI of another host. Envoy checks
+   the certificate again and refuses the call with `expected SAN api.anthropic.com, got npmjs.org`. A failed resume
+   stores no new session, so every later call to that host fails for all actors until the pod restarts. The cache is
+   also shared by all actors. The installer sets `max_session_keys: 0` in the `UpstreamTlsContext` of
+   `egress_forward_proxy` and `egress_forward_proxy_grpc`. Exit condition: remove the edit when a Substrate release sets
+   it, or keys the sessions by SNI.
+2. **IPv4-first DNS** (`--egress-dns-v4-preferred`, default off). Substrate resolves with `dns_lookup_family: ALL`.
+   On a cluster without an IPv6 route, a call can fail at random with `503 Network is unreachable`. The option sets
+   `V4_PREFERRED`. It is a setting of the installer: Substrate is not part of the chart, so the chart has no value for it.
+
+`TestEgressCorrectionFitsThePinnedTree` checks the real pinned manifest. It needs a clone of Substrate in
+`KOINON_SUBSTRATE_SOURCE`, like the generic overlay test.
+
+### Koinon's own gateways (issue #1486 item 3)
+
+No Koinon gateway reuses an upstream TLS session across hosts:
+
+- Go gateways (`koinon-gateway`: egress, model and MCP paths): none sets `tls.Config.ClientSessionCache`, and Go
+  resumes a client session only when that field is set. `internal/gateway/egress/egress.go:184` and
+  `internal/gateway/actortoken/substrate.go:293` build the `tls.Config` with `MinVersion` and `RootCAs` only.
+  `internal/mcpgateway/upstream.go:298` and `:315` copy a transport and set roots, `MinVersion` or
+  `InsecureSkipVerify` only. `internal/modelgateway/gateway.go:107` clones `http.DefaultTransport`, which has no
+  `TLSClientConfig` session cache. A test would have to set a cache first: the code has none.
+- agentgateway fallback (v1.7.x): the backend TLS client (`crates/agentgateway/src/http/backendtls.rs:322`) is a
+  rustls `ClientConfig` with default resumption. The rustls session store keys sessions by server name, so a session
+  of one host is never offered to another. This was read in the agentgateway `v1.7.0` source, not run against
+  Cloudflare. agentgateway is deleted in ADR 0097 step 3.
+
 ## Options
 
 Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
@@ -106,6 +142,7 @@ Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
 | `--gcp-project-id`, `--snapshot-transfer-gsa-name` | the same names | `gke` only. |
 | `--setup-csi nfs\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`). `hostpath` and `both` are for kind only; `generic` refuses them. |
 | `--gvisor-mirror <base-url>` | none (Koinon step) | The installer host cannot reach `storage.googleapis.com`. See [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store). |
+| `--egress-dns-v4-preferred` | none (Koinon edit) | The cluster has no IPv6 route and egress calls fail at random with 503. See [Egress gateway corrections](#egress-gateway-corrections). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
