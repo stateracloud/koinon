@@ -810,6 +810,7 @@
             },
             "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
+            "goldenSnapshots": {"type": "boolean"},
             "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},
             "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},
             "imageMirrors": {"type": "object", "additionalProperties": {"type": "string"}},

@@ -81,6 +81,10 @@ type Config struct {
 	// SnapshotStorageLocation is the ActorTemplate's snapshot storage location, as Substrate's
 	// install names it. Empty leaves the template's field unset, which Substrate's default fills.
 	SnapshotStorageLocation string
+	// GoldenSnapshots turns on Substrate's golden snapshot of each template. The zero value is off:
+	// the template sets GOLDEN_SNAPSHOT_MODE_DISABLED (issue #1492). A golden clone copies memory from
+	// one sandbox to another, which ADR 0120 section 5.2 forbids; true is an admin's exception to it.
+	GoldenSnapshots bool
 	// SnapshotFidelity is the fidelity templates ask for. The zero value is memory, which D5 wants
 	// (disk and memory from the first release).
 	SnapshotFidelity ateapiv1.SnapshotFidelity

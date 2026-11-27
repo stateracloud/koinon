@@ -151,9 +151,17 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    a snapshot cannot hold them. A restore always gets a fresh actor token. An old token is never
    restored. The 0044 exception is refused for a sandbox with snapshots on, or its path is excluded
    from the snapshot.
-2. **Short lifetime.** A snapshot has an expiry. A memory snapshot restores once: a restore consumes it,
-   and a second restore needs a new snapshot. This stops two clones with the same memory and the same
-   random state. Tokens stay short-lived for the same reason.
+2. **Short lifetime.** A snapshot has an expiry. Substrate resumes a suspended actor from its own
+   snapshot. It does not make a second actor from that snapshot, so no two sandboxes share one memory
+   state. Single use (a restore consumes the snapshot) is a Koinon rule: the snapshot record of the
+   v0.2 design enforces it (amendment of 2026-11-25). Substrate does not enforce it. Tokens stay
+   short-lived for the same reason.
+   **Golden snapshots are off by default in every tier** (issue #1492). A golden snapshot clones the memory
+   of one sandbox into many, which this item forbids. The Koinon template sets
+   `GOLDEN_SNAPSHOT_MODE_DISABLED`. An admin can turn golden mode on (`execution.substrate.goldenSnapshots`).
+   That is an explicit exception to the no-memory-clone rule: the admin accepts that sandboxes of one
+   template start from the same memory and the same random state. Golden mode is not needed for speed
+   (see the numbers in [the Substrate install document](../dev/substrate-install.md#golden-snapshots)).
 3. **Encryption at rest.** Every snapshot object is encrypted at rest under a key scoped to one org,
    with a key that Koinon controls (the envelope scheme of the secret keys, with a DEK per org and a
    KEK from the secret store). If the driver's own store does not give that, Koinon encrypts the

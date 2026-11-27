@@ -174,6 +174,28 @@ it did not create. How the probe namespace pulls the probe image is part of S2 (
 `koinon-api preflight --driver substrate` runs only the checks. It creates and removes the probe namespace in
 the same way, so it also runs after `helm install`.
 
+### Golden snapshots
+
+Golden snapshots are off by default in every tier (issue #1492). The Koinon template sets
+`GOLDEN_SNAPSHOT_MODE_DISABLED`. To turn them on, set `execution.substrate.goldenSnapshots=true` in the chart
+(the reconciler flag is `--substrate-golden-snapshots`). The setting is part of the template hash, so a
+change makes new templates.
+
+Turn it on only with a reason. A golden snapshot clones memory from one sandbox to another. ADR 0120
+section 5.2 forbids that, and an admin who turns it on makes an exception to that rule.
+
+Cost, from the koinon-lab experiment of 2026-11-27 (lab-notes `experiments/2026-11-27-substrate-edges`,
+sections O8 and O8 vm tier). Time from create to the first successful Exec, 20 sandboxes per arm, 0 failures:
+
+| Tier | Golden off p50 / p95 | Golden on p50 / p95 |
+|---|---|---|
+| gVisor | 1.03 s / 1.42 s | 1.05 s / 1.58 s |
+| vm (microVM) | 2.65 s / 2.78 s | 3.50 s / 3.64 s |
+
+- Golden mode was not faster in these runs. On the vm tier it was slower.
+- A golden build takes 36-38 s. It holds a pool slot for about 21-23 s each time a template changes.
+- All runs used the 40 MB/s lab disk cap. The times include an extra chmod call, so they are an upper bound.
+
 ### Permissions of the installer
 
 The kubeconfig of the installer needs these rules:
