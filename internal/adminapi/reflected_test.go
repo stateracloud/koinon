@@ -20,7 +20,7 @@ var _ = Describe("the admin API and request values in responses (issue 1365)", f
 	const payload = `<img src=x onerror=alert(1)>`
 
 	DescribeTable("never answers with markup",
-		func(ctx SpecContext, method, path, body string, authenticated bool) {
+		func(ctx SpecContext, method, path, body string, authenticated, echoes bool) {
 			e := newEnv(ctx)
 			var rd io.Reader
 			if body != "" {
@@ -44,15 +44,20 @@ var _ = Describe("the admin API and request values in responses (issue 1365)", f
 			Expect(resp.Header.Get("X-Content-Type-Options")).To(Equal("nosniff"))
 			Expect(resp.Header.Get("Content-Type")).NotTo(ContainSubstring("html"))
 			Expect(string(raw)).NotTo(ContainSubstring("<img"), "a raw request value in the body")
+			// A value that the error echoes is JSON-escaped (\u003c) and has the JSON type. The entries that
+			// echo must do so: else the check below proves nothing.
+			if echoes {
+				Expect(string(raw)).To(ContainSubstring("u003c"), "the error no longer echoes the value; update this entry")
+			}
 			if strings.Contains(string(raw), "u003c") {
 				Expect(resp.Header.Get("Content-Type")).To(Equal("application/json"), "an echoed value needs the JSON type")
 			}
 		},
-		Entry("a path value that is not a UUID", http.MethodGet, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E/budget", "", true),
-		Entry("a query value that is not a date-time", http.MethodGet, "/admin/v1/audit?since=%3Cimg%20src=x%20onerror=alert(1)%3E", "", true),
-		Entry("a body that does not decode", http.MethodPost, "/admin/v1/tokens", `{"name": `+payload, true),
-		Entry("an unknown path", http.MethodGet, "/admin/v1/%3Cimg%20src=x%20onerror=alert(1)%3E", "", true),
-		Entry("a wrong method", http.MethodPatch, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E", "", true),
-		Entry("a path value without a token", http.MethodGet, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E/budget", "", false),
+		Entry("a path value that is not a UUID", http.MethodGet, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E/budget", "", true, true),
+		Entry("a query value that is not a date-time", http.MethodGet, "/admin/v1/audit?since=%3Cimg%20src=x%20onerror=alert(1)%3E", "", true, true),
+		Entry("a body that does not decode", http.MethodPost, "/admin/v1/tokens", `{"name": `+payload, true, true),
+		Entry("an unknown path", http.MethodGet, "/admin/v1/%3Cimg%20src=x%20onerror=alert(1)%3E", "", true, false),
+		Entry("a wrong method", http.MethodPatch, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E", "", true, false),
+		Entry("a path value without a token", http.MethodGet, "/admin/v1/agents/%3Cimg%20src=x%20onerror=alert(1)%3E/budget", "", false, false),
 	)
 })
