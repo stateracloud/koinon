@@ -48,5 +48,5 @@ func run(values, ca string, ifPresent bool) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", values, err)
 	}
-	return os.WriteFile(values, out, 0o600)
+	return os.WriteFile(values, out, 0o600) // #nosec G703 -- a test tool: the path is the caller's own file
 }
