@@ -136,6 +136,8 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
 			StorageLocation:   cfg.SnapshotStorageLocation,
 			PreferredFidelity: cfg.SnapshotFidelity,
+			// Substrate builds golden snapshots when this config is omitted, so the mode is always set.
+			GoldenSnapshotConfig: &ateapiv1.GoldenSnapshotConfig{Mode: goldenMode(cfg.GoldenSnapshots)},
 		},
 	}
 	if cpu > 0 || mem > 0 {
@@ -153,10 +155,18 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		t.Containers[0].SecurityContext = &ateapiv1.SecurityContext{Capabilities: &ateapiv1.Capabilities{Drop: capDrop, Add: capAdd}}
 	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v4\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q\x00%q", workspace, image, spec.Command, cpu, mem,
-		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath, capDrop, capAdd)
+	_, _ = fmt.Fprintf(h, "v5\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q\x00%q\x00%t", workspace, image, spec.Command, cpu, mem,
+		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath, capDrop, capAdd, cfg.GoldenSnapshots)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
+}
+
+// goldenMode is the template's golden snapshot mode: disabled unless an admin turns it on (issue #1492).
+func goldenMode(on bool) ateapiv1.GoldenSnapshotMode {
+	if on {
+		return ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_ENABLED
+	}
+	return ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_DISABLED
 }
 
 // templateTier is the isolation tier of a spec, resolved the way Exec resolves it from the template:

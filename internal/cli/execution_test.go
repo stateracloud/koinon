@@ -68,6 +68,14 @@ var _ = Describe("Execution", func() {
 		Expect(cfg.ImageRegistry).To(Equal("mirror.example.com/all"))
 		Expect(cfg.ImageMirrors).To(Equal(map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io", "docker.io": "cache.koinon.svc/docker.io"}))
 	})
+	It("leaves golden snapshots off unless the setting is on (#1492)", func() {
+		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeFalse())
+		cfg, err = cli.Substrate{DefaultTier: "dev", GoldenSnapshots: true}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeTrue())
+	})
 	It("builds the content digest from the snapshot store flags, or fails closed without them", func() {
 		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())

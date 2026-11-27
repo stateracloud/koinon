@@ -472,6 +472,25 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tmpl.SnapshotConfig.PreferredFidelity).To(Equal(ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY))
 		})
 
+		It("disables golden snapshots by default and enables them only on an admin's setting (issue #1492)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "500m", MemoryLimit: "512Mi"})
+			Expect(err).NotTo(HaveOccurred())
+			off, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(off.SnapshotConfig.GetGoldenSnapshotConfig().GetMode()).To(Equal(ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_DISABLED))
+
+			spec := execution.SandboxSpec{Name: "a", Image: img}
+			cfg := substrate.Config{GuestSigner: fakeate.Signer()}
+			a, err := substrate.RenderTemplateForTest(ws, spec, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			cfg.GoldenSnapshots = true
+			b, err := substrate.RenderTemplateForTest(ws, spec, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.SnapshotConfig.GetGoldenSnapshotConfig().GetMode()).To(Equal(ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_ENABLED))
+			Expect(b.Metadata.Name).NotTo(Equal(a.Metadata.Name), "the setting is part of the template hash")
+		})
+
 		It("mounts a durable directory at the agent's home and no other volume (issue #1090)", func(ctx SpecContext) {
 			dd, c := newDriver()
 			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "500m", MemoryLimit: "512Mi"})
