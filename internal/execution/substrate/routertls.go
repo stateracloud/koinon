@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc/credentials"
@@ -133,7 +134,7 @@ func routerCredentials(ep Endpoint) (credentials.TransportCredentials, error) {
 			return nil, err
 		}
 	}
-	rc := &routerCreds{name: name, ca: ca}
+	rc := &routerCreds{name: name, ca: ca, refused: &refusal{}}
 	if ep.RouterCertFile != "" {
 		cc := &clientCert{file: &watchedFile{path: ep.RouterCertFile}}
 		if _, err := cc.get(); err != nil {
@@ -148,19 +149,77 @@ func routerCredentials(ep Endpoint) (credentials.TransportCredentials, error) {
 // verification (chain, name, ServerAuth key usage) then runs against the CA pool of that moment, so a
 // rotation of the router's CA needs no restart and no verification is skipped.
 type routerCreds struct {
+	mu         sync.RWMutex // guards name
 	name       string
 	ca         *roots
 	clientCert func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
+	refused    *refusal
+}
+
+// refusal remembers the last identity refusal of the router connection: the router did not accept the
+// client certificate, or the client did not accept the router's. A refused connection is in TRANSIENT_FAILURE
+// and no retry fixes it, which is what separates it from an outage (connection refused, timeout).
+type refusal struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (r *refusal) set(err error) {
+	r.mu.Lock()
+	r.err = err
+	r.mu.Unlock()
+}
+
+// matches returns the recorded refusal when callErr, the error of a router call, carries its text. A later
+// attempt that failed in another way (connection refused) replaces the text of the call error, so an old
+// refusal does not hide an outage.
+func (r *refusal) matches(callErr error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.err == nil || callErr == nil || !strings.Contains(callErr.Error(), r.err.Error()) {
+		return nil
+	}
+	return r.err
+}
+
+// isIdentityRefusal reports whether err is a TLS alert from the peer or a failed check of the peer's
+// certificate. Connection refused, a timeout and a closed connection are not.
+func isIdentityRefusal(err error) bool {
+	var op *net.OpError // a TLS alert from the peer is a net.OpError with Op "remote error"
+	var verify *tls.CertificateVerificationError
+	var unknownCA x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	var hostname x509.HostnameError
+	return (errors.As(err, &op) && op.Op == "remote error") || errors.As(err, &verify) || errors.As(err, &unknownCA) ||
+		errors.As(err, &invalid) || errors.As(err, &hostname)
+}
+
+// refusalConn records an identity refusal that arrives after the handshake: in TLS 1.3 the client finishes
+// its handshake before the router checks the client certificate, so the alert is the error of the first read.
+type refusalConn struct {
+	net.Conn
+	r *refusal
+}
+
+func (c refusalConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err != nil && isIdentityRefusal(err) {
+		c.r.set(err)
+	}
+	return n, err
 }
 
 func (c *routerCreds) config() (*tls.Config, error) {
+	c.mu.RLock()
+	name := c.name
+	c.mu.RUnlock()
 	pool, err := c.ca.get()
 	if err != nil {
 		return nil, err
 	}
 	return &tls.Config{
 		MinVersion:           tls.VersionTLS13,
-		ServerName:           c.name,
+		ServerName:           name,
 		RootCAs:              pool, // nil: the system roots
 		GetClientCertificate: c.clientCert,
 	}, nil
@@ -173,10 +232,22 @@ func (c *routerCreds) ClientHandshake(ctx context.Context, _ string, conn net.Co
 		return nil, nil, err
 	}
 	// Check the router against the pinned name, not the channel authority that grpc passes in.
-	return credentials.NewTLS(cfg).ClientHandshake(ctx, c.name, conn)
+	c.mu.RLock()
+	name := c.name
+	c.mu.RUnlock()
+	cfg.ServerName = name
+	tc, info, err := credentials.NewTLS(cfg).ClientHandshake(ctx, name, conn)
+	if err != nil {
+		if isIdentityRefusal(err) {
+			c.refused.set(err)
+		}
+		return nil, nil, err
+	}
+	return refusalConn{Conn: tc, r: c.refused}, info, nil
 }
 
 func (c *routerCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	_ = conn.Close()
 	return nil, nil, errors.New("substrate: the router credentials are client side only")
 }
 
@@ -185,12 +256,15 @@ func (c *routerCreds) Info() credentials.ProtocolInfo {
 }
 
 func (c *routerCreds) Clone() credentials.TransportCredentials {
-	cp := *c
-	return &cp
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return &routerCreds{name: c.name, ca: c.ca, clientCert: c.clientCert, refused: c.refused}
 }
 
 // OverrideServerName sets the name the router certificate is checked against.
 func (c *routerCreds) OverrideServerName(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.name = name
 	return nil
 }
