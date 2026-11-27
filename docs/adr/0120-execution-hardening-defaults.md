@@ -923,3 +923,25 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   scope so that the payload cannot stop or trace the guest front.
 - **Docker's default capability set.** Docker keeps `KILL`, `NET_RAW` and `SETUID` for a root container. We remove
   every capability, because the harnesses need none.
+
+## Amendment (2026-11-27, issue #1515): on Substrate the deny is at the CONNECT, not at the TCP handshake
+
+Section 2 item 1 says that the egress layer denies all traffic by default. The sentence "L4 denies all traffic" does
+not mean that a TCP handshake fails on Substrate. This amendment says where the deny happens. It changes no control.
+
+- **What happens.** Each actor has its own network namespace. The nftables rules there send every TCP connect to a
+  local atunnel listener. The listener accepts the connection first. Then it opens a CONNECT tunnel to atenet-egress.
+  atenet-egress decides on the Host or the SNI, and it never dials the IP address that the guest chose. So on
+  Substrate the TCP handshake always completes. The deny is at the CONNECT: the tunnel closes, or the gateway answers
+  403 `address_denied`, and no byte comes back from the destination.
+- **What follows for a test.** A `connect()` proves nothing about a deny or an allow on Substrate. A deny spec sends
+  bytes (a TLS ClientHello or an HTTP request) and expects no byte from the destination. It runs a positive control in
+  the same probe: a request to a gateway route that must get an answer. The specs of issue #1515 do this.
+- **What stays.** Default-deny egress in every tier, the enforced L7 rules, the isolation tiers of ADR 0075 and the
+  positive control are unchanged. The address `169.254.17.2` is the same constant in every actor. Each actor has it in
+  its own network namespace. It is not a collision, and it is not a route to another actor.
+- **Open until the lab run.** The 4 specs of issue #1515 fail on a lab run of 2026-11-27 because they probed with
+  `connect()`. This amendment does not claim that the product holds on these 4 targets. A lab run of the new specs,
+  with the positive control passing, is the evidence. Until then, "no product hole" is a hypothesis.
+- **Docs.** [escape-substrate.md](../dev/escape-substrate.md#a-connect-proves-nothing-on-substrate) gives the
+  denial results that a spec accepts.
