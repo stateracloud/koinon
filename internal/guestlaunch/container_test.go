@@ -66,9 +66,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		add("bin/probe", filepath.Join(dir, "probe"), 0o755)
 		policy := []byte(`{
   "capabilities": {"allow": ["CAP_SYS_ADMIN", "CAP_SYS_PTRACE"]},
-  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"]},
+  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"], "scoped": ["signal"]},
   "seccomp": {"mode": "require"},
-  "user": {"mode": "off"}
+  "user": {"mode": "require", "uid": 1000, "gid": 1000}
 }`)
 		// The image policies, as the overlay carries them (cmd/koinon-guest-launcher).
 		images := map[string][]byte{}
@@ -147,6 +147,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	fdAttempts := []string{
 		"inherited_fd", "proc_reopen_own_socket", "proc_fd_open_other",
 		"process_vm_readv_other", "ptrace_other", "pidfd_getfd_other",
+		// Issue #1496: no signal reaches a process outside the payload, the guest front among them.
+		"kill_other", "pidfd_signal_other",
 	}
 	// procReadAttempts read another process's /proc entries without taking a descriptor. A payload
 	// that holds CAP_SYS_PTRACE (policy.json keeps it on purpose) passes the kernel's access check;
@@ -157,6 +159,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	attempts := append([]string{
 		"ptrace", "mount", "bpf", "keyctl", "perf_event_open", "unshare_newuser", "unshare_newns",
 		"clone_newuser", "clone3", "io_uring_setup", "socket_vsock",
+		// Issue #1496: loading a module, a reboot and a raw socket (CAP_SYS_MODULE, CAP_SYS_BOOT, CAP_NET_RAW).
+		"finit_module", "reboot", "socket_raw",
 		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
 		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
 	}, fdAttempts...)
@@ -168,8 +172,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	// skipWithoutLandlock turns the one outcome that means "this Docker host has no Landlock of the
 	// ABI the policy needs" into a skip; every other failure stays a failure.
 	skipWithoutLandlock := func(out string, code int) {
-		if code == 70 && strings.Contains(out, "landlock required but the kernel") {
-			Skip("the Docker host kernel has no Landlock of ABI 5 or newer")
+		if code == 70 && (strings.Contains(out, "landlock required but the kernel") ||
+			strings.Contains(out, "landlock signal scope required but the kernel")) {
+			Skip("the Docker host kernel has no Landlock of the ABI the policy needs")
 		}
 	}
 
@@ -180,6 +185,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for _, a := range []string{
 			"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3",
 			"inherited_fd", "proc_fd_list_other", "proc_environ_other", "ptrace_other", "pidfd_getfd_other",
+			"kill_other", "pidfd_signal_other", "socket_raw",
 		} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}
@@ -190,6 +196,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 	It("blocks the escape attempts and keeps the allowed paths writable", func() {
 		// SYS_ADMIN and SYS_PTRACE stay in the allowlist so only seccomp and Landlock can be the cause.
+		// The drop to uid 1000 is required: a policy that can leave the payload root refuses them (issue #1496).
 		out, code := run(inherit("/launcher", "--policy", "/policy.json", "--", "/bin/probe")...)
 		skipWithoutLandlock(out, code)
 		Expect(code).To(Equal(0), out)
@@ -233,6 +240,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 				if bv, ok := v["dev_write_blockdev"]; ok {
 					Expect(bv).To(Equal("blocked"), out)
 				}
+				Expect(v).To(HaveKeyWithValue("kill_own_child", "open"), "the payload signals its own processes\n"+out)
 			},
 			Entry("vm tier", "policy-vm.json", substrate, "0"),
 			Entry("gVisor tiers", "policy-gvisor.json", gvisor, "10001"),
