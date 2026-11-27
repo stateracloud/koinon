@@ -71,7 +71,7 @@ var _ = Describe("Front", func() {
 		Expect(err).NotTo(HaveOccurred())
 		ws = GinkgoT().TempDir()
 		f, err := guestfront.New(guestfront.Config{
-			Workspace: ws, LogDir: GinkgoT().TempDir(),
+			Workspace: ws, LogDir: realTemp(),
 			Keys: []ed25519.PublicKey{signer.PublicKey()},
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -193,34 +193,37 @@ var _ = Describe("PrepareLogDir", func() {
 		Expect(guestfront.PrepareLogDir(d)).To(Succeed())
 		st, err := os.Stat(d)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(st.Mode().Perm()).To(Equal(os.FileMode(0o750)))
+		Expect(st.Mode().Perm()&0o027).To(BeZero(), "no group write, no access for others")
 	})
 	It("refuses a symlink as the directory", func() {
 		base := realTemp()
 		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
 		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "jobs"))).To(Succeed())
-		Expect(guestfront.PrepareLogDir(filepath.Join(base, "jobs"))).NotTo(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "jobs"))).To(MatchError(ContainSubstring("without following a symlink")))
 	})
 	It("refuses a symlink in a parent part", func() {
 		base := realTemp()
 		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
 		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "link"))).To(Succeed())
-		Expect(guestfront.PrepareLogDir(filepath.Join(base, "link", "jobs"))).NotTo(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "link", "jobs"))).To(MatchError(ContainSubstring("without following a symlink")))
 	})
 	It("refuses a directory that others can write", func() {
 		d := filepath.Join(realTemp(), "jobs")
 		Expect(os.Mkdir(d, 0o755)).To(Succeed())
 		Expect(os.Chmod(d, 0o777)).To(Succeed())
-		Expect(guestfront.PrepareLogDir(d)).NotTo(Succeed())
+		Expect(guestfront.PrepareLogDir(d)).To(MatchError(ContainSubstring("lets group or others write")))
+	})
+	It("refuses a parent that others can write, without the sticky bit", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "open"), 0o755)).To(Succeed())
+		Expect(os.Chmod(filepath.Join(base, "open"), 0o777)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "open", "jobs"))).To(MatchError(ContainSubstring("lets group or others write")))
 	})
 	It("refuses a file and a relative path", func() {
 		f := filepath.Join(realTemp(), "file")
 		Expect(os.WriteFile(f, nil, 0o600)).To(Succeed())
-		Expect(guestfront.PrepareLogDir(f)).NotTo(Succeed())
-		Expect(guestfront.PrepareLogDir("jobs")).NotTo(Succeed())
-	})
-	It("is the default of New, and the default is not under a directory that the payload writes", func() {
-		Expect(guestfront.DefaultLogDir).To(Equal("/run/koinon/ate-jobs"))
+		Expect(guestfront.PrepareLogDir(f)).To(MatchError(ContainSubstring("not a directory")))
+		Expect(guestfront.PrepareLogDir("jobs")).To(MatchError(ContainSubstring("not an absolute path")))
 	})
 })
 

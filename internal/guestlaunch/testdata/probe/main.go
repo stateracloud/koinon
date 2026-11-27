@@ -204,7 +204,12 @@ func main() {
 
 	// Issue #1503: the guest front, as root, writes its job logs in a directory under /run. The
 	// payload must not create a file or a symlink there, or the front could follow the link.
-	write("/run/koinon-probe")
+	wf, werr := os.OpenFile("/run/koinon-probe", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if werr == nil {
+		_ = wf.Close()
+		_ = os.Remove("/run/koinon-probe")
+	}
+	denied("write:/run/koinon-probe", werr, "create a file under /run")
 	lerr := os.Symlink("/etc/koinon-probe", "/run/koinon-link")
 	if lerr == nil {
 		_ = os.Remove("/run/koinon-link")

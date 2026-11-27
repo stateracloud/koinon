@@ -176,7 +176,7 @@ modes. Two results follow:
   300 s, so an upload that needs more time fails. `-log-dir` of the guest front is `/run/koinon/ate-jobs` by
   default. The front makes it and checks it before the payload starts, and fails when it is a symlink, has a symlink in its
   path or is writable by group or others. Do not set it to a directory that the payload can write: the front (root)
-  writes the process logs there, and upstream follows symlinks (ADR 0120, amendment of 2026-11-27, issue #1503).
+  writes the process logs there, and upstream follows symlinks (ADR 0120, amendment of 2026-11-27 for issue #1496, consequence "The root front writes only where the payload cannot write").
 - **The home volume.** The front runs processes in `/sandbox`. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner

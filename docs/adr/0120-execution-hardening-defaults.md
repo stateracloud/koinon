@@ -895,7 +895,7 @@ run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` ti
 control that removes it and the harness need.
 
 This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): the `vm` tier keeps
-its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets one more control.
+its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets two more controls: the Landlock signal scope and the job log directory rule (consequences).
 
 ### Consequences
 
@@ -909,11 +909,14 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   symlinks. The upstream default directory, `/var/log/ate-jobs`, is under `/var/log`, and the payload can write
   there (`read_write` in `policy-vm.json`). A root payload could plant a symlink with the name of a job log, and the
   front would then truncate or create the target file. The rule is: every path that the root front opens for writing
-  is under a directory that the payload cannot write. The front uses `/run/koinon/ate-jobs`. `/run` is in `read_exec`
-  of both image policies, so Landlock refuses create, symlink, rename and remove beneath it. The front makes the
-  directory and checks it before the payload exists: a real directory, no symlink in the path, owned by the front,
-  not writable by group or others. The check is a defence against a wrong image, and not the control: the payload
-  starts after it, and Landlock keeps the directory out of its reach. A new path that the front writes needs a
+  is under a directory that the payload cannot write. The front uses `/run/koinon/ate-jobs`. On the `vm` tier, Landlock
+  (mode `require`) is the control: `/run` is in `read_exec`, so Landlock refuses create, symlink, rename and remove
+  beneath it. On the gVisor tiers, Landlock is best effort. There the control is the non-root payload (uid 10001) and a
+  directory that root owns, with mode 0750, under a `/run` that root owns. The front makes the directory before the
+  payload exists. It walks the path from `/` with `openat` and `O_NOFOLLOW`, and makes a missing part with `mkdirat`
+  on the open parent. So it never follows a symlink and has no gap between a check and an open. It refuses a part
+  that is not a directory, that another user than root or the front owns, or that group or others can write (a parent
+  with the sticky bit excepted). A new path that the front writes needs a
   policy spec that no `read_write` entry covers it.
 
 ### Proof
