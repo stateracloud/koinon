@@ -38,7 +38,7 @@ func sys(name string, nr uintptr, a ...uintptr) {
 // denied reports an attempt that failed for want of permission: EPERM from seccomp or a capability,
 // EACCES from Landlock. Any other result, success included, leaves the attempt open.
 func denied(name string, err error, detail string) {
-	report(name, err == nil || !(errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)), detail+" "+fmt.Sprint(err))
+	report(name, err == nil || !errors.Is(err, unix.EPERM) && !errors.Is(err, unix.EACCES), detail+" "+fmt.Sprint(err))
 }
 
 // sysErrno runs a raw syscall and returns its errno as an error (nil on success).
@@ -76,7 +76,7 @@ func inherit(argv []string) {
 		fmt.Println("probe: inherit:", err)
 		os.Exit(2)
 	}
-	holder := exec.Command(os.Args[0], "sleep")
+	holder := exec.Command(os.Args[0], "sleep") //nolint:gosec,noctx // the probe starts itself; it has no context
 	holder.ExtraFiles = []*os.File{os.NewFile(uintptr(fd), "socket")}
 	if err := holder.Start(); err != nil {
 		fmt.Println("probe: cannot start the outside process:", err)
@@ -117,12 +117,12 @@ func fdChecks() {
 	_, _ = fmt.Sscan(other, &pid)
 	_, err = os.ReadDir("/proc/" + other + "/fd")
 	blockedAny("proc_fd_list_other", err, "readdir(/proc/<outside pid>/fd)")
-	f, err := os.OpenFile("/proc/"+other+"/fd/3", os.O_RDWR, 0)
+	f, err := os.OpenFile("/proc/"+other+"/fd/3", os.O_RDWR, 0) //nolint:gosec // the pid of the outside process the test started
 	if err == nil {
 		_ = f.Close()
 	}
 	blockedAny("proc_fd_open_other", err, "open(/proc/<outside pid>/fd/3), a socket")
-	_, err = os.ReadFile("/proc/" + other + "/environ")
+	_, err = os.ReadFile("/proc/" + other + "/environ") //nolint:gosec // the pid of the outside process the test started
 	blockedAny("proc_environ_other", err, "read(/proc/<outside pid>/environ)")
 
 	buf := make([]byte, 8)
@@ -159,7 +159,7 @@ func main() {
 	}
 	fdChecks()
 	// ptrace of our own child: allowed to an unprivileged process, so only seccomp stops it.
-	child := exec.Command(os.Args[0], "sleep")
+	child := exec.Command(os.Args[0], "sleep") //nolint:gosec,noctx // the probe starts itself; it has no context
 	if err := child.Start(); err != nil {
 		fmt.Println("probe: cannot start child:", err)
 		os.Exit(2)
@@ -174,7 +174,7 @@ func main() {
 	empty, _ := unix.BytePtrFromString("")
 	tmpfs, _ := unix.BytePtrFromString("tmpfs")
 	dir, _ := unix.BytePtrFromString("/tmp")
-	sys("mount", unix.SYS_MOUNT, uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(dir)), uintptr(unsafe.Pointer(tmpfs)), 0, 0)
+	sys("mount", unix.SYS_MOUNT, uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(dir)), uintptr(unsafe.Pointer(tmpfs)), 0, 0) //nolint:gosec // mount(2) takes C strings
 	sys("bpf", unix.SYS_BPF, 5, 0, 0)
 	sys("keyctl", unix.SYS_KEYCTL, 0, ^uintptr(2), 0) // KEYCTL_GET_KEYRING_ID, KEY_SPEC_USER_SESSION_KEYRING (-3)
 	sys("perf_event_open", unix.SYS_PERF_EVENT_OPEN, 0, 0, ^uintptr(0), ^uintptr(0), 0)
@@ -216,7 +216,7 @@ func main() {
 		_ = os.Remove("/dev/koinon-probe")
 	}
 	denied("dev_create:/dev/koinon-probe", ferr, "create a regular file in /dev")
-	merr := unix.Mknod("/dev/koinon-blk", unix.S_IFBLK|0o600, int(unix.Mkdev(7, 0)))
+	merr := unix.Mknod("/dev/koinon-blk", unix.S_IFBLK|0o600, int(unix.Mkdev(7, 0))) //nolint:gosec // loop device 7:0 fits in an int
 	if merr == nil {
 		_ = os.Remove("/dev/koinon-blk")
 	}
