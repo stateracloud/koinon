@@ -63,14 +63,8 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 	// chunk, and an archive that fits in it is retried to the end. A larger archive is not retried
 	// (the caller owns the stream).
 	first := make([]byte, uploadChunk)
-	n, rerr := io.ReadFull(archive, first)
-	first = first[:n]
-	complete := false
-	switch {
-	case rerr == nil:
-	case errors.Is(rerr, io.EOF), errors.Is(rerr, io.ErrUnexpectedEOF):
-		complete = true
-	default:
+	first, complete, rerr := fillChunk(archive, first)
+	if rerr != nil {
 		return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)}
 	}
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
@@ -129,6 +123,24 @@ func (d *Driver) extract(ctx context.Context, op string, k key, destDir string, 
 	return "", nil
 }
 
+// fillChunk reads r into buf until buf is full or r returns io.EOF. Only a plain io.EOF ends the
+// archive. Any other error, io.ErrUnexpectedEOF included, is a failed read: the caller must not send
+// close, or tar would see a truncated archive as a complete one.
+func fillChunk(r io.Reader, buf []byte) (chunk []byte, eof bool, err error) {
+	n := 0
+	for n < len(buf) {
+		m, rerr := r.Read(buf[n:])
+		n += m
+		if rerr == io.EOF {
+			return buf[:n], true, nil
+		}
+		if rerr != nil {
+			return nil, false, rerr
+		}
+	}
+	return buf[:n], false, nil
+}
+
 // sendArchive streams the archive in one WriteProcessInput stream. It reads one message ahead, so
 // the last message carries close. A guest that says tar has exited is not an error here: the caller
 // reads the exit code, which tells why tar ended.
@@ -156,13 +168,9 @@ func (d *Driver) sendArchive(ctx context.Context, op string, k key, id string, f
 		var next []byte
 		nextEOF := false
 		if !curEOF {
-			n, rerr := io.ReadFull(r, spare)
-			next = spare[:n]
-			switch {
-			case rerr == nil:
-			case errors.Is(rerr, io.EOF), errors.Is(rerr, io.ErrUnexpectedEOF):
-				nextEOF = true
-			default:
+			var rerr error
+			next, nextEOF, rerr = fillChunk(r, spare)
+			if rerr != nil {
 				return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)} // cancel aborts the stream
 			}
 		}
@@ -174,7 +182,8 @@ func (d *Driver) sendArchive(ctx context.Context, op string, k key, id string, f
 		if last {
 			break
 		}
-		// cur is on the wire (Send copies it), so its buffer can be read into again.
+		// cur is on the wire: Send has encoded it and no interceptor of this client keeps it, so its
+		// buffer can be read into again.
 		cur, spare, curEOF = next, cur[:cap(cur)], nextEOF
 	}
 	resp, err := stream.CloseAndRecv()

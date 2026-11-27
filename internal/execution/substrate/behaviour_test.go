@@ -451,6 +451,22 @@ var _ = Describe("the Substrate driver", func() {
 			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
 		})
 
+		It("treats io.ErrUnexpectedEOF from the reader as a failed read, not as the end", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("x"), 3<<20)
+			Expect(tw.WriteHeader(&tar.Header{Name: "big.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			// A valid archive, cut at 600 KiB by a reader that returns io.ErrUnexpectedEOF as its own error.
+			big := io.MultiReader(bytes.NewReader(buf.Bytes()[:600<<10]), failing{io.ErrUnexpectedEOF})
+			err := d.Upload(ctx, ws, "sb", "/work", big)
+			Expect(errors.Is(err, io.ErrUnexpectedEOF)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+			Expect(cl.Files(ws, "sb")).To(BeEmpty())
+		})
+
 		It("leaves no tar running after a suspend at the middle of an upload", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			release := make(chan struct{})
@@ -826,7 +842,6 @@ type failing struct{ err error }
 
 func (f failing) Read([]byte) (int, error) { return 0, f.err }
 
-// stallReader gives one chunk, then blocks until released and ends the stream.
 // stallAfter returns n bytes, then blocks in Read until release closes (after it closes started):
 // an upload whose stream is open and whose tar waits for input.
 type stallAfter struct {
@@ -854,6 +869,7 @@ func (r *stallAfter) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// stallReader gives one chunk, then blocks until released and ends the stream.
 type stallReader struct {
 	first   []byte
 	started chan struct{}

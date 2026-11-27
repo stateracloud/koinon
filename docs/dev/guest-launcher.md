@@ -168,7 +168,7 @@ modes. Two results follow:
   actor runs again. `StartProcess` also has a 30 minute timeout as a backstop. The router resets a stream after
   300 s, so an upload that needs more time fails. `-log-dir` of the guest front must not be a directory that the
   payload can write: the front (root) writes the process logs there.
-- **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
+- **The home volume.** The front runs processes in `/sandbox`. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
   `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
