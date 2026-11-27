@@ -780,12 +780,14 @@ install check for any point in this section. The operator must do each point.
    home, also a file with mode 0600, is readable in the snapshot objects. The lab bucket had no SSE, and the
    objects `fs/pages.img.zstd` (gVisor), `durable-dir-home.tar.zstd` and `memory-ranges.zstd` (vm tier) held
    plain data. Set the default encryption of the bucket before the first sandbox starts:
-   - AWS S3: default encryption on the bucket, `SSE-S3` or `SSE-KMS` (`aws s3api put-bucket-encryption`).
+   - AWS S3: S3 applies `SSE-S3` to new objects by default. To use `SSE-KMS`, set the default encryption of
+     the bucket (`aws s3api put-bucket-encryption`).
    - Google Cloud Storage: a default customer-managed key on the bucket (`gcloud storage buckets update
      --default-encryption-key`). Google encrypts at rest with its own key when you set none.
    - MinIO: bucket encryption with a KMS key (`mc encrypt set`).
-   - rustfs (the bundled store): follow the rustfs documentation for server-side encryption. Also use an
-     encrypted StorageClass or an encrypted disk for the `rustfs-data` volume.
+   - rustfs (the bundled store): put the `rustfs-data` volume on an encrypted StorageClass or an encrypted
+     disk. Also check the rustfs documentation for server-side encryption; this page does not verify it.
+
    Encryption at rest protects the stored object against loss of a disk or a bucket export. It does not
    protect against a holder of the bucket credential: the store decrypts for that holder (point 2).
 2. **Limit who holds the bucket credential.** The credential reads every home, including 0600 files, and
@@ -794,8 +796,8 @@ install check for any point in this section. The operator must do each point.
    out of the Koinon namespace. Limit who can read the Secret `koinon-rustfs-credentials` in the Substrate
    namespace.
 3. **Substrate has no snapshot checksums.** Substrate does not check a snapshot when it restores it. A
-   damaged or changed object in the bucket is not found. Use the version and the object-lock functions of
-   your store when you need to detect or prevent a change.
+   damaged or changed object in the bucket is not found. Use the object versioning of your store when you need
+   to find a change. Do not use object lock on the bucket: it can block the deletes that Substrate makes.
 
 ## Substrate database: not in the Koinon backup
 
@@ -815,8 +817,10 @@ Put the Substrate PostgreSQL on storage that does not share a disk with the snap
 an actor lease when one PostgreSQL commit stalls for more than about 10 s. The lease renews every 10 s and
 has a fixed deadline of 20 s (`lease.go`). A suspend that loses its lease fails after 20.9 s with a
 `Canceled` error and writes no log line. On koinon-lab, the snapshot upload loaded the same disk as the
-PostgreSQL write-ahead log. Commits stalled for 8 to 9.1 s: 0.4 s from the limit. Use `--postgres-storage-class`
-for a class on a separate disk (see [Options](#options)).
+PostgreSQL write-ahead log. Commits stalled for 8 to 9.1 s, and the margin was 0.4 s. Use `--postgres-storage-class`
+for a class that maps to a different disk than the class of `rustfs-data` (`--rustfs-storage-class`). A
+class name alone does not prove this: for example, `local-path` can place both claims on one node disk.
+See [Options](#options).
 
 ## Verified and unverified
 
