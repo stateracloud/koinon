@@ -36,7 +36,7 @@ The full list, with defaults, is in the header of `test/escape/substrate_harness
 - `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES`: the gateway routes, a comma-separated list of `host:port`. The driver
   refuses to create a sandbox without a gateway route (issue #1444), and the suite cannot start without one
   (issue #1508). Use the DNS name of the gateway Service, for example `koinon-gateway.koinon-system.svc:8080`.
-  The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of
+  The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of The first route is the model route. Every other route is an MCP route.
   every sandbox. They are the only destinations that policy allows: default-deny stays for every other
   destination (ADR 0120). The egress gateway spec is the one exception: it replaces the policy of its own
   sandbox with an allow-all rule, as its control. Do not name a host that a deny probe targets (for example in

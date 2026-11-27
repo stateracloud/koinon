@@ -163,7 +163,7 @@ func parseGatewayRoutes(raw string) ([]substrate.GatewayRoute, error) {
 	return routes, nil
 }
 
-// withListeners gives each parsed route the header and audience of a gateway listener (issue #1489): the
+// withListeners: the first route is the model route, every other route an MCP route. It gives each parsed route the header and audience of a gateway listener (issue #1489): the
 // first route is the model listener, every other one an MCP listener. The specs never call these routes; the
 // driver needs valid ones to write a policy.
 func withListeners(routes []substrate.GatewayRoute) []substrate.GatewayRoute {
