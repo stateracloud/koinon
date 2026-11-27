@@ -58,7 +58,22 @@ type LandlockPolicy struct {
 	// ListDirs are directories whose entries may be listed and nothing else: /dev is listed so
 	// tools work, but a node in it that Devices does not name cannot be opened or created.
 	ListDirs []string `json:"list_dirs"`
+	// Scoped lists the Landlock IPC scopes (ABI 6). The one known scope is "signal": the payload
+	// cannot send a signal to a process outside its Landlock domain, such as the guest front and
+	// the other Koinon processes of the guest, even when it runs as the same uid (issue #1496). The
+	// scope follows Mode: in require mode a kernel below ABI 6 stops the start.
+	Scoped []string `json:"scoped,omitempty"`
 }
+
+// ScopeSignal is the Landlock scope that blocks signals to processes outside the payload's domain.
+const ScopeSignal = "signal"
+
+// RootAllowedCapabilities are the only capabilities that a payload which can run as root may keep
+// (issue #1496). Any other capability could trace, signal or reconfigure the Koinon processes of
+// the guest, create device nodes (CAP_MKNOD) or widen the guest kernel's attack surface. It is an
+// allowlist, so a capability that a later kernel adds is refused by default. Validate refuses a
+// policy whose allowlist holds any other capability unless the user drop is required.
+var RootAllowedCapabilities = []string{"CAP_NET_BIND_SERVICE", "CAP_AUDIT_WRITE"}
 
 // SeccompPolicy is the deny filter: every other syscall stays allowed.
 type SeccompPolicy struct {
@@ -178,8 +193,27 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("guest launcher policy: seccomp mode %q is refused: it must be require", p.Seccomp.Mode)
 	}
 	for _, c := range p.Capabilities.Allow {
-		if _, ok := capNumber(c); !ok {
+		n, ok := capNumber(c)
+		if !ok {
 			return fmt.Errorf("guest launcher policy: unknown capability %q", c)
+		}
+		// A policy without a required drop can leave the payload root (the vm tier, issue #1496).
+		if p.User.Mode != ModeRequire {
+			allowed := false
+			for _, a := range RootAllowedCapabilities {
+				if an, _ := capNumber(a); an == n {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("guest launcher policy: capability %s is refused for a payload that can run as root (user mode %q); allowed: %s", c, p.User.Mode, strings.Join(RootAllowedCapabilities, ", "))
+			}
+		}
+	}
+	for _, s := range p.Landlock.Scoped {
+		if s != ScopeSignal {
+			return fmt.Errorf("guest launcher policy: unknown landlock scope %q (known: %s)", s, ScopeSignal)
 		}
 	}
 	for _, list := range [][]string{p.Landlock.ReadExec, p.Landlock.ReadWrite, p.Landlock.Devices, p.Landlock.ListDirs} {
