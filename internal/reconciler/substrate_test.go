@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -57,6 +58,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		now  atomic.Pointer[time.Time]
 		ws   string
 		ctl  ateapiv1.ControlClient
+		// checkpoints turns home checkpoints on for the reconcilers that newR makes after it is set.
+		checkpoints bool
 	)
 	pass := func(ctx context.Context) {
 		GinkgoHelper()
@@ -114,6 +117,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
 		now.Store(nil)
+		checkpoints = false
 		org, user = newOrg(ctx)
 		ws = execution.WorkspaceName(org.Bytes)
 		addProvider(ctx, org, user, "upstream", "", "fake")
@@ -134,6 +138,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 					RuntimeClassName: "kata",
 					MCPAckWait:       300 * time.Millisecond, MCPAckPoll: 20 * time.Millisecond,
 					KeepWarmPerOrg: 2,
+					Checkpoints:    checkpoints,
 					Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 					Now: func() time.Time {
 						if t := now.Load(); t != nil {
@@ -541,6 +546,212 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			pass(ctx)
 			Expect(cl.Calls("RevertActor")).To(Equal(1))
 			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeFalse(), "the mark of another sandbox does not count")
+		})
+
+		// refuse makes the database refuse an UPDATE or INSERT on table when cond holds (a trigger), until the
+		// returned drop runs (also at cleanup).
+		refuse := func(ctx SpecContext, table, event, cond string) (drop func()) {
+			GinkgoHelper()
+			_, err := pool.Exec(ctx, `CREATE OR REPLACE FUNCTION refuse_test_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test write refused'; END $$`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, fmt.Sprintf(`CREATE TRIGGER refuse_test BEFORE %s ON %s FOR EACH ROW WHEN (%s) EXECUTE FUNCTION refuse_test_write()`, event, table, cond))
+			Expect(err).NotTo(HaveOccurred())
+			dropped := false
+			drop = func() {
+				if !dropped {
+					dropped = true
+					_, err := pool.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS refuse_test ON %s`, table))
+					Expect(err).NotTo(HaveOccurred())
+				}
+			}
+			DeferCleanup(drop)
+			return drop
+		}
+		// expectHomeKept checks that the restored home is not lost: the restore points at the checkpoint
+		// again and the mark stays, also after the passes that would seal an idle sandbox.
+		expectHomeKept := func(ctx SpecContext, agent store.Agent, restored pgtype.UUID, why string) {
+			GinkgoHelper()
+			got := sandboxRow(ctx, agent.ID)
+			Expect(got.RestoreCheckpointID).To(Equal(restored), "the next run restores the home: %s", why)
+			Expect(got.RestoredCheckpointID.Valid).To(BeTrue(), "the mark stays: %s", why)
+		}
+
+		It("keeps the restored home when the revert fails after the restore pointer was written", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			coolDown(ctx, org, agent.ID)
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			cl.Crash(ws, actor, "guest kernel panic")
+			cl.FailNextReverts(ws, actor, 1000) // no worker has room, at every try
+			advance(0)
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(BeNumerically(">", 0))
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_CRASHED), "the revert did not work")
+			expectHomeKept(ctx, agent, restored, "the pointer was written before the revert")
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+		})
+
+		It("keeps the restored home when the egress policy write after RevertActor fails", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			coolDown(ctx, org, agent.ID)
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			cl.Crash(ws, actor, "guest kernel panic")
+			cl.FailPolicyReadsAfterRevert(ws, actor, 1)
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(1), "the revert worked")
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED), "the actor holds its snapshot")
+			Expect(cl.Calls("DeleteActor")).To(BeZero(), "the reverted actor is not deleted")
+			expectHomeKept(ctx, agent, restored, "the egress write failed after the revert")
+
+			By("an idle stopped sandbox with the restore pending is not sealed and keeps the mark")
+			advance(3 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			expectHomeKept(ctx, agent, restored, "a stop that this path did not send")
+		})
+
+		It("keeps the restored home when the audit write after the revert fails", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			coolDown(ctx, org, agent.ID)
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			// audit-lint:allow a trigger makes the database refuse the revert's audit write, to prove the home survives it
+			drop := refuse(ctx, "audit_events", "INSERT", fmt.Sprintf("NEW.org_id = '%s' AND NEW.action = 'sandbox.revert'", org))
+			cl.Crash(ws, actor, "guest kernel panic")
+			Expect(r.ReconcileAll(ctx)).NotTo(Succeed(), "the pass reports the failed write")
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			expectHomeKept(ctx, agent, restored, "the audit write failed after the revert")
+
+			By("the next passes, with the writes working, do not seal before the restore ran")
+			drop()
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			advance(3 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			expectHomeKept(ctx, agent, restored, "the idle stop with the restore pending is not the seal")
+		})
+
+		Context("with home checkpoints on", func() {
+			BeforeEach(func() {
+				checkpoints = true
+				r = newR()
+			})
+			// completeCheckpoint plays agentd's checkpoint writer: a complete checkpoint of the sandbox, taken now.
+			completeCheckpoint := func(ctx SpecContext, agent store.Agent) store.HomeCheckpoint {
+				GinkgoHelper()
+				sb := sandboxRow(ctx, agent.ID)
+				_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sb.SandboxID.String, Generation: sb.HomeGeneration.String})
+				if err != nil {
+					Expect(err).To(MatchError(pgx.ErrNoRows), "an open request is the one claimed")
+				}
+				cp, err := q.ClaimHomeCheckpoint(ctx, store.ClaimHomeCheckpointParams{OrgID: org, LeaseSeconds: 60})
+				Expect(err).NotTo(HaveOccurred())
+				cp, err = q.CompleteHomeCheckpoint(ctx, store.CompleteHomeCheckpointParams{
+					OrgID: org, ID: cp.ID, SnapshotID: pgtype.Text{String: "k" + cp.ID.String(), Valid: true},
+					SizeBytes: pgtype.Int8{Int64: 1, Valid: true}, Generation: sb.HomeGeneration.String,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				return cp
+			}
+			// dirtyHome stands in for a run that wrote the home after the checkpoint.
+			dirtyHome := func(ctx SpecContext, agent store.Agent) {
+				GinkgoHelper()
+				_, err := pool.Exec(ctx, `UPDATE agent_sandboxes SET home_dirtied_at = now() WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			// firstBoot creates the agent's actor and returns it once the first-boot seal is recorded.
+			firstBoot := func(ctx SpecContext) (store.Agent, string) {
+				GinkgoHelper()
+				agent := newAgent(ctx, org, user)
+				pass(ctx)
+				actor := sandboxRow(ctx, agent.ID).ActorName.String
+				Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+				pass(ctx) // the row says ready: the checkpoint writer reads only a ready sandbox
+				Expect(cl.Calls("SuspendActor")).To(Equal(1), "the seal of the first boot")
+				Expect(sandboxRow(ctx, agent.ID).LastSnapshotAt.Valid).To(BeTrue(), "the seal's time is recorded")
+				return agent, actor
+			}
+
+			It("points the restore at a stale checkpoint that is newer than the first-boot seal, after a leader change", func(ctx SpecContext) {
+				agent, actor := firstBoot(ctx)
+				cp := completeCheckpoint(ctx, agent)
+				dirtyHome(ctx, agent) // the checkpoint is stale: the home was written after it
+				Expect(cp.FinishedAt.Time).To(BeTemporally(">", sandboxRow(ctx, agent.ID).LastSnapshotAt.Time))
+				r = newR() // only the Postgres state: the snapshot time comes from the row
+				cl.Crash(ws, actor, "guest kernel panic")
+				pass(ctx)
+				Expect(cl.Calls("RevertActor")).To(BeZero(), "a revert would give the empty home of the first boot")
+				Expect(cl.Calls("DeleteActor")).To(Equal(1), "the repair path recreates the sandbox")
+				Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID).To(Equal(cp.ID), "the new sandbox restores the checkpoint")
+			})
+
+			It("points the restore at the checkpoint when the snapshot time is unknown", func(ctx SpecContext) {
+				agent, actor := firstBoot(ctx)
+				cp := completeCheckpoint(ctx, agent)
+				_, err := pool.Exec(ctx, `UPDATE agent_sandboxes SET last_snapshot_at = NULL WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+				Expect(err).NotTo(HaveOccurred())
+				cl.Crash(ws, actor, "guest kernel panic")
+				pass(ctx)
+				Expect(cl.Calls("RevertActor")).To(BeZero(), "an unknown snapshot time loses to the checkpoint")
+				Expect(cl.Calls("DeleteActor")).To(Equal(1))
+				Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID).To(Equal(cp.ID))
+			})
+
+			It("reverts when the snapshot is newer than the checkpoint", func(ctx SpecContext) {
+				agent, actor := firstBoot(ctx)
+				completeCheckpoint(ctx, agent)
+				_, err := pool.Exec(ctx, `UPDATE agent_sandboxes SET last_snapshot_at = now() + interval '1 minute' WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+				Expect(err).NotTo(HaveOccurred())
+				cl.Crash(ws, actor, "guest kernel panic")
+				pass(ctx)
+				Expect(cl.Calls("RevertActor")).To(Equal(1))
+				Expect(cl.Calls("DeleteActor")).To(BeZero())
+				Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeFalse())
+			})
+		})
+
+		It("after a leader change, a new reconciler with only the Postgres state neither clears the seal mark nor reverts without the restore", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			coolDown(ctx, org, agent.ID)
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			cl.Crash(ws, actor, "guest kernel panic")
+			cl.FailNextReverts(ws, actor, 5) // every try of one pass: RevertActor and its retries
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_CRASHED))
+			expectHomeKept(ctx, agent, restored, "the old leader wrote the pointer before its revert failed")
+
+			By("the new leader has no memory of the restore, the failed revert or its backoff")
+			r = newR()
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(6), "the new leader reverts")
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			expectHomeKept(ctx, agent, restored, "the pointer is in Postgres")
+
+			By("an idle sandbox with the restore pending is not sealed: the reverted home lacks the restore")
+			advance(3 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			expectHomeKept(ctx, agent, restored, "the idle stop with the restore pending is not the seal")
 		})
 
 		It("stops a front that fails the wakeup probe at every resume, and never deletes the reverted actor", func(ctx SpecContext) {

@@ -89,8 +89,10 @@ type actor struct {
 	failProbe int
 	// failPolicyGets is how many GetActorEgressPolicy calls fail with Unavailable.
 	failPolicyGets int
-	streams        map[int]context.CancelFunc
-	nextSID        int
+	// failPolicyAfterRevert is how many GetActorEgressPolicy calls fail after the next RevertActor works.
+	failPolicyAfterRevert int
+	streams               map[int]context.CancelFunc
+	nextSID               int
 }
 
 func (a *actor) dropStreams() {
@@ -412,6 +414,9 @@ func (s *controlServer) RevertActor(_ context.Context, r *ateapiv1.RevertActorRe
 		a.files = map[string][]byte{}
 	}
 	a.state, a.crash = ateapiv1.ActorState_ACTOR_STATE_SUSPENDED, ""
+	if a.failPolicyAfterRevert > 0 {
+		a.failPolicyGets, a.failPolicyAfterRevert = a.failPolicyAfterRevert, 0
+	}
 	a.dropStreams()
 	return &ateapiv1.RevertActorResponse{Actor: a.pb()}, nil
 }

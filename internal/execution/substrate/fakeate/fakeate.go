@@ -455,6 +455,17 @@ func (c *Cluster) FailNextPolicyReads(atespace, name string, n int) {
 	}
 }
 
+// FailPolicyReadsAfterRevert makes the n GetActorEgressPolicy calls for an actor that follow the next
+// RevertActor that works fail with Unavailable: the write after the revert fails, the calls before it
+// work (issue #1481).
+func (c *Cluster) FailPolicyReadsAfterRevert(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failPolicyAfterRevert = n
+	}
+}
+
 // FailNextResumesAfter lets the next skip ResumeActor calls for an actor work, and then fails n of them
 // with Unavailable (the resume after the first-boot seal, issue #1481).
 func (c *Cluster) FailNextResumesAfter(atespace, name string, skip, n int) {
