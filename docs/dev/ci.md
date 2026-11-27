@@ -823,7 +823,10 @@ poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without
 step is not enough: code in a job can write cache entries itself with the runner's cache token. So
 `e2e-kind` also refuses an `inputs.commit` that is not a first-parent commit of the dispatch ref
 (the head or a merge; a step before the checkout, issue 1365). Any ancestor is not enough: the
-inner commits of a merged pull request were never reviewed as a tree. `ci.yml`
+inner commits of a merged pull request were never reviewed as a tree. The checkout takes the sha that the guard
+step matched in the commit graph (`steps.dispatchrev.outputs.rev`), not the raw input. CodeQL does not model a `run` step as
+a control check: it flags the first run step after the checkout that matches its poisonable commands (`pnpm store path`,
+`make`), alerts 53 and 58, so the alert can stay open while the guard holds (issue 1365). `ci.yml`
 (`pull_request` has its own cache scope; pushes and queue builds are trusted refs), `secrets.yml` and
 `g2-kind.yml` (the dispatched ref's own scope) keep the action and save. Any new caller on an
 untrusted ref passes `save: 'false'` and takes the action from a trusted checkout. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
