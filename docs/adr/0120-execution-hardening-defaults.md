@@ -630,6 +630,9 @@ it (`no_token`).
      archived. So an archived or
      deleted sandbox loses its identity at the next State update. The route check (`route.inScope`) does
      not change.
+   - A bad row in the map (a missing field, or two rows with one identity) is skipped and reported, and the
+     other rows stay (issue #1485). The actor of a skipped row is refused. Two rows with one identity are both
+     dropped, because the gateway cannot know which is right.
    - A new actor is not in the map until the next State update. So its first request can be refused. This
      fails closed. koinon-agentd waits until the gateway knows the actor before it starts the run, as
      `forgewait.go` waits for the forge credential.
@@ -640,7 +643,7 @@ it (`no_token`).
    task, for an ephemeral agent, `internal/execution/names.go`). So a new actor can have the name of an old
    one and get a token with the old UID. Item 5 refuses that token, so it fails closed, but the new actor
    cannot reach the gateway for up to 10 minutes. To prevent this, each new actor gets a name that no earlier
-   actor had: `<sandbox name>-<8 random hex characters>`, recorded in `agent_sandboxes.actor_name` (item 5).
+   actor had: `<sandbox name>-<16 random hex characters>` (64 bits; issue #1485: with 8 hex characters, a lab test on 2026-11-27 got the UID of a deleted actor for a reused name), recorded in `agent_sandboxes.actor_name` (item 5).
    A new name is made for each new actor and is never used again. Kagent does the same with `session-<uuid>`.
 7. **Network and install.** The gateway needs a route to the issuer and to its `jwks_uri`. The chart adds
    one NetworkPolicy egress rule from the gateway for this route, and a chart check asserts it. The rule

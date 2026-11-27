@@ -196,6 +196,11 @@ Order of the step:
    a client certificate on this list, so set `execution.substrate.routerAddress` to
    `atenet-router.<substrate namespace>.svc:443` (issue #1446, ADR 0120 amendment). The preflight fails when the
    list lacks the agentd identity or the router Service has no such port.
+   The driver fails a run at once with "TLS identity check with the atenet router failed" when the router sends a
+   TLS alert or the driver rejects the router certificate. Known limit: on a real TCP connection, a router that
+   closes the connection with unread client bytes can send a TCP reset, and the reset can hide the TLS alert. The
+   driver cannot read the alert then. The error stays Unavailable and the driver retries until
+   `GuestReadyTimeout`. If runs wait that long with no error, check the router log and the allow-list.
 9. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
    object store" below.
 10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release

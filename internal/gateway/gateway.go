@@ -675,25 +675,41 @@ type EgressActor struct {
 }
 
 // ActorLookup returns the actors of e by their Substrate identity, for the gateway's check of an actor
-// JWT. An actor that does not name its workspace, name, UID, org and agent, or an identity that two actors
-// give, fails the whole lookup: the caller then knows no actor and refuses every token (fail closed).
+// JWT. A bad row is skipped and reported, and the other rows stay (issue #1485): an actor that does not
+// name its workspace, name, UID, org and agent is skipped, and an identity that two rows give is dropped
+// with all its rows, because the gateway cannot know which row is right. The result holds the good actors
+// also when the error is not nil. The error joins one error for each bad row; the caller logs it. A token
+// of a skipped actor finds no actor and is refused (fail closed for that actor only).
 func (e EgressState) ActorLookup() (map[actortoken.SubstrateActor]actortoken.Actor, error) {
 	out := make(map[actortoken.SubstrateActor]actortoken.Actor, len(e.EgressActors))
+	var errs []error
+	ambiguous := map[actortoken.SubstrateActor]bool{}
 	for _, a := range e.EgressActors {
 		k := actortoken.SubstrateActor{Atespace: a.Atespace, Name: a.Name, UID: a.UID}
 		if k.Atespace == "" || k.Name == "" || k.UID == "" {
-			return nil, fmt.Errorf("gateway: egress actor %q of workspace %q names no workspace, name or UID", a.Name, a.Atespace)
+			errs = append(errs, fmt.Errorf("gateway: egress actor %q of workspace %q names no workspace, name or UID: skipped", a.Name, a.Atespace))
+			continue
 		}
 		actor := actortoken.Actor{Org: a.Org, Agent: a.Agent, Run: a.Run}
 		if err := actor.Validate(); err != nil {
-			return nil, fmt.Errorf("gateway: egress actor %s/%s: %w", a.Atespace, a.Name, err)
+			errs = append(errs, fmt.Errorf("gateway: egress actor %s/%s: %w: skipped", a.Atespace, a.Name, err))
+			// A second claim on a complete identity makes it ambiguous, also when this row is the bad one.
+			delete(out, k)
+			ambiguous[k] = true
+			continue
+		}
+		if ambiguous[k] {
+			continue
 		}
 		if _, dup := out[k]; dup {
-			return nil, fmt.Errorf("gateway: egress actor %s/%s (uid %s) is in the State twice", a.Atespace, a.Name, a.UID)
+			delete(out, k)
+			ambiguous[k] = true
+			errs = append(errs, fmt.Errorf("gateway: egress actor %s/%s (uid %s) is in the State twice: dropped", a.Atespace, a.Name, a.UID))
+			continue
 		}
 		out[k] = actor
 	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 // ModelConfig is what the model path is handed: the keys and the model half of a State. A driver

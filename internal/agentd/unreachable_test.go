@@ -22,7 +22,7 @@ import (
 type unreachableBackend struct{ agentd.Backend }
 
 func (unreachableBackend) Exec(context.Context, string, string, execution.ExecRequest) (execution.Process, error) {
-	return nil, &execution.Error{Op: "Exec", Kind: execution.ErrUnreachable, Err: errors.New("cannot connect to the atenet router: tls: bad certificate")}
+	return nil, &execution.Error{Op: "Exec", Kind: execution.ErrUnreachable, Err: errors.New("TLS identity check with the atenet router failed: remote error: tls: bad certificate")}
 }
 
 var _ = Describe("A sandbox data path that cannot be reached", func() {
@@ -34,7 +34,7 @@ var _ = Describe("A sandbox data path that cannot be reached", func() {
 
 		Eventually(runState(ctx, id)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, id)
-		Expect(got.OutcomeReason.String).To(ContainSubstring("cannot connect to the atenet router: tls: bad certificate"))
+		Expect(got.OutcomeReason.String).To(ContainSubstring("TLS identity check with the atenet router failed: remote error: tls: bad certificate"))
 		Expect(got.OutcomeReason.String).NotTo(ContainSubstring("harness connection was lost"))
 		Expect(got.Takeovers).To(BeZero(), "no lease takeover: the failure is final on the first worker")
 	})

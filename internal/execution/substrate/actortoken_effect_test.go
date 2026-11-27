@@ -164,6 +164,10 @@ var _ = Describe("the driver refuses the actor token effect on any other rule", 
 		Entry("an https (MITM) rule with the effect", []*ateapiv1.EgressRule{
 			{Https: &ateapiv1.HttpsRule{Hostnames: []string{"forge.example.test"}, Ports: &ateapiv1.Ports{Numbers: []int32{443}}, Effects: jwt(model)}},
 		}, routes),
+		Entry("a rule with both http and https", []*ateapiv1.EgressRule{{
+			Http:  httpRule(fakeate.GatewayHost, gwPort, jwt(model)).GetHttp(),
+			Https: &ateapiv1.HttpsRule{Hostnames: []string{"forge.example.test"}, Ports: &ateapiv1.Ports{Numbers: []int32{443}}},
+		}}, routes),
 		Entry("the effect on another host", []*ateapiv1.EgressRule{httpRule("forge.example.test", 80, jwt(model))}, routes),
 		Entry("the egress audience on the model listener", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, gwPort, jwt(swapped(model, substrate.AudienceEgress)))}, routes),
 		Entry("the model audience on the egress listener", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt(swapped(egress, substrate.AudienceModel)))}, routes),
@@ -272,11 +276,11 @@ var _ = Describe("the fake Substrate admission of effects and actor names", func
 func strings63() string { return strings.Repeat("a", 63) }
 func strings64() string { return strings.Repeat("a", 64) }
 
-// The actor name (issue #1386): "<sandbox>-<8 hex>", new for each call, and found through the adapter.
+// The actor name (issue #1386): "<sandbox>-<16 hex>", new for each call, and found through the adapter.
 var _ = Describe("the actor name", func() {
-	It("is the sandbox name, a dash and 8 lowercase hex characters, and new each time", func() {
+	It("is the sandbox name, a dash and 16 lowercase hex characters, and new each time", func() {
 		d, _ := newDriver()
-		re := regexp.MustCompile(`^kt-0123456789abcdef-[0-9a-f]{8}$`)
+		re := regexp.MustCompile(`^kt-0123456789abcdef-[0-9a-f]{16}$`)
 		seen := map[string]bool{}
 		for range 200 {
 			n := d.NewActorName("kt-0123456789abcdef")
@@ -296,7 +300,7 @@ var _ = Describe("the actor name", func() {
 		n, ok := execution.ActorNamerOf(execution.WithoutEgress(d))
 		Expect(ok).To(BeTrue())
 		Expect(n).To(BeIdenticalTo(d))
-		Expect(n.NewActorName("a")).To(MatchRegexp(`^a-[0-9a-f]{8}$`))
+		Expect(n.NewActorName("a")).To(MatchRegexp(`^a-[0-9a-f]{16}$`))
 		_, ok = execution.ActorNamerOf(execution.WithoutEgress(struct{ execution.Compute }{}))
 		Expect(ok).To(BeFalse())
 	})

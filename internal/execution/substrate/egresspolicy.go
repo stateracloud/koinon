@@ -212,6 +212,10 @@ func checkActorTokenEffects(rules []*ateapiv1.EgressRule, routes []GatewayRoute)
 	seen := map[int]bool{}
 	for i, r := range rules {
 		switch {
+		case r.GetHttp() != nil && r.GetHttps() != nil:
+			// The API says one rule is one union member; a rule with both is not a rule this driver wrote
+			// (issue #1485).
+			return fmt.Errorf("rule %d: a rule has both http and https; the actor JWT may go only to a gateway listener", i)
 		case len(r.GetHttps().GetEffects().GetReplaceHeaders()) > 0:
 			return fmt.Errorf("rule %d: an https rule carries replace_headers; the actor JWT may go only to a gateway listener", i)
 		case len(r.GetHttp().GetEffects().GetReplaceHeaders()) == 0:
@@ -286,14 +290,13 @@ func (d *Driver) accessOf(k key) execution.GatewayAccess {
 	return d.access[k]
 }
 
-// policyRules are the rules of the actor's policy: the routes of every actor, and the egress listener when its
-// access has CodeHostEgress and the install has one.
-func (d *Driver) policyRules(k key) []*ateapiv1.EgressRule {
-	var egress *GatewayRoute
+// egressRoute is the egress listener route of the actor's policy: the install's one when the access has
+// CodeHostEgress, else nil.
+func (d *Driver) egressRoute(k key) *GatewayRoute {
 	if d.cfg.CodeHostEgressRoute != nil && d.accessOf(k).CodeHostEgress {
-		egress = d.cfg.CodeHostEgressRoute
+		return d.cfg.CodeHostEgressRoute
 	}
-	return gatewayRules(d.cfg.GatewayRoutes, egress)
+	return nil
 }
 
 // policyWriteAttempts bounds the retries when another writer changes the policy between the read and the write.
@@ -307,13 +310,10 @@ func (d *Driver) ensureEgressPolicy(ctx context.Context, op string, k key) error
 	if err := d.requireGatewayRoutes(op); err != nil {
 		return err
 	}
+	egress := d.egressRoute(k) // once: the rules and the check below use the same route
 	want := &ateapiv1.EgressPolicy{
 		Metadata: &ateapiv1.ResourceMetadata{Atespace: k.atespace, Name: egressPolicyName},
-		Rules:    d.policyRules(k),
-	}
-	var egress *GatewayRoute
-	if d.cfg.CodeHostEgressRoute != nil && d.accessOf(k).CodeHostEgress {
-		egress = d.cfg.CodeHostEgressRoute
+		Rules:    gatewayRules(d.cfg.GatewayRoutes, egress), // the routes of every actor, and the egress listener when egress is set
 	}
 	if err := checkActorTokenEffects(want.GetRules(), policyRoutes(d.cfg.GatewayRoutes, egress)); err != nil {
 		return fail(op, execution.ErrFailedPrecondition, "egress policy: %v (issue #1386)", err)

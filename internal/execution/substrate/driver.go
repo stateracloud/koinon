@@ -645,5 +645,5 @@ func (d *Driver) routerDown(op string, err error) error {
 	if refused == nil {
 		return nil
 	}
-	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("the atenet router refused the TLS identity: %w", refused)}
+	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("TLS identity check with the atenet router failed: %w", refused)}
 }
