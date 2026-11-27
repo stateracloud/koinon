@@ -112,6 +112,22 @@ var _ = Describe("sandbox actor record (issue #1386)", func() {
 		Expect(forge.ServedAt.Valid).To(BeFalse())
 	})
 
+	It("resets the forge row when a new actor is named, so no run passes on the old actor", func(ctx SpecContext) {
+		_, err := q.SetAgentSandboxActorName(ctx, store.SetAgentSandboxActorNameParams{OrgID: f.org, AgentID: f.agent.ID, ActorName: sb.SandboxName + "-0a1b2c3d"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetAgentSandboxActorUID(ctx, store.SetAgentSandboxActorUIDParams{
+			OrgID: f.org, AgentID: f.agent.ID, ActorName: sb.SandboxName + "-0a1b2c3d", ActorUid: "uid-1",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		setForge(ctx, 7)
+		_, err = q.SetAgentSandboxActorName(ctx, store.SetAgentSandboxActorNameParams{OrgID: f.org, AgentID: f.agent.ID, ActorName: sb.SandboxName + "-4e5f6a7b"})
+		Expect(err).NotTo(HaveOccurred())
+		forge, err := q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: f.org, AgentID: f.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(forge.StateRevision.Valid).To(BeFalse())
+		Expect(forge.ServedAt.Valid).To(BeFalse())
+	})
+
 	It("clears the actor when the row moves to the sandbox of the next task", func(ctx SpecContext) {
 		_, err := q.SetAgentSandboxActorName(ctx, store.SetAgentSandboxActorNameParams{OrgID: f.org, AgentID: f.agent.ID, ActorName: sb.SandboxName + "-0a1b2c3d"})
 		Expect(err).NotTo(HaveOccurred())

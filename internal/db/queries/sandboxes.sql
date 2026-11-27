@@ -202,12 +202,19 @@ RETURNING *;
 
 -- name: SetAgentSandboxActorName :one
 -- Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
--- The name is new and never used again; the new actor has no observed UID yet.
-UPDATE agent_sandboxes
+-- The name is new and never used again; the new actor has no observed UID yet. It also resets the agent's
+-- forge row, so no run passes waitForge on a State revision of the old actor before the new UID is
+-- recorded (SetAgentSandboxActorUID resets it again).
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    WHERE f.org_id = @org_id AND f.agent_id = @agent_id
+)
+UPDATE agent_sandboxes a
 SET actor_name = @actor_name::text,
     actor_uid = NULL
-WHERE org_id = @org_id AND agent_id = @agent_id
-RETURNING *;
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+RETURNING a.*;
 
 -- name: SetAgentSandboxActorUID :one
 -- Records the UID of the observed actor actor_name (issue #1386). A new UID also resets the agent's forge

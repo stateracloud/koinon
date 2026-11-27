@@ -617,11 +617,16 @@ func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandbox
 }
 
 const setAgentSandboxActorName = `-- name: SetAgentSandboxActorName :one
-UPDATE agent_sandboxes
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    WHERE f.org_id = $2 AND f.agent_id = $3
+)
+UPDATE agent_sandboxes a
 SET actor_name = $1::text,
     actor_uid = NULL
-WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid
+WHERE a.org_id = $2 AND a.agent_id = $3
+RETURNING a.org_id, a.agent_id, a.workspace, a.sandbox_name, a.provider_name, a.key_secret_name, a.gateway_key_id, a.gateway_key_hash, a.state, a.phase, a.message, a.spec_hash, a.started_at, a.stopped_at, a.observed_at, a.created_at, a.updated_at, a.home_generation, a.unhealthy_at, a.unhealthy_reason, a.unhealthy_generation, a.woken_at, a.sandbox_id, a.restore_checkpoint_id, a.restore_claimed_at, a.archived_at, a.reason, a.home_dirtied_at, a.enforcement, a.actor_name, a.actor_uid
 `
 
 type SetAgentSandboxActorNameParams struct {
@@ -631,7 +636,9 @@ type SetAgentSandboxActorNameParams struct {
 }
 
 // Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
-// The name is new and never used again; the new actor has no observed UID yet.
+// The name is new and never used again; the new actor has no observed UID yet. It also resets the agent's
+// forge row, so no run passes waitForge on a State revision of the old actor before the new UID is
+// recorded (SetAgentSandboxActorUID resets it again).
 func (q *Queries) SetAgentSandboxActorName(ctx context.Context, arg SetAgentSandboxActorNameParams) (AgentSandbox, error) {
 	row := q.db.QueryRow(ctx, setAgentSandboxActorName, arg.ActorName, arg.OrgID, arg.AgentID)
 	var i AgentSandbox

@@ -1590,9 +1590,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if r.specChanged(ws, spec, sb, hash) {
+	if r.specChanged(ws, spec, sb, hash) || r.unnamedActor(w) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
-		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
+		// hand, or it is a Substrate actor made before actors had their own names): OpenShell
+		// and Substrate cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
 		// included: a parked run resumes its harness session, which lives in that volume.
 		// (agentd starts a new session when the volume was replaced anyway, see
@@ -1760,6 +1761,15 @@ func (r *Reconciler) specChanged(ws string, spec execution.SandboxSpec, sb execu
 // GetSandbox refuses it.
 func (r *Reconciler) unmarked(sb execution.Sandbox) bool {
 	return r.owns() && sb.Labels[execution.LabelInstall] == ""
+}
+
+// unnamedActor reports a sandbox that runs as an actor under its sandbox name, on a backend that names
+// actors: it was made before issue #1386 gave each actor its own name, so it has no recorded UID and is
+// never in the gateway State, and every token for it is refused. It is recreated like a spec change
+// (issue 461 does the same for an unmarked sandbox), and the create after it names a new actor.
+func (r *Reconciler) unnamedActor(w *work) bool {
+	_, ok := execution.ActorNamerOf(r.backend)
+	return ok && !w.sb.ActorName.Valid
 }
 
 // owns reports whether the backend owns what it makes (an install mark is set).

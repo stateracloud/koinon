@@ -58,7 +58,7 @@ func (r *Reconciler) nameNewActor(ctx context.Context, w *work, ws string, acces
 // recordActor records the UID of the named actor that the backend reports for w, when it is new. The
 // store then resets the agent's forge row, so a run waits for the State revision that carries the actor,
 // and the reconciler wakes to publish that revision. A legacy actor under the sandbox name (no actor name
-// recorded) gets no UID.
+// recorded) gets no UID: the reconciler recreates it (unnamedActor), and the new actor gets a name.
 func (r *Reconciler) recordActor(ctx context.Context, w *work, sb execution.Sandbox) error {
 	if _, ok := execution.ActorNamerOf(r.backend); !ok || sb.ID == "" || !w.sb.ActorName.Valid || sb.Name != w.sb.ActorName.String {
 		return nil
@@ -85,9 +85,14 @@ func (r *Reconciler) recordActor(ctx context.Context, w *work, sb execution.Sand
 }
 
 // actorOf is the Substrate actor of w that the State carries: one with a name and a recorded UID, on a
-// backend that names actors. It is nil otherwise.
+// backend that names actors, of a sandbox that is not deleted or being deleted (ADR 0120 amendment for
+// #1386, item 5). It is nil otherwise. The row keeps the name and the UID of a deleted actor until the next
+// actor is named, but a token for that actor must not identify the agent.
 func (r *Reconciler) actorOf(w *work) *gatewayplan.Actor {
 	if _, ok := execution.ActorNamerOf(r.backend); !ok || !w.sb.ActorName.Valid || !w.sb.ActorUid.Valid || w.sb.ActorUid.String == "" {
+		return nil
+	}
+	if w.sb.State == store.SandboxStateDeleting || w.sb.State == store.SandboxStateDeleted {
 		return nil
 	}
 	return &gatewayplan.Actor{Atespace: w.sb.Workspace, Name: w.sb.ActorName.String, UID: w.sb.ActorUid.String}

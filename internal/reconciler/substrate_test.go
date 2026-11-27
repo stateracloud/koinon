@@ -288,6 +288,65 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		}}), "only the current actor")
 	})
 
+	// Issue #1386: an actor made before actors had their own names runs under the sandbox name and has no
+	// UID, so it is never in the State and the gateway refuses its tokens. The reconciler recreates it.
+	It("recreates an actor that runs under its sandbox name, and names the new one", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, user)
+		pass(ctx)
+		first := sandboxRow(ctx, agent.ID)
+		Eventually(func() ateapiv1.ActorState { return cl.State(ws, first.ActorName.String) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+
+		By("the legacy shape: the actor runs under the sandbox name, with the same template, and no actor name is recorded")
+		cur, err := ctl.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: &ateapiv1.ObjectRef{Atespace: ws, Name: first.ActorName.String}})
+		Expect(err).NotTo(HaveOccurred())
+		legacy := first.SandboxName
+		_, err = ctl.CreateActor(ctx, &ateapiv1.CreateActorRequest{Actor: &ateapiv1.Actor{
+			Metadata: &ateapiv1.ResourceMetadata{Atespace: ws, Name: legacy}, ActorTemplate: cur.GetActorTemplate(),
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = ctl.DeleteActor(ctx, &ateapiv1.DeleteActorRequest{Actor: &ateapiv1.ObjectRef{Atespace: ws, Name: first.ActorName.String}})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE agent_sandboxes SET actor_name = NULL, actor_uid = NULL WHERE org_id = $1 AND agent_id = $2`, org, agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sandboxRow(ctx, agent.ID).ActorRef()).To(Equal(legacy))
+		Expect(cl.State(ws, legacy)).NotTo(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "the legacy actor exists")
+
+		Eventually(func(g Gomega) {
+			g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+			sb := sandboxRow(ctx, agent.ID)
+			g.Expect(sb.ActorName.Valid).To(BeTrue(), "a new actor name is recorded")
+			g.Expect(sb.ActorUid.Valid).To(BeTrue())
+		}).Should(Succeed())
+		next := sandboxRow(ctx, agent.ID)
+		Expect(next.ActorName.String).NotTo(Equal(legacy))
+		Expect(cl.State(ws, legacy)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "the legacy actor is gone")
+		pass(ctx)
+		Expect(stateActors(ctx, agent.ID)).To(HaveLen(1), "the new actor is in the State")
+	})
+
+	// Issue #1386, ADR 0120 amendment item 5: the State carries only the actor of a sandbox that is not
+	// deleted. A token that atenet-egress minted for a deleted actor must not identify the agent.
+	It("takes the actor of a deleted task sandbox out of the gateway State", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","ephemeral":true}`)
+		queueRun(ctx, org, user, agent.ID)
+		pass(ctx)
+		run := claimRun(ctx, org)
+		pass(ctx)
+		task := sandboxRow(ctx, agent.ID)
+		Expect(task.ActorUid.Valid).To(BeTrue())
+		pass(ctx)
+		Expect(stateActors(ctx, agent.ID)).To(HaveLen(1), "the task actor is in the State")
+
+		_, err := q.FinishRun(ctx, store.FinishRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, Outcome: store.RunStateSucceeded})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: org, ID: run.TaskID, State: store.TaskStateCompleted})
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		pass(ctx)
+		Expect(cl.State(ws, task.ActorName.String)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "the task actor is gone")
+		Expect(stateActors(ctx, agent.ID)).To(BeEmpty(), "no State entry for the deleted actor")
+	})
+
 	// Issue #1386: a create can make an actor that goes before a pass records its UID. atenet-egress keeps
 	// tokens by actor name, so the next create must not use that name again. The driver forgets the
 	// gateway access of the old name (ForgetGatewayAccess, tested with the driver).

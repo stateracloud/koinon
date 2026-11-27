@@ -738,7 +738,10 @@ it (`no_token`).
   the UID of a deleted actor for up to a third of the lifetime, also after its atespace was made again. So a name
   is never used again, and the gateway keys an actor by atespace, name and UID together, never by UID alone. The
   JWT is ES256 only in the lab, with `exp - iat` = 900 s, so the gateway now accepts ES256 only (main's
-  decision). The guest cannot steer the identity with fake XFCC or `Ate-Target-Actor` headers.
+  decision). The guest cannot steer the identity with fake XFCC or `Ate-Target-Actor` headers. The lane review added
+  two rules: the State carries no actor of a sandbox that is deleted or being deleted (item 5), and the
+  reconciler recreates an actor that runs under its sandbox name (made before this amendment), so that the
+  new actor gets its own name and its UID.
 
 ### Prior art
 
