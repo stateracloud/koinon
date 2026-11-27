@@ -32,7 +32,9 @@ image=$("$reader" "$pin" 2>/dev/null || true)
 
 check "the pin file sets PLAYWRIGHT_IMAGE to the Playwright image" test -n "$image"
 # The reader fails closed (nothing sources the pin file): negative cases.
-good_line='PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.2.3-noble@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+# Built at run time: a full image@sha256:<64 hex> literal in a file would be read as a new pin by hack/dep-age-check.sh.
+zero_digest=$(printf '%064d' 0)
+good_line="PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.2.3-noble@sha256:$zero_digest"
 pinfx=$(mktemp -d "${TMPDIR:-/tmp}/ci-playwright-pin.XXXXXX") || exit 1
 # shellcheck disable=SC2329 # called through check
 reads() { printf '%s\n' "$2" >"$pinfx/$1.env"; "$reader" "$pinfx/$1.env"; }
