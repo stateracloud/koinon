@@ -25,7 +25,8 @@ gateway:
     koinon:
       egress:
         enabled: true
-        # The run CA of the fake Gitea: test/e2e/run.sh replaces this line with a block that holds it.
+        # The run CA of the fake Gitea: test/e2e/kindvalues (from run.sh, upgrade.sh and the restore drill) replaces
+        # this line with a block that holds the run's CA. Unfilled, the chart refuses to render it (#1487).
         caBundle: "@E2E_EGRESS_CA@"
 
 # The fake model server, the fake MCP server and the fake Gitea are Services in another namespace (a ClusterIP,

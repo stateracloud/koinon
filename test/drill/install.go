@@ -4,13 +4,16 @@ package drill
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/stateracloud/koinon/internal/faketls"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/test/e2e/kindvalues"
 )
 
 // SeededPassword is the fixed fake password the seed gives the bootstrap admin.
@@ -64,6 +67,24 @@ const (
 	FakeMCPHeader = "X-Api-Key"
 	FakeMCPKey    = "koinon_test_not-a-real-token"
 )
+
+// BaseValues is the base values file (the topology's valuesFile) with the egress CA placeholder of the kind values
+// (test/e2e/kind/koinon-values.yaml) filled with egressCA, by the same function as the quickstart (test/e2e/run.sh,
+// #1487). A base file without the placeholder (an operator's own topology) is returned as it is.
+func BaseValues(path string, egressCA []byte) ([]byte, error) {
+	b, err := os.ReadFile(path) //nolint:gosec // the topology's own values file
+	if err != nil {
+		return nil, err
+	}
+	out, err := kindvalues.FillEgressCA(b, egressCA)
+	if errors.Is(err, kindvalues.ErrNoEgressCAPlaceholder) {
+		return b, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
 
 // ValuesOverlay is the part of the Koinon chart values that differs from the base file for one
 // install: the fake model's host in the egress policy, the install's own gateway, its gateway ID and its client TLS
