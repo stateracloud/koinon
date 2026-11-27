@@ -345,6 +345,49 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the forced fault; a front that answers is left alone")
 		})
 
+		// restoreHome stands in for agentd: the row points at a checkpoint, then the restore ends.
+		restoreHome := func(ctx SpecContext, agent store.Agent, done bool) {
+			GinkgoHelper()
+			if done {
+				Expect(q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent.ID})).To(Succeed())
+				return
+			}
+			sb := sandboxRow(ctx, agent.ID)
+			cp, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sb.SandboxID.String, Generation: sb.HomeGeneration.String})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: org, AgentID: agent.ID, CheckpointID: cp.ID})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("takes a SYNC suspend after a home restore, so a later revert keeps the restored home", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			pass(ctx)
+			restoreHome(ctx, agent, true)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED), "the restored home is snapshotted")
+			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the seal of the restore")
+		})
+
+		It("does not revert a crash before the restored home is sealed; the repair path restores it", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			queueRun(ctx, org, user, agent.ID) // a run holds the sandbox: the seal waits
+			restoreHome(ctx, agent, false)
+			pass(ctx)
+			restoreHome(ctx, agent, true)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "a run holds the sandbox: no seal yet")
+			cl.Crash(ws, actor, "guest kernel panic")
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "the first-boot snapshot has an empty home")
+		})
+
 		It("stops a front that fails the wakeup probe at every resume, and never deletes the reverted actor", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			pass(ctx)

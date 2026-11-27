@@ -40,6 +40,30 @@ type crashTracker struct {
 	mu      sync.Mutex
 	reverts map[pgtype.UUID][]time.Time
 	silent  map[pgtype.UUID]time.Time
+	// restored holds the agents whose sandbox got its home from a checkpoint and has no snapshot
+	// since. A revert of such a sandbox would give the empty home of the first boot.
+	restored map[pgtype.UUID]bool
+}
+
+// setRestored records that the agent's sandbox is waiting for, or got, a home restore and has no
+// snapshot that holds it. A false value clears the record.
+func (t *crashTracker) setRestored(id pgtype.UUID, on bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !on {
+		delete(t.restored, id)
+		return
+	}
+	if t.restored == nil {
+		t.restored = map[pgtype.UUID]bool{}
+	}
+	t.restored[id] = true
+}
+
+func (t *crashTracker) isRestored(id pgtype.UUID) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.restored[id]
 }
 
 // noteRevert records a revert and returns how many reverts of the agent are inside the window.
@@ -127,11 +151,55 @@ func (r *Reconciler) checkFront(ctx context.Context, w *work, ws, name string, s
 	return true, r.record(ctx, w, sb, hash, "the guest front did not answer; reverting the sandbox to its last snapshot")
 }
 
+// sealRestored takes the SYNC suspend after a home restore (issue #1481, item 8). The restore ends in
+// the guest (agentd clears RestoreCheckpointID), and agentd never calls the control plane, so the
+// reconciler sees the clear and seals. The suspend is the stop of an idle sandbox: it waits for a
+// sandbox that has runs or demand (a stop would cut them), and for the home backup of stopGate. Until
+// the seal, a crash does not revert, because the last snapshot lacks the restored home: revertCrashed
+// sends it to the repair path. A record that is lost with the process only gives up this guard.
+func (r *Reconciler) sealRestored(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string, act store.GetAgentRunActivityRow) (bool, error) {
+	if _, ok := execution.ReverterOf(r.backend); !ok {
+		return false, nil
+	}
+	id := w.agent.ID
+	switch {
+	case w.sb.RestoreCheckpointID.Valid:
+		r.crash.setRestored(id, true)
+		return false, nil
+	case !r.crash.isRestored(id):
+		return false, nil
+	case sb.Phase.IsStopped():
+		r.crash.setRestored(id, false) // a stop took the snapshot
+		return false, nil
+	case sb.Phase != execution.PhaseReady || act.HasActive || act.HasDemand:
+		return false, nil
+	}
+	if ok, err := r.stopGate(ctx, w, sb); err != nil {
+		return true, err
+	} else if !ok {
+		return true, r.record(ctx, w, sb, hash, "waiting for the home backup before the snapshot of the restored home")
+	}
+	stopped, err := r.stopSandbox(ctx, ws, name)
+	if err != nil {
+		return true, err
+	}
+	if stopped.Phase.IsStopped() {
+		r.crash.setRestored(id, false)
+		r.log.Info("suspended a sandbox to snapshot its restored home", w.logAttrs()...)
+	}
+	return true, r.record(ctx, w, stopped, hash, "")
+}
+
 // revertCrashed reverts a crashed sandbox. handled is false when the caller must run the repair path
 // (the delete and the restore from the checkpoint).
 func (r *Reconciler) revertCrashed(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string) (handled bool, err error) {
 	rv, ok := execution.ReverterOf(r.backend)
 	if !ok || sb.Phase != execution.PhaseError || w.agent.UnhealthyAt.Valid {
+		return false, nil
+	}
+	if w.sb.RestoreCheckpointID.Valid || r.crash.isRestored(w.agent.ID) {
+		// The last snapshot lacks the restored home (or the restore is still to come): a revert would
+		// give the empty home of the first boot. The repair path restores from the checkpoints.
 		return false, nil
 	}
 	since := homeDirtiedSince(w.sb)
