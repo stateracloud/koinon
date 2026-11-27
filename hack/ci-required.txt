@@ -65,5 +65,5 @@ advisory ci-red
 # .github/workflows/e2e-kind.yml, #1091) is advisory. It is a driver of the `quickstart` job, not a job of its own, so it has
 # no name to list above and can never be required here: a required name must report on every PR, push and merge_group
 # build, and this leg runs on dispatch only. A red leg never changes the `e2e result` check. It becomes a required leg at
-# the switch (#1093), which makes it a job of its own. The harness contract suite is not part of the leg: the required
-# `harnesses` job above runs it against the harness image, which is the same image for both drivers.
+# the switch (#1093), which makes it a job of its own. The leg runs the harness contract suite itself
+# (test/e2e/run.sh) against the Substrate overlay image; the required `harnesses` job above runs it against the plain harness image.

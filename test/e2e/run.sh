@@ -271,6 +271,10 @@ if [[ $DRIVER == substrate ]]; then
   step "Substrate: harness overlay and install (kind/substrate.sh)"
   digest=$(OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" harness | tail -n1)
   [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest for the substrate overlay (got '$digest')" >&2; exit 1; }
+  # The harness contract suite against the overlay image itself (it is the image the actors run), so the Substrate leg tests
+  # what it deploys. The suite starts its containers with its own entrypoint and needs no cluster.
+  step "Substrate: harness contract suite against the overlay image ($IMAGE_REPO/sandbox-substrate:e2e)"
+  (cd "$root" && KOINON_HARNESS_IMAGE_OPENCODE="$IMAGE_REPO/sandbox-substrate:e2e" make harness-suite)
   # The CIDR of the docker network "kind" (the kind registry's range): the image cache needs an egress rule for it. The network
   # exists only after kind/up.sh, so the values file is written again here with the range filled in.
   KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)

@@ -3,6 +3,13 @@
 package kind_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +19,32 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/yaml"
+
+	"github.com/stateracloud/koinon/test/e2e/kindvalues"
 )
+
+// filledSubstrateValues writes a copy of substrate-values.yaml with the egress CA placeholder filled with a throwaway
+// test CA, as test/e2e/run.sh does with a real one (fill-egress-ca), and returns its path.
+func filledSubstrateValues() string {
+	GinkgoHelper()
+	raw, err := os.ReadFile("substrate-values.yaml")
+	Expect(err).NotTo(HaveOccurred())
+	filled, err := kindvalues.FillEgressCA(raw, testCAPEM())
+	Expect(err).NotTo(HaveOccurred())
+	out := filepath.Join(GinkgoT().TempDir(), "substrate-values.yaml")
+	Expect(os.WriteFile(out, filled, 0o600)).To(Succeed())
+	return out
+}
+
+func testCAPEM() []byte {
+	GinkgoHelper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	Expect(err).NotTo(HaveOccurred())
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "koinon-test-not-a-real-ca"}, IsCA: true, BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	Expect(err).NotTo(HaveOccurred())
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
 
 func readValues(name string) map[string]any {
 	GinkgoHelper()
@@ -60,7 +92,7 @@ var _ = Describe("substrate-values.yaml", func() {
 		if _, err := exec.LookPath("helm"); err != nil {
 			Skip("helm is not installed")
 		}
-		out, err := exec.Command("helm", "template", "koinon", "../../../charts/koinon", "-n", "koinon", "-f", "substrate-values.yaml").CombinedOutput()
+		out, err := exec.Command("helm", "template", "koinon", "../../../charts/koinon", "-n", "koinon", "-f", filledSubstrateValues()).CombinedOutput()
 		Expect(err).NotTo(HaveOccurred(), string(out))
 		Expect(string(out)).To(ContainSubstring("ate-workers"))
 	})
@@ -74,7 +106,9 @@ var _ = Describe("substrate-values.yaml", func() {
 		out := filepath.Join(GinkgoT().TempDir(), "values.yaml")
 		rewritten, err := exec.Command("bash", "values-rewrite.sh", "substrate-values.yaml", "localhost:5001/koinon-e1", "10.9.0.0/16").CombinedOutput()
 		Expect(err).NotTo(HaveOccurred(), string(rewritten))
-		Expect(os.WriteFile(out, rewritten, 0o600)).To(Succeed())
+		filled, err := kindvalues.FillEgressCA(rewritten, testCAPEM())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.WriteFile(out, filled, 0o600)).To(Succeed())
 		Expect(string(rewritten)).To(ContainSubstring("10.9.0.0/16"))
 		Expect(string(rewritten)).NotTo(ContainSubstring("172.18.0.0/16"))
 

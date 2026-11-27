@@ -51,7 +51,7 @@ func TestImagePolicyDirReadableByNonRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	tag := "koinon-guest-launcher-image-test:" + hex.EncodeToString(suffix)
-	build := exec.CommandContext(t.Context(), "docker", "build", "--quiet", "--build-arg", "FLAVOR_IMAGE=busybox:1.37",
+	build := exec.CommandContext(t.Context(), "docker", "build", "--quiet", "--build-context", "flavor=docker-image://busybox:1.37",
 		"--build-context", "launcher="+launcher, "--tag", tag, ctx)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("docker build: %v\n%s", err, out)

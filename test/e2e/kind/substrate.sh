@@ -36,6 +36,11 @@ REPO=$("$here/imagerepo.sh")
 # kind create cluster names the bucket of its own object store; the installer needs it to exist (docs/dev/substrate-install.md).
 BUCKET=ate-snapshots
 
+# Temp directories of this run, removed on exit (a RETURN trap does not run when the script exits).
+TMP_DIRS=()
+cleanup() { if ((${#TMP_DIRS[@]})); then rm -rf "${TMP_DIRS[@]}"; fi; }
+trap cleanup EXIT
+
 step() { echo "== $(date -u +%H:%M:%SZ) $*" >&2; }
 
 harness() {
@@ -46,20 +51,9 @@ harness() {
   step "guest front and launcher (linux/$arch)"
   (cd "$root" && make guest-launcher >&2)
   step "substrate overlay of the harness image: $REPO/sandbox-substrate:e2e"
-  # The flavor image goes in as an OCI layout: the buildx builder is a container and cannot pull from localhost:5001.
-  local flavor_dir
-  # Outside $OUT: CI uploads $OUT as an artifact, and the layout holds the whole harness image.
-  flavor_dir=$(mktemp -d "${TMPDIR:-/tmp}/flavor-oci.XXXXXX")
-  # shellcheck disable=SC2064
-  trap "rm -rf '$flavor_dir'" RETURN
-  # The default builder (the docker driver) does not read an OCI layout context. Use a builder of its own with the
-  # docker-container driver; the run needs no other setup (setup-buildx-action is skipped when the harness is pulled).
-  local builder=koinon-substrate
-  docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >&2
-  docker buildx build --builder "$builder" --load --platform "linux/$arch" \
-    --build-context "flavor=$("$root/hack/harness-flavor-context.sh" "$src" "$flavor_dir")" \
-    --build-context "launcher=$root/build/guest-launcher" \
-    --tag "$REPO/sandbox-substrate:e2e" "$root/cmd/koinon-guest-launcher" >&2
+  # The same build as `make harness-substrate-<name>`: a docker-container builder of its own, the harness image as an OCI
+  # layout in a temporary directory (outside $OUT, which CI uploads) that the script removes on exit.
+  "$root/hack/harness-substrate-build.sh" "$src" "$REPO/sandbox-substrate:e2e" "linux/$arch"
   docker push -q "$REPO/sandbox-substrate:e2e" >/dev/null
   # The digest of what the registry now holds under the tag. The node pulls it from the registry, so the registry's
   # digest is the one the chart must pin (a local RepoDigests entry can differ after a push through another manifest type).
@@ -102,8 +96,7 @@ install() {
   # The binary and the admin kubeconfig of the kind cluster stay outside $OUT: CI uploads $OUT as an artifact (7 days).
   local work
   work=$(mktemp -d "${TMPDIR:-/tmp}/substrate-install.XXXXXX")
-  # shellcheck disable=SC2064
-  trap "rm -rf '$work'" RETURN
+  TMP_DIRS+=("$work")
   (cd "$root" && go build -o "$work/koinon-api" ./cmd/koinon-api)
   src=$(source_clone)
   kc="$work/kubeconfig"
