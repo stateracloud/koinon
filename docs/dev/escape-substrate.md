@@ -66,9 +66,6 @@ Set these:
 - `KOINON_ESCAPE_EGRESS_REBIND` (default `169-254-169-254.sslip.io:80,127-0-0-1.sslip.io:80,127-0-0-1.sslip.io:15000,0-0-0-0.sslip.io:80`):
   `host:port` names that resolve to the refused addresses. The default needs the public wildcard DNS
   service sslip.io. Set your own names when the cluster has no route to it.
-- `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES` (default `koinon-gateway.koinon.svc:8080`): the gateway listeners
-  that the driver writes into the egress policy of every actor (issue #1444). The driver refuses a create
-  without them. No spec calls them.
 - `KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY`: `host:port` (a DNS name, not an IP) of the identity stand-in on
   this machine. The driver writes it as the code-host egress route, so atenet-egress adds the actor JWT to a
   clear-text request to it (issue #1386).
