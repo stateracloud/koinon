@@ -799,13 +799,15 @@ install check for any point in this section. The operator must do each point.
    damaged or changed object in the bucket is not found. Use the object versioning of your store when you need
    to find a change. Do not use object lock on the bucket: it can block the deletes that Substrate makes.
    The snapshot store is therefore trusted. Write access to it gives control of the suspended agents.
-4. **Size the snapshot store.** The default is 10Gi (`--rustfs-storage-size`). Use this rule: add the memory
-   in use of all agents that can be suspended at one time. Use the memory limit of each agent as the worst
-   case. Each suspend replaces the old snapshot of that agent, and deleting the agent empties its prefix. A
-   snapshot is about the size of the touched memory that does not compress, not the limit. Lab values
-   (Substrate v1.0.0, gVisor class, issue #1090): idle 3.4 MB; 0.5 GiB in use, 541 MB; 1 GiB in use, 1.08 GB;
-   4 GiB in use, about 4.2 GB. The case of a full store is not tested yet. Until it is, keep free space in
-   the store above the sum from this rule.
+4. **Size the snapshot store.** The default is 10Gi (`--rustfs-storage-size`). That option sizes only the
+   bundled rustfs store. For an external bucket, set the size or the quota in that store. Calculate the sum
+   of the memory in use of all agents that can be suspended at one time, plus the home size of each of these
+   agents. Use the memory limit of each agent as the worst case. Each suspend replaces the old snapshot of
+   that agent, and deleting the agent empties its prefix. A snapshot is about the size of the touched memory
+   that does not compress, plus the home. It is not the limit. A tag adds one more full copy, but Koinon
+   makes no tag in v0.1. Lab values (Substrate v1.0.0, gVisor class, issue #1090): idle 3.4 MB; 0.5 GiB in
+   use, 541 MB; 1 GiB in use, 1.08 GB; 4 GiB in use, about 4.2 GB. The case of a full store is not tested
+   yet. Until it is, make the store larger than the sum from this rule, and keep free space in it.
 
 ## Substrate database: not in the Koinon backup
 
