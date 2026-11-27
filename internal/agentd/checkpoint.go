@@ -603,9 +603,9 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 }
 
 // restoreOne streams one checkpoint into the sandbox's home through the execution layer's upload
-// channel. Exec stdin is not used: it has no flow control, and the supervisor kills a command
-// whose unread stdin passes 4 MiB (ADR 0032, 2026-10-27, issue 169). The archive is shaped by
-// checkpoint.WriteTar for the upload's fixed `tar xf - -C /sandbox`.
+// channel. The Substrate driver sends the archive as a tar stream on exec stdin (#1478): tar reads
+// every byte, so the 4 MiB stdin cap of the supervisor does not apply. The archive is shaped by
+// checkpoint.WriteTar for `tar -x -f - -C /sandbox`.
 func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo checkpoint.Repository, cp store.HomeCheckpoint) error {
 	c := r.p.cfg.Checkpoints
 	// The restore stages the snapshot on the scratch disk: only so many at once.

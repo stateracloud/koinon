@@ -65,7 +65,7 @@ type actor struct {
 
 	smu       sync.Mutex
 	failOut   int // the next output streams that fail at once with Unavailable
-	failWrite int // the next WriteFile streams that end with Unavailable when the client closes
+	failWrite int // the next tar upload streams that end with Unavailable at their close message
 	failRes   int // the next ResumeActor calls that fail with Unavailable
 	streams   map[int]context.CancelFunc
 	nextSID   int

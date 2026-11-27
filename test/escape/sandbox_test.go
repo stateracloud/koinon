@@ -601,15 +601,10 @@ var _ = Describe("Substrate actor", Label("escape", "substrate"), func() {
 		needProbe("it has no ateapi or atelet")
 		testenv.Require(testenv.Vars("substrate-targets", "KOINON_ESCAPE_ATEAPI", "KOINON_ESCAPE_ATELET"))
 		ts := append(targets(os.Getenv("KOINON_ESCAPE_ATEAPI")), targets(os.Getenv("KOINON_ESCAPE_ATELET"))...)
-		checks := make([]check, 0, len(ts))
-		for _, t := range ts {
-			checks = append(checks, check{"id": "tcp " + t.String(), "op": "tcp", "host": t.host, "port": t.port})
-		}
-		res := substrateProbe(ctx, checks...)
-		for _, c := range checks {
-			// Refused by the guest's fence, like every other denial in this suite.
-			Expect(res[c["id"].(string)]).To(BeElementOf("EACCES", "EPERM"), c["id"])
-		}
+		// gVisor has no network fence in the guest, so a connect to these addresses succeeds (the actor's
+		// tunnel accepts it, issue #1515). The deny is outside the guest: the spec sends bytes and expects
+		// no byte back, with the gateway route as the positive control.
+		expectNoBytes(ctx, substrateProbe, ts)
 	}, NodeTimeout(2*time.Minute))
 
 	// The guest API starts processes as the guest's user. Only the guest front (issue #1309) may

@@ -21,6 +21,7 @@ package fakeate
 
 import (
 	"context"
+	"maps"
 	"net"
 	"slices"
 	"sync"
@@ -345,10 +346,11 @@ func (c *Cluster) FailNextOutputStreams(atespace, name string, n int) {
 	}
 }
 
-// FailNextWriteFiles makes the next n WriteFile streams of an actor end with Unavailable when the
-// client closes them, after the data arrived: client-streaming errors show on Send or CloseAndRecv,
-// not when the stream opens.
-func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
+// FailNextUploadStreams makes the next n WriteProcessInput streams to a tar process end with
+// Unavailable at the message that carries close, after the data arrived. The process does not get the
+// close, so it stays running with its partial input, as a process does in the real guest when the
+// stream that feeds it breaks (issue #1478).
+func (c *Cluster) FailNextUploadStreams(atespace, name string, n int) {
 	c.mu.Lock()
 	a := c.actors[key{atespace, name}]
 	c.mu.Unlock()
@@ -357,6 +359,40 @@ func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
 		a.failWrite = n
 		a.smu.Unlock()
 	}
+}
+
+// Running returns the commands of the processes of an actor that have not exited, as the guest runs
+// them (the launcher prefix is removed).
+func (c *Cluster) Running(atespace, name string) [][]string {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	var procs []*fproc
+	if a != nil {
+		for _, p := range a.procs {
+			procs = append(procs, p)
+		}
+	}
+	c.mu.Unlock()
+	var out [][]string
+	for _, p := range procs {
+		p.mu.Lock()
+		if !p.exited {
+			out = append(out, slices.Clone(p.argv))
+		}
+		p.mu.Unlock()
+	}
+	return out
+}
+
+// Files returns the files that tar extracted into an actor, by path.
+func (c *Cluster) Files(atespace, name string) map[string][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a := c.actors[key{atespace, name}]
+	if a == nil {
+		return nil
+	}
+	return maps.Clone(a.files)
 }
 
 // FailNextResumes makes the next n ResumeActor calls for an actor fail with Unavailable and leave

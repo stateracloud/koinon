@@ -52,7 +52,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 		var buf bytes.Buffer
 		tw := tar.NewWriter(&buf)
-		for _, d := range []string{"tmp", "sandbox", "etc", "usr", "var", "bin"} {
+		for _, d := range []string{"tmp", "sandbox", "etc", "usr", "var", "bin", "run"} {
 			Expect(tw.WriteHeader(&tar.Header{Name: d + "/", Typeflag: tar.TypeDir, Mode: 0o1777})).To(Succeed())
 		}
 		add := func(name, from string, mode int64) {
@@ -162,6 +162,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		// Issue #1496: loading a module, a reboot and a raw socket (CAP_SYS_MODULE, CAP_SYS_BOOT, CAP_NET_RAW).
 		"finit_module", "reboot", "socket_raw",
 		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
+		// Issue #1503: the job log directory of the guest front is under /run, read-only for the payload.
+		"write:/run/koinon-probe", "symlink:/run/koinon-link",
 		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
 	}, fdAttempts...)
 	// inherit runs argv after the probe has played the guest server: a socket at fd 7 without
@@ -185,7 +187,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for _, a := range []string{
 			"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3",
 			"inherited_fd", "proc_fd_list_other", "proc_environ_other", "ptrace_other", "pidfd_getfd_other",
-			"kill_other", "pidfd_signal_other", "socket_raw",
+			"kill_other", "pidfd_signal_other", "socket_raw", "write:/run/koinon-probe", "symlink:/run/koinon-link",
 		} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}

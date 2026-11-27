@@ -911,17 +911,17 @@ root payload from two tiers and leaves the third as it was.
   `ip_unprivileged_port_start`). The lab run above started the front with this set. This is true only when runsc
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
-- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
-  Upload code of before #1387 unchanged. Upload under the Substrate driver already fails on main. This is not a
-  result of #1387. Lab, 2026-11-26 (on the head of the #1387 pull request and on `origin/main`): `WriteFile`
-  fails with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root directory "/sandbox"`. The
-  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`. The failure happens before `tar`
-  starts. The home restore in `internal/agentd/checkpoint.go` fails the same way. A second gap exists: the root
-  front writes the archive with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it
-  (`ErrInvalid`). [#1478](https://github.com/stateracloud/koinon/issues/1478) must solve both gaps. The safe
-  design in #1478: run `tar` on exec stdin as the payload user, and turn the file service of the guest front off.
-  The root front never writes into a path that the payload can write. A staging directory that the payload owns
-  lets the payload swap a symlink while the root front writes, so this amendment does not contain one.
+- **Upload with a non-root payload** ([#1478](https://github.com/stateracloud/koinon/issues/1478)). The front stays
+  root but has no `CAP_DAC_OVERRIDE`. Upload under the Substrate driver failed on main before #1478. Lab,
+  2026-11-26: `WriteFile` failed with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root
+  directory "/sandbox"`, and the root front wrote the archive with mode 0600, so `tar` as uid 10001 could not read
+  it. The fix of #1478: the driver runs `mkdir -p`, then `tar -x -f - -C DIR` as the payload user (behind the
+  launcher), and sends the archive on the stdin of `tar`. The guest front starts with the file service off
+  (`EnableFileSystem: false`). The root front never writes into a path that the payload can write. A staging
+  directory that the payload owns would let the payload swap a symlink while the root front writes, so there is
+  none. The command reads every byte of stdin, so the exec stdin cap (about 4 MiB that the command does not read)
+  does not apply. The home restore in `internal/agentd/checkpoint.go` uses the same Upload path. The `-log-dir` of
+  the front must not be a directory that the payload can write.
 - **Lab proof run, 2026-11-26 21:00Z (koinon-lab, gVisor worker).** Head `41a2400b5`, through the real Substrate
   driver and the real front image. The run showed:
   - runsc network mode `--network=sandbox`;
@@ -929,8 +929,9 @@ root payload from two tiers and leaves the third as it was.
   - `/sandbox` at run time is `0:0` mode 777, so the front enters it without `CAP_DAC_READ_SEARCH`;
   - the escape suite: 14 of 18 specs pass (13 of 18 on main). The 4 network failures are the same on main.
     Their cause in the lab setup is not confirmed.
-- **Not proved here.** The Upload and checkpoint restore proof belongs to #1478. The lab run above used the
-  staging design that this amendment later reverted, so it does not cover the current code for these two paths.
+- **Not proved here.** The lab run above used the staging design that #1478 replaced, so it does not cover the
+  current Upload and checkpoint restore code. A lab run of the tar stream (uid 10001 owner on gVisor, a 1 GiB
+  archive, a suspend in the middle of an upload) is still open.
   The maintainer has not yet accepted the 4 network failures in writing, so this change does not close #1387.
   It uses `Refs #1387`.
 
@@ -994,13 +995,16 @@ and adds one control.
 5. **The home owner differs between tiers.** The home files are owned by uid 0 in the Substrate guest of v0.1 (the
    guest has no `CAP_SETUID`, [#1462](https://github.com/stateracloud/koinon/issues/1462)). They are owned by uid
    10001 when the drop succeeds, and on the gVisor tiers.
+6. **The job log directory is out of the payload's reach** (issue
+   [#1503](https://github.com/stateracloud/koinon/issues/1503)). The guest front runs as root and writes the job logs.
+   See "The root front writes only where the payload cannot write" below.
 
 The harnesses need none of the removed capabilities: OpenCode, git and package installs into the home (npm, pip, go)
 run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` tier") gives each capability, the
 control that removes it and the harness need.
 
 This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): the `vm` tier keeps
-its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets one more control.
+its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets two more controls: the Landlock signal scope and the job log directory rule (consequences).
 
 ### Consequences
 
@@ -1009,6 +1013,20 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   it from another exec must keep both in one exec (or one process tree).
 - The guest kernel of the `vm` tier must offer Landlock ABI 6 (Linux 6.12). Phase 0 measured ABI 7 in the Substrate
   guest.
+- **The root front writes only where the payload cannot write** (issue #1503). The upstream process tracker opens
+  each job log with `os.OpenFile` (`O_CREATE` and `O_TRUNC`) and makes the directory with `MkdirAll`. Both follow
+  symlinks. The upstream default directory, `/var/log/ate-jobs`, is under `/var/log`, and the payload can write
+  there (`read_write` in `policy-vm.json`). A root payload could plant a symlink with the name of a job log, and the
+  front would then truncate or create the target file. The rule is: every path that the root front opens for writing
+  is under a directory that the payload cannot write. The front uses `/run/koinon/ate-jobs`. On the `vm` tier, Landlock
+  (mode `require`) is the control: `/run` is in `read_exec`, so Landlock refuses create, symlink, rename and remove
+  beneath it. On the gVisor tiers, Landlock is best effort. There the control is the non-root payload (uid 10001) and a
+  directory that root owns, with mode 0750, under a `/run` that root owns. The front makes the directory before the
+  payload exists. It walks the path from `/` with `openat` and `O_NOFOLLOW`, and makes a missing part with `mkdirat`
+  on the open parent. So it never follows a symlink and has no gap between a check and an open. It refuses a part
+  that is not a directory, that another user than root or the front owns, or that group or others can write (a parent
+  with the sticky bit excepted). A new path that the front writes needs a
+  policy spec that no `read_write` entry covers it.
 
 ### Proof
 
@@ -1017,6 +1035,10 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   `CapEff` and `CapAmb` 0 and `NoNewPrivs` 1. Signal 0 to an outside root process (`kill` and
   `pidfd_send_signal`), `ptrace` of that process, `mount`, `finit_module`, `reboot` and a raw socket are refused. A
   signal to its own child works. No committed spec clears the signal scope. The review ran that case by hand and saw both signal attempts open.
+- **Docker, issue #1503.** In the container specs, with the image policies, a write of a file and a symlink under `/run`
+  are refused, and the control run without the launcher shows both open. The policy specs check that no `read_write`
+  entry of either image policy covers `/run/koinon/ate-jobs`. The unit specs of `guestfront.PrepareLogDir` refuse a
+  symlink as the directory or in its path, a directory that others can write, a file and a relative path.
 - **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
   run (clone, build, push).
 
@@ -1029,5 +1051,30 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
 - **Kata Containers.** The kata-agent runs as root in the guest, next to the container processes, and Kata treats the
   VM as the boundary to the host. We keep the VM as the boundary too, and we add the capability drop and the signal
   scope so that the payload cannot stop or trace the guest front.
+- **Firecracker jailer and the Kata agent.** Both make the directories of the privileged process before the
+  untrusted workload starts, and give the workload no write access to them. We do the same for the job log
+  directory, and we move it from `/var/log` to `/run`, which the payload cannot write.
 - **Docker's default capability set.** Docker keeps `KILL`, `NET_RAW` and `SETUID` for a root container. We remove
   every capability, because the harnesses need none.
+
+## Amendment (2026-11-27, issue #1515): on Substrate the deny comes after the CONNECT, not at the TCP handshake
+
+Section 2 item 1 says that the egress layer denies all traffic by default. The sentence "L4 denies all traffic" does
+not mean that a TCP handshake fails on Substrate. This amendment says where the deny happens. It changes no control.
+
+- **What happens.** Each actor has its own network namespace. The nftables rules there send every TCP connect to a
+  local atunnel listener. The listener accepts the connection first. Then it opens a CONNECT tunnel to atenet-egress.
+  atenet-egress decides on the Host or the SNI, and it never dials the IP address that the guest chose. So on
+  Substrate the TCP handshake always completes. The CONNECT is accepted. The deny comes after atenet-egress reads the Host or
+  the SNI: the tunnel closes, or the gateway answers 403 `address_denied`, and no byte comes back from the destination.
+- **What follows for a test.** A `connect()` proves nothing about a deny or an allow on Substrate. A deny spec sends
+  bytes (a TLS ClientHello or an HTTP request) and expects no byte from the destination. It runs a positive control in
+  the same probe: a request to a gateway route that must get an answer. The specs of issue #1515 do this.
+- **What stays.** Default-deny egress in every tier, the enforced L7 rules, the isolation tiers of ADR 0075 and the
+  positive control are unchanged. The address `169.254.17.2` is the same constant in every actor. Each actor has it in
+  its own network namespace. It is not a collision, and it is not a route to another actor.
+- **Open until the lab run.** The 4 specs of issue #1515 fail on a lab run of 2026-11-27 because they probed with
+  `connect()`. This amendment does not claim that the product holds on these 4 targets. A lab run of the new specs,
+  with the positive control passing, is the evidence. Until then, "no product hole" is a hypothesis.
+- **Docs.** [escape-substrate.md](../dev/escape-substrate.md#a-connect-proves-nothing-on-substrate) gives the
+  denial results that a spec accepts.

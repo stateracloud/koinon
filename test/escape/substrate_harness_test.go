@@ -54,6 +54,11 @@ import (
 //	                                       sandbox-substrate overlay (guest front and launcher) (required)
 //	KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS  the Substrate runtime class of the tier under test, for
 //	                                       example the gVisor class of the install (required)
+//	KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES comma-separated host:port gateway routes (required), for example
+//	                                       koinon-gateway.koinon-system.svc:8080. The driver writes them into
+//	                                       the egress policy of every sandbox (issue #1444, #1508): the only
+//	                                       destinations that policy allows. A host is a lowercase DNS name,
+//	                                       never an IP address. The suite sends one HTTP request to the first, as the positive control of the deny specs
 //	KOINON_ESCAPE_TIER                     the isolation tier of that class: hardened (default), vm or dev
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS  comma-separated host=target entries, as --substrate-image-mirrors
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY registry that replaces the host of an image with no mirror entry
@@ -72,7 +77,7 @@ import (
 //	                                       the restore spec needs them, and fails closed without
 //	KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES comma-separated host:port gateway listeners that the driver writes
 //	                                       into the egress policy of every actor, as the reconciler's model
-//	                                       and MCP routes (issue #1444; default koinon-gateway.koinon.svc:8080).
+//	                                       and MCP routes (issue #1444, required).
 //	                                       Without routes the driver refuses every create
 //	KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY host:port (a DNS name) of the identity stand-in that this
 //	                                       process serves (substrate_identity_rig_test.go). The driver writes
@@ -95,6 +100,7 @@ import (
 var substrateEnvNames = []string{
 	"KOINON_ESCAPE_SUBSTRATE_CONTROL", "KOINON_ESCAPE_SUBSTRATE_ROUTER",
 	"KOINON_ESCAPE_SUBSTRATE_IMAGE", "KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS",
+	"KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES",
 }
 
 // missingSubstrateEnv names the required variables that are empty.
@@ -121,28 +127,6 @@ type substrateRig struct {
 	identity *substrate.GatewayRoute
 }
 
-// defaultGatewayRoutes is the model and MCP listener that every actor's policy names when the run sets
-// no KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES: the chart's gateway Service. The specs never call it; the
-// driver only needs one route to write a policy (issue #1444).
-const defaultGatewayRoutes = "koinon-gateway.koinon.svc:8080"
-
-// gatewayRoutes parses a comma-separated host:port list into gateway routes.
-func gatewayRoutes(list string) ([]substrate.GatewayRoute, error) {
-	var out []substrate.GatewayRoute
-	for _, s := range splitList(list) {
-		host, port, err := net.SplitHostPort(s)
-		if err != nil {
-			return nil, fmt.Errorf("gateway route %q: %w", s, err)
-		}
-		p, err := strconv.ParseUint(port, 10, 16)
-		if err != nil {
-			return nil, fmt.Errorf("gateway route %q: %w", s, err)
-		}
-		out = append(out, substrate.GatewayRoute{Host: host, Port: uint32(p)})
-	}
-	return out, nil
-}
-
 // rig is the one rig of the run; the suite's BeforeSuite sets it when KOINON_ESCAPE_DRIVER=substrate.
 var rig *substrateRig
 
@@ -152,6 +136,43 @@ func splitList(s string) []string {
 	for _, p := range strings.Split(s, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseGatewayRoutes parses a comma-separated list of host:port gateway routes (issue #1508). It applies the
+// checks of the driver (ValidateGatewayRoutes), so a bad input fails with a clear message before any call to
+// Substrate. The list must not be empty: the driver refuses a sandbox without a route (issue #1444).
+func parseGatewayRoutes(raw string) ([]substrate.GatewayRoute, error) {
+	var routes []substrate.GatewayRoute
+	for _, entry := range splitList(raw) {
+		host, portText, err := net.SplitHostPort(entry)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: want host:port: %w", entry, err)
+		}
+		port, err := strconv.ParseUint(portText, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES entry %q: the port is not a number in 1-65535", entry)
+		}
+		routes = append(routes, substrate.GatewayRoute{Host: host, Port: uint32(port)})
+	}
+	if err := substrate.ValidateGatewayRoutes(withListeners(routes), nil); err != nil {
+		return nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES %q: %w", raw, err)
+	}
+	return routes, nil
+}
+
+// withListeners gives each parsed route the header and audience of a gateway listener (issue #1489): the
+// first route is the model listener, every other one an MCP listener. The specs never call these routes; the
+// driver needs valid ones to write a policy.
+func withListeners(routes []substrate.GatewayRoute) []substrate.GatewayRoute {
+	out := make([]substrate.GatewayRoute, len(routes))
+	for i, r := range routes {
+		if i == 0 {
+			out[i] = substrate.ModelRoute(r.Host, r.Port)
+		} else {
+			out[i] = substrate.MCPRoute(r.Host, r.Port)
 		}
 	}
 	return out
@@ -186,24 +207,21 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 			return nil, nil, err
 		}
 	}
-	// The egress policy of every actor (issue #1444): without routes the driver refuses each create. The
-	// code-host egress route is the identity stand-in, so atenet-egress adds the actor JWT on its way there
-	// (issue #1386) and the identity specs can see what the gateway gets.
-	routeList := get("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES")
-	if strings.TrimSpace(routeList) == "" {
-		routeList = defaultGatewayRoutes
-	}
-	routes, err := gatewayRoutes(routeList)
+	routes, err := parseGatewayRoutes(get("KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES"))
 	if err != nil {
 		return nil, nil, err
 	}
+	routes = withListeners(routes)
+	// The code-host egress route is the identity stand-in, so atenet-egress adds the actor JWT on its way
+	// there (issue #1386) and the identity specs can see what the gateway gets.
 	var identity *substrate.GatewayRoute
 	if id := strings.TrimSpace(get("KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY")); id != "" {
-		r, err := gatewayRoutes(id)
+		r, err := parseGatewayRoutes(id)
 		if err != nil || len(r) != 1 {
 			return nil, nil, fmt.Errorf("KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY must be one host:port: %q", id)
 		}
-		identity = &r[0]
+		e := substrate.EgressRoute(r[0].Host, r[0].Port)
+		identity = &e
 	}
 	s := cli.Substrate{
 		GatewayRoutes:       routes,

@@ -62,8 +62,8 @@ architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`
 
 ### The guest API channel
 
-The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService`,
-`FileSystemService`) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
+The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService` only: the guest
+front has no file service, see Upload below) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
 which selects the actor by the `ate-target-actor` header and removes that header before it forwards
 the call. The payload runs in the same network namespace in both tiers, so it can reach port 80 on
 `127.0.0.1` or on the pod address. The upstream guest server has no authentication, so the guest
@@ -164,13 +164,20 @@ kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
 The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
 modes. Two results follow:
 
-- **Upload.** The driver is unchanged by #1387. Upload under the Substrate driver already fails on main: the
-  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`, so `WriteFile` returns
-  `PermissionDenied` before `tar` starts. The checkpoint restore of the home fails the same way. A second gap:
-  the root front writes the archive with mode 0600, and `tar` runs as uid 10001. #1478 must solve both gaps. The
-  safe design in #1478: `tar` on exec stdin as the payload user, and the file service of the guest front off.
-  The root front never writes into a path that the payload can write (a symlink swap).
-- **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
+- **Upload** (#1478). The driver runs `mkdir -p DIR`, then `tar -x -f - -C DIR` as the payload user (behind the
+  launcher), and sends the archive on the stdin of `tar`. The root front never writes a file, so no root process
+  writes into a path that the payload can write (a symlink swap). The front starts the upstream guest server with
+  the file service off (`EnableFileSystem: false`), so the guest has no `FileSystemService`. The archive goes in
+  one `WriteProcessInput` stream of 256 KiB messages. The last message carries `close`. The driver then compares
+  the bytes that the guest took with the bytes it sent. A guest process does not end when the stream that feeds
+  it ends. So on a read error, a cancelled context or a broken stream (a suspend), the driver sends SIGKILL to
+  `tar` by process id and never sends `close`. When the break came from a suspend, the kill waits until the
+  actor runs again. `StartProcess` also has a 30 minute timeout as a backstop. The router resets a stream after
+  300 s, so an upload that needs more time fails. `-log-dir` of the guest front is `/run/koinon/ate-jobs` by
+  default. The front makes it and checks it before the payload starts, and fails when it is a symlink, has a symlink in its
+  path or is writable by group or others. Do not set it to a directory that the payload can write: the front (root)
+  writes the process logs there, and upstream follows symlinks (ADR 0120, amendment of 2026-11-27 for issue #1496, consequence "The root front writes only where the payload cannot write").
+- **The home volume.** The front runs processes in `/sandbox`. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
   `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run

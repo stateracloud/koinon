@@ -78,22 +78,12 @@ var _ = Describe("the typed task events migration (#735)", func() {
 			Expect(v).To(BeZero())
 		}
 
-		By("an old binary's insert, without the columns, gets version 0 and the prompt mark by the old rule")
-		for i, r := range rows {
-			seq := 100 + i
-			var byUser, byAgent any
-			switch r.actor {
-			case "user":
-				byUser = user
-			case "agent":
-				byAgent = agent
-			}
-			_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-				org, task, seq, r.kind, r.actor, byUser, byAgent, r.payload)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = $2`, task, seq)).
-				To(Equal(strconv.FormatBool(r.prompt)+"|0"), "old insert %d (%s by %s)", i+1, r.kind, r.actor)
-		}
+		By("the trigger of the old rule is gone: an insert without the mark is not a prompt (#1393)")
+		Expect(scan(`SELECT count(*)::text FROM pg_trigger WHERE tgrelid = 'task_events'::regclass AND tgname = 'task_events_prompt_by_old_rule'`)).To(Equal("0"))
+		Expect(scan(`SELECT count(*)::text FROM pg_proc WHERE proname = 'task_events_prompt_by_old_rule'`)).To(Equal("0"))
+		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload) VALUES ($1, $2, 100, 'message', 'user', $3, '{"text":"hello"}')`, org, task, user)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scan(`SELECT prompt::text || '|' || payload_version FROM task_events WHERE task_id = $1 AND seq = 100`, task)).To(Equal("false|0"))
 
 		By("a new binary's own mark is kept")
 		_, err = db.ExecContext(ctx, `INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id, payload, payload_version, prompt) VALUES ($1, $2, 99, 'message', 'user', $3, '{}', 1, true)`, org, task, user)

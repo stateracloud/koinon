@@ -44,6 +44,85 @@ def tcp(c):
         s.close()
 
 
+def client_hello(sni):
+    """A TLS 1.2 ClientHello, with the server name when `sni` is a name (not an IP address). Any TLS server
+    answers it with a ServerHello or an alert (bytes); the egress gateway answers with nothing."""
+    import struct
+    import os as _os
+    ext = b""
+    if sni and not re.fullmatch(r"[0-9.]+|[0-9a-fA-F]*:[0-9a-fA-F:.]*", sni):
+        name = sni.encode()
+        entry = b"\x00" + struct.pack(">H", len(name)) + name
+        lst = struct.pack(">H", len(entry)) + entry
+        ext += struct.pack(">HH", 0, len(lst)) + lst
+    ext += struct.pack(">HHHH", 10, 4, 2, 23)  # supported_groups: secp256r1 (a list of length 2)
+    ext += b"\x00\x0b\x00\x02\x01\x00"  # ec_point_formats: uncompressed
+    ext += b"\x00\x0d\x00\x04\x00\x02\x04\x01"  # signature_algorithms: rsa_pkcs1_sha256
+    suites = b"\xc0\x2f\xc0\x2b\x00\x9c\x00\x2f"
+    body = b"\x03\x03" + _os.urandom(32) + b"\x00" + struct.pack(">H", len(suites)) + suites + b"\x01\x00"
+    body += struct.pack(">H", len(ext)) + ext
+    hs = b"\x01" + struct.pack(">I", len(body))[1:] + body
+    return b"\x16\x03\x01" + struct.pack(">H", len(hs)) + hs
+
+
+def payload(c):
+    """Connects to host:port, sends bytes and reads the answer. A connect() alone proves nothing on
+    Substrate: the actor's tunnel accepts every TCP connection and decides after it reads the Host or the
+    SNI (ADR 0120 section 2.1, amendment of 2026-11-27, issue #1515). So the result is what came back:
+      an errno name or "gaierror"   the connect or the send failed
+      "closed"                      the peer closed with no byte (the gateway's refusal of a CONNECT)
+      "timeout"                     no byte in 8 seconds
+      "bytes N"                     N bytes arrived (kind "tls"): the destination, or something that
+                                    pretends to be it, answered
+      "status NNN server=... envoy=0|1 upstream=0|1"   (kind "http", as http_status)
+    "kind" is "tls" (a ClientHello with `sni`, default: host) or "http" (GET / with `Host: host:port`).
+    A byte answers "tls" only when it is the start of a TLS record."""
+    try:
+        infos = socket.getaddrinfo(c["host"], c["port"], type=socket.SOCK_STREAM)
+    except OSError as e:
+        return err_name(e)
+    family, kind, proto, _, addr = infos[0]
+    s = socket.socket(family, kind, proto)
+    s.settimeout(8)
+    try:
+        s.connect(addr)
+    except OSError as e:
+        s.close()
+        return err_name(e)
+    data = b""
+    try:
+        if c.get("kind", "tls") == "http":
+            host = "[%s]" % c["host"] if ":" in c["host"] else c["host"]
+            s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (host, c["port"])).encode())
+        else:
+            s.sendall(client_hello(c.get("sni", c["host"])))
+        while len(data) < 8192 and (c.get("kind", "tls") != "http" or b"\r\n\r\n" not in data):
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            data += chunk
+            if c.get("kind", "tls") != "http":
+                break
+        if not data:
+            return "closed"
+        if c.get("kind", "tls") != "http":
+            return "bytes %d" % len(data)
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "bytes %d" % len(data)
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
+        upstream = int("x-envoy-upstream-service-time" in headers)
+        return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
+    except OSError as e:
+        if data:
+            return "bytes %d" % len(data)  # a byte came before the error: the destination was reached
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def http_status(c):
     """GET / with `Host: host:port` through the egress gateway. The TCP connection goes to the address
     of "via" (a name the `*` rule lets through, resolved here), so it leaves the guest and the gateway
@@ -486,7 +565,7 @@ def kernel(_):
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+OPS = {"tcp": tcp, "payload": payload, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
        "find": find, "mounts": mounts, "status": status, "ids": ids, "write": write, "open_write": open_write, "mode": mode,
        "syscall": syscall, "kernel": kernel, "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners,
        "egress_http": egress_http}

@@ -94,27 +94,26 @@ var _ = Describe("Substrate egress gateway", Label("escape", "substrate", "live"
 		control = c
 		name = rig.sandbox(ctx, rig.workspace, fmt.Sprintf("kese-%d", suffix()))
 
-		// The driver wrote the actor's "default" policy (the gateway routes, issue #1444) before the
-		// create. The spec replaces its rules with the allow-all rule, in the same policy.
 		ref := &ateapiv1.ObjectRef{Atespace: rig.workspace, Name: name}
-		cur, err := control.GetActorEgressPolicy(ctx, &ateapiv1.GetActorEgressPolicyRequest{Actor: ref, Name: "default"})
-		Expect(err).NotTo(HaveOccurred(), "the egress policy that the driver wrote")
-		_, err = control.UpdateActorEgressPolicy(ctx, &ateapiv1.UpdateActorEgressPolicyRequest{
-			Actor: ref,
-			EgressPolicy: &ateapiv1.EgressPolicy{
-				Metadata: &ateapiv1.ResourceMetadata{
-					Atespace: rig.workspace, Name: "default",
-					Uid: cur.GetMetadata().GetUid(), Version: cur.GetMetadata().GetVersion(),
-				},
-				Rules: []*ateapiv1.EgressRule{{
-					Http: &ateapiv1.HttpRule{
-						// The allow-all rule: every name, on the ports the specs use.
-						Hostnames: []string{"*"},
-						Ports:     &ateapiv1.Ports{Numbers: []int32{80, 15000}},
-					},
-				}},
+		// Since #1444 the driver writes the policy "default" (the gateway routes only) when it creates the
+		// sandbox, so the spec replaces its rules; a Create would fail with AlreadyExists (issue #1508).
+		allowAll := []*ateapiv1.EgressRule{{
+			Http: &ateapiv1.HttpRule{
+				// The allow-all rule: every name, on the ports the specs use.
+				Hostnames: []string{"*"},
+				Ports:     &ateapiv1.Ports{Numbers: []int32{80, 15000}},
 			},
-		})
+		}}
+		cur, err := control.GetActorEgressPolicy(ctx, &ateapiv1.GetActorEgressPolicyRequest{Actor: ref, Name: "default"})
+		Expect(err).NotTo(HaveOccurred(), "the gateway-only policy that the driver wrote")
+		upd := &ateapiv1.EgressPolicy{
+			Metadata: &ateapiv1.ResourceMetadata{
+				Atespace: rig.workspace, Name: "default",
+				Uid: cur.GetMetadata().GetUid(), Version: cur.GetMetadata().GetVersion(),
+			},
+			Rules: allowAll,
+		}
+		_, err = control.UpdateActorEgressPolicy(ctx, &ateapiv1.UpdateActorEgressPolicyRequest{Actor: ref, EgressPolicy: upd})
 		Expect(err).NotTo(HaveOccurred(), "an egress policy with the `*` rule")
 		DeferCleanup(func(ctx context.Context) error {
 			_, err := control.DeleteActorEgressPolicy(ctx, &ateapiv1.DeleteActorEgressPolicyRequest{Actor: ref, Name: "default"})

@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/guestfront"
 	"github.com/stateracloud/koinon/internal/guestlaunch"
 )
 
@@ -138,6 +139,24 @@ var _ = Describe("the image policies", func() {
 		},
 		Entry("vm tier", "policy-vm.json", guestlaunch.ModeRequire, guestlaunch.ModeBestEffort),
 		Entry("gVisor tiers", "policy-gvisor.json", guestlaunch.ModeBestEffort, guestlaunch.ModeRequire),
+	)
+
+	// Issue #1503: the front, as root, writes the job logs in /run/koinon/ate-jobs (guestfront.DefaultLogDir). The payload must not write there, or it could plant a symlink.
+	DescribeTable("keep the job log directory of the guest front out of the payload's write rules",
+		func(name string) {
+			logDir := guestfront.DefaultLogDir
+			p := load(name)
+			Expect(p.Landlock.ReadExec).To(ContainElement("/run"), "readable, never writable")
+			for _, rw := range p.Landlock.ReadWrite {
+				Expect(logDir).NotTo(Or(Equal(rw), HavePrefix(rw+"/")), "read_write %s covers the job log directory", rw)
+				Expect(rw).NotTo(HavePrefix(logDir))
+			}
+			for _, dev := range p.Landlock.Devices {
+				Expect(dev).NotTo(HavePrefix("/run"), "a device entry becomes a write rule too")
+			}
+		},
+		Entry("vm tier", "policy-vm.json"),
+		Entry("gVisor tiers", "policy-gvisor.json"),
 	)
 
 	It("differ in nothing but the Landlock and user modes and the signal scope", func() {
