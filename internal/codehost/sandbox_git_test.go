@@ -3,6 +3,7 @@
 package codehost_test
 
 import (
+	"context"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -87,11 +89,8 @@ var _ = Describe("git in a sandbox on a connection's host", func() {
 		Expect(os.WriteFile(cfgFile, []byte(rendered), 0o600)).To(Succeed())
 
 		ls := func(config string) ([]byte, error) {
-			c := exec.Command("git", "ls-remote", srv.URL+"/acme/widgets.git")
-			c.Env = []string{
-				"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + config,
-				"GIT_TERMINAL_PROMPT=0", "GITHUB_TOKEN=koinon_test_not-a-real-token",
-			}
+			c := gitenv.Command(context.Background(), dir, "", "ls-remote", srv.URL+"/acme/widgets.git")
+			c.Env = gitenv.Env(dir, "GIT_CONFIG_GLOBAL="+config, "GITHUB_TOKEN=koinon_test_not-a-real-token")
 			return c.CombinedOutput()
 		}
 
@@ -156,11 +155,8 @@ var _ = Describe("git in a sandbox through the gateway's egress prefix", func() 
 		return dir, cfgFile
 	}
 	ls := func(dir, cfgFile, url string) ([]byte, error) {
-		c := exec.Command("git", "ls-remote", url)
-		c.Env = []string{
-			"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + cfgFile,
-			"GIT_TERMINAL_PROMPT=0", "GITHUB_TOKEN=koinon_test_not-a-real-token",
-		}
+		c := gitenv.Command(context.Background(), dir, "", "ls-remote", url)
+		c.Env = gitenv.Env(dir, "GIT_CONFIG_GLOBAL="+cfgFile, "GITHUB_TOKEN=koinon_test_not-a-real-token")
 		return c.CombinedOutput()
 	}
 
