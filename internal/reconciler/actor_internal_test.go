@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
@@ -52,4 +53,14 @@ func TestForgeWantWaitsForTheActorRevision(t *testing.T) {
 	if row, _ := r.forgeWant(w); row.rev != 4 {
 		t.Fatalf("without an actor the credential revision counts: got %d", row.rev)
 	}
+
+	r.backend = namingBackend{}
+	if row, ok := r.forgeWant(w); !ok || row.rev != 0 {
+		t.Fatalf("a backend that names actors waits for the actor: want rev 0, got %+v %v", row, ok)
+	}
 }
+
+// namingBackend is a backend that names actors, as the Substrate driver does. Only NewActorName is used.
+type namingBackend struct{ execution.Backend }
+
+func (namingBackend) NewActorName(sandbox string) string { return sandbox + "-0a1b2c3d" }

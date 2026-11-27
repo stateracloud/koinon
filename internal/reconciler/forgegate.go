@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
 
@@ -79,7 +80,8 @@ func (r *Reconciler) forgeRev(name string) (int64, bool) {
 // Agent Substrate an actor's egress policy holds that listener only with CodeHostEgress, which needs a
 // read grant (GitHubReadAccessAt) and the egress listener, the same rule as forgeExpects. The model and
 // MCP listeners do not read the actor token. So an actor that can reach the listener always has a row,
-// and its row waits for the actor revision below.
+// and its row waits for the actor revision below. On a backend that names actors, a row without an
+// actor waits too.
 func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects {
 		return forgeRow{}, false
@@ -103,6 +105,10 @@ func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 			return forgeRow{}, true
 		}
 		rev = max(rev, arev)
+	} else if _, names := execution.ActorNamerOf(r.backend); names {
+		// A backend that names actors has no actor for w yet (its sandbox is not made, or it was deleted):
+		// the gateway refuses its egress requests, so the run waits (issue #1386).
+		return forgeRow{}, true
 	}
 	return forgeRow{rev: rev}, true
 }
