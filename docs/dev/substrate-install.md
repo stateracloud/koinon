@@ -179,7 +179,8 @@ the same way, so it also runs after `helm install`.
 Golden snapshots are off by default in every tier (issue #1492). The Koinon template sets
 `GOLDEN_SNAPSHOT_MODE_DISABLED`. To turn them on, set `execution.substrate.goldenSnapshots=true` in the chart
 (the reconciler flag is `--substrate-golden-snapshots`). The setting is part of the template hash, so a
-change makes new templates.
+change makes new templates. An upgrade to this version, and each change of the setting, make the reconciler
+recreate every Substrate sandbox, because the sandbox spec hash changes.
 
 Turn it on only with a reason. A golden snapshot clones memory from one sandbox to another. ADR 0120
 section 5.2 forbids that, and an admin who turns it on makes an exception to that rule.

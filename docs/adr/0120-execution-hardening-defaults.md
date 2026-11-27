@@ -156,7 +156,7 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    state. Single use (a restore consumes the snapshot) is a Koinon rule: the snapshot record of the
    v0.2 design enforces it (amendment of 2026-11-25). Substrate does not enforce it. Tokens stay
    short-lived for the same reason.
-   **Golden snapshots are off by default in every tier** (issue #1492). A golden snapshot clones the memory
+   **Golden snapshots are off by default in every tier** (issue #1492, amendment of 2026-11-27). A golden snapshot clones the memory
    of one sandbox into many, which this item forbids. The Koinon template sets
    `GOLDEN_SNAPSHOT_MODE_DISABLED`. An admin can turn golden mode on (`execution.substrate.goldenSnapshots`).
    That is an explicit exception to the no-memory-clone rule: the admin accepts that sandboxes of one
@@ -837,3 +837,18 @@ root payload from two tiers and leaves the third as it was.
 - **gVisor (runsc).** runsc runs the container process with the user and capabilities of the OCI spec, and the
   sentry checks capabilities against its own user namespace. A drop inside the sandbox through `setresuid` is the
   normal Linux behaviour in the sentry.
+
+## Amendment (2026-11-27, issue #1492): golden snapshots off by default, admin exception
+
+The maintainer decided on 2026-11-27: golden snapshots are an option that is off by default in every tier.
+
+- **Text fix, section 5 item 2.** Substrate resumes a suspended actor from its own snapshot. It does not make a
+  second actor from it. Single use of a snapshot is a Koinon rule that the snapshot record of the v0.2 design
+  enforces. Substrate does not enforce it.
+- **Default.** The Koinon template sets `GOLDEN_SNAPSHOT_MODE_DISABLED`. Golden mode clones the memory of one
+  sandbox into many, which section 5 item 2 forbids.
+- **Exception.** An admin can turn golden mode on with `execution.substrate.goldenSnapshots`. The admin then accepts
+  that sandboxes of one template start from the same memory and the same random state.
+- **Evidence.** In the lab, golden mode was not faster: cold start to the first Exec was p50 1.03 s (off) and 1.05 s
+  (on) on gVisor, and 2.65 s (off) and 3.50 s (on) on the vm tier. A golden build takes 36-38 s. The numbers are
+  in [the Substrate install document](../dev/substrate-install.md#golden-snapshots).
