@@ -16,11 +16,12 @@ WHERE gateway_agent_forge.state_revision IS DISTINCT FROM EXCLUDED.state_revisio
    OR gateway_agent_forge.failure IS DISTINCT FROM EXCLUDED.failure;
 
 -- name: MarkGatewayAgentForgeServed :exec
--- Every live copy acked the revision that holds the agent's credential.
+-- Every live copy acked the revision that holds the agent's credential or actor. A row with a failure may be
+-- marked too: it then proves only the actor revision (agentd ignores the failure when the run needs no credential).
 UPDATE gateway_agent_forge
 SET served_at = now(), updated_at = now()
 WHERE org_id = @org_id AND agent_id = @agent_id AND state_revision = @state_revision
-  AND failure = '' AND served_at IS NULL;
+  AND served_at IS NULL;
 
 -- name: DeleteGatewayAgentForge :exec
 -- The agents of the org that no longer expect a forge credential.

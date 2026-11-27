@@ -140,7 +140,9 @@ func (r *runner) waitForge(ctx context.Context) error {
 				return ctx.Err()
 			}
 			continue
-		case f.Failure != "":
+		case f.Failure != "" && forge:
+			// A run that expects no credential ignores the failure of the active version's grant: it waits
+			// for the revision of its actor only, which the failure row carries on Agent Substrate.
 			return &failure{reason: f.Failure + "; check the agent's code-host connection and the koinon-reconciler log, then run the task again"}
 		case f.ServedAt.Valid:
 			if forge && r.waitsForActor() {

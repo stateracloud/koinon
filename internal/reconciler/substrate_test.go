@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
+	gwv1 "github.com/stateracloud/koinon/internal/gen/koinon/gateway/v1alpha1"
 	"github.com/stateracloud/koinon/internal/guestlaunch"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -127,8 +128,9 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 					harness.OpenCode: {Image: substrateImage, Binaries: reconciler.DefaultBinaries[harness.OpenCode]},
 				},
 				RuntimeClassName: "kata",
-				KeepWarmPerOrg:   2,
-				Logger:           slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
+				MCPAckWait:       300 * time.Millisecond, MCPAckPoll: 20 * time.Millisecond,
+				KeepWarmPerOrg: 2,
+				Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 				Now: func() time.Time {
 					if t := now.Load(); t != nil {
 						return *t
@@ -298,6 +300,38 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Atespace: ws, Name: second.ActorName.String, UID: second.ActorUid.String,
 			Org: slug, Agent: execution.UUIDString(agent.ID.Bytes),
 		}}), "only the current actor")
+	})
+
+	// Issue #1489: the model listener checks the actor JWT against the actor table of its own copy, so the
+	// run waits for the model copies to ack the actor revision, not only the MCP copies.
+	It("holds the forge row until every live model gateway copy acked the actor revision", func(ctx SpecContext) {
+		// A copy that serves only the model half: it never acks the MCP half.
+		Expect(staterev.TouchCopy(ctx, pool, "model-copy-1", "test-stream", false)).To(Succeed())
+		DeferCleanup(func() { _ = staterev.ForgetCopy(context.Background(), pool, "model-copy-1", "test-stream") })
+		agent := newAgent(ctx, org, user)
+		pass(ctx)
+		pass(ctx)
+		row, err := q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.StateRevision.Valid).To(BeTrue(), "the row waits for the revision of the actor")
+		Expect(row.ServedAt.Valid).To(BeFalse(), "no model copy acked yet")
+		var first int64
+		Expect(pool.QueryRow(ctx, "SELECT min(revision) FROM gateway_state_revisions").Scan(&first)).To(Succeed())
+		Expect(first).To(BeNumerically("<", row.StateRevision.Int64), "an earlier revision exists")
+
+		By("a live model copy that holds an older revision keeps the row unserved")
+		Expect(staterev.Ack(ctx, pool, "model-copy-1", first, gwv1.Half_HALF_MODEL)).To(Succeed())
+		pass(ctx)
+		row, err = q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.ServedAt.Valid).To(BeFalse())
+
+		By("the row is served when the model copy acks the actor revision")
+		Expect(staterev.Ack(ctx, pool, "model-copy-1", row.StateRevision.Int64, gwv1.Half_HALF_MODEL)).To(Succeed())
+		pass(ctx)
+		row, err = q.GetGatewayAgentForge(ctx, store.GetGatewayAgentForgeParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.ServedAt.Valid).To(BeTrue())
 	})
 
 	// Issue #1386: an actor made before actors had their own names runs under the sandbox name and has no

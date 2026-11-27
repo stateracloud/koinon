@@ -379,12 +379,18 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 			Expect(eventOf(events(ctx, r), "run.waiting_for_forge")).To(BeEmpty())
 		})
 
-		It("fails the run on the row's failure, also for an actor-only row", func(ctx SpecContext) {
+		// Issue #1489: a run whose version has no forge grant needs no credential. A failure row of the active
+		// version's grant is not its failure: it waits for its actor revision only.
+		It("ignores a credential failure in an actor-only run, and waits for the served actor revision", func(ctx SpecContext) {
 			e := newEnv(ctx, harness.OpenCode)
-			record(ctx, e, 0, false, "koinon-reconciler has no forge credential for the agent: koinon_test_cause")
+			record(ctx, e, 2, false, "koinon-reconciler has no forge credential for the agent: koinon_test_cause")
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside = true })
-			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
+			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside, c.ReconcileNudge = true, 100*time.Millisecond })
+			Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.waiting_for_forge") }).
+				WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateFailed))
+			record(ctx, e, 2, true, "koinon-reconciler has no forge credential for the agent: koinon_test_cause")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		})
 
 		DescribeTable("refuses settings that would send the placeholder unchanged or put a token in the guest",

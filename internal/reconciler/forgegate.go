@@ -86,34 +86,40 @@ func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
 	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects && !names {
 		return forgeRow{}, false
 	}
-	var rev int64
+	var (
+		rev     int64
+		failure string
+	)
 	if w.forgeExpects {
 		if w.forgeErr != nil || w.forge == nil {
 			cause := "no credential was made"
 			if w.forgeErr != nil {
 				cause = w.forgeErr.Error()
 			}
-			return forgeRow{failure: forgeFailure(cause)}, true
-		}
-		var ok bool
-		if rev, ok = r.forgeRev(w.forge.Name); !ok {
-			return forgeRow{}, true
+			failure = forgeFailure(cause)
+		} else {
+			var ok bool
+			if rev, ok = r.forgeRev(w.forge.Name); !ok {
+				return forgeRow{}, true
+			}
 		}
 	}
 	if !names {
-		return forgeRow{rev: rev}, true
+		return forgeRow{rev: rev, failure: failure}, true
 	}
 	// The gateway knows a Substrate actor only from the revision that carries it (issues #1386 and #1489):
 	// the run waits for the later of the two revisions. A backend that names actors and has no actor for w
 	// yet (its sandbox is not made, or it was deleted): the gateway refuses its requests, so the run waits.
+	// A credential failure keeps the actor revision in its row: a run pinned to a version without a forge
+	// grant ignores the failure and waits only for its actor.
 	if w.actor == nil {
-		return forgeRow{}, true
+		return forgeRow{failure: failure}, true
 	}
 	arev, ok := r.actorRev(*w.actor)
 	if !ok {
-		return forgeRow{}, true
+		return forgeRow{failure: failure}, true
 	}
-	return forgeRow{rev: max(rev, arev)}, true
+	return forgeRow{rev: max(rev, arev), failure: failure}, true
 }
 
 // recordForge writes what each agent of the pass expects of its forge credential (gateway_agent_forge)
@@ -148,15 +154,15 @@ func (r *Reconciler) recordForge(ctx context.Context, items []*work, wait bool) 
 	}
 	var gate *keyGate
 	if maxRev > 0 {
-		if wait && !r.newKeyGate(ctx, nil).ackedRev(ctx, maxRev) {
-			r.awaitGatewayAcked(ctx, maxRev)
+		if wait && !r.newKeyGate(ctx, nil).actorAckedRev(ctx, maxRev) {
+			r.awaitActorAcked(ctx, maxRev)
 		}
 		gate = r.newKeyGate(ctx, nil)
 	}
 	var errs []error
 	for k, row := range want {
 		if row.rev > 0 && !row.served {
-			row.served = gate.ackedRev(ctx, row.rev)
+			row.served = gate.actorAckedRev(ctx, row.rev)
 		}
 		old, had := r.forgeRows[k]
 		if !had || old.rev != row.rev || old.failure != row.failure {
