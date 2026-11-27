@@ -27,7 +27,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", ":80", "address to serve the guest API on")
-	logDir := flag.String("log-dir", "", "directory for process logs (default: the upstream guest server's)")
+	logDir := flag.String("log-dir", "", "directory for process logs, made and checked by the front (default: "+guestfront.DefaultLogDir+")")
 	workspace := flag.String("workspace", "/", "workspace root directory")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))

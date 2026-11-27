@@ -202,6 +202,14 @@ func main() {
 	}
 	denied("socket_raw", rerr, "socket(AF_INET, SOCK_RAW)")
 
+	// Issue #1503: the guest front, as root, writes its job logs in a directory under /run. The
+	// payload must not create a file or a symlink there, or the front could follow the link.
+	write("/run/koinon-probe")
+	lerr := os.Symlink("/etc/koinon-probe", "/run/koinon-link")
+	if lerr == nil {
+		_ = os.Remove("/run/koinon-link")
+	}
+	denied("symlink:/run/koinon-link", lerr, "plant a symlink under /run")
 	// Devices: the listed nodes work, nothing else under /dev does.
 	f, ferr := os.OpenFile("/dev/null", os.O_WRONLY, 0)
 	if ferr == nil {

@@ -36,9 +36,11 @@ import (
 type Config struct {
 	// Listen is the TCP address of the guest API. Default ":80".
 	Listen string
-	// Workspace and LogDir are the upstream guest server's.
+	// Workspace is the upstream guest server's.
 	Workspace string
-	LogDir    string
+	// LogDir is where the upstream guest server writes the job logs. Default DefaultLogDir. The
+	// front makes the directory and checks it before any payload exists (PrepareLogDir).
+	LogDir string
 	// Keys verify the tokens. Required.
 	Keys   []ed25519.PublicKey
 	Logger *slog.Logger
@@ -76,8 +78,14 @@ func New(cfg Config) (*Front, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.LogDir == "" {
+		cfg.LogDir = DefaultLogDir
+	}
 	v, err := guestauth.NewVerifier(cfg.Keys)
 	if err != nil {
+		return nil, fmt.Errorf("guestfront: %w", err)
+	}
+	if err := PrepareLogDir(cfg.LogDir); err != nil {
 		return nil, fmt.Errorf("guestfront: %w", err)
 	}
 	gs, cleanup, err := guest.NewServer(guest.Config{

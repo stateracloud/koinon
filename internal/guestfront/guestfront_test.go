@@ -186,3 +186,47 @@ var _ = Describe("Gate", func() {
 		Expect(strings.Count(buf.String(), "guest API call refused")).To(Equal(1))
 	})
 })
+
+var _ = Describe("PrepareLogDir", func() {
+	It("makes the directory with mode 0750", func() {
+		d := filepath.Join(realTemp(), "a", "jobs")
+		Expect(guestfront.PrepareLogDir(d)).To(Succeed())
+		st, err := os.Stat(d)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Mode().Perm()).To(Equal(os.FileMode(0o750)))
+	})
+	It("refuses a symlink as the directory", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
+		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "jobs"))).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "jobs"))).NotTo(Succeed())
+	})
+	It("refuses a symlink in a parent part", func() {
+		base := realTemp()
+		Expect(os.Mkdir(filepath.Join(base, "target"), 0o755)).To(Succeed())
+		Expect(os.Symlink(filepath.Join(base, "target"), filepath.Join(base, "link"))).To(Succeed())
+		Expect(guestfront.PrepareLogDir(filepath.Join(base, "link", "jobs"))).NotTo(Succeed())
+	})
+	It("refuses a directory that others can write", func() {
+		d := filepath.Join(realTemp(), "jobs")
+		Expect(os.Mkdir(d, 0o755)).To(Succeed())
+		Expect(os.Chmod(d, 0o777)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(d)).NotTo(Succeed())
+	})
+	It("refuses a file and a relative path", func() {
+		f := filepath.Join(realTemp(), "file")
+		Expect(os.WriteFile(f, nil, 0o600)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(f)).NotTo(Succeed())
+		Expect(guestfront.PrepareLogDir("jobs")).NotTo(Succeed())
+	})
+	It("is the default of New, and the default is not under a directory that the payload writes", func() {
+		Expect(guestfront.DefaultLogDir).To(Equal("/run/koinon/ate-jobs"))
+	})
+})
+
+// realTemp is a temporary directory whose path has no symlink.
+func realTemp() string {
+	d, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+	Expect(err).NotTo(HaveOccurred())
+	return d
+}

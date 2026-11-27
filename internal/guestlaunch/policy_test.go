@@ -140,6 +140,22 @@ var _ = Describe("the image policies", func() {
 		Entry("gVisor tiers", "policy-gvisor.json", guestlaunch.ModeBestEffort, guestlaunch.ModeRequire),
 	)
 
+	// Issue #1503: the front, as root, writes the job logs in /run/koinon/ate-jobs (guestfront.DefaultLogDir,
+	// whose test checks the same string). The payload must not write there, or it could plant a symlink.
+	DescribeTable("keep the job log directory of the guest front out of the payload's write rules",
+		func(name string) {
+			const logDir = "/run/koinon/ate-jobs"
+			p := load(name)
+			Expect(p.Landlock.ReadExec).To(ContainElement("/run"), "readable, never writable")
+			for _, rw := range p.Landlock.ReadWrite {
+				Expect(logDir).NotTo(Or(Equal(rw), HavePrefix(rw+"/")), "read_write %s covers the job log directory", rw)
+				Expect(rw).NotTo(HavePrefix(logDir))
+			}
+		},
+		Entry("vm tier", "policy-vm.json"),
+		Entry("gVisor tiers", "policy-gvisor.json"),
+	)
+
 	It("differ in nothing but the Landlock and user modes and the signal scope", func() {
 		vm, gv := load("policy-vm.json"), load("policy-gvisor.json")
 		Expect(vm.Landlock.Scoped).To(Equal([]string{guestlaunch.ScopeSignal}), "a root payload on the vm tier cannot signal the guest front (issue #1496)")

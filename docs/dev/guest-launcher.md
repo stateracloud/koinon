@@ -173,8 +173,10 @@ modes. Two results follow:
   it ends. So on a read error, a cancelled context or a broken stream (a suspend), the driver sends SIGKILL to
   `tar` by process id and never sends `close`. When the break came from a suspend, the kill waits until the
   actor runs again. `StartProcess` also has a 30 minute timeout as a backstop. The router resets a stream after
-  300 s, so an upload that needs more time fails. `-log-dir` of the guest front must not be a directory that the
-  payload can write: the front (root) writes the process logs there.
+  300 s, so an upload that needs more time fails. `-log-dir` of the guest front is `/run/koinon/ate-jobs` by
+  default. The front makes it and checks it before the payload starts, and fails when it is a symlink, has a symlink in its
+  path or is writable by group or others. Do not set it to a directory that the payload can write: the front (root)
+  writes the process logs there, and upstream follows symlinks (ADR 0120, amendment of 2026-11-27, issue #1503).
 - **The home volume.** The front runs processes in `/sandbox`. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
