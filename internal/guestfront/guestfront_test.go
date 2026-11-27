@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,7 +74,7 @@ var _ = Describe("Front", func() {
 		ws = GinkgoT().TempDir()
 		f, err := guestfront.New(guestfront.Config{
 			Workspace: ws, LogDir: GinkgoT().TempDir(),
-			Keys: []ed25519.PublicKey{signer.PublicKey()},
+			Keys: []ed25519.PublicKey{signer.PublicKey()}, ReapGrace: 100 * time.Millisecond,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -161,6 +163,28 @@ var _ = Describe("Front", func() {
 		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
 	})
 
+	It("reaps the orphans of a swept job and keeps the exit status of the job itself", func() {
+		if runtime.GOOS != "linux" {
+			Skip("the reaper is Linux only")
+		}
+		// The shell starts a short child in the background and exits at once with code 7. The child
+		// goes to the front (a subreaper here, PID 1 in the guest). It exits 300 ms later and is a zombie
+		// until the front reaps it.
+		p, err := process.StartProcess(with(self, ""), &ateenvv1alpha.StartProcessRequest{
+			Command: []string{"/bin/sh", "-c", "(sleep 0.3 &) ; exit 7"},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() int32 {
+			got, err := process.GetProcess(with(self, ""), &ateenvv1alpha.GetProcessRequest{ProcessId: p.GetProcessId()})
+			Expect(err).NotTo(HaveOccurred())
+			if got.GetState() != ateenvv1alpha.ProcessState_PROCESS_STATE_EXITED {
+				return -1
+			}
+			return got.GetExitCode()
+		}, racescale.D(5*time.Second)).Should(Equal(int32(7)))
+		Eventually(zombieChildren, racescale.D(10*time.Second)).Should(BeEmpty())
+	})
+
 	It("refuses a request with two token headers", func() {
 		tok, err := signer.Sign(self, "")
 		Expect(err).NotTo(HaveOccurred())
@@ -186,3 +210,22 @@ var _ = Describe("Gate", func() {
 		Expect(strings.Count(buf.String(), "guest API call refused")).To(Equal(1))
 	})
 })
+
+// zombieChildren lists the zombie children of the test process (the front is a subreaper here).
+func zombieChildren() []string {
+	ents, err := os.ReadDir("/proc")
+	Expect(err).NotTo(HaveOccurred())
+	var out []string
+	for _, e := range ents {
+		b, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		s := string(b)
+		f := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])
+		if len(f) > 1 && f[0] == "Z" && f[1] == strconv.Itoa(os.Getpid()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}

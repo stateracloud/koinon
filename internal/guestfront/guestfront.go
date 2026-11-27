@@ -42,6 +42,9 @@ type Config struct {
 	// Keys verify the tokens. Required.
 	Keys   []ed25519.PublicKey
 	Logger *slog.Logger
+	// ReapGrace is how long an orphaned zombie waits before the front reaps it. Default
+	// DefaultReapGrace. See reaper.
+	ReapGrace time.Duration
 }
 
 // KeysFromEnv reads the verify keys from guestauth.VerifyKeysEnv and removes the variable from the
@@ -112,6 +115,13 @@ func (f *Front) Handler() http.Handler {
 // Serve serves on lis until ctx ends, then stops gracefully.
 func (f *Front) Serve(ctx context.Context, lis net.Listener) error {
 	defer f.cleanup()
+	rctx, stopReaper := context.WithCancel(ctx)
+	reaped := make(chan struct{})
+	go func() {
+		defer close(reaped)
+		newReaper(f.cfg.ReapGrace, f.cfg.Logger).run(rctx)
+	}()
+	defer func() { stopReaper(); <-reaped }()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
