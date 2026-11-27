@@ -82,6 +82,10 @@ func checkPart(fd int, dir, name string, last bool) error {
 	if st.Mode&0o022 != 0 && (last || !sticky) {
 		return fmt.Errorf("log dir %s: %q has mode %o, which lets group or others write", dir, name, st.Mode&0o7777)
 	}
+	if last && int(st.Gid) != os.Getegid() {
+		// Mode 0750 lets the group read: a group other than the front's could be the payload group.
+		return fmt.Errorf("log dir %s: %q has gid %d, want gid %d", dir, name, st.Gid, os.Getegid())
+	}
 	if last && st.Mode&0o027 != 0 {
 		return fmt.Errorf("log dir %s: %q has mode %o, which lets others access it or the group write; want 0750 or stricter", dir, name, st.Mode&0o7777)
 	}

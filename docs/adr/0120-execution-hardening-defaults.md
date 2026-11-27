@@ -917,7 +917,7 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   on the open parent. So it never follows a symlink and has no gap between a check and an open. It refuses a part
   that is not a directory, that another user than root or the front owns, or that group or others can write (a parent
   with the sticky bit excepted). For the last part it also refuses any access for others and any group write (mode
-  0750 or stricter), so a directory made earlier with mode 0755 is refused. A new path that the front writes needs a
+  0750 or stricter), so a directory made earlier with mode 0755 is refused. It also refuses a group other than the front's group. A new path that the front writes needs a
   policy spec that no `read_write` entry covers it.
 - **The payload cannot read the job logs** (issue #1516). `/run` is in `read_exec`, so a root payload on the `vm` tier
   could read the job logs in `/run/koinon/ate-jobs`. We close this with Landlock and not with a note. Landlock has no
@@ -925,7 +925,8 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   `read_exec` entry that holds a hidden path with its entries, and goes down to the hidden path. It leaves symlinks
   out, because Landlock would grant their targets. The launcher reads the directories when it starts the payload,
   after the front has made `/run/koinon`. A file that a service makes later in `/run` is not readable for the payload.
-  The payload makes no file in `/run` itself (it cannot write there). The front is not under Landlock, so it is not
+  `/run` itself is not granted any more, so a tool that lists `/run` fails, and a symlink in `/run` that points
+  outside the granted paths does not work. The payload makes no file in `/run` itself (it cannot write there). The front is not under Landlock, so it is not
   affected. The policy refuses a `hidden` path that is inside a `read_write`, `devices` or `list_dirs` entry, because
   Landlock cannot take back a right of a parent. A read error of a directory stops the start. Reads under `/var/log`
   stay open on purpose: `/var/log` is `read_write` for the payload, and the front writes no log there.

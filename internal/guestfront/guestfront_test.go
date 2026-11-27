@@ -331,6 +331,15 @@ var _ = Describe("PrepareLogDir", func() {
 		Entry("0700", os.FileMode(0o700)),
 		Entry("0550", os.FileMode(0o550)),
 	)
+	It("refuses a last part of another group", func() {
+		if os.Geteuid() != 0 {
+			Skip("changing the group needs root")
+		}
+		d := filepath.Join(realTemp(), "jobs")
+		Expect(os.Mkdir(d, 0o750)).To(Succeed())
+		Expect(os.Chown(d, 0, 12345)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(d)).To(MatchError(ContainSubstring("has gid 12345")))
+	})
 	It("refuses the root directory with a clear message", func() {
 		Expect(guestfront.PrepareLogDir("/")).To(MatchError(ContainSubstring("is the root directory")))
 		Expect(guestfront.PrepareLogDir("//")).To(MatchError(ContainSubstring("is the root directory")))

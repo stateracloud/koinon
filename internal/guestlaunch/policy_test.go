@@ -75,6 +75,8 @@ var _ = Describe("ParsePolicy", func() {
 		Entry("hidden root", `{"landlock":{"read_exec":["/run"],"hidden":["/"]}}`, "is the root directory"),
 		Entry("hidden path in a writable path", `{"landlock":{"read_exec":["/run"],"read_write":["/run"],"hidden":["/run/koinon"]}}`, "inside read_write path"),
 		Entry("hidden path in the root writable path", `{"landlock":{"read_write":["/"],"hidden":["/run/koinon"]}}`, "inside read_write path"),
+		Entry("read_exec entry inside a hidden path", `{"landlock":{"read_exec":["/run/koinon/ate-jobs"],"hidden":["/run/koinon"]}}`, "is inside hidden path"),
+		Entry("read_exec entry equal to a hidden path", `{"landlock":{"read_exec":["/run/koinon"],"hidden":["/run/koinon"]}}`, "is inside hidden path"),
 		Entry("unknown landlock scope", `{"landlock":{"scoped":["abstract_unix_socket"]}}`, "unknown landlock scope"),
 	)
 
@@ -216,7 +218,7 @@ var _ = Describe("the image policies", func() {
 			p := load(name)
 			Expect(p.Landlock.ReadExec).To(ContainElement("/run"), "readable, never writable")
 			for _, rw := range p.Landlock.ReadWrite {
-				Expect(logDir).NotTo(Or(Equal(rw), HavePrefix(rw+"/")), "read_write %s covers the job log directory", rw)
+				Expect(covers(rw, logDir)).To(BeFalse(), "read_write %s covers the job log directory", rw)
 				Expect(rw).NotTo(HavePrefix(logDir))
 			}
 			for _, dev := range p.Landlock.Devices {

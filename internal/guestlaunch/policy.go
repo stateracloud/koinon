@@ -236,6 +236,12 @@ func (p Policy) Validate() error {
 		if path.Clean(h) == "/" {
 			return fmt.Errorf("guest launcher policy: landlock hidden path %q is the root directory", h)
 		}
+		// A read rule on or below a hidden path would grant it again.
+		for _, e := range p.Landlock.ReadExec {
+			if pathCovers(h, e) {
+				return fmt.Errorf("guest launcher policy: landlock read_exec path %q is inside hidden path %q", e, h)
+			}
+		}
 		// Rights on a writable parent cannot be taken back, and a hidden path must not be writable.
 		for _, rw := range p.Landlock.ReadWrite {
 			if pathCovers(rw, h) {
