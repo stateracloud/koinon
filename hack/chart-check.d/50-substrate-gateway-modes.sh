@@ -8,10 +8,10 @@
 # order by hack/chart-check.sh; it uses that script's helpers (render, fail, ...) and docof and nocomment of
 # 44-substrate-worker.sh.
 
-# sgw_control <render args...>: the koinon-substrate-control policy of a render with ci/substrate-values.yaml, without
+# sgw_control: the koinon-substrate-control policy of a render with ci/substrate-values.yaml, without
 # comment lines (a comment must not count as a peer or a port).
 sgw_control() {
-	render -f "$CHART/ci/substrate-values.yaml" "$@" --show-only templates/substrate-networkpolicy.yaml |
+	render -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml |
 		docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' | nocomment
 }
 

@@ -535,6 +535,7 @@ def egress_http(c):
         if c.get("tls"):
             import ssl
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             s = ctx.wrap_socket(s, server_hostname=c["host"])
