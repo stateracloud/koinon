@@ -315,10 +315,18 @@ registry of the kind cluster is its upstream (`imageCache.upstreams` with `allow
 the range of the docker network `kind`, which run.sh reads with `docker network inspect`). `kind/values-rewrite.sh` fills the
 placeholders of `kind/substrate-values.yaml`; the registry host `localhost:5001` of the cache upstream stays as it is.
 
-Not covered yet: the harness contract tests, the restore drill (`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a
-message that names #1091), the gVisor-class assertion on the actor, the Substrate escape case and the missing-image step
-(skipped until its Substrate form is proven). Issue #1091 stays open for them. The CI job is a `.github` change that is
-already in `e2e-kind.yml` as the `driver` dispatch input; it becomes a required leg at the switch (#1093, no soak).
+The harness contract tests (`make harness-suite`, `./test/harnesses/...`) are not a step of this leg, and they are not a
+step of the OpenShell leg either. They run in the `harnesses` job of `ci.yml` (required, merge queue and main), against the
+OpenCode harness image and with no cluster; they do not read the driver. The Substrate parts of the image are covered there
+too: the sweep spec runs `koinon-agentd`'s sweep script on the Substrate guest front's PID 1. The Substrate overlay that
+this leg pushes is built from that same tested image (`harness-substrate-<name>`).
+
+The leg is advisory (a comment in `hack/ci-required.txt`, not a listed name: it is a driver of the `quickstart` job and
+runs on dispatch only). Issue #1091 is done when the quickstart is green on this leg, the harness contract tests are green
+in the `harnesses` job and the leg is listed as advisory. Not covered here: the restore drill
+(`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a message that names #1090 part 3), the gVisor-class assertion on the actor, the Substrate escape case and the missing-image step
+(skipped until its Substrate form is proven). The CI wiring is already in `e2e-kind.yml` as the `driver` dispatch input; the leg
+becomes a required leg at the switch (#1093, no soak).
 
 ### The N-1 to N upgrade e2e (issue #519)
 
