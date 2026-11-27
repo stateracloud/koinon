@@ -397,20 +397,22 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tw.WriteHeader(&tar.Header{Name: "a.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2})).To(Succeed())
 			_, _ = tw.Write([]byte("hi"))
 			Expect(tw.Close()).To(Succeed())
-			cl.FailNextWriteFiles(ws, "sb", 2)
+			cl.FailNextUploadStreams(ws, "sb", 2)
 			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
-			Expect(cl.Calls("WriteFile")).To(Equal(3), "two failed streams and one that worked")
+			Expect(cl.Calls("WriteProcessInput")).To(Equal(3), "two failed streams and one that worked")
+			Expect(cl.Running(ws, "sb")).To(BeEmpty(), "each retry killed the tar of the stream before it")
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/a.txt", []byte("hi")))
 		})
 
 		It("gives up after the ready timeout when every write ends Unavailable", func(ctx SpecContext) {
 			dd, c := newDriver(substrate.Config{PollInterval: time.Millisecond, GuestReadyTimeout: 50 * time.Millisecond})
 			ready(ctx, dd, "sb")
-			c.FailNextWriteFiles(ws, "sb", 1<<20)
+			c.FailNextUploadStreams(ws, "sb", 1<<20)
 			err := dd.Upload(ctx, ws, "sb", "/work", strings.NewReader("x"))
 			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
 		})
 
-		It("uploads a large archive and leaves no temporary file", func(ctx SpecContext) {
+		It("uploads a large archive in several messages and writes no file but the extracted ones", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			var buf bytes.Buffer
 			tw := tar.NewWriter(&buf)
@@ -419,6 +421,54 @@ var _ = Describe("the Substrate driver", func() {
 			_, _ = tw.Write(body)
 			Expect(tw.Close()).To(Succeed())
 			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
+			Expect(cl.Files(ws, "sb")).To(HaveLen(1))
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/big.bin", body))
+			Expect(cl.Running(ws, "sb")).To(BeEmpty())
+			Expect(cl.Started(ws, "sb")).To(HaveLen(2), "mkdir and tar: no staging file, no rm")
+		})
+
+		It("kills the tar of a stream that breaks, and does not retry an archive that it cannot read again", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("y"), 1<<20) // more than one message
+			Expect(tw.WriteHeader(&tar.Header{Name: "big.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			cl.FailNextUploadStreams(ws, "sb", 1)
+			err := d.Upload(ctx, ws, "sb", "/work", &buf)
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+			Expect(cl.Files(ws, "sb")).To(BeEmpty(), "tar never got the close, so it extracted nothing")
+		})
+
+		It("kills the tar when the reader fails, and sends no close", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			boom := errors.New("tar source broke")
+			big := io.MultiReader(bytes.NewReader(bytes.Repeat([]byte("z"), 600<<10)), failing{boom})
+			err := d.Upload(ctx, ws, "sb", "/work", big)
+			Expect(errors.Is(err, boom)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+		})
+
+		It("leaves no tar running after a suspend at the middle of an upload", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			release := make(chan struct{})
+			started := make(chan struct{})
+			upErr := make(chan error, 1)
+			go func() {
+				upErr <- d.Upload(ctx, ws, "sb", "/work", &stallAfter{n: 256 << 10, started: started, release: release})
+			}()
+			Eventually(started).WithTimeout(5 * time.Second).Should(BeClosed())
+			_, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			close(release)
+			Eventually(upErr).WithTimeout(5 * time.Second).Should(Receive(HaveOccurred()))
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(10*time.Second).Should(BeEmpty(), "the orphan is killed once the actor runs")
 		})
 	})
 
@@ -777,6 +827,33 @@ type failing struct{ err error }
 func (f failing) Read([]byte) (int, error) { return 0, f.err }
 
 // stallReader gives one chunk, then blocks until released and ends the stream.
+// stallAfter returns n bytes, then blocks in Read until release closes (after it closes started):
+// an upload whose stream is open and whose tar waits for input.
+type stallAfter struct {
+	n       int
+	started chan struct{}
+	release chan struct{}
+	read    int
+	stalled bool
+}
+
+func (r *stallAfter) Read(p []byte) (int, error) {
+	if r.read < r.n {
+		k := min(len(p), r.n-r.read)
+		for i := range k {
+			p[i] = 'x'
+		}
+		r.read += k
+		return k, nil
+	}
+	if !r.stalled {
+		r.stalled = true
+		close(r.started)
+	}
+	<-r.release
+	return 0, io.EOF
+}
+
 type stallReader struct {
 	first   []byte
 	started chan struct{}
