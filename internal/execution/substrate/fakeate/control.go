@@ -71,8 +71,11 @@ type actor struct {
 	frontDead bool
 	// failRevert is how many RevertActor calls fail with ResourceExhausted before one works.
 	failRevert int
-	streams    map[int]context.CancelFunc
-	nextSID    int
+	// failProbe is how many resumes fail the wakeup probe: the actor ends CRASHED and the call fails
+	// with Internal, as Substrate does when the front does not answer.
+	failProbe int
+	streams   map[int]context.CancelFunc
+	nextSID   int
 }
 
 func (a *actor) dropStreams() {
@@ -403,6 +406,11 @@ func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRe
 	a.smu.Unlock()
 	if failRes {
 		return nil, status.Errorf(codes.Unavailable, "actor %q: resume failed", k.name)
+	}
+	if a.failProbe > 0 && a.state == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		a.failProbe--
+		a.state, a.crash = ateapiv1.ActorState_ACTOR_STATE_CRASHED, "wakeup probe failed: GET /readyz:80"
+		return nil, status.Errorf(codes.Internal, "actor %q: wakeup probe failed", k.name)
 	}
 	resumed := false
 	switch a.state {

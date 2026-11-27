@@ -42,6 +42,9 @@ var (
 	ErrUnsupported = errors.New("unsupported")
 	// ErrNoSnapshot means a revert has no snapshot to go back to: the sandbox never suspended.
 	ErrNoSnapshot = errors.New("no snapshot")
+	// ErrRevertResume means the revert itself worked and the resume after it failed. The sandbox holds
+	// its snapshot: the caller must not delete it. Read the sandbox to see its state.
+	ErrRevertResume = errors.New("resume after revert failed")
 	// ErrFrontDown means the guest front of a running sandbox did not answer in time.
 	ErrFrontDown = errors.New("guest front does not answer")
 	// ErrStreamClosed: an exec stream ended without an exit status.

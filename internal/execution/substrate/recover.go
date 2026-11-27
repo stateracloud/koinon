@@ -37,14 +37,28 @@ const exhaustedRetries = 4
 func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 	const op = "CheckFront"
 	k := key{workspace, name}
-	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
+	// The gate proves that the actor runs and stops a suspend from starting under the call. A closed
+	// gate or a sandbox that does not run is no verdict on the front.
+	// enter is not used: it binds the actor with a guest call, and a dead front fails that.
+	var gctx context.Context
+	var end func()
+	for ok := false; !ok; {
+		g := d.gate(k)
+		if gctx, end, ok = g.begin(ctx, shortCall); !ok && !g.isDead() {
+			return fail(op, execution.ErrFailedPrecondition, "sandbox %s is being suspended or deleted", k)
+		}
+	}
+	defer end()
+	// The proof that the actor runs comes after the registration: a suspend that starts now drains
+	// the call, so the router never resumes the actor for it.
+	actor, err := d.control.GetActor(gctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
 		return execution.GRPCError(op, err)
 	}
 	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
 		return fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not running", k, phaseOf(actor))
 	}
-	cctx, cancel := context.WithTimeout(ctx, frontCheckTimeout)
+	cctx, cancel := context.WithTimeout(gctx, frontCheckTimeout)
 	defer cancel()
 	_, err = d.process.GetProcess(route(cctx, k), &ateenvv1alpha.GetProcessRequest{ProcessId: "koinon-liveness"})
 	switch status.Code(err) {
@@ -64,13 +78,32 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 
 // FaultSandbox implements execution.Reverter: it sends SuspendActor, which a running actor with a dead
 // front does not survive as a snapshot. The router is not used, because a call through it resumes a
-// suspended actor. It does not wait.
+// suspended actor. It drains the gate as suspend does, and it reads the actor after the call: the actor
+// must be CRASHED. A SUSPENDED actor would hold a snapshot of the dead front, and that snapshot would be
+// the last one; the call then fails, and the cap of the reconciler stops the loop. Lab test O7 checks
+// what Substrate does here.
 func (d *Driver) FaultSandbox(ctx context.Context, workspace, name string) error {
-	_, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
+	const op = "FaultSandbox"
+	k := key{workspace, name}
+	g := d.pauseGate(k)
+	defer g.unpause()
+	if err := g.drain(ctx, d.cfg.DrainTimeout); err != nil {
+		return fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
+	}
+	if _, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
 		Actor:   ref(workspace, name),
 		Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
-	})
-	return execution.GRPCError("FaultSandbox", err)
+	}); err != nil {
+		return execution.GRPCError(op, err)
+	}
+	actor, err := d.settled(ctx, op, k)
+	if err != nil {
+		return err
+	}
+	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_CRASHED {
+		return fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after the fault, not crashed", k, phaseOf(actor))
+	}
+	return nil
 }
 
 // RevertSandbox implements execution.Reverter. The actor must be CRASHED. It fails with
@@ -109,7 +142,9 @@ func (d *Driver) RevertSandbox(ctx context.Context, workspace, name string) (exe
 		resumed = resp.GetActor()
 		return err
 	}); err != nil {
-		return execution.RevertResult{}, execution.GRPCError(op, err)
+		// The revert worked. A failed wakeup probe lands here: the actor is CRASHED again, with the
+		// snapshot kept. The caller reads the state and does not delete it.
+		return execution.RevertResult{}, fail(op, execution.ErrRevertResume, "sandbox %s was reverted and did not resume: %v", k, err)
 	}
 	d.setOwed(k, false)
 	d.mu.Lock()

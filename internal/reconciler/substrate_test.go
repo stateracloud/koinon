@@ -345,6 +345,24 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the forced fault; a front that answers is left alone")
 		})
 
+		It("stops a front that fails the wakeup probe at every resume, and never deletes the reverted actor", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.FailProbe(ws, actor, 100)
+			cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+			for range 5 {
+				pass(ctx)
+			}
+			Expect(cl.Calls("RevertActor")).To(Equal(3), "the cap counts a revert whose resume failed")
+			Expect(cl.Calls("DeleteActor")).To(BeZero(), "the repair path never deletes the reverted actor")
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			Expect(a.UnhealthyReason.String).To(ContainSubstring("the front kept failing"))
+		})
+
 		It("stops at the retry cap, marks the agent unhealthy and reverts no more", func(ctx SpecContext) {
 			agent := newAgent(ctx, org, user)
 			pass(ctx)

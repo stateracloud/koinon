@@ -95,7 +95,11 @@ func (t *crashTracker) answered(id pgtype.UUID) {
 // crash: the pass then ends, and the next one reverts it.
 func (r *Reconciler) checkFront(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string) (bool, error) {
 	rv, ok := execution.ReverterOf(r.backend)
-	if !ok || sb.Phase != execution.PhaseReady {
+	if !ok {
+		return false, nil
+	}
+	if sb.Phase != execution.PhaseReady {
+		r.crash.answered(w.agent.ID) // an old silence must not count against the next run of the sandbox
 		return false, nil
 	}
 	now := r.cfg.Now()
@@ -105,7 +109,9 @@ func (r *Reconciler) checkFront(ctx context.Context, w *work, ws, name string, s
 		r.crash.answered(w.agent.ID)
 		return false, nil
 	case !errors.Is(err, execution.ErrFrontDown):
-		// Not a verdict on the front (the router is down, the sandbox is not running any more).
+		// Not a verdict on the front (the router is down, the sandbox is not running any more): the
+		// silence so far is not proof.
+		r.crash.answered(w.agent.ID)
 		return false, nil
 	}
 	since := r.crash.silentSince(w.agent.ID, now)
@@ -138,6 +144,11 @@ func (r *Reconciler) revertCrashed(ctx context.Context, w *work, ws, name string
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("read the latest home checkpoint: %w", err)
 	}
+	// The kind comes from the actor state and the crash message, never from a gRPC code. A revert does
+	// not fix an image that cannot be pulled: the repair path (a new sandbox) handles it.
+	if execution.ClassifySandboxWait(sb.Reason, sb.Message) == execution.WaitCauseImagePull {
+		return false, nil
+	}
 	now := r.cfg.Now()
 	detail := "phase " + string(sb.Phase)
 	if m := truncate(sb.Message, 300); m != "" {
@@ -166,6 +177,13 @@ func (r *Reconciler) revertCrashed(ctx context.Context, w *work, ws, name string
 	case errors.Is(err, execution.ErrNoSnapshot):
 		// The actor never suspended: a revert would give an empty home. Repair recreates it.
 		return false, nil
+	case errors.Is(err, execution.ErrRevertResume):
+		// The revert worked and the resume did not (a failed wakeup probe crashes the actor again).
+		// The snapshot is good: the repair path must not delete it. Count the revert, so the cap stops
+		// a front that always fails, and let the next pass read the state.
+		r.crash.noteRevert(w.agent.ID, now)
+		r.log.Warn("the sandbox was reverted and did not resume", append(w.logAttrs(), "err", err)...)
+		return true, nil
 	case errors.Is(err, execution.ErrUnavailable):
 		return true, err // a worker has no room now (after the backoff of the driver): try on the next pass
 	case err != nil:

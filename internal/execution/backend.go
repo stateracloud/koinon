@@ -192,7 +192,8 @@ func ActorNamerOf(b Backend) (ActorNamer, bool) {
 // check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
 type Reverter interface {
 	// RevertSandbox reverts a CRASHED sandbox to its last snapshot and resumes it. It fails with
-	// ErrNoSnapshot when the sandbox never suspended: a revert would give an empty home.
+	// ErrNoSnapshot when the sandbox never suspended: a revert would give an empty home. It fails with
+	// ErrRevertResume when the revert worked and the resume did not.
 	RevertSandbox(ctx context.Context, workspace, name string) (RevertResult, error)
 	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
 	// answers and ErrFrontDown when it does not answer in time. It never resumes the sandbox.

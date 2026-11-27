@@ -424,6 +424,16 @@ func (c *Cluster) FailNextReverts(atespace, name string, n int) {
 	}
 }
 
+// FailProbe makes the next n resumes of a suspended actor fail the wakeup probe: the actor ends
+// CRASHED with its snapshots kept, and the call fails with Internal.
+func (c *Cluster) FailProbe(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failProbe = n
+	}
+}
+
 // FailNextResumes makes the next n ResumeActor calls for an actor fail with Unavailable and leave
 // it as it was.
 func (c *Cluster) FailNextResumes(atespace, name string, n int) {
