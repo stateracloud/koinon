@@ -59,6 +59,7 @@ type Cluster struct {
 	atespaces        map[string]string // name to uid
 	templates        map[key]*ateapiv1.ActorTemplate
 	actors           map[key]*actor
+	armed            map[key][2]int // FailNextResumesAfter for an actor that does not exist yet
 	tags             map[key]*ateapiv1.Tag
 	policies         map[key]*ateapiv1.EgressPolicy // the actor egress policies
 	policyWrites     map[key]int
@@ -396,8 +397,8 @@ func (c *Cluster) Files(atespace, name string) map[string][]byte {
 }
 
 // KillFront makes the guest of a running actor answer nothing, as when pid 1 has exited: the actor
-// stays RUNNING with no crash record (issue #1481). A SuspendActor then ends in CRASHED; RevertActor
-// brings the front back.
+// stays RUNNING with no crash record (issue #1481). A SuspendActor of it passes and its snapshot holds
+// the dead front; RevertActor brings back the front and the files of the newest snapshot.
 func (c *Cluster) KillFront(atespace, name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -406,12 +407,22 @@ func (c *Cluster) KillFront(atespace, name string) {
 	}
 }
 
+// HangFront makes the dead front of KillFront take a guest call and never answer, so the caller runs into
+// its own deadline. A refusing front answers Unavailable at once; this one is silent.
+func (c *Cluster) HangFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontHang = true
+	}
+}
+
 // DropSnapshots removes the snapshots of an actor, as for an actor that never suspended.
 func (c *Cluster) DropSnapshots(atespace, name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a := c.actors[key{atespace, name}]; a != nil {
-		a.snapshots = nil
+		a.snapshots, a.snapState = nil, nil
 	}
 }
 
@@ -431,6 +442,44 @@ func (c *Cluster) FailProbe(atespace, name string, n int) {
 	defer c.mu.Unlock()
 	if a := c.actors[key{atespace, name}]; a != nil {
 		a.failProbe = n
+	}
+}
+
+// FailNextPolicyReads makes the next n GetActorEgressPolicy calls for an actor fail with Unavailable,
+// so a driver call that writes the policy fails (issue #1481: the write after RevertActor).
+func (c *Cluster) FailNextPolicyReads(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failPolicyGets = n
+	}
+}
+
+// FailNextResumesAfter lets the next skip ResumeActor calls for an actor work, and then fails n of them
+// with Unavailable (the resume after the first-boot seal, issue #1481).
+func (c *Cluster) FailNextResumesAfter(atespace, name string, skip, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	if a == nil { // the actor is created next: the call applies to it
+		if c.armed == nil {
+			c.armed = map[key][2]int{}
+		}
+		c.armed[key{atespace, name}] = [2]int{skip, n}
+	}
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failSkip, a.failRes = skip, n
+		a.smu.Unlock()
+	}
+}
+
+// PutFile writes a file into the guest of an actor, as an agent's write to its home does.
+func (c *Cluster) PutFile(atespace, name, path string, body []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.files[path] = body
 	}
 }
 

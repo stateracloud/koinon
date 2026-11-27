@@ -86,6 +86,12 @@ SET state = @state::sandbox_state,
     home_dirtied_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
                             AND @home_generation::text IS DISTINCT FROM sandbox_id
                            THEN NULL ELSE home_dirtied_at END,
+    -- The snapshot clock belongs to one sandbox too (issue #1481). A snapshot time never goes back; an
+    -- unknown one (NULL) keeps the recorded time.
+    last_snapshot_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                             AND @home_generation::text IS DISTINCT FROM sandbox_id
+                            THEN sqlc.narg('snapshot_at')::timestamptz
+                            ELSE GREATEST(last_snapshot_at, sqlc.narg('snapshot_at')::timestamptz) END,
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'

@@ -2034,7 +2034,7 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID); err != nil {
+	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID, sb.SnapshotAt); err != nil {
 		return err
 	}
 	if err := r.recordActor(ctx, w, sb); err != nil {
@@ -2062,13 +2062,16 @@ func (r *Reconciler) recordState(ctx context.Context, w *work, state store.Sandb
 	if len(hash) > 0 {
 		h = hash[0]
 	}
-	return r.recordRow(ctx, w, state, phase, msg, "", h, "")
+	return r.recordRow(ctx, w, state, phase, msg, "", h, "", time.Time{})
 }
 
-func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string) error {
+// recordRow stores the observed sandbox. snapshotAt is when the newest snapshot was taken, or zero when
+// this observation took none (the recorded time then stays).
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string, snapshotAt time.Time) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
 		State: state, Phase: phase, Message: msg, Reason: reason, SpecHash: hash, HomeGeneration: generation,
+		SnapshotAt: pgtype.Timestamptz{Time: snapshotAt, Valid: !snapshotAt.IsZero()},
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)
@@ -2089,7 +2092,7 @@ const ForeignReason = "OwnedByAnotherInstall"
 // guardSandbox in the OpenShell backend, which refuses every call on a sandbox another install owns.
 // So a failed write is logged and the pass goes on.
 func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
-	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, ""); rerr != nil {
+	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "", time.Time{}); rerr != nil {
 		r.log.Warn("recording the foreign-owned sandbox failed; guardSandbox still refuses it",
 			append(w.logAttrs(), "err", rerr)...)
 	}

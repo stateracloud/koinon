@@ -181,8 +181,11 @@ type Querier interface {
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
-	// (issue #1481); the reconciler clears it after the stop that takes the snapshot.
+	// (issue #1481); the reconciler clears it after the stop that takes the snapshot. The checkpoint ID
+	// is a flag with a usable ID: a restore takes the newest complete checkpoint of the home.
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
+	// A stop of this sandbox took the snapshot that holds the restored home. The sandbox ID keeps a clear
+	// from touching the mark of another sandbox.
 	ClearSandboxRestoredMark(ctx context.Context, arg ClearSandboxRestoredMarkParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
@@ -1584,6 +1587,12 @@ type Querier interface {
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
+	// A crash may revert the sandbox to a snapshot that lacks the restored home. This points the next run
+	// at the restore again. It is written BEFORE the revert, in one statement that reads the row itself
+	// (not a cached copy): a leader change or a failed write after the revert then cannot leave a mark
+	// with no restore pending. It writes only for a sandbox with a mark and no restore pending. No row:
+	// nothing to do.
+	RestoreFromMark(ctx context.Context, arg RestoreFromMarkParams) (AgentSandbox, error)
 	// Clears the unhealthy mark and starts a new count of recreations. No row: not unhealthy.
 	ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent, error)
 	// Epoch 0 was superseded: its blobs may be deleted after @delete_after.

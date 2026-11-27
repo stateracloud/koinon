@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -331,24 +332,44 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(after.Message).To(ContainSubstring("lost: the writes after"))
 		})
 
-		It("finds a running actor whose front is silent, forces the fault and reverts it", func(ctx SpecContext) {
+		// readyActor creates the agent's actor, waits until it runs, and lets one pass see it ready.
+		readyActor := func(ctx SpecContext) (store.Agent, string) {
+			GinkgoHelper()
 			agent := newAgent(ctx, org, user)
 			pass(ctx)
 			actor := sandboxRow(ctx, agent.ID).ActorName.String
 			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
-			cl.KillFront(ws, actor)
 			advance(0)
 			pass(ctx)
-			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING), "a short silence is not a fault")
+			return agent, actor
+		}
+
+		It("reverts a running actor whose front is silent directly from RUNNING, with no suspend first", func(ctx SpecContext) {
+			_, actor := readyActor(ctx)
+			cl.KillFront(ws, actor)
 			advance(time.Minute)
 			pass(ctx)
-			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_CRASHED), "the silence lasted: the fault is forced")
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "one failed check is not proof")
+			advance(time.Minute + 10*time.Second)
 			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "two are not enough, and the silence is 10 s old")
+			advance(3 * time.Minute)
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(1), "three checks in a row over the silence window")
 			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
-			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(cl.Calls("SuspendActor")).To(Equal(1), "only the seal of the first boot: a suspend of a dead front would save it over the last good snapshot")
 			Expect(cl.Calls("DeleteActor")).To(BeZero())
-			pass(ctx)
-			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal of the first boot and the forced fault; a front that answers is left alone")
+			Expect(d.CheckFront(ctx, ws, actor)).To(Succeed(), "the front of the good snapshot answers")
+		})
+
+		It("leaves a sandbox that was just seen ready alone for the grace time", func(ctx SpecContext) {
+			_, actor := readyActor(ctx)
+			cl.KillFront(ws, actor)
+			for _, off := range []time.Duration{5 * time.Second, 15 * time.Second, 25 * time.Second} {
+				advance(off)
+				pass(ctx)
+			}
+			Expect(cl.Calls("RevertActor")).To(BeZero())
 		})
 
 		// restoreHome stands in for agentd: the row points at a checkpoint, then the restore ends.
@@ -431,6 +452,80 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.UnhealthyAt.Valid).To(BeFalse())
+
+			By("the pending restore keeps the seal away: the reverted actor is not snapshotted before the restore ran")
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			advance(3 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			Expect(cl.Calls("SuspendActor")).To(Equal(1), "only the seal of the first boot")
+			Expect(sandboxRow(ctx, agent.ID).RestoredCheckpointID.Valid).To(BeTrue(), "the mark stays until a stop took the snapshot")
+		})
+
+		It("does not revert when the restore pointer cannot be written first, and the mark stays", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			restoreHome(ctx, agent, true)
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeFalse())
+			// The database refuses the pointer for this org: the write that must come before the revert.
+			_, err := pool.Exec(ctx, `CREATE OR REPLACE FUNCTION refuse_restore_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'restore write refused'; END $$`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, fmt.Sprintf(`CREATE TRIGGER refuse_restore BEFORE UPDATE ON agent_sandboxes FOR EACH ROW
+				WHEN (NEW.org_id = '%s' AND OLD.restore_checkpoint_id IS NULL AND NEW.restore_checkpoint_id IS NOT NULL)
+				EXECUTE FUNCTION refuse_restore_write()`, org))
+			Expect(err).NotTo(HaveOccurred())
+			dropped := false
+			drop := func() {
+				if !dropped {
+					dropped = true
+					_, err := pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS refuse_restore ON agent_sandboxes`)
+					Expect(err).NotTo(HaveOccurred())
+				}
+			}
+			DeferCleanup(drop)
+			cl.Crash(ws, actor, "guest kernel panic")
+			_ = r.ReconcileAll(ctx) // the pass reports the failed write
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "no revert without the pointer")
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_CRASHED))
+			Expect(sandboxRow(ctx, agent.ID).RestoredCheckpointID.Valid).To(BeTrue(), "the mark is intact")
+
+			By("the next pass, with the write working, points the restore and reverts")
+			drop()
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(1))
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeTrue())
+		})
+
+		It("sends a crashed actor with a mark and no snapshot to repair, with the restore pointer kept", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			restoreHome(ctx, agent, true)
+			cl.DropSnapshots(ws, actor)
+			cl.Crash(ws, actor, "guest kernel panic")
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "the actor never suspended: a revert would give an empty home")
+			Expect(cl.Calls("DeleteActor")).To(Equal(1), "the repair path recreates it")
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeTrue(), "the new actor restores the home: the pointer was written before the revert")
+		})
+
+		It("keeps the mark for a stop that it did not send and no newer snapshot is recorded for", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			restoreHome(ctx, agent, false)
+			restoreHome(ctx, agent, true)
+			_, err := d.StopSandbox(ctx, ws, actor) // a stop behind the reconciler's back: its snapshot time is not recorded
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			Expect(sandboxRow(ctx, agent.ID).RestoredCheckpointID.Valid).To(BeTrue())
 		})
 
 		It("keeps no mark for a recreated sandbox that got no restore", func(ctx SpecContext) {
@@ -464,6 +559,47 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.UnhealthyAt.Valid).To(BeTrue())
 			Expect(a.UnhealthyReason.String).To(ContainSubstring("the front kept failing"))
+		})
+
+		It("reverts again after an admin resumed the agent: the cap counts from the resume", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			for range 3 {
+				Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+				cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+				pass(ctx)
+			}
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.Crash(ws, actor, "wakeup probe: GET /readyz: connection refused")
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(3), "the cap is reached")
+			time.Sleep(20 * time.Millisecond) // the database clock moves past the last revert
+			_, err := q.ResumeAgent(ctx, store.ResumeAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(4), "the reverts before the resume no longer count")
+		})
+
+		It("backs off a revert that fails before RevertActor worked, and gives the sandbox to repair after enough tries", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.Crash(ws, actor, "guest kernel panic")
+			cl.FailNextReverts(ws, actor, 1000) // no worker has room, at every try
+			advance(0)
+			pass(ctx)
+			first := cl.Calls("RevertActor")
+			Expect(first).To(BeNumerically(">", 0))
+			pass(ctx)
+			Expect(cl.Calls("RevertActor")).To(Equal(first), "inside the backoff no new try is sent")
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			for i := range 8 {
+				advance(time.Duration(i+1) * 10 * time.Minute)
+				pass(ctx)
+			}
+			Expect(cl.Calls("DeleteActor")).To(Equal(1), "after the tries the repair path takes the sandbox")
 		})
 
 		It("stops at the retry cap, marks the agent unhealthy and reverts no more", func(ctx SpecContext) {

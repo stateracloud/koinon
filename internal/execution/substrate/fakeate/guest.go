@@ -110,6 +110,12 @@ func (g *guestServer) target(ctx context.Context, method string) (*actor, error)
 	}
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		if a.frontDead && a.frontHang { // the guest accepts the call and never answers: the caller's deadline ends it
+			g.c.mu.Unlock()
+			<-ctx.Done()
+			g.c.mu.Lock()
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
 		if a.frontDead { // pid 1 exited: the actor still runs and nothing answers
 			return nil, status.Errorf(codes.Unavailable, "actor %s: the guest does not answer", v[0])
 		}

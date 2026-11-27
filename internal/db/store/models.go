@@ -1894,6 +1894,8 @@ type AgentSandbox struct {
 	ActorUid             pgtype.Text
 	RestoredSandboxID    pgtype.Text
 	RestoredCheckpointID pgtype.UUID
+	RestoredAt           pgtype.Timestamptz
+	LastSnapshotAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {

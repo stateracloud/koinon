@@ -105,7 +105,12 @@ func (s *controlServer) GetActorEgressPolicy(_ context.Context, r *ateapiv1.GetA
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	p, ok := c.policies[key{r.GetActor().GetAtespace(), r.GetActor().GetName()}]
+	k := key{r.GetActor().GetAtespace(), r.GetActor().GetName()}
+	if a := c.actors[k]; a != nil && a.failPolicyGets > 0 {
+		a.failPolicyGets--
+		return nil, status.Errorf(codes.Unavailable, "actor %q: the egress policy read failed", k.name)
+	}
+	p, ok := c.policies[k]
 	if !ok {
 		return nil, notFound("egress policy", r.GetActor().GetName())
 	}

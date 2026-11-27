@@ -188,27 +188,20 @@ func ActorNamerOf(b Backend) (ActorNamer, bool) {
 	return nil, false
 }
 
-// Reverter is an optional capability of a driver: revert a crashed sandbox to its last snapshot and
-// check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
+// Reverter is an optional capability of a driver: revert a crashed or dead sandbox to its last snapshot
+// and check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
 type Reverter interface {
-	// RevertSandbox reverts a CRASHED sandbox to its last snapshot and resumes it. It fails with
-	// ErrNoSnapshot when the sandbox never suspended: a revert would give an empty home. It fails with
-	// ErrRevertResume when the revert worked and the resume did not.
-	RevertSandbox(ctx context.Context, workspace, name string) (RevertResult, error)
+	// RevertSandbox reverts a sandbox that is CRASHED, or RUNNING with a dead front, to its last
+	// snapshot and resumes it. RevertActor accepts both states (Substrate cmd/ateapi/internal/controlapi/
+	// workflow_revert.go, revertableStates). It fails with ErrNoSnapshot when the sandbox never
+	// suspended: a revert would give an empty home. It fails with ErrRevertResume for every failure
+	// after the revert worked (the egress policy write and the resume): the sandbox then holds its
+	// snapshot, and the caller must not delete it.
+	RevertSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
 	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
-	// answers and ErrFrontDown when it does not answer in time. It never resumes the sandbox.
+	// answers and ErrFrontDown when it does not. A slow answer of the control API in the same call is
+	// no verdict on the front and is returned as another error. It never resumes the sandbox.
 	CheckFront(ctx context.Context, workspace, name string) error
-	// FaultSandbox forces a running sandbox with a dead front into the crashed state, so that the
-	// next RevertSandbox can run. It does not wait for the sandbox to settle.
-	FaultSandbox(ctx context.Context, workspace, name string) error
-}
-
-// RevertResult says what a revert did.
-type RevertResult struct {
-	Sandbox Sandbox
-	// SnapshotAt is when the snapshot that the sandbox came back from was taken. It is zero when the
-	// driver does not know (for example after a restart of the driver).
-	SnapshotAt time.Time
 }
 
 // ReverterOf returns the [Reverter] of b, or false when b has none. It looks through wrappers like
@@ -415,6 +408,10 @@ type Sandbox struct {
 	// Reason and Message describe the latest condition that is not true, if any.
 	Reason  string
 	Message string
+	// SnapshotAt is when the driver sent the suspend that took the sandbox's newest snapshot. It is set
+	// only on the sandbox that a suspend (or the first-boot seal) returns; zero means no new snapshot
+	// or an unknown time. The reconciler stores it, because the Substrate API gives no snapshot time.
+	SnapshotAt time.Time
 }
 
 // SpecIdentifier is implemented by a backend whose sandboxes carry no labels (Agent Substrate has

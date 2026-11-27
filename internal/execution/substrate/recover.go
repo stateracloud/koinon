@@ -4,7 +4,6 @@ package substrate
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -16,24 +15,28 @@ import (
 )
 
 // The crash and liveness path of issue #1481. A Substrate actor does not signal when pid 1 (the guest
-// front) exits: it stays RUNNING. The driver gives the reconciler three calls: CheckFront finds that
-// the front is silent, FaultSandbox forces the crash, and RevertSandbox goes back to the last
-// snapshot. RevertSandbox keeps the home (about 0.1 s), where a delete and a create gives an empty one.
+// front) exits: it stays RUNNING (lab-verified: pid 1 exit gives no crash signal). The driver gives the
+// reconciler two calls: CheckFront finds that the front is silent, and RevertSandbox goes back to the
+// last snapshot. RevertActor accepts a RUNNING actor (Substrate cmd/ateapi/internal/controlapi/
+// workflow_revert.go, revertableStates), so a dead front is reverted directly. A SuspendActor first would
+// save the broken state over the last good snapshot. RevertSandbox keeps the home (about 0.1 s), where a
+// delete and a create gives an empty one.
 
 var _ execution.Reverter = (*Driver)(nil)
-
-// frontCheckTimeout is how long CheckFront waits for the front to answer. The front is a local
-// process of the guest: a longer wait is a front that does not run.
-const frontCheckTimeout = 5 * time.Second
 
 // exhaustedRetries is how many times a call that Substrate refused with ResourceExhausted is sent again.
 const exhaustedRetries = 4
 
+// controlFastBound is how fast a control API read must be for a deadline on the guest call to count as
+// silence of the front. A control plane that is slow says nothing about the front.
+const controlFastBound = time.Second
+
 // CheckFront implements execution.Reverter. It reads the actor first with the control API, which never
 // resumes it, and calls the guest only when the actor runs. It asks for a process that does not exist:
-// any answer of the front, NotFound included, proves that the front runs. A call that ends with
-// Unavailable or a deadline is no answer. Any other error is not a verdict on the front and is returned
-// as it is.
+// any answer of the front, NotFound included, proves that the front runs. Unavailable from the guest is
+// silence. A deadline is silence only when the control API read of the same call was fast
+// (controlFastBound): with a slow control plane the deadline is not a verdict, and the call returns
+// ErrUnavailable. Any other error is not a verdict on the front and is returned as it is.
 func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 	const op = "CheckFront"
 	k := key{workspace, name}
@@ -51,14 +54,16 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 	defer end()
 	// The proof that the actor runs comes after the registration: a suspend that starts now drains
 	// the call, so the router never resumes the actor for it.
+	read := time.Now()
 	actor, err := d.control.GetActor(gctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
 		return execution.GRPCError(op, err)
 	}
+	controlFast := time.Since(read) < controlFastBound
 	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
 		return fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not running", k, phaseOf(actor))
 	}
-	cctx, cancel := context.WithTimeout(gctx, frontCheckTimeout)
+	cctx, cancel := context.WithTimeout(gctx, d.cfg.FrontCheckTimeout)
 	defer cancel()
 	_, err = d.process.GetProcess(route(cctx, k), &ateenvv1alpha.GetProcessRequest{ProcessId: "koinon-liveness"})
 	switch status.Code(err) {
@@ -71,57 +76,33 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 		if derr := d.routerDown(op, err); derr != nil {
 			return derr // the router is down: that says nothing about the front
 		}
+		if status.Code(err) == codes.DeadlineExceeded && !controlFast {
+			return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s ran into its deadline and the control API is slow too: no verdict on the front", k)
+		}
 		return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer: %v", k, err)
 	}
 	return execution.GRPCError(op, err)
 }
 
-// FaultSandbox implements execution.Reverter: it sends SuspendActor, which a running actor with a dead
-// front does not survive as a snapshot. The router is not used, because a call through it resumes a
-// suspended actor. It drains the gate as suspend does, and it reads the actor after the call: the actor
-// must be CRASHED. A SUSPENDED actor would hold a snapshot of the dead front, and that snapshot would be
-// the last one; the call then fails, and the cap of the reconciler stops the loop. Lab test O7 checks
-// what Substrate does here.
-func (d *Driver) FaultSandbox(ctx context.Context, workspace, name string) error {
-	const op = "FaultSandbox"
-	k := key{workspace, name}
-	g := d.pauseGate(k)
-	defer g.unpause()
-	if err := g.drain(ctx, d.cfg.DrainTimeout); err != nil {
-		return fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
-	}
-	if _, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
-		Actor:   ref(workspace, name),
-		Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
-	}); err != nil {
-		return execution.GRPCError(op, err)
-	}
-	actor, err := d.settled(ctx, op, k)
-	if err != nil {
-		return err
-	}
-	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_CRASHED {
-		return fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after the fault, not crashed", k, phaseOf(actor))
-	}
-	return nil
-}
-
-// RevertSandbox implements execution.Reverter. The actor must be CRASHED. It fails with
-// execution.ErrNoSnapshot when the actor never suspended, because the revert would give an empty home.
-// It sends the egress policy again (resume does), and it sends a call that Substrate refuses with
-// ResourceExhausted again, with a growing wait.
-func (d *Driver) RevertSandbox(ctx context.Context, workspace, name string) (execution.RevertResult, error) {
+// RevertSandbox implements execution.Reverter. The actor must be CRASHED, or RUNNING with a dead front.
+// It fails with execution.ErrNoSnapshot when the actor never suspended, because the revert would give an
+// empty home. It sends the egress policy again (resume does), and it sends a call that Substrate refuses
+// with ResourceExhausted again, with a growing wait. Every failure after RevertActor worked (the policy
+// write, the resume, a failed wakeup probe) is execution.ErrRevertResume: the actor holds its snapshot.
+func (d *Driver) RevertSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error) {
 	const op = "RevertSandbox"
 	k := key{workspace, name}
 	actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)})
 	if err != nil {
-		return execution.RevertResult{}, execution.GRPCError(op, err)
+		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
-	if st := actor.GetStatus().GetState(); st != ateapiv1.ActorState_ACTOR_STATE_CRASHED {
-		return execution.RevertResult{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not crashed", k, phaseOf(actor))
+	switch actor.GetStatus().GetState() {
+	case ateapiv1.ActorState_ACTOR_STATE_CRASHED, ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+	default:
+		return execution.Sandbox{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not crashed or running", k, phaseOf(actor))
 	}
 	if len(actor.GetStatus().GetSnapshots()) == 0 {
-		return execution.RevertResult{}, fail(op, execution.ErrNoSnapshot, "sandbox %s has no snapshot: a revert would give an empty home", k)
+		return execution.Sandbox{}, fail(op, execution.ErrNoSnapshot, "sandbox %s has no snapshot: a revert would give an empty home", k)
 	}
 	// The gate stops the driver's own calls to a guest that is going away.
 	g := d.pauseGate(k)
@@ -131,10 +112,12 @@ func (d *Driver) RevertSandbox(ctx context.Context, workspace, name string) (exe
 		_, err := d.control.RevertActor(ctx, &ateapiv1.RevertActorRequest{Actor: ref(workspace, name)})
 		return err
 	}); err != nil {
-		return execution.RevertResult{}, execution.GRPCError(op, err)
+		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
+	// From here the actor is SUSPENDED at its snapshot. Whatever fails next must not make the caller
+	// delete it.
 	if err := d.ensureEgressPolicy(ctx, op, k); err != nil {
-		return execution.RevertResult{}, err
+		return execution.Sandbox{}, fail(op, execution.ErrRevertResume, "sandbox %s was reverted and its egress policy was not written: %v", k, err)
 	}
 	var resumed *ateapiv1.Actor
 	if err := d.retryExhausted(ctx, func() error {
@@ -142,15 +125,11 @@ func (d *Driver) RevertSandbox(ctx context.Context, workspace, name string) (exe
 		resumed = resp.GetActor()
 		return err
 	}); err != nil {
-		// The revert worked. A failed wakeup probe lands here: the actor is CRASHED again, with the
-		// snapshot kept. The caller reads the state and does not delete it.
-		return execution.RevertResult{}, fail(op, execution.ErrRevertResume, "sandbox %s was reverted and did not resume: %v", k, err)
+		// A failed wakeup probe lands here: the actor is CRASHED again, with the snapshot kept.
+		return execution.Sandbox{}, fail(op, execution.ErrRevertResume, "sandbox %s was reverted and did not resume: %v", k, err)
 	}
 	d.setOwed(k, false)
-	d.mu.Lock()
-	at := d.snapAt[k]
-	d.mu.Unlock()
-	return execution.RevertResult{Sandbox: sandboxFrom(workspace, resumed), SnapshotAt: at}, nil
+	return sandboxFrom(workspace, resumed), nil
 }
 
 // retryExhausted runs call, and runs it again after a wait while it fails with ResourceExhausted (no
@@ -167,34 +146,4 @@ func (d *Driver) retryExhausted(ctx context.Context, call func() error) error {
 		}
 		delay = min(delay*2, 8*d.cfg.PollInterval)
 	}
-}
-
-// CrashKind says what a crash message is about. Koinon decides by the actor state and the message and
-// never by the gRPC code of the call: a failed wakeup probe gives the code Internal for many reasons.
-type CrashKind string
-
-// Crash kinds.
-const (
-	// CrashProbe: the wakeup probe of the front failed.
-	CrashProbe CrashKind = "probe"
-	// CrashImage: the image could not be pulled.
-	CrashImage CrashKind = "image"
-	// CrashOther: any other crash.
-	CrashOther CrashKind = "other"
-)
-
-// ClassifyCrash classifies a sandbox by its phase and its message. Only a sandbox in phase Error has a
-// crash kind; any other phase gives the empty kind.
-func ClassifyCrash(sb execution.Sandbox) CrashKind {
-	if sb.Phase != execution.PhaseError {
-		return ""
-	}
-	m := strings.ToLower(sb.Message)
-	switch {
-	case strings.Contains(m, "probe"):
-		return CrashProbe
-	case execution.ClassifySandboxWait(sb.Reason, sb.Message) == execution.WaitCauseImagePull:
-		return CrashImage
-	}
-	return CrashOther
 }
