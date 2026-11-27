@@ -802,17 +802,17 @@ root payload from two tiers and leaves the third as it was.
   `ip_unprivileged_port_start`). The lab run above started the front with this set. This is true only when runsc
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
-- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
-  Upload code of before #1387 unchanged. Upload under the Substrate driver already fails on main. This is not a
-  result of #1387. Lab, 2026-11-26 (on the head of the #1387 pull request and on `origin/main`): `WriteFile`
-  fails with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root directory "/sandbox"`. The
-  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`. The failure happens before `tar`
-  starts. The home restore in `internal/agentd/checkpoint.go` fails the same way. A second gap exists: the root
-  front writes the archive with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it
-  (`ErrInvalid`). [#1478](https://github.com/stateracloud/koinon/issues/1478) must solve both gaps. The safe
-  design in #1478: run `tar` on exec stdin as the payload user, and turn the file service of the guest front off.
-  The root front never writes into a path that the payload can write. A staging directory that the payload owns
-  lets the payload swap a symlink while the root front writes, so this amendment does not contain one.
+- **Upload with a non-root payload** ([#1478](https://github.com/stateracloud/koinon/issues/1478)). The front stays
+  root but has no `CAP_DAC_OVERRIDE`. Upload under the Substrate driver failed on main before #1478. Lab,
+  2026-11-26: `WriteFile` failed with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root
+  directory "/sandbox"`, and the root front wrote the archive with mode 0600, so `tar` as uid 10001 could not read
+  it. The fix of #1478: the driver runs `mkdir -p`, then `tar -x -f - -C DIR` as the payload user (behind the
+  launcher), and sends the archive on the stdin of `tar`. The guest front starts with the file service off
+  (`EnableFileSystem: false`). The root front never writes into a path that the payload can write. A staging
+  directory that the payload owns would let the payload swap a symlink while the root front writes, so there is
+  none. The command reads every byte of stdin, so the exec stdin cap (about 4 MiB that the command does not read)
+  does not apply. The home restore in `internal/agentd/checkpoint.go` uses the same Upload path. The `-log-dir` of
+  the front must not be a directory that the payload can write.
 - **Lab proof run, 2026-11-26 21:00Z (koinon-lab, gVisor worker).** Head `41a2400b5`, through the real Substrate
   driver and the real front image. The run showed:
   - runsc network mode `--network=sandbox`;
@@ -820,8 +820,9 @@ root payload from two tiers and leaves the third as it was.
   - `/sandbox` at run time is `0:0` mode 777, so the front enters it without `CAP_DAC_READ_SEARCH`;
   - the escape suite: 14 of 18 specs pass (13 of 18 on main). The 4 network failures are the same on main.
     Their cause in the lab setup is not confirmed.
-- **Not proved here.** The Upload and checkpoint restore proof belongs to #1478. The lab run above used the
-  staging design that this amendment later reverted, so it does not cover the current code for these two paths.
+- **Not proved here.** The lab run above used the staging design that #1478 replaced, so it does not cover the
+  current Upload and checkpoint restore code. A lab run of the tar stream (uid 10001 owner on gVisor, a 1 GiB
+  archive, a suspend in the middle of an upload) is still open.
   The maintainer has not yet accepted the 4 network failures in writing, so this change does not close #1387.
   It uses `Refs #1387`.
 
