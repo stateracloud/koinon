@@ -358,8 +358,8 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 		}
 	}, NodeTimeout(6*time.Minute))
 
-	// atenet-egress adds the token on the clear-text rule only (ADR 0120 amendment, item 3): through TLS it
-	// cannot see the header. So an https request to the egress URL must never carry a token.
+	// The driver puts the actor JWT on the clear-text egress rule only (ADR 0120 amendment, item 3): no
+	// https rule carries it. So an https request to the egress URL must never carry a token.
 	It("(h) an https request to the egress URL gets no token", func(ctx SpecContext) {
 		probe := fmt.Sprintf("h-%d", suffix())
 		res := guestGet(ctx, rig.workspace, name, probe, placeholder, true)

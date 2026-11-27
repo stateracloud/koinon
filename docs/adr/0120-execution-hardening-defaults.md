@@ -574,11 +574,14 @@ it (`no_token`).
      has an open `TODO(identity)` to audit that the actor cannot set this header (`egress.go`). A control spec proves
      that a guest that sends its own `x-forwarded-client-cert` does not change the actor that the gateway sees. If it
      fails, the code of #1386 does not ship.
-3. **The gateway URL of a Substrate guest is `http`.** `replace_headers` works on an `HttpRule`, and an
-   `HttpRule` does not match TLS. To replace a header in TLS, Substrate needs an `HttpsRule`. That rule
-   decrypts the request with a gateway CA that the guest must trust, and Koinon does not use it. The chart
-   URL is `http` already. Today `CheckEgressURL` (`internal/agentd/actortoken.go`) accepts `https`. #1386
-   changes it to refuse an `https` egress URL with a clear error.
+3. **The actor JWT goes only to the gateway egress listener, and its URL is `http`.** `replace_headers` works on
+   an `HttpRule` and also on an `HttpsRule` (MITM): the lab test of 2026-11-27 showed that an `HttpsRule` replaces
+   the header too, and then the upstream host, or the guest through an echo, sees the token. So the driver puts
+   `actor_jwt` on exactly one rule: the clear-text `HttpRule` of the code-host egress route, with its one host and
+   its one port. It refuses to write a policy where any other rule, of any kind, has `replace_headers`
+   (`checkActorTokenEffects`, `internal/execution/substrate/egresspolicy.go`). The driver writes no `HttpsRule`.
+   An `https` egress URL would not match that one rule, so `CheckEgressURL` (`internal/agentd/actortoken.go`)
+   refuses it on Substrate with a clear error. The chart URL is `http` already.
 4. **The gateway verifies the Substrate token.** The Substrate verifier replaces the Ed25519 verifier. Until #1094
    removes the OpenShell driver, the execution driver of the install selects the verifier: Substrate gets this
    verifier, and OpenShell keeps the Ed25519 verifier and the interim token file. The second PR of #1386 deletes the
@@ -726,6 +729,15 @@ it (`no_token`).
   confirms it before the code of #1386 depends on it.
 - **Corrections of 2026-11-26.** Lane c1386 read the Substrate source and corrected items 2, 4, 5, 6 and 7,
   the threat model and these open points. Main approved the corrections (issue #1386).
+- **Corrections of 2026-11-27.** The lab test and maintainer decision D4 (PR #1480; the maintainer's research store,
+  `2026-11-27-substrate-verified-reference.md`, section 1.3, C7, C8, N6, I5) corrected item 3: an `HttpsRule`
+  also replaces the header, so "clear-text `HttpRule` only" was false, and the driver now enforces the one rule in
+  code. They confirmed item 6: the atenet-egress token cache is keyed by actor name
+  (`cmd/atenet/internal/router/egress/actorjwt/actorjwt.go`), and a new actor with a reused name got a token with
+  the UID of a deleted actor for up to a third of the lifetime, also after its atespace was made again. So a name
+  is never used again, and the gateway keys an actor by atespace, name and UID together, never by UID alone. The
+  JWT is ES256 only in the lab, with `exp - iat` = 900 s, and the guest cannot steer the identity with fake XFCC or
+  `Ate-Target-Actor` headers.
 
 ### Prior art
 

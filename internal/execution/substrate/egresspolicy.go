@@ -177,6 +177,33 @@ func gatewayRules(routes []GatewayRoute, egress *GatewayRoute) []*ateapiv1.Egres
 	return rules
 }
 
+// checkActorTokenEffects refuses rules where an actor JWT can reach anything other than the Koinon gateway's egress
+// listener (issue #1386; lab test of 2026-11-27). atenet-egress replaces the header on an HttpsRule (MITM) too, and
+// then the upstream host, or the guest through an echo, sees the token. So the effect is allowed on exactly one rule:
+// the clear-text HttpRule of the egress route, with its one host and its one port. Every other rule, of any kind,
+// must carry no replace_headers at all.
+func checkActorTokenEffects(rules []*ateapiv1.EgressRule, egress *GatewayRoute) error {
+	carriers := 0
+	for i, r := range rules {
+		switch {
+		case len(r.GetHttps().GetEffects().GetReplaceHeaders()) > 0:
+			return fmt.Errorf("rule %d: an https rule carries replace_headers; the actor JWT may go only to the gateway egress listener", i)
+		case len(r.GetHttp().GetEffects().GetReplaceHeaders()) == 0:
+			continue
+		}
+		h := r.GetHttp()
+		if egress == nil || !slices.Equal(h.GetHostnames(), []string{egress.Host}) || h.GetPorts().GetAll() != nil ||
+			!slices.Equal(h.GetPorts().GetNumbers(), []int32{int32(egress.Port)}) { //nolint:gosec // ValidateGatewayRoutes keeps the port in 1-65535
+			return fmt.Errorf("rule %d (%v): replace_headers on a rule that is not the gateway egress route", i, h.GetHostnames())
+		}
+		carriers++
+	}
+	if carriers > 1 {
+		return fmt.Errorf("%d rules carry replace_headers; only the one gateway egress rule may", carriers)
+	}
+	return nil
+}
+
 // requireGatewayRoutes fails closed without gateway routes: the driver would have no policy to write, and an
 // actor without one reaches nothing, not even the gateway.
 func (d *Driver) requireGatewayRoutes(op string) error {
@@ -249,6 +276,13 @@ func (d *Driver) ensureEgressPolicy(ctx context.Context, op string, k key) error
 	want := &ateapiv1.EgressPolicy{
 		Metadata: &ateapiv1.ResourceMetadata{Atespace: k.atespace, Name: egressPolicyName},
 		Rules:    d.policyRules(k),
+	}
+	var egress *GatewayRoute
+	if d.cfg.CodeHostEgressRoute != nil && d.accessOf(k).CodeHostEgress {
+		egress = d.cfg.CodeHostEgressRoute
+	}
+	if err := checkActorTokenEffects(want.GetRules(), egress); err != nil {
+		return fail(op, execution.ErrFailedPrecondition, "egress policy: %v (issue #1386)", err)
 	}
 	actor := ref(k.atespace, k.actor)
 	var err error

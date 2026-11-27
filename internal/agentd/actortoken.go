@@ -181,16 +181,16 @@ func (c *Config) checkEgress() error {
 
 // CheckEgressURL checks that s is a plain http or https base URL that holds nothing a guest must not
 // see: it is written into the sandbox's git configuration. koinon-agentd checks its flag with it at
-// start, before it reads any key. With identityOutside (Agent Substrate) it must be http: atenet-egress
-// replaces the actor token header only on its clear-text rule, and through TLS the guest's placeholder
-// would reach the gateway unchanged (ADR 0120 amendment of 2026-11-26, item 3).
+// start, before it reads any key. With identityOutside (Agent Substrate) it must be http: the driver puts
+// the actor JWT on one rule only, the clear-text HttpRule of the egress route, and an https URL does not
+// match it (ADR 0120 amendment for #1386, item 3).
 func CheckEgressURL(s string, identityOutside bool) error {
 	u, err := url.Parse(s)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("agentd: EgressURL must be an http or https URL, got %q", s)
 	}
 	if identityOutside && u.Scheme != "http" {
-		return fmt.Errorf("agentd: EgressURL must be an http URL on Agent Substrate, got %q: the egress layer adds the actor token only to clear-text requests", s)
+		return fmt.Errorf("agentd: EgressURL must be an http URL on Agent Substrate, got %q: the egress policy adds the actor token only on the clear-text egress rule", s)
 	}
 	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") != "" || u.Opaque != "" || u.ForceQuery {
 		return errors.New("agentd: EgressURL must not carry user info, a path, a query or a fragment")

@@ -112,6 +112,62 @@ var _ = Describe("the actor token effect of the egress rule", func() {
 })
 
 // The fake enforces what ateapi enforces for these rules (Substrate 20778a6d, apivalidation and ateapi.proto).
+// The actor JWT may go only to the gateway egress listener (issue #1386, lab test of 2026-11-27): atenet-egress
+// also replaces the header on an https (MITM) rule, and then the upstream host sees the token.
+var _ = Describe("the driver refuses the actor token effect on any other rule", func() {
+	egress := &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort}
+	jwt := func() *ateapiv1.HttpRuleEffects {
+		return &ateapiv1.HttpRuleEffects{ReplaceHeaders: []*ateapiv1.CredentialHeader{{
+			Header: substrate.ActorTokenHeader,
+			ActorJwt: &ateapiv1.ActorJwtSource{
+				Audiences: []string{substrate.ActorTokenAudience}, ExpirationSeconds: substrate.ActorTokenLifetimeSeconds,
+			},
+		}}}
+	}
+	httpRule := func(host string, port int32, fx *ateapiv1.HttpRuleEffects) *ateapiv1.EgressRule {
+		return &ateapiv1.EgressRule{Http: &ateapiv1.HttpRule{
+			Hostnames: []string{host}, Ports: &ateapiv1.Ports{Numbers: []int32{port}}, Effects: fx,
+		}}
+	}
+	gwPort := int32(fakeate.GatewayPort)
+	egPort := int32(fakeate.EgressPort)
+
+	It("accepts the effect on the one gateway egress rule", func() {
+		Expect(substrate.CheckActorTokenEffects([]*ateapiv1.EgressRule{
+			httpRule(fakeate.GatewayHost, gwPort, nil),
+			httpRule(fakeate.GatewayHost, egPort, jwt()),
+		}, egress)).To(Succeed())
+	})
+
+	DescribeTable("refuses",
+		func(rules []*ateapiv1.EgressRule, eg *substrate.GatewayRoute) {
+			Expect(substrate.CheckActorTokenEffects(rules, eg)).To(HaveOccurred())
+		},
+		Entry("an https (MITM) rule with the effect", []*ateapiv1.EgressRule{
+			{Https: &ateapiv1.HttpsRule{Hostnames: []string{"forge.example.test"}, Ports: &ateapiv1.Ports{Numbers: []int32{443}}, Effects: jwt()}},
+		}, egress),
+		Entry("the effect on another host", []*ateapiv1.EgressRule{httpRule("forge.example.test", 80, jwt())}, egress),
+		Entry("the effect on the model and MCP port of the gateway", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, gwPort, jwt())}, egress),
+		Entry("the effect on all ports of the gateway host", []*ateapiv1.EgressRule{{Http: &ateapiv1.HttpRule{
+			Hostnames: []string{fakeate.GatewayHost}, Ports: &ateapiv1.Ports{All: &ateapiv1.AllPorts{}}, Effects: jwt(),
+		}}}, egress),
+		Entry("the effect with no egress route", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt())}, nil),
+		Entry("two rules with the effect", []*ateapiv1.EgressRule{
+			httpRule(fakeate.GatewayHost, egPort, jwt()), httpRule(fakeate.GatewayHost, egPort, jwt()),
+		}, egress),
+	)
+
+	It("does not write a policy that breaks the rule", func(ctx SpecContext) {
+		d, c := newDriver()
+		Expect(d.SetGatewayAccess(ctx, ws, "a", execution.GatewayAccess{CodeHostEgress: true})).To(Succeed())
+		ready(ctx, d, "a")
+		for _, r := range c.EgressPolicy(ws, "a").GetRules() {
+			Expect(r.GetHttps()).To(BeNil(), "the driver writes no https rule")
+		}
+		Expect(substrate.CheckActorTokenEffects(c.EgressPolicy(ws, "a").GetRules(), egress)).To(Succeed())
+	})
+})
+
 var _ = Describe("the fake Substrate admission of effects and actor names", func() {
 	const gw, gwPort, egressPort = fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
 
