@@ -94,11 +94,10 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: The filesystem of /var/lib/ate on a worker node has little free space, so sandbox homes may fail to write
+            summary: The filesystem of /var/lib/ate on a worker node is almost full
             description: >-
               Less than {{ $pr.ateFilesystem.freeBelowPercent }} percent of the filesystem mounted at /var/lib/ate is free on this
-              node. Sandbox homes (gVisor and microVM) live there, and kubelet does not count that space for the sandbox pods, so
-              this rule adds the advice for homes. v0.1 has no hard cap per home (issue #1495). Find the largest homes under
+              node. Sandbox homes (gVisor and microVM) live there, and kubelet does not report that space for the sandbox pods. v0.1 has no hard cap per home (issue #1495). Find the largest homes under
               /var/lib/ate/actors, then stop or clean those sandboxes, or increase the size of the filesystem. A node whose
               /var/lib/ate shares the root filesystem has no series for this mount point, so this alert stays silent
               there: the preflight warns about that case.

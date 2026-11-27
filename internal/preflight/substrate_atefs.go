@@ -172,31 +172,28 @@ func (c *Checker) checkAteFS(ctx context.Context) Result {
 	if len(skipped) > 0 {
 		note = "; not probed: " + strings.Join(skipped, ", ")
 	}
-	switch {
-	case len(shared) > 0:
-		return Result{
-			Check: check, Status: Warn,
-			Message: fmt.Sprintf("/var/lib/ate is on the same filesystem as the node root or the kubelet filesystem on %s: a sandbox home that becomes full fills that filesystem, "+
-				"and kubelet reports 0 bytes used for it%s", strings.Join(shared, ", "), note),
-			Fix: AteFSFix,
-		}
-	case len(missing) > 0:
-		return Result{
-			Check: check, Status: Warn,
-			Message: fmt.Sprintf("/var/lib/ate does not exist yet on %s, so its filesystem is not checked%s", strings.Join(missing, ", "), note),
-			Fix:     "Mount a filesystem at /var/lib/ate on these nodes before the first worker starts, then run the check again.",
-		}
-	case len(broken) > 0:
-		return Result{
-			Check: check, Status: Warn,
-			Message: fmt.Sprintf("the /var/lib/ate probe pod did not report on %d of %d nodes: %s%s", len(broken), probed, strings.Join(broken, "; "), note),
-			Fix:     "fix the cause above then run the check again",
-		}
-	case probed == 0:
+	if probed == 0 {
 		return Result{
 			Check: check, Status: Warn, Message: "no node could be probed" + note,
 			Fix: "pass --substrate-node-selector with the labels of the worker nodes, and make sure they are Ready",
 		}
+	}
+	var parts, fixes []string
+	if len(shared) > 0 {
+		parts = append(parts, fmt.Sprintf("/var/lib/ate is on the same filesystem as the node root or the kubelet filesystem on %s: "+
+			"a sandbox home that becomes full fills that filesystem, and kubelet reports 0 bytes used for it", strings.Join(shared, ", ")))
+		fixes = append(fixes, AteFSFix)
+	}
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("/var/lib/ate does not exist yet on %s, so its filesystem is not checked", strings.Join(missing, ", ")))
+		fixes = append(fixes, "Mount a filesystem at /var/lib/ate on the nodes where it does not exist before the first worker starts. Then run the check again.")
+	}
+	if len(broken) > 0 {
+		parts = append(parts, fmt.Sprintf("the /var/lib/ate probe pod did not report on %d of %d nodes: %s", len(broken), probed, strings.Join(broken, "; ")))
+		fixes = append(fixes, "Fix the cause above. Then run the check again.")
+	}
+	if len(parts) > 0 {
+		return Result{Check: check, Status: Warn, Message: strings.Join(parts, "; ") + note, Fix: strings.Join(fixes, " ")}
 	}
 	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("/var/lib/ate has a filesystem of its own on %d node(s)%s", probed, note)}
 }

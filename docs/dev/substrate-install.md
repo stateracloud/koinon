@@ -254,7 +254,7 @@ Why the node needs this:
   directory in the same place. `/var/lib/ate` is a hostPath that kubelet does not see.
 - A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it in the pod stats of
   the sandbox. When `/var/lib/ate` shares the node filesystem, kubelet sees the free space fall and sets disk
-  pressure. It then evicts pods by their reported use, so it evicts the wrong pods and the large home stays.
+  pressure. The sandbox pods report no use for the home, so the eviction does not target the large home.
 - Substrate sets the hostPath of the worker in its own code, and one worker can hold up to 1000 actors. A volume
   for each worker therefore cannot cap one home.
 
@@ -265,10 +265,10 @@ What to do on each worker node:
 2. You can also mount a separate disk at `/var/lib/ate/snapshots`. Snapshot data then cannot fill the home
    filesystem. See Substrate `docs/guides/node-storage.md`.
 3. Make the filesystem large enough for the homes that you expect, plus a margin, because no cap limits one home.
-   How you mount it depends on the node OS: on kubeadm nodes, use an `/etc/fstab` entry or a systemd mount unit.
-   On Talos, `/var` is the only writable filesystem, and a Talos user volume mounts under `/var/mnt`. The mount
-   at `/var/lib/ate` then needs a bind mount from that path (a kubelet `extraMounts` entry). This Talos path is
-   not verified on a cluster yet.
+   How you mount it depends on the node OS. On kubeadm nodes, use an `/etc/fstab` entry or a systemd mount unit.
+   There is no tested method for Talos yet. On Talos, `/var` is the only writable filesystem, and a Talos user
+   volume mounts under `/var/mnt`. Do not use a kubelet `extraMounts` entry for this: it changes the mount
+   namespace of the kubelet only, and the data of the home stays on `/var`.
 
 The check compares device numbers. A btrfs subvolume or a ZFS dataset has its own device number, but it shares
 the space of its pool. The preflight does not see this case, so it reports no warning for it.
@@ -283,7 +283,8 @@ How Koinon helps you check it:
   for 10 minutes (`metrics.prometheusRule.ateFilesystem`). It reads the series `node_filesystem_avail_bytes` and
   `node_filesystem_size_bytes` of node-exporter for the mount point `/var/lib/ate`. So it needs node-exporter on the
   worker nodes, and it stays silent on a node where `/var/lib/ate` is not a mount point of its own. That is the case
-  that the preflight warns about.
+  that the preflight warns about. The preflight runs at install and on request only. Run
+  `koinon-api preflight --driver substrate` again after you add a worker node.
 - **The leak-guard byte alert does not cover this.** The byte cap of ADR 0091 (issue #1058) counts the bytes of
   MCP calls that leave a run. It does not see the disk of a node. It cannot fire on a full home, so the node-disk
   alert above is a separate rule.
