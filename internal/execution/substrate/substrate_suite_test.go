@@ -70,7 +70,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	}
 	if c.GatewayRoutes == nil && !noGatewayRoutes {
 		c.GatewayRoutes = gatewayRoutes
-		c.CodeHostEgressRoute = &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort}
+		c.CodeHostEgressRoute = ptr(substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort))
 	}
 	if c.ContentDigest == nil && !noContentDigest {
 		// The fake has no object store: the object's content is its address.
@@ -83,7 +83,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 }
 
 // gatewayRoutes is the one gateway route of the specs' driver.
-var gatewayRoutes = []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}}
+var gatewayRoutes = []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)}
 
 // img is the actor image of the specs: the driver refuses one that is not pinned by digest.
 const img = "img" + digest

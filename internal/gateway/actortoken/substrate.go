@@ -26,8 +26,12 @@ import (
 )
 
 // The Substrate verifier checks the actor JWT that Substrate's ate-api-server mints
-// (MintActorJwt) and atenet-egress puts in the Koinon-Actor-Token header, outside the guest (ADR
-// 0120, amendment for issue #1386). The gateway holds no private key: it reads the issuer's
+// (MintActorJwt) and atenet-egress puts in the request, outside the guest (ADR 0120, amendments for
+// issues #1386 and #1489): in the Koinon-Actor-Token header for the egress listener, and in the
+// Authorization header for the model and MCP listeners. Each listener has its own audience
+// (AudienceModel, AudienceMCP, AudienceEgress), and its verifier accepts only a token with exactly
+// that audience; WithAudience makes the verifier of another listener with the same key cache. The
+// gateway holds no private key: it reads the issuer's
 // public keys from the issuer's OIDC discovery document and JWK set, over TLS checked against a
 // configured CA bundle only.
 //
@@ -106,7 +110,7 @@ var (
 	ErrSignature error = &reasonError{"signature"}
 	// ErrIssuer means the iss claim is not the configured issuer.
 	ErrIssuer error = &reasonError{"issuer"}
-	// ErrAudience means the aud claim does not contain Audience.
+	// ErrAudience means the aud claim is not exactly the one audience of the verifier's listener.
 	ErrAudience error = &reasonError{"audience"}
 	// ErrExpired means exp is in the past (beyond the leeway).
 	ErrExpired error = &reasonError{"expired"}
@@ -152,6 +156,11 @@ type SubstrateConfig struct {
 	CAFile string
 	// RootCAs is the same as CAFile, as a pool.
 	RootCAs *x509.CertPool
+	// Audience is the audience of the listener this verifier checks: AudienceModel, AudienceMCP or
+	// AudienceEgress (issue #1489). A token must carry exactly this one audience, so a token that
+	// atenet-egress made for one listener is refused on the others. WithAudience gives a verifier for
+	// another listener that shares the key cache.
+	Audience string
 	// Now is the clock. Nil means time.Now. It is for tests.
 	Now func() time.Time
 }
@@ -164,8 +173,16 @@ type SubstrateClaims struct {
 	Expiry    time.Time
 }
 
-// SubstrateVerifier checks Substrate actor JWTs. It is safe for concurrent use.
+// SubstrateVerifier checks Substrate actor JWTs for one listener audience. It is safe for concurrent
+// use.
 type SubstrateVerifier struct {
+	*substrateKeys
+	audience string
+}
+
+// substrateKeys is the issuer and its key cache. The verifiers of the listeners of one process share
+// it (WithAudience), so a key rotation or an issuer outage is seen the same on every listener.
+type substrateKeys struct {
 	ctx       context.Context
 	issuer    string
 	discovery string
@@ -187,6 +204,9 @@ func NewSubstrateVerifier(ctx context.Context, cfg SubstrateConfig) (*SubstrateV
 	if err := checkIssuerURL(cfg.Issuer); err != nil {
 		return nil, err
 	}
+	if err := checkAudience(cfg.Audience); err != nil {
+		return nil, err
+	}
 	pool, err := rootPool(cfg)
 	if err != nil {
 		return nil, err
@@ -196,12 +216,35 @@ func NewSubstrateVerifier(ctx context.Context, cfg SubstrateConfig) (*SubstrateV
 		now = time.Now
 	}
 	return &SubstrateVerifier{
-		ctx:       ctx,
-		issuer:    cfg.Issuer,
-		discovery: strings.TrimSuffix(cfg.Issuer, "/") + wellKnownPath,
-		client:    newIssuerClient(pool),
-		now:       now,
+		substrateKeys: &substrateKeys{
+			ctx:       ctx,
+			issuer:    cfg.Issuer,
+			discovery: strings.TrimSuffix(cfg.Issuer, "/") + wellKnownPath,
+			client:    newIssuerClient(pool),
+			now:       now,
+		},
+		audience: cfg.Audience,
 	}, nil
+}
+
+// WithAudience returns a verifier for the listener of audience that shares v's issuer and key cache.
+func (v *SubstrateVerifier) WithAudience(audience string) (*SubstrateVerifier, error) {
+	if err := checkAudience(audience); err != nil {
+		return nil, err
+	}
+	return &SubstrateVerifier{substrateKeys: v.substrateKeys, audience: audience}, nil
+}
+
+// Audience returns the one audience v accepts.
+func (v *SubstrateVerifier) Audience() string { return v.audience }
+
+func checkAudience(audience string) error {
+	for _, a := range listenerAudiences {
+		if audience == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("actortoken: the Substrate audience %q is not a gateway listener audience (%s)", audience, strings.Join(listenerAudiences[:], ", "))
 }
 
 func checkIssuerURL(issuer string) error {
@@ -344,7 +387,8 @@ func (v *SubstrateVerifier) check(w *substrateWire) (SubstrateClaims, error) {
 	if w.Issuer != v.issuer {
 		return SubstrateClaims{}, ErrIssuer
 	}
-	if !w.Audience.Contains(Audience) {
+	// Exactly one audience, the listener's: a token with more audiences would pass on each of them.
+	if len(w.Audience) != 1 || w.Audience[0] != v.audience {
 		return SubstrateClaims{}, ErrAudience
 	}
 	if w.Expiry == nil || w.IssuedAt == nil || w.NotBefore == nil || w.ID == "" {
@@ -383,7 +427,7 @@ func isNull(raw json.RawMessage) bool {
 // are older than KeyMaxAge, or when kid is unknown, but at most once per KeyRefetchInterval. The
 // fetch runs without the lock, so requests with a known kid do not wait for it; a request that
 // needs the fetch in flight waits for it to end.
-func (v *SubstrateVerifier) key(kid string) (jose.JSONWebKey, error) {
+func (v *substrateKeys) key(kid string) (jose.JSONWebKey, error) {
 	v.mu.Lock()
 	now := v.now()
 	if k, ok := v.keys[kid]; ok && v.freshLocked(now) {
@@ -427,7 +471,7 @@ func (v *SubstrateVerifier) key(kid string) (jose.JSONWebKey, error) {
 }
 
 // freshLocked reports whether the cached keys are younger than KeyMaxAge. v.mu must be held.
-func (v *SubstrateVerifier) freshLocked(now time.Time) bool {
+func (v *substrateKeys) freshLocked(now time.Time) bool {
 	return v.keys != nil && now.Sub(v.fetchedAt) < KeyMaxAge
 }
 
@@ -438,7 +482,7 @@ type discoveryDoc struct {
 
 // fetchKeys reads the discovery document and the JWK set and returns the usable signing keys by
 // kid. Any failure is an error; the caller then keeps no fresh keys.
-func (v *SubstrateVerifier) fetchKeys() (map[string]jose.JSONWebKey, error) {
+func (v *substrateKeys) fetchKeys() (map[string]jose.JSONWebKey, error) {
 	var d discoveryDoc
 	if err := v.fetchJSON(v.discovery, &d); err != nil {
 		return nil, err
@@ -483,7 +527,7 @@ func usableKey(k jose.JSONWebKey) bool {
 	return ok && pk.Curve == elliptic.P256()
 }
 
-func (v *SubstrateVerifier) fetchJSON(target string, out any) error {
+func (v *substrateKeys) fetchJSON(target string, out any) error {
 	ctx, cancel := context.WithTimeout(v.ctx, fetchTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)

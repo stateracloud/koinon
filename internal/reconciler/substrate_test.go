@@ -100,9 +100,12 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		ctl = ateapiv1.NewControlClient(control)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-			GatewayRoutes:       []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
-			CodeHostEgressRoute: &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort},
-			GuestSigner:         fakeate.Signer(),
+			GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
+			CodeHostEgressRoute: func() *substrate.GatewayRoute {
+				r := substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort)
+				return &r
+			}(),
+			GuestSigner: fakeate.Signer(),
 			// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
@@ -212,9 +215,18 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(cl.EgressAllowed(ws, plainActor, gw, egressPort)).To(BeFalse(), "an actor without a code-host grant has no route to the egress listener")
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, egressPort)).To(BeTrue(), "the agent with the grant")
-		// Issue #1386: only an agent with a forge row can reach the egress listener, so a run that does not
-		// wait for its forge row needs no wait for its actor either (forgeWant).
-		Expect(forgeRows(ctx, plain.ID)).To(BeZero(), "no egress listener, no forge row")
+		// Issue #1489: the gateway checks the actor JWT on the model and MCP listeners too, so on Substrate
+		// every active agent has a row that waits for its actor's revision, also without a forge grant.
+		Expect(forgeRows(ctx, plain.ID)).To(Equal(1), "an actor-only row, for the model and MCP listeners")
+		// The first pass records the actor's UID; the State carries the actor from the next pass.
+		pass(ctx)
+		var rev pgtype.Int8
+		var served bool
+		var failure string
+		Expect(pool.QueryRow(ctx, "SELECT state_revision, served_at IS NOT NULL, failure FROM gateway_agent_forge WHERE org_id = $1 AND agent_id = $2", org, plain.ID).Scan(&rev, &served, &failure)).To(Succeed())
+		Expect(rev.Valid && rev.Int64 > 0).To(BeTrue(), "the row waits for the revision that carries the actor")
+		Expect(failure).To(BeEmpty())
+		Expect(served).To(BeTrue(), "the fake gateway acked the revision")
 		Expect(forgeRows(ctx, forge.ID)).To(Equal(1))
 		creates, deletes := cl.Calls("CreateActor"), cl.Calls("DeleteActor")
 
@@ -228,7 +240,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(cl.EgressAllowed(ws, forgeActor, gw, gwPort)).To(BeTrue())
 		Expect(cl.Calls("CreateActor")).To(Equal(creates), "the grant is not part of the sandbox spec")
 		Expect(cl.Calls("DeleteActor")).To(Equal(deletes))
-		Expect(forgeRows(ctx, forge.ID)).To(BeZero(), "the listener and the forge row go together")
+		Expect(forgeRows(ctx, forge.ID)).To(Equal(1), "the row stays, for the actor only (issue #1489)")
 		Expect(cl.State(ws, forgeActor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	})
 

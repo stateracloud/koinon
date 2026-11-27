@@ -4,7 +4,7 @@
 # Chart assertions: execution.driver (ADR 0119, #1088). Sourced in order by hack/chart-check.sh; it
 # uses that script's helpers (render, has, lacks, ...).
 
-sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
+sub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
@@ -104,6 +104,11 @@ for gm in standalone kubernetes; do
 	[ "$gm" = standalone ] || gwargs+=(--set gateway.mcp.driver=agentgateway)
 	has "openshell driver admits OpenShell's namespaces ($gm)" 'openshell.ai/managed-by: openshell' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "openshell driver has no Substrate peer ($gm)" 'ate-system' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+	if [ "$gm" = kubernetes ]; then
+		# Substrate needs koinon-gateway on the model and MCP paths (issue #1489), and that needs standalone mode.
+		if render "${sub[@]}" "${gwargs[@]}" >/dev/null 2>&1; then fail "substrate must not render in kubernetes mode"; fi
+		continue
+	fi
 	has "substrate admits Substrate's namespace ($gm)" 'kubernetes.io/metadata.name: ate-system' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "substrate has no openshell.ai/managed-by peer ($gm)" 'openshell.ai/managed-by' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 done

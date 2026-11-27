@@ -29,8 +29,21 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// Audience is the audience of every actor token: the Koinon gateway.
+// Audience is the audience of every Ed25519 actor token (the OpenShell driver): the Koinon gateway.
 const Audience = "koinon-gateway"
+
+// The audiences of the Substrate actor JWT, one for each koinon-gateway listener (issue #1489, ADR 0120
+// amendment of 2026-11-27). atenet-egress mints the token of each gateway rule with the audience of that
+// listener, and each listener accepts only its own: a token copied from one listener's request is
+// refused on another.
+const (
+	AudienceModel  = "koinon-gateway-model"
+	AudienceMCP    = "koinon-gateway-mcp"
+	AudienceEgress = "koinon-gateway-egress"
+)
+
+// listenerAudiences are the Substrate listener audiences.
+var listenerAudiences = [...]string{AudienceModel, AudienceMCP, AudienceEgress}
 
 // Lifetimes (ADR 0120 section 1.2).
 const (

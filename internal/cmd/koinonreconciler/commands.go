@@ -89,6 +89,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-mcp-url":                      "gateway.mcpUrl",
+	"gateway-model-url":                    "gateway.modelUrl",
 	"gateway-config-map":                   "gateway.configMap",
 	"gateway-deployment":                   "gateway.deployment",
 	"gateway-stats-url":                    "gateway.statsUrl",
@@ -297,6 +298,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
+	fs.StringVar(&c.gatewayModelURL, "gateway-model-url", "", "koinon-gateway's model listener URL as sandboxes reach it (gateway.model.driver=koinon); required with --execution-driver=substrate, where agent model calls go there and the listener checks the actor JWT (issue #1489)")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "koinon-gateway's MCP listener URL as sandboxes reach it (gateway.mcp.driver=koinon): agent sandboxes may send /mcp there and not to agentgateway, and the MCP prober lists tools there; empty: agentgateway serves /mcp")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
 	fs.StringVar(&c.gatewayDeployment, "gateway-deployment", "", "standalone agentgateway Deployment that owns the ConfigMap when the reconciler creates it")

@@ -17,110 +17,127 @@ import (
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 )
 
-// The actor token effect of the egress rule (issue #1386): Substrate puts a JWT for the actor in the header, so
-// the guest holds no token.
-var _ = Describe("the actor token effect of the egress rule", func() {
+// The actor token effect of the gateway rules (issues #1386 and #1489): Substrate puts a JWT for the actor, for the
+// audience of the one listener, in the listener's header, so the guest holds no token.
+var _ = Describe("the actor token effect of the gateway rules", func() {
 	const gw, gwPort, egressPort = fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
+	const mcpHost = "mcp.koinon.svc.cluster.local"
 	grant := execution.GatewayAccess{CodeHostEgress: true}
 
-	It("repeats the header and audience of the gateway", func() {
-		Expect(substrate.ActorTokenHeader).To(Equal(route.TokenHeader))
-		Expect(substrate.ActorTokenAudience).To(Equal(actortoken.Audience))
-	})
-
-	It("gives the egress rule one actor_jwt header and the model and MCP rules none", func(ctx SpecContext) {
-		d, c := newDriver()
-		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
-		ready(ctx, d, "a")
-
-		rules := c.EgressPolicy(ws, "a").GetRules()
-		Expect(rules).To(HaveLen(2), "the egress route is its own rule, on the same host with another port")
-		Expect(rules[0].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(gwPort)}))
-		Expect(rules[0].GetHttp().GetEffects()).To(BeNil(), "the model and MCP rules hold no effect")
-		Expect(rules[1].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(egressPort)}))
-		hdrs := rules[1].GetHttp().GetEffects().GetReplaceHeaders()
+	jwtOf := func(c *fakeate.Cluster, host string, port uint32) *ateapiv1.CredentialHeader {
+		GinkgoHelper()
+		hdrs := c.EgressEffects(ws, "a", host, port).GetReplaceHeaders()
 		Expect(hdrs).To(HaveLen(1))
-		Expect(hdrs[0].GetHeader()).To(Equal("Koinon-Actor-Token"))
-		Expect(hdrs[0].GetPrefix()).To(BeEmpty())
 		Expect(hdrs[0].GetCredentialUri()).To(BeEmpty())
-		Expect(hdrs[0].GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway"}))
 		Expect(hdrs[0].GetActorJwt().GetExpirationSeconds()).To(Equal(int64(900)))
+		return hdrs[0]
+	}
 
-		By("the rule that decides for each port is the one with the effect")
-		Expect(c.EgressEffects(ws, "a", gw, egressPort)).NotTo(BeNil())
-		Expect(c.EgressEffects(ws, "a", gw, gwPort)).To(BeNil())
-		Expect(c.EgressEffects(ws, "a", "github.com", 443)).To(BeNil())
+	It("repeats the header and the listener audiences of the gateway", func() {
+		Expect(substrate.ActorTokenHeader).To(Equal(route.TokenHeader))
+		Expect(substrate.AudienceModel).To(Equal(actortoken.AudienceModel))
+		Expect(substrate.AudienceMCP).To(Equal(actortoken.AudienceMCP))
+		Expect(substrate.AudienceEgress).To(Equal(actortoken.AudienceEgress))
+		Expect(substrate.AudienceEgress).NotTo(Equal(actortoken.Audience), "the Ed25519 audience is not a listener audience")
 	})
 
-	It("gives an actor without a code-host grant no effect at all", func(ctx SpecContext) {
-		d, c := newDriver()
-		ready(ctx, d, "a")
-		for _, r := range c.EgressPolicy(ws, "a").GetRules() {
-			Expect(r.GetHttp().GetEffects()).To(BeNil())
-		}
-	})
-
-	It("writes the same rules for the same routes, in a fixed order", func(ctx SpecContext) {
+	It("gives each listener its own rule, header and audience", func(ctx SpecContext) {
 		d, c := newDriver(substrate.Config{
-			GatewayRoutes:       []substrate.GatewayRoute{{Host: "mcp.koinon.svc.cluster.local", Port: 8080}, {Host: gw, Port: gwPort}},
-			CodeHostEgressRoute: &substrate.GatewayRoute{Host: gw, Port: egressPort},
+			GatewayRoutes:       []substrate.GatewayRoute{substrate.MCPRoute(mcpHost, 8080), substrate.ModelRoute(gw, gwPort)},
+			CodeHostEgressRoute: ptr(substrate.EgressRoute(gw, egressPort)),
 		})
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
 		ready(ctx, d, "a")
+
 		rules := c.EgressPolicy(ws, "a").GetRules()
-		Expect(rules).To(HaveLen(3))
+		Expect(rules).To(HaveLen(3), "one rule for each host and port")
 		Expect(rules[0].GetHttp().GetHostnames()).To(Equal([]string{gw}))
 		Expect(rules[0].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(gwPort)}))
 		Expect(rules[1].GetHttp().GetPorts().GetNumbers()).To(Equal([]int32{int32(egressPort)}))
-		Expect(rules[2].GetHttp().GetHostnames()).To(Equal([]string{"mcp.koinon.svc.cluster.local"}))
-		Expect(c.EgressEffects(ws, "a", "mcp.koinon.svc.cluster.local", 8080)).To(BeNil())
+		Expect(rules[2].GetHttp().GetHostnames()).To(Equal([]string{mcpHost}))
+
+		m := jwtOf(c, gw, gwPort)
+		Expect(m.GetHeader()).To(Equal("Authorization"))
+		Expect(m.GetPrefix()).To(Equal("Bearer "))
+		Expect(m.GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-model"}))
+		p := jwtOf(c, mcpHost, 8080)
+		Expect(p.GetHeader()).To(Equal("Authorization"))
+		Expect(p.GetPrefix()).To(Equal("Bearer "))
+		Expect(p.GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-mcp"}))
+		e := jwtOf(c, gw, egressPort)
+		Expect(e.GetHeader()).To(Equal("Koinon-Actor-Token"))
+		Expect(e.GetPrefix()).To(BeEmpty())
+		Expect(e.GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-egress"}))
+
+		Expect(c.EgressEffects(ws, "a", "github.com", 443)).To(BeNil())
 	})
 
-	It("updates a policy that has the egress rule without the effect in place", func(ctx SpecContext) {
+	It("gives an actor without a code-host grant no egress rule, and the model rule its effect", func(ctx SpecContext) {
+		d, c := newDriver()
+		ready(ctx, d, "a")
+		rules := c.EgressPolicy(ws, "a").GetRules()
+		Expect(rules).To(HaveLen(1))
+		Expect(jwtOf(c, gw, gwPort).GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-model"}))
+		Expect(c.EgressEffects(ws, "a", gw, egressPort)).To(BeNil())
+	})
+
+	It("writes the same rules for the same routes, in a fixed order", func(ctx SpecContext) {
+		cfg := substrate.Config{
+			GatewayRoutes:       []substrate.GatewayRoute{substrate.MCPRoute(mcpHost, 8080), substrate.ModelRoute(gw, gwPort)},
+			CodeHostEgressRoute: ptr(substrate.EgressRoute(gw, egressPort)),
+		}
+		d1, c1 := newDriver(cfg)
+		cfg.GatewayRoutes = []substrate.GatewayRoute{cfg.GatewayRoutes[1], cfg.GatewayRoutes[0]}
+		d2, c2 := newDriver(cfg)
+		for _, d := range []*substrate.Driver{d1, d2} {
+			Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+			ready(ctx, d, "a")
+		}
+		Expect(substrate.RulesEqual(c1.EgressPolicy(ws, "a").GetRules(), c2.EgressPolicy(ws, "a").GetRules())).To(BeTrue())
+	})
+
+	It("updates a policy of an earlier driver in place", func(ctx SpecContext) {
 		d, c := newDriver()
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
 		ready(ctx, d, "a")
 		_, err := d.StopSandbox(ctx, ws, "a")
 		Expect(err).NotTo(HaveOccurred())
 
-		By("a policy of the earlier driver: the same hosts and ports, no effect")
-		c.SetEgressPolicy(ws, "a", []*ateapiv1.EgressRule{{Http: &ateapiv1.HttpRule{
-			Hostnames: []string{gw}, Ports: &ateapiv1.Ports{Numbers: []int32{int32(gwPort), int32(egressPort)}},
-		}}})
-		before := c.PolicyWrites(ws, "a")
-		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
-		Expect(c.PolicyWrites(ws, "a")).To(Equal(before+1), "written in place")
-		Expect(c.Calls("CreateActor")).To(Equal(1), "no new actor")
-		Expect(c.EgressEffects(ws, "a", gw, egressPort)).NotTo(BeNil())
-
-		By("an equal policy is left alone")
-		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
-		Expect(c.PolicyWrites(ws, "a")).To(Equal(before + 1))
-
-		By("a changed effect is put back too")
+		By("a policy of the PR 1480 driver: no effect on the model rule, the Ed25519 audience on the egress rule")
 		c.SetEgressPolicy(ws, "a", []*ateapiv1.EgressRule{
 			{Http: &ateapiv1.HttpRule{Hostnames: []string{gw}, Ports: &ateapiv1.Ports{Numbers: []int32{int32(gwPort)}}}},
 			{Http: &ateapiv1.HttpRule{Hostnames: []string{gw}, Ports: &ateapiv1.Ports{Numbers: []int32{int32(egressPort)}}, Effects: &ateapiv1.HttpRuleEffects{
 				ReplaceHeaders: []*ateapiv1.CredentialHeader{{Header: "Koinon-Actor-Token", ActorJwt: &ateapiv1.ActorJwtSource{
-					Audiences: []string{"koinon-gateway"}, ExpirationSeconds: 3600,
+					Audiences: []string{"koinon-gateway"}, ExpirationSeconds: 900,
 				}}},
 			}}},
 		})
+		before := c.PolicyWrites(ws, "a")
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
-		Expect(c.EgressEffects(ws, "a", gw, egressPort).GetReplaceHeaders()[0].GetActorJwt().GetExpirationSeconds()).To(Equal(int64(900)))
+		Expect(c.PolicyWrites(ws, "a")).To(Equal(before+1), "written in place")
+		Expect(c.Calls("CreateActor")).To(Equal(1), "no new actor")
+		Expect(jwtOf(c, gw, gwPort).GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-model"}))
+		Expect(jwtOf(c, gw, egressPort).GetActorJwt().GetAudiences()).To(Equal([]string{"koinon-gateway-egress"}))
+
+		By("an equal policy is left alone")
+		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
+		Expect(c.PolicyWrites(ws, "a")).To(Equal(before + 1))
 	})
 })
 
 // The fake enforces what ateapi enforces for these rules (Substrate 20778a6d, apivalidation and ateapi.proto).
-// The actor JWT may go only to the gateway egress listener (issue #1386, lab test of 2026-11-27): atenet-egress
-// also replaces the header on an https (MITM) rule, and then the upstream host sees the token.
+// The actor JWT may go only to a gateway listener, with that listener's own effect (issues #1386 and #1489, lab
+// test of 2026-11-27): atenet-egress also replaces the header on an https (MITM) rule, and then the upstream host
+// sees the token.
 var _ = Describe("the driver refuses the actor token effect on any other rule", func() {
-	egress := &substrate.GatewayRoute{Host: fakeate.GatewayHost, Port: fakeate.EgressPort}
-	jwt := func() *ateapiv1.HttpRuleEffects {
+	model := substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)
+	egress := substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort)
+	routes := []substrate.GatewayRoute{model, egress}
+	jwt := func(r substrate.GatewayRoute) *ateapiv1.HttpRuleEffects {
 		return &ateapiv1.HttpRuleEffects{ReplaceHeaders: []*ateapiv1.CredentialHeader{{
-			Header: substrate.ActorTokenHeader,
+			Header: r.Header, Prefix: r.Prefix,
 			ActorJwt: &ateapiv1.ActorJwtSource{
-				Audiences: []string{substrate.ActorTokenAudience}, ExpirationSeconds: substrate.ActorTokenLifetimeSeconds,
+				Audiences: []string{r.Audience}, ExpirationSeconds: substrate.ActorTokenLifetimeSeconds,
 			},
 		}}}
 	}
@@ -131,30 +148,39 @@ var _ = Describe("the driver refuses the actor token effect on any other rule", 
 	}
 	gwPort := int32(fakeate.GatewayPort)
 	egPort := int32(fakeate.EgressPort)
+	swapped := func(r substrate.GatewayRoute, aud string) substrate.GatewayRoute { r.Audience = aud; return r }
 
-	It("accepts the effect on the one gateway egress rule", func() {
+	It("accepts each listener's own effect", func() {
 		Expect(substrate.CheckActorTokenEffects([]*ateapiv1.EgressRule{
-			httpRule(fakeate.GatewayHost, gwPort, nil),
-			httpRule(fakeate.GatewayHost, egPort, jwt()),
-		}, egress)).To(Succeed())
+			httpRule(fakeate.GatewayHost, gwPort, jwt(model)),
+			httpRule(fakeate.GatewayHost, egPort, jwt(egress)),
+		}, routes)).To(Succeed())
 	})
 
 	DescribeTable("refuses",
-		func(rules []*ateapiv1.EgressRule, eg *substrate.GatewayRoute) {
-			Expect(substrate.CheckActorTokenEffects(rules, eg)).To(HaveOccurred())
+		func(rules []*ateapiv1.EgressRule, rs []substrate.GatewayRoute) {
+			Expect(substrate.CheckActorTokenEffects(rules, rs)).To(HaveOccurred())
 		},
 		Entry("an https (MITM) rule with the effect", []*ateapiv1.EgressRule{
-			{Https: &ateapiv1.HttpsRule{Hostnames: []string{"forge.example.test"}, Ports: &ateapiv1.Ports{Numbers: []int32{443}}, Effects: jwt()}},
-		}, egress),
-		Entry("the effect on another host", []*ateapiv1.EgressRule{httpRule("forge.example.test", 80, jwt())}, egress),
-		Entry("the effect on the model and MCP port of the gateway", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, gwPort, jwt())}, egress),
+			{Https: &ateapiv1.HttpsRule{Hostnames: []string{"forge.example.test"}, Ports: &ateapiv1.Ports{Numbers: []int32{443}}, Effects: jwt(model)}},
+		}, routes),
+		Entry("the effect on another host", []*ateapiv1.EgressRule{httpRule("forge.example.test", 80, jwt(model))}, routes),
+		Entry("the egress audience on the model listener", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, gwPort, jwt(swapped(model, substrate.AudienceEgress)))}, routes),
+		Entry("the model audience on the egress listener", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt(swapped(egress, substrate.AudienceModel)))}, routes),
+		Entry("the Ed25519 audience", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt(swapped(egress, "koinon-gateway")))}, routes),
+		Entry("the egress header on the model listener", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, gwPort, jwt(substrate.GatewayRoute{
+			Header: substrate.ActorTokenHeader, Audience: substrate.AudienceModel,
+		}))}, routes),
 		Entry("the effect on all ports of the gateway host", []*ateapiv1.EgressRule{{Http: &ateapiv1.HttpRule{
-			Hostnames: []string{fakeate.GatewayHost}, Ports: &ateapiv1.Ports{All: &ateapiv1.AllPorts{}}, Effects: jwt(),
-		}}}, egress),
-		Entry("the effect with no egress route", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt())}, nil),
-		Entry("two rules with the effect", []*ateapiv1.EgressRule{
-			httpRule(fakeate.GatewayHost, egPort, jwt()), httpRule(fakeate.GatewayHost, egPort, jwt()),
-		}, egress),
+			Hostnames: []string{fakeate.GatewayHost}, Ports: &ateapiv1.Ports{All: &ateapiv1.AllPorts{}}, Effects: jwt(model),
+		}}}, routes),
+		Entry("the effect on two ports in one rule", []*ateapiv1.EgressRule{{Http: &ateapiv1.HttpRule{
+			Hostnames: []string{fakeate.GatewayHost}, Ports: &ateapiv1.Ports{Numbers: []int32{gwPort, egPort}}, Effects: jwt(model),
+		}}}, routes),
+		Entry("the egress effect with no egress route", []*ateapiv1.EgressRule{httpRule(fakeate.GatewayHost, egPort, jwt(egress))}, []substrate.GatewayRoute{model}),
+		Entry("two rules for one listener", []*ateapiv1.EgressRule{
+			httpRule(fakeate.GatewayHost, egPort, jwt(egress)), httpRule(fakeate.GatewayHost, egPort, jwt(egress)),
+		}, routes),
 	)
 
 	It("does not write a policy that breaks the rule", func(ctx SpecContext) {
@@ -164,9 +190,11 @@ var _ = Describe("the driver refuses the actor token effect on any other rule", 
 		for _, r := range c.EgressPolicy(ws, "a").GetRules() {
 			Expect(r.GetHttps()).To(BeNil(), "the driver writes no https rule")
 		}
-		Expect(substrate.CheckActorTokenEffects(c.EgressPolicy(ws, "a").GetRules(), egress)).To(Succeed())
+		Expect(substrate.CheckActorTokenEffects(c.EgressPolicy(ws, "a").GetRules(), routes)).To(Succeed())
 	})
 })
+
+func ptr[T any](v T) *T { return &v }
 
 var _ = Describe("the fake Substrate admission of effects and actor names", func() {
 	const gw, gwPort, egressPort = fakeate.GatewayHost, fakeate.GatewayPort, fakeate.EgressPort
@@ -200,7 +228,7 @@ var _ = Describe("the fake Substrate admission of effects and actor names", func
 				Expect(err).To(HaveOccurred())
 			}
 		},
-		Entry("the Koinon effect", jwt([]string{"koinon-gateway"}, 900), true),
+		Entry("the Koinon effect", jwt([]string{"koinon-gateway-egress"}, 900), true),
 		Entry("the lowest lifetime", jwt([]string{"x"}, 300), true),
 		Entry("the highest lifetime", jwt([]string{"x"}, 3600), true),
 		Entry("a lifetime under 300", jwt([]string{"x"}, 299), false),

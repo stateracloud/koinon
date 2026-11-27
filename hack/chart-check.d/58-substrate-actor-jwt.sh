@@ -76,11 +76,39 @@ if render "${aj[@]}" --set execution.substrate.workerNetworkPolicy.enabled=false
 	--set 'execution.substrate.workerNetworkPolicy.atenetEgressSelector.matchLabels=null' "${aj_np[@]}" >/dev/null 2>"$out/aj.err"; then
 	fail "substrate: an empty atenet-egress selector must not render"
 fi
-grep -Fq 'reach the egress port' "$out/aj.err" || fail "substrate: the empty atenet-egress selector error must name the egress port"
+grep -Fq 'reach the gateway listeners' "$out/aj.err" || fail "substrate: the empty atenet-egress selector error must name the gateway listeners"
 
-# Without the egress listener nothing of it renders on substrate.
-lacks "substrate without the listener: no verifier flags" 'actor-token-verifier|actor-jwt' "${wsub[@]}" --set gateway.mcp.driver=koinon "${aj_gw[@]}"
-lacks "substrate without the listener: no issuer route" 'ate-idp-server' "${wsub[@]}" --set gateway.mcp.driver=koinon "${aj_np[@]}"
+# Issue #1489 (ADR 0120 amendment of 2026-11-27): the model and MCP listeners check the actor JWT too, also without
+# the egress listener. The model and MCP paths must be koinon-gateway's, agents send model calls there, and only
+# atenet-egress reaches the listeners.
+for gw_tpl in gateway-koinon-mcp gateway-koinon-model; do
+	has "substrate without the listener: $gw_tpl runs the Substrate verifier" '^            - --actor-token-verifier=substrate$' "${wsub[@]}" --show-only "templates/$gw_tpl.yaml"
+	has "substrate without the listener: $gw_tpl reads the issuer CA file" '^            - --actor-jwt-ca-file=/etc/koinon/substrate-idp-ca/ca.crt$' "${wsub[@]}" --show-only "templates/$gw_tpl.yaml"
+	has "substrate without the listener: $gw_tpl mounts the issuer CA" '^            - name: substrate-idp-ca$' "${wsub[@]}" --show-only "templates/$gw_tpl.yaml"
+	lacks "substrate without the listener: $gw_tpl has no Ed25519 setting" '--actor-token-issuer|actor-token-keys' "${wsub[@]}" --show-only "templates/$gw_tpl.yaml"
+done
+lacks "substrate without the listener: no egress listener flag" '--egress-addr' "${wsub[@]}" "${aj_gw[@]}"
+env_is KOINON_GATEWAY_URL '"http://koinon-model-gateway.koinon.svc.cluster.local:8080"' "${wsub[@]}"
+has "substrate: the reconciler gets the model listener" '^      modelUrl: http://koinon-model-gateway.koinon.svc.cluster.local:8080$' "${wsub[@]}" --show-only templates/config.yaml
+env_is KOINON_GATEWAY_URL '"http://gw.example.test:8080"' "${wsub[@]}" --set agentd.gatewayURL=http://gw.example.test:8080
+for drv in gateway.model.driver gateway.mcp.driver; do
+	if render "${wsub[@]}" --set "$drv=agentgateway" >/dev/null 2>"$out/aj.err"; then
+		fail "substrate: $drv=agentgateway must not render (issue #1489)"
+	fi
+	grep -Fq "needs $drv=koinon" "$out/aj.err" || fail "substrate: the error must name $drv=koinon"
+done
+for listener in koinon-mcp-gateway:mcp koinon-model-gateway:model; do
+	pol=$(render "${wsub[@]}" "${aj_np[@]}" | docof "name: ${listener%%:*}\n")
+	egr=$(awk '/^  egress:$/{p=1; next} /^  ingress:$/{p=0} p' <<<"$pol")
+	grep -Fq 'app: ate-idp-server' <<<"$egr" || fail "substrate: ${listener%%:*} has no egress rule to ate-idp-server"
+	ing=$(awk '/^  ingress:$/{p=1; next} p' <<<"$pol" | awk -v port="port: ${listener##*:}" 'BEGIN{RS="\n    - "} index($0, port)')
+	grep -Fq 'app: atenet-egress' <<<"$ing" || fail "substrate: the ${listener##*:} port must admit the atenet-egress pods"
+	if grep -Fq 'kubernetes.io/metadata.name: ate-system' <<<"$ing"; then
+		fail "substrate: the ${listener##*:} port must not admit all of Substrate's namespace"
+	fi
+	n=$(grep -c 'namespaceSelector:' <<<"$ing" || true)
+	[ "$n" = 1 ] || fail "substrate: the ${listener##*:} port has $n namespace peers, want 1 (the atenet-egress pods)"
+done
 
 # openshell: the Ed25519 path as before, and none of the Substrate settings.
 lacks "openshell: no Substrate verifier" 'actor-token-verifier|actor-jwt|substrate-idp-ca' "${aj_os[@]}" "${aj_gw[@]}"

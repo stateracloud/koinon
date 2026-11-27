@@ -5,7 +5,7 @@
 # uses that script's helpers (render, has, lacks, fail, ...). The provisioner is the one Koinon pod with a global
 # role in Substrate; the reconciler and agentd hold none.
 
-psub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
+psub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
 	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false

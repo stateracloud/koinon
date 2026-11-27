@@ -44,3 +44,6 @@ var RouterCredentials = routerCredentials
 
 // CheckActorTokenEffects is checkActorTokenEffects, for the spec that the actor JWT goes only to the egress rule.
 var CheckActorTokenEffects = checkActorTokenEffects
+
+// RulesEqual is rulesEqual, for the spec that the same routes give the same rules.
+var RulesEqual = rulesEqual

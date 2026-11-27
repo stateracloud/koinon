@@ -348,12 +348,43 @@ var _ = Describe("git through the gateway's egress prefix (#1086 part C2)", func
 
 		It("leaves git on the driver's egress without an egress URL", func(ctx SpecContext) {
 			e := newEnvWith(ctx, harness.OpenCode, ghesAgent(ctx))
+			record(ctx, e, 3, true, "") // the actor's row (issue #1489)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside = true })
 			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 			cfg, _ := e.files.get(codehost.SandboxGitConfig)
 			Expect(string(cfg)).NotTo(ContainSubstring("/egress/"))
 			Expect(e.files.history(codehost.SandboxEgressToken)).To(BeEmpty())
+		})
+
+		// Issue #1489: the gateway checks the actor JWT on the model and MCP listeners too, and knows an
+		// actor only from the State revision that carries it. So a run waits for its actor's row, also
+		// without a forge grant and without the egress listener.
+		It("waits for the actor's row without a forge grant, and starts when it is served", func(ctx SpecContext) {
+			e := newEnv(ctx, harness.OpenCode)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside, c.ReconcileNudge = true, 100*time.Millisecond })
+			Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.waiting_for_forge") }).
+				WithTimeout(racescale.D(10 * time.Second)).Should(HaveLen(1))
+			Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateSucceeded), "the harness does not start before the row is served")
+			record(ctx, e, 2, true, "")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		})
+
+		It("does not wait for an actor without ActorIdentityOutside or a forge grant", func(ctx SpecContext) {
+			e := newEnv(ctx, harness.OpenCode)
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a")
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+			Expect(eventOf(events(ctx, r), "run.waiting_for_forge")).To(BeEmpty())
+		})
+
+		It("fails the run on the row's failure, also for an actor-only row", func(ctx SpecContext) {
+			e := newEnv(ctx, harness.OpenCode)
+			record(ctx, e, 0, false, "koinon-reconciler has no forge credential for the agent: koinon_test_cause")
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a", func(c *agentd.Config) { c.ActorIdentityOutside = true })
+			Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateFailed))
 		})
 
 		DescribeTable("refuses settings that would send the placeholder unchanged or put a token in the guest",

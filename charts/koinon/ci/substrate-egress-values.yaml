@@ -23,8 +23,11 @@ sandboxNetworkPolicy:
   enabled: false
 sandboxLimitRange:
   enabled: false
+# Substrate needs koinon-gateway on the model and MCP paths: only it checks the actor JWT (issue #1489).
 gateway:
   mode: standalone
+  model:
+    driver: koinon
   mcp:
     driver: koinon
     koinon:

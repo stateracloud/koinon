@@ -795,3 +795,65 @@ Maintainer decision of 2026-11-26.
 - **Failure behaviour.** When the router connection fails before a stream opens, agentd fails the run at once with
   the dial error. It does not treat the failure as a lost harness and does not take over the lease: a retry cannot
   help until an operator fixes the install.
+
+## Amendment (2026-11-27, issue #1489): the actor JWT on every gateway listener
+
+Maintainer decisions of 2026-11-27 (issue #1489, comments 7220445863 and 7221191962). This amendment changes items 1,
+3, 5 and 8 of the #1386 amendment for the Substrate driver. The OpenShell driver does not change until #1094.
+
+- **Fact.** The #1386 amendment put `actor_jwt` on the egress listener only. The model and MCP listeners read the
+  agent's gateway key from the guest (`KOINON_MODEL_KEY`). That is a credential inside the guest, against section 1.1.
+- **One rule for each listener.** The driver writes one `HttpRule` for each gateway host and port: the model, the MCP
+  and (with a code-host grant) the egress listener. Each rule has `replace_headers` with `actor_jwt`,
+  `expiration_seconds: 900`, and exactly one audience: `koinon-gateway-model`, `koinon-gateway-mcp` or
+  `koinon-gateway-egress`. A token for one listener is refused on every other listener. Two listeners on one host and
+  port are refused (`ValidateGatewayRoutes`, `internal/execution/substrate/egresspolicy.go`). The rule of item 3 stays:
+  only these `HttpRule`s carry `replace_headers`, and the driver writes no `HttpsRule`.
+- **The header.** The model and MCP listeners read the JWT from `Authorization`, with the prefix `Bearer `, where the
+  harness client sends its key. The egress listener keeps `Koinon-Actor-Token`: the git and HTTP clients of the guest
+  set `Authorization` for the upstream host, and the OpenShell Ed25519 gate uses the same header until #1094. This is
+  a deviation from decision 1 of comment 7220445863. Main can change it when #1094 removes the Ed25519 path.
+- **Section 1.2 and 1.3 on Substrate.** The guest gets the fixed public placeholder `koinon-actor-placeholder` in
+  `KOINON_MODEL_KEY` (`actortoken.Placeholder`). It is the same in every sandbox and it is not a secret. atenet-egress
+  writes over it. The guest holds no gateway key.
+- **The verifier on every listener.** koinon-gateway has one Substrate verifier, with one key cache, and a verifier
+  for each audience (`WithAudience`). On each listener:
+  - It accepts `ES256` only.
+  - It refuses the placeholder, an empty bearer, a token it cannot verify and no token with 401 and the do-not-retry
+    marker. There is no fallback to a gateway key for these values. A real gateway key still works on the model
+    listener for koinon-api.
+  - It checks `iss`, `exp`, `iat`, `nbf` and `jti`, a lifetime of 300 to 3600 seconds, and an `aud` that is exactly
+    the audience of the listener.
+  - The actor must be in the actor table of the State and its UID must be equal to the recorded UID (item 5). An
+    unknown actor gets 403.
+  - When the issuer keys are not available, the listener answers 503 without the do-not-retry marker.
+  - The gateway never sends the JWT upstream.
+- **Key policy.** The verifier uses fetched keys for at most 10 minutes (`KeyMaxAge`). When the issuer is down for more
+  than 10 minutes, every call on every listener gets 503 until the issuer is back. This fails closed. We accept it: an
+  older key set could still accept a key that Substrate removed.
+- **Model calls on Substrate go to koinon-gateway.** Only koinon-gateway checks the actor JWT. So the chart refuses
+  `execution.driver=substrate` without `gateway.model.driver=koinon` and `gateway.mcp.driver=koinon`, with a message
+  that names the value. The koinon model driver needs `gateway.mode=standalone`, so Substrate needs it too. The chart
+  sets the agentd gateway URL and the reconciler `gateway.modelUrl` to the model listener. agentgateway keeps its
+  own policy for the OpenShell driver.
+- **Item 8 on every listener.** The chart NetworkPolicy admits the model, MCP and egress listener ports from the
+  Substrate namespace only for the atenet-egress pods (a `namespaceSelector` and a `podSelector`). It does not admit
+  the whole namespace. An empty `workerNetworkPolicy.atenetEgressSelector` fails the render. The model gateway also gets the egress rule to
+  the `ate-idp-server` pod port (item 7). A chart check asserts each rule.
+- **The run waits for its actor.** koinon-reconciler writes a `gateway_agent_forge` row for every active agent on
+  Substrate, also without a forge grant. The row waits for the later of the credential's revision and the first State
+  revision that holds the actor's UID. koinon-agentd starts the harness only when every live gateway copy acked that
+  revision (`waitForge`). The wait goes through the database and the State stream. No kubelet ConfigMap or volume sync
+  is on its path. Kind has no Substrate agent path, so the added start time is not measured there. Main measures it
+  in the lab.
+- **Restore.** A restore can keep the old token. The token cache is in atenet-egress, keyed by actor name, not in the
+  guest. When the restored actor keeps its name and its UID, its cached token stays valid for it. When it gets a new
+  actor, item 6 gives it a new name, so no old token applies. The guest and its
+  snapshot hold no token (section 5.1).
+- **The #1386 rule for this amendment.** No listener trusts a value that the guest sets for the identity. Each
+  listener trusts only the JWT that atenet-egress adds, checked against Koinon's own record.
+- **Lab risks.** These are not proven in this amendment. Main proves them in the lab.
+  - A reused actor name gets a token with the old UID for up to about 9 minutes (two thirds of 900 seconds, less the
+    time since the mint). Item 6 makes each name new, and the UID check refuses the old token, so this fails closed.
+  - A deleted actor's token passes the signature check for up to about 10 minutes. The actor table drops the actor at
+    the next State update, and then the UID check refuses the token.

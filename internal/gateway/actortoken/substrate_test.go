@@ -165,7 +165,7 @@ func substrateClaims(issuer string, iat time.Time, life time.Duration) map[strin
 	return map[string]any{
 		"iss": issuer,
 		"sub": "actor/" + subAtespace + "/" + subActor,
-		"aud": []string{actortoken.Audience},
+		"aud": []string{actortoken.AudienceEgress},
 		"exp": iat.Add(life).Unix(),
 		"nbf": iat.Add(-5 * time.Minute).Unix(),
 		"iat": iat.Unix(),
@@ -208,7 +208,7 @@ var _ = Describe("Substrate actor token verifier", func() {
 
 	newVerifier := func() *actortoken.SubstrateVerifier {
 		sv, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-			Issuer: iss, RootCAs: idp.pool(), Now: clock,
+			Issuer: iss, RootCAs: idp.pool(), Now: clock, Audience: actortoken.AudienceEgress,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		return sv
@@ -232,14 +232,14 @@ var _ = Describe("Substrate actor token verifier", func() {
 
 	Describe("construction", func() {
 		It("needs a CA pool or a CA file and accepts no empty pool", func() {
-			_, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss})
+			_, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss, Audience: actortoken.AudienceEgress})
 			Expect(err).To(MatchError(ContainSubstring("CA file or a CA pool")))
 			_, err = actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-				Issuer: iss, RootCAs: x509.NewCertPool(),
+				Issuer: iss, RootCAs: x509.NewCertPool(), Audience: actortoken.AudienceEgress,
 			})
 			Expect(err).To(MatchError(ContainSubstring("empty")))
 			_, err = actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-				Issuer: iss, RootCAs: idp.pool(), CAFile: "/nonexistent",
+				Issuer: iss, RootCAs: idp.pool(), CAFile: "/nonexistent", Audience: actortoken.AudienceEgress,
 			})
 			Expect(err).To(MatchError(ContainSubstring("not both")))
 		})
@@ -248,20 +248,20 @@ var _ = Describe("Substrate actor token verifier", func() {
 			dir := GinkgoT().TempDir()
 			good := filepath.Join(dir, "ca.pem")
 			Expect(os.WriteFile(good, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: idp.srv.Certificate().Raw}), 0o600)).To(Succeed())
-			sv, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss, CAFile: good, Now: clock})
+			sv, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss, CAFile: good, Now: clock, Audience: actortoken.AudienceEgress})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = sv.Verify(mintWith(ecKey, jose.ES256, ecKID, substrateClaims(iss, now, 900*time.Second)))
 			Expect(err).NotTo(HaveOccurred())
 
 			bad := filepath.Join(dir, "bad.pem")
 			Expect(os.WriteFile(bad, []byte("not a certificate"), 0o600)).To(Succeed())
-			_, err = actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss, CAFile: bad})
+			_, err = actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: iss, CAFile: bad, Audience: actortoken.AudienceEgress})
 			Expect(err).To(MatchError(ContainSubstring("no PEM certificate")))
 		})
 
 		It("needs an https issuer with no query or fragment", func() {
 			for _, bad := range []string{"", "http://ate-idp.example", "https://", "https://u@ate-idp.example", "https://ate-idp.example?x=1", "https://ate-idp.example#f"} {
-				_, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: bad, RootCAs: idp.pool()})
+				_, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: bad, RootCAs: idp.pool(), Audience: actortoken.AudienceEgress})
 				Expect(err).To(HaveOccurred(), bad)
 			}
 		})
@@ -334,7 +334,7 @@ var _ = Describe("Substrate actor token verifier", func() {
 
 		It("refuses a server certificate the CA pool does not sign", func() {
 			sv, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-				Issuer: iss, RootCAs: selfSignedCAPool(), Now: clock,
+				Issuer: iss, RootCAs: selfSignedCAPool(), Now: clock, Audience: actortoken.AudienceEgress,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = sv.Verify(good())
@@ -486,9 +486,57 @@ var _ = Describe("Substrate actor token verifier", func() {
 			Expect(err).To(MatchError(actortoken.ErrAudience))
 		})
 
-		It("accepts an aud array that also names another audience", func() {
-			_, err := v.Verify(withClaims(func(m map[string]any) { m["aud"] = []string{"other", actortoken.Audience} }))
+		It("refuses an aud array that also names another audience (issue #1489)", func() {
+			_, err := v.Verify(withClaims(func(m map[string]any) { m["aud"] = []string{"other", actortoken.AudienceEgress} }))
+			Expect(err).To(MatchError(actortoken.ErrAudience))
+			_, err = v.Verify(withClaims(func(m map[string]any) { m["aud"] = []string{actortoken.AudienceEgress, actortoken.AudienceEgress} }))
+			Expect(err).To(MatchError(actortoken.ErrAudience))
+		})
+
+		It("accepts an aud string that equals the listener audience", func() {
+			_, err := v.Verify(withClaims(func(m map[string]any) { m["aud"] = actortoken.AudienceEgress }))
 			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("refuses the token of one listener on every other listener (issue #1489)", func() {
+			for _, aud := range []string{actortoken.AudienceModel, actortoken.AudienceMCP, actortoken.AudienceEgress} {
+				tok := withClaims(func(m map[string]any) { m["aud"] = []string{aud} })
+				for _, listener := range []string{actortoken.AudienceModel, actortoken.AudienceMCP, actortoken.AudienceEgress} {
+					lv, err := v.WithAudience(listener)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(lv.Audience()).To(Equal(listener))
+					_, err = lv.Verify(tok)
+					if aud == listener {
+						Expect(err).NotTo(HaveOccurred(), aud)
+					} else {
+						Expect(err).To(MatchError(actortoken.ErrAudience), aud+" on "+listener)
+					}
+				}
+			}
+		})
+
+		It("refuses the Ed25519 audience and an audience that is not a listener's", func() {
+			_, err := v.Verify(withClaims(func(m map[string]any) { m["aud"] = []string{actortoken.Audience} }))
+			Expect(err).To(MatchError(actortoken.ErrAudience))
+			for _, bad := range []string{"", actortoken.Audience, "other"} {
+				_, err = v.WithAudience(bad)
+				Expect(err).To(MatchError(ContainSubstring("not a gateway listener audience")), bad)
+				_, err = actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
+					Issuer: iss, RootCAs: idp.pool(), Audience: bad,
+				})
+				Expect(err).To(MatchError(ContainSubstring("not a gateway listener audience")), bad)
+			}
+		})
+
+		It("shares the key cache between the listener verifiers", func() {
+			mv, err := v.WithAudience(actortoken.AudienceMCP)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = v.Verify(good())
+			Expect(err).NotTo(HaveOccurred())
+			fetches := idp.jwksHits.Load()
+			_, err = mv.Verify(withClaims(func(m map[string]any) { m["aud"] = []string{actortoken.AudienceMCP} }))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(idp.jwksHits.Load()).To(Equal(fetches), "the MCP verifier used the keys the egress verifier fetched")
 		})
 
 		It("refuses an expired token beyond the leeway", func() {

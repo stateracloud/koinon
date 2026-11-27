@@ -629,13 +629,16 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
 		return r.execErr(ctx, "write the git configuration", err)
 	}
-	if r.egress {
-		if !r.tokenOutside() {
-			defer r.keepActorToken(ctx, workspace, sandbox)()
-		}
-		// The agent clones through koinon-gateway: its forge credential must be served first (forgewait.go).
+	if r.egress && !r.tokenOutside() {
+		defer r.keepActorToken(ctx, workspace, sandbox)()
+	}
+	if r.egress || r.p.cfg.ActorIdentityOutside {
+		// The agent clones through koinon-gateway: its forge credential must be served first. On Agent
+		// Substrate every model, MCP and egress call carries the actor JWT, and koinon-gateway knows the
+		// actor only from the State revision that holds it: that revision must be served first too, also
+		// for an agent without a forge grant (forgewait.go, issue #1489).
 		if err := r.waitForge(fctx); err != nil {
-			return r.execErr(ctx, "wait for the forge credential", err)
+			return r.execErr(ctx, "wait for koinon-gateway to serve the agent", err)
 		}
 	}
 

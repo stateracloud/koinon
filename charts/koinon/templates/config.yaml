@@ -44,6 +44,11 @@ data:
       # agentgateway (ADR 0097 decision 5, #1239).
       mcpUrl: http://{{ include "koinon.mcpGatewayHost" . }}:{{ int .Values.gateway.mcp.koinon.port }}
       {{- end }}
+      {{- if eq (include "koinon.substrate" .) "true" }}
+      # koinon-gateway's model listener as sandboxes reach it. On Substrate (which needs gateway.model.driver=koinon) the
+      # agents' model calls go there, and the driver adds the actor JWT for the model audience on that host and port (issue #1489).
+      modelUrl: {{ include "koinon.modelGatewayURL" . }}
+      {{- end }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.
       name: {{ include "koinon.componentName" (list . "gateway") }}

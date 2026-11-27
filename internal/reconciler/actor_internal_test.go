@@ -13,9 +13,9 @@ import (
 )
 
 // A run of an agent with a Substrate actor waits for the State revision that carries the actor, and for the
-// one that carries its forge credential: the later of the two (issue #1386).
+// one that carries its forge credential: the later of the two (issues #1386 and #1489).
 func TestForgeWantWaitsForTheActorRevision(t *testing.T) {
-	r := &Reconciler{}
+	r := &Reconciler{backend: namingBackend{}}
 	const cred = "org/acme/agent/a1/codehost"
 	actor := gatewayplan.Actor{Atespace: "ws-acme", Name: "ka-a1-0a1b2c3d", UID: "uid-1"}
 	w := &work{
@@ -50,13 +50,30 @@ func TestForgeWantWaitsForTheActorRevision(t *testing.T) {
 	}
 
 	w.actor = nil
-	if row, _ := r.forgeWant(w); row.rev != 4 {
-		t.Fatalf("without an actor the credential revision counts: got %d", row.rev)
-	}
-
-	r.backend = namingBackend{}
 	if row, ok := r.forgeWant(w); !ok || row.rev != 0 {
 		t.Fatalf("a backend that names actors waits for the actor: want rev 0, got %+v %v", row, ok)
+	}
+
+	// Issue #1489: without a forge grant the row waits for the actor only.
+	w.actor, w.forgeExpects, w.forge = &actor, false, nil
+	if row, ok := r.forgeWant(w); !ok || row.rev != 6 || row.failure != "" {
+		t.Fatalf("an actor-only row waits for the first revision that held the actor: got %+v %v", row, ok)
+	}
+
+	w.agent.Status = store.AgentStatusArchived
+	if _, ok := r.forgeWant(w); ok {
+		t.Fatal("an agent that is not active has no row")
+	}
+
+	// A backend that does not name actors: only the forge credential counts, and no grant means no row.
+	r.backend = nil
+	w.agent.Status = store.AgentStatusActive
+	if _, ok := r.forgeWant(w); ok {
+		t.Fatal("without a forge grant and without actor names there is no row")
+	}
+	w.forgeExpects, w.forge = true, &gatewayplan.ForgeCredential{Name: cred}
+	if row, ok := r.forgeWant(w); !ok || row.rev != 4 {
+		t.Fatalf("without actor names the credential revision counts: got %+v %v", row, ok)
 	}
 }
 

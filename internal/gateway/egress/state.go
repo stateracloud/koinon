@@ -74,3 +74,21 @@ func (s StateRoutes) ApplyEgress(_ context.Context, e gateway.EgressState) error
 	s.Gateway.ApplyWithCredentials(t, creds)
 	return actorErr
 }
+
+// ActorState applies only the Substrate actors of each revision to an actor table. A pod without the
+// egress listener uses it: its model and MCP listeners check the actor JWT against the same record
+// (issue #1489). A fault in the actors empties the table, as in StateRoutes.
+type ActorState struct {
+	Actors *route.ActorTable
+}
+
+// ApplyEgress replaces the actor table with the actors of e.
+func (s ActorState) ApplyEgress(_ context.Context, e gateway.EgressState) error {
+	m, err := e.ActorLookup()
+	if err != nil {
+		s.Actors.Set(nil)
+		return fmt.Errorf("egress: the actors: %w", err)
+	}
+	s.Actors.Set(m)
+	return nil
+}

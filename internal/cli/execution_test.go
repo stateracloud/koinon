@@ -89,11 +89,11 @@ var _ = Describe("Execution", func() {
 		cfg, err := cli.Substrate{}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.GatewayRoutes).To(BeEmpty(), "agentd sets none: it creates no sandbox")
-		routes := []substrate.GatewayRoute{{Host: "koinon-gateway.koinon.svc", Port: 8080}}
+		routes := []substrate.GatewayRoute{substrate.ModelRoute("koinon-gateway.koinon.svc", 8080)}
 		cfg, err = cli.Substrate{GatewayRoutes: routes}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.GatewayRoutes).To(Equal(routes))
-		_, err = cli.Substrate{GatewayRoutes: []substrate.GatewayRoute{{Host: "10.0.0.1", Port: 8080}}}.DriverConfig(nil)
+		_, err = cli.Substrate{GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute("10.0.0.1", 8080)}}.DriverConfig(nil)
 		Expect(err).To(MatchError(ContainSubstring("IP address")))
 	})
 	It("reads the guest API signing key, or refuses a malformed one", func() {
@@ -112,7 +112,7 @@ var _ = Describe("Execution", func() {
 		cfg, err := cli.Substrate{
 			GuestKeyFile:      guestKeyFile(),
 			RuntimeClassTiers: []string{"kata=vm", "gvisor=hardened"}, DefaultTier: "dev",
-			GatewayRoutes: []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
+			GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 		}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
 		cfg.PollInterval, cfg.GuestReadyTimeout = 5*time.Millisecond, 2*time.Second

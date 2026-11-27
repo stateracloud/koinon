@@ -70,7 +70,7 @@ func (f *idp) mint(atespace, name, uid string, iat time.Time) string {
 	tok, err := jwt.Signed(s).Claims(map[string]any{
 		"iss": f.srv.URL,
 		"sub": "actor/" + atespace + "/" + name,
-		"aud": []string{actortoken.Audience},
+		"aud": []string{actortoken.AudienceEgress},
 		"exp": iat.Add(15 * time.Minute).Unix(),
 		"nbf": iat.Add(-5 * time.Minute).Unix(),
 		"iat": iat.Unix(),
@@ -107,7 +107,7 @@ var _ = Describe("actor identity (issue #1386)", func() {
 		BeforeEach(func() {
 			issuer = newIDP()
 			ver, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-				Issuer: issuer.srv.URL, RootCAs: issuer.pool(), Now: func() time.Time { return now },
+				Issuer: issuer.srv.URL, RootCAs: issuer.pool(), Now: func() time.Time { return now }, Audience: actortoken.AudienceEgress,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			actors = &route.ActorTable{}
@@ -154,7 +154,7 @@ var _ = Describe("actor identity (issue #1386)", func() {
 
 		It("refuses every token before the first State revision", func() {
 			ver, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
-				Issuer: issuer.srv.URL, RootCAs: issuer.pool(), Now: func() time.Time { return now },
+				Issuer: issuer.srv.URL, RootCAs: issuer.pool(), Now: func() time.Time { return now }, Audience: actortoken.AudienceEgress,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			id, err := route.NewSubstrateIdentifier(ver, &route.ActorTable{})
@@ -198,7 +198,7 @@ var _ = Describe("actor identity (issue #1386)", func() {
 		It("needs a verifier and a table", func() {
 			_, err := route.NewSubstrateIdentifier(nil, &route.ActorTable{})
 			Expect(err).To(HaveOccurred())
-			ver, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: issuer.srv.URL, RootCAs: issuer.pool()})
+			ver, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{Issuer: issuer.srv.URL, RootCAs: issuer.pool(), Audience: actortoken.AudienceEgress})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = route.NewSubstrateIdentifier(ver, nil)
 			Expect(err).To(HaveOccurred())

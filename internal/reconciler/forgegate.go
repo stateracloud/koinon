@@ -15,8 +15,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/route"
 )
 
-// The forge gate (#1086 part C2). An agent with a forge read grant clones through koinon-gateway's
-// egress listener, and the gateway attaches the agent's sealed code-host token there. A new credential
+// The forge gate (#1086 part C2), and on Agent Substrate the actor gate (issue #1489). An agent with a
+// forge read grant clones through koinon-gateway's egress listener, and the gateway attaches the agent's sealed code-host token there. A new credential
 // reaches the gateway only after its file settled in the gateway pod (gatewayplan settleForge), and then
 // every live copy must apply the State revision that holds it. Until then a clone fails with 503
 // credential_unavailable. So the reconciler records, per agent, the revision that serves the credential,
@@ -70,47 +70,50 @@ func (r *Reconciler) forgeRev(name string) (int64, bool) {
 	return rev, ok
 }
 
-// forgeWant is what the active agent w expects of its forge credential, and false when it expects
-// none. The rule is agentEgress's (forgeExpects): the install has the egress listener and the agent has
-// a forge read grant (codehost.Registry.ReadGrant, which koinon-agentd reads too). An agent that expects
-// a credential and has none gets its cause.
+// forgeWant is what the active agent w expects of its forge credential and, on a backend that names
+// actors, of its actor; false when it expects neither. The forge rule is agentEgress's (forgeExpects):
+// the install has the egress listener and the agent has a forge read grant (codehost.Registry.ReadGrant,
+// which koinon-agentd reads too). An agent that expects a credential and has none gets its cause.
 //
-// An agent without forgeExpects gets no row, so a run does not wait for its actor's State revision
-// either. That is safe (issue #1386): the actor token is checked only on the egress listener, and on
-// Agent Substrate an actor's egress policy holds that listener only with CodeHostEgress, which needs a
-// read grant (GitHubReadAccessAt) and the egress listener, the same rule as forgeExpects. The model and
-// MCP listeners do not read the actor token. So an actor that can reach the listener always has a row,
-// and its row waits for the actor revision below. On a backend that names actors, a row without an
-// actor waits too.
+// On a backend that names actors (Agent Substrate) every active agent gets a row, also without a forge
+// grant (issue #1489): koinon-gateway checks the actor JWT on the model, MCP and egress listeners, and
+// knows an actor only from the State revision that carries it. So the row waits for the later of the
+// credential's and the actor's revisions, and koinon-agentd starts the harness only when every live copy
+// acked it (agentd waitForge). The wait goes through the State stream and the database: no kubelet volume
+// sync is on its path.
 func (r *Reconciler) forgeWant(w *work) (forgeRow, bool) {
-	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects {
+	_, names := execution.ActorNamerOf(r.backend)
+	if w.agent.Status != store.AgentStatusActive || !w.forgeExpects && !names {
 		return forgeRow{}, false
 	}
-	if w.forgeErr != nil || w.forge == nil {
-		cause := "no credential was made"
-		if w.forgeErr != nil {
-			cause = w.forgeErr.Error()
+	var rev int64
+	if w.forgeExpects {
+		if w.forgeErr != nil || w.forge == nil {
+			cause := "no credential was made"
+			if w.forgeErr != nil {
+				cause = w.forgeErr.Error()
+			}
+			return forgeRow{failure: forgeFailure(cause)}, true
 		}
-		return forgeRow{failure: forgeFailure(cause)}, true
+		var ok bool
+		if rev, ok = r.forgeRev(w.forge.Name); !ok {
+			return forgeRow{}, true
+		}
 	}
-	rev, ok := r.forgeRev(w.forge.Name)
+	if !names {
+		return forgeRow{rev: rev}, true
+	}
+	// The gateway knows a Substrate actor only from the revision that carries it (issues #1386 and #1489):
+	// the run waits for the later of the two revisions. A backend that names actors and has no actor for w
+	// yet (its sandbox is not made, or it was deleted): the gateway refuses its requests, so the run waits.
+	if w.actor == nil {
+		return forgeRow{}, true
+	}
+	arev, ok := r.actorRev(*w.actor)
 	if !ok {
 		return forgeRow{}, true
 	}
-	// The gateway knows a Substrate actor only from the revision that carries it (issue #1386): the run
-	// waits for the later of the two revisions.
-	if w.actor != nil {
-		arev, ok := r.actorRev(*w.actor)
-		if !ok {
-			return forgeRow{}, true
-		}
-		rev = max(rev, arev)
-	} else if _, names := execution.ActorNamerOf(r.backend); names {
-		// A backend that names actors has no actor for w yet (its sandbox is not made, or it was deleted):
-		// the gateway refuses its egress requests, so the run waits (issue #1386).
-		return forgeRow{}, true
-	}
-	return forgeRow{rev: rev}, true
+	return forgeRow{rev: max(rev, arev)}, true
 }
 
 // recordForge writes what each agent of the pass expects of its forge credential (gateway_agent_forge)
