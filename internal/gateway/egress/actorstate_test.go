@@ -30,11 +30,26 @@ var _ = Describe("the actor-only applier (issue #1489)", func() {
 		Expect(ok).To(BeFalse())
 	})
 
-	It("empties the table when the actors of a revision are not valid", func() {
+	It("skips a bad actor row and keeps the good actors (issue #1485)", func() {
 		t := &route.ActorTable{}
 		s := egress.ActorState{Actors: t}
-		Expect(s.ApplyEgress(context.Background(), gateway.EgressState{EgressActors: []gateway.EgressActor{a}})).To(Succeed())
-		Expect(s.ApplyEgress(context.Background(), gateway.EgressState{EgressActors: []gateway.EgressActor{a, a}})).NotTo(Succeed())
-		Expect(t.Len()).To(BeZero())
+		bad := a
+		bad.UID = "koinon-test-uid-bad"
+		bad.Agent = ""
+		Expect(s.ApplyEgress(context.Background(), gateway.EgressState{EgressActors: []gateway.EgressActor{a, bad}})).NotTo(Succeed())
+		Expect(t.Len()).To(Equal(1))
+		_, ok := t.Lookup(key)
+		Expect(ok).To(BeTrue())
+	})
+
+	It("drops an identity that two rows give, and keeps the others", func() {
+		t := &route.ActorTable{}
+		s := egress.ActorState{Actors: t}
+		other := a
+		other.UID = "koinon-test-uid-other"
+		Expect(s.ApplyEgress(context.Background(), gateway.EgressState{EgressActors: []gateway.EgressActor{a, other, a}})).NotTo(Succeed())
+		Expect(t.Len()).To(Equal(1))
+		_, ok := t.Lookup(key)
+		Expect(ok).To(BeFalse())
 	})
 })

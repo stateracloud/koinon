@@ -184,6 +184,12 @@ func (r *refusal) matches(callErr error) error {
 
 // isIdentityRefusal reports whether err is a TLS alert from the peer or a failed check of the peer's
 // certificate. Connection refused, a timeout and a closed connection are not.
+//
+// Known limit: on real TCP, a router that closes the connection with unread client bytes can send a TCP
+// reset, and the reset can discard the TLS alert before the driver reads it. The error is then a reset or
+// a closed connection, not an alert: it stays Unavailable and the driver retries until GuestReadyTimeout
+// (the behaviour from before #1446). The client cannot prevent this: it does not control when the router
+// closes. The runbook is docs/dev/substrate-install.md.
 func isIdentityRefusal(err error) bool {
 	var op *net.OpError // a TLS alert from the peer is a net.OpError with Op "remote error"
 	var verify *tls.CertificateVerificationError

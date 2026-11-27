@@ -33,23 +33,26 @@ var _ = Describe("EgressState.ActorLookup (issue #1386)", func() {
 		Expect(got).To(BeEmpty())
 	})
 
-	DescribeTable("fails closed on an actor it cannot trust",
+	DescribeTable("skips an actor row it cannot trust and keeps the good rows (issue #1485)",
 		func(mut func(*gateway.EgressActor), dup bool) {
 			bad := acme
 			mut(&bad)
-			actors := []gateway.EgressActor{bad}
+			good := acme
+			good.UID = "uid-good"
+			actors := []gateway.EgressActor{bad, good}
 			if dup {
-				actors = append(actors, bad)
+				actors = []gateway.EgressActor{bad, good, bad, bad}
 			}
 			got, err := gateway.EgressState{EgressActors: actors}.ActorLookup()
 			Expect(err).To(HaveOccurred())
-			Expect(got).To(BeNil())
+			Expect(got).To(HaveLen(1))
+			Expect(got).To(HaveKey(actortoken.SubstrateActor{Atespace: "ws-acme", Name: "ka-acme-0a1b2c3d", UID: "uid-good"}))
 		},
 		Entry("no workspace", func(a *gateway.EgressActor) { a.Atespace = "" }, false),
 		Entry("no name", func(a *gateway.EgressActor) { a.Name = "" }, false),
 		Entry("no UID", func(a *gateway.EgressActor) { a.UID = "" }, false),
 		Entry("no org", func(a *gateway.EgressActor) { a.Org = "" }, false),
 		Entry("no agent", func(a *gateway.EgressActor) { a.Agent = "" }, false),
-		Entry("the same identity twice", func(*gateway.EgressActor) {}, true),
+		Entry("the same identity twice or more: all its rows are dropped", func(*gateway.EgressActor) {}, true),
 	)
 })

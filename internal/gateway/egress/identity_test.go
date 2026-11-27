@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -133,6 +134,10 @@ var _ = Describe("egress routes with the Substrate identifier (issue #1386)", fu
 		Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
 		Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal(string(route.ReasonUnknownActor)))
 		Expect(count(route.ReasonUnknownActor)).To(Equal(1.0))
+		// The text that goes to the guest names the reason only: no actor name, UID, org or agent (issue #1485).
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(Equal("koinon-gateway: egress refused: unknown_actor\n"))
 	})
 
 	It("refuses an actor with another UID", func() {
@@ -144,16 +149,16 @@ var _ = Describe("egress routes with the Substrate identifier (issue #1386)", fu
 		Expect(do(known).StatusCode).To(Equal(http.StatusForbidden))
 	})
 
-	It("knows no actor when the actors of a revision are wrong, and still serves the routes", func() {
+	It("skips a bad actor row, keeps the good actors and still serves the routes (issue #1485)", func() {
 		bad := actor
+		bad.UID = "koinon-test-uid-0003"
 		bad.Agent = ""
 		err := applier.ApplyEgress(context.Background(), gateway.EgressState{
 			EgressRoutes: []route.Route{forge}, EgressActors: []gateway.EgressActor{actor, bad},
 		})
 		Expect(err).To(MatchError(ContainSubstring("egress: the actors")))
-		resp := do(known)
-		Expect(resp.StatusCode).To(Equal(http.StatusForbidden))
-		Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal(string(route.ReasonUnknownActor)))
+		Expect(applier.Actors.Len()).To(Equal(1))
+		Expect(do(known).Header.Get(egress.RefusalHeader)).NotTo(Equal(string(route.ReasonUnknownActor)))
 	})
 
 	It("removes the actors also when the routes of a revision are refused", func() {

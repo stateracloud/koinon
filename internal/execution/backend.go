@@ -166,7 +166,7 @@ func GatewayAccessSetterOf(b any) GatewayAccessSetter {
 // Substrate, issue #1386). Substrate signs a JWT for the actor, and the gateway maps the actor name to an agent run,
 // so a name must never come back for another run: a new actor gets a new name, never a reused one.
 type ActorNamer interface {
-	// NewActorName returns a new, unique name for the actor of sandbox. It is "<sandbox>-<8 hex>" on Substrate.
+	// NewActorName returns a new, unique name for the actor of sandbox. It is "<sandbox>-<16 hex>" on Substrate.
 	// The driver does not shorten a name that is too long for its backend; the create then fails with ErrInvalid.
 	NewActorName(sandbox string) string
 }

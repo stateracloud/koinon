@@ -50,14 +50,14 @@ type StateRoutes struct {
 // ApplyEgress merges the org routes of e with the platform routes and installs the result with the
 // credentials of e. A fault in the routes or the credentials installs the platform routes alone. The
 // actors of e replace the actor table first, whatever the routes do, so an actor that the revision
-// removed loses its identity; a fault in the actors empties the table (every Substrate token is then
-// refused) and is returned with any route fault.
+// removed loses its identity; a bad actor row is skipped and returned with any route fault, and the other
+// actors stay (issue #1485).
 func (s StateRoutes) ApplyEgress(_ context.Context, e gateway.EgressState) error {
 	var actorErr error
 	if s.Actors != nil {
-		m, err := e.ActorLookup()
+		m, err := e.ActorLookup() // m holds the good actors also when err is not nil
 		if err != nil {
-			m, actorErr = nil, fmt.Errorf("egress: the actors: %w", err)
+			actorErr = fmt.Errorf("egress: the actors: %w", err)
 		}
 		s.Actors.Set(m)
 	}
@@ -77,18 +77,17 @@ func (s StateRoutes) ApplyEgress(_ context.Context, e gateway.EgressState) error
 
 // ActorState applies only the Substrate actors of each revision to an actor table. A pod without the
 // egress listener uses it: its model and MCP listeners check the actor JWT against the same record
-// (issue #1489). A fault in the actors empties the table, as in StateRoutes.
+// (issue #1489). A bad actor row is skipped and returned, as in StateRoutes.
 type ActorState struct {
 	Actors *route.ActorTable
 }
 
-// ApplyEgress replaces the actor table with the actors of e.
+// ApplyEgress replaces the actor table with the good actors of e and returns the error of the bad rows.
 func (s ActorState) ApplyEgress(_ context.Context, e gateway.EgressState) error {
 	m, err := e.ActorLookup()
+	s.Actors.Set(m)
 	if err != nil {
-		s.Actors.Set(nil)
 		return fmt.Errorf("egress: the actors: %w", err)
 	}
-	s.Actors.Set(m)
 	return nil
 }
