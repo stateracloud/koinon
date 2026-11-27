@@ -9,7 +9,7 @@
 //
 // It finds the run in this order: the run URL that `gh workflow run` prints (newer gh and GitHub
 // return it); else, with --bisect-id, the dispatched run whose name carries the commit and the bisect
-// id; else the new workflow_dispatch run on the ref that was not there before the dispatch. When two
+// id, not there before the dispatch; else the new workflow_dispatch run on the ref that was not there before the dispatch. When two
 // runs match (another dispatch on the same ref at the same time), it cannot know which one is its
 // own: it prints nothing on stdout, lists them on stderr and exits 1.
 // Exit 0: found. 1: no single run showed up in time. 2: usage error, or a gh call failed (ADR 0118).
@@ -171,17 +171,16 @@ func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "would dispatch: gh %s\n", strings.Join(dargs, " "))
 		return 0
 	}
-	// Without a bisect id, the new run is the one that was not there before.
+	// A run that exists before the dispatch is never the new run. With a bisect id this also keeps out
+	// a run of an earlier attempt that carries the same name.
 	before := map[int64]bool{}
-	if o.bisectID == "" {
-		runs, err := listRuns(gh, o.ref)
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
-			return 1
-		}
-		for _, r := range runs {
-			before[r.ID] = true
-		}
+	runs, err := listRuns(gh, o.ref)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
+		return 2
+	}
+	for _, r := range runs {
+		before[r.ID] = true
 	}
 	start := clk.Now()
 	out, errOut, err := gh.Gh(dargs...)
@@ -196,7 +195,7 @@ func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 	match := func(r Run) bool { return !before[r.ID] }
 	if o.bisectID != "" {
 		match = func(r Run) bool {
-			return strings.Contains(r.Title, o.commit) && strings.Contains(r.Title, "bisect "+o.bisectID)
+			return !before[r.ID] && strings.Contains(r.Title, o.commit) && strings.Contains(r.Title, "bisect "+o.bisectID)
 		}
 	}
 	for {

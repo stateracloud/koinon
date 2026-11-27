@@ -78,6 +78,8 @@ var _ = Describe("commentVerdict", func() {
 		Entry("needs main", StatusMarker+"\nneeds main: the .github PR #12", VerdictQuestion, ""),
 		Entry("a word inside a line is not a verdict", StatusMarker+"\nI do not STOP here. No question remains.", VerdictNothing, ""),
 		Entry("lower-case stop is not STOP", StatusMarker+"\nstop the old run first", VerdictNothing, ""),
+		Entry("a quoted question line is not news", StatusMarker+"\n> question: which?\n> **STOP**\n> review: READY at "+head, VerdictNothing, ""),
+		Entry("a quoted line does not hide an unquoted one", StatusMarker+"\n> question: old\nquestion: new", VerdictQuestion, ""),
 		Entry("Question: none is not a question", StatusMarker+"\nQuestion: none.\n**Needs main:** n/a\nquestions:", VerdictNothing, ""),
 	)
 })

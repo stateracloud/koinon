@@ -118,10 +118,17 @@ trap 'rm -rf "$tmp" "$fx"' EXIT
 cat >"$fx/runs.json" <<JSON
 [{"databaseId":50,"headSha":"$green","event":"push","conclusion":"success"}]
 JSON
+# The list before the dispatch holds a run of an earlier attempt with the same name (100). After the
+# dispatch of a commit, the list also holds the new runs. The fake gh switches per dispatched commit.
+cat >"$fx/dispatched-before.json" <<JSON
+[{"databaseId":100,"displayTitle":"e2e-kind ($head) bisect 999"}]
+JSON
 cat >"$fx/dispatched.json" <<JSON
-[{"databaseId":111,"displayTitle":"e2e-kind ($head) bisect 555"},
+[{"databaseId":100,"displayTitle":"e2e-kind ($head) bisect 999"},
+ {"databaseId":111,"displayTitle":"e2e-kind ($head) bisect 555"},
  {"databaseId":222,"displayTitle":"e2e-kind ($head) bisect 999"}]
 JSON
+echo '{"status":"completed","conclusion":"success"}' >"$fx/view-100.json"
 echo '{"status":"completed","conclusion":"success"}' >"$fx/view-111.json"
 echo '{"status":"completed","conclusion":"failure"}' >"$fx/view-222.json"
 cat >"$fx/gh" <<'SH'
@@ -130,7 +137,8 @@ echo "gh $*" >>"$FX/calls"
 jqexpr="" ; args=("$@")
 for i in "${!args[@]}"; do [[ ${args[$i]} == --jq ]] && jqexpr=${args[$((i + 1))]}; done
 case "$1 $2" in
-"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
+"workflow run") [[ $* == *"commit=$HEAD_SHA"* ]] && touch "$FX/dispatched-flag" ;;
+"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched-before.json; [[ -e $FX/dispatched-flag ]] && f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
 "run view") jq -r "${jqexpr:-.}" "$FX/view-$3.json" ;;
 "api repos/x/y/actions/runs/60/artifacts") echo "HTTP 502" >&2; exit 1 ;; # the artifacts call fails for run 60
 "api repos/x/y/actions/runs/40/artifacts") echo 1 ;; # only run 40 left a stories-green artifact
@@ -140,7 +148,7 @@ case "$1 $2" in
 esac
 SH
 chmod +x "$fx/gh"
-export FX="$fx" GH="$fx/gh"
+export FX="$fx" GH="$fx/gh" HEAD_SHA="$head"
 out=$(hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "candidate .*: fail" "the run named for this bisect id decides (222 fail), not the other one (111 pass)"
 nocheck "$out" "candidate .*: pass" "the run of another bisect is ignored"
@@ -157,6 +165,7 @@ cat >"$fx/runs2.json" <<JSON
  {"databaseId":40,"headSha":"$green","event":"schedule","conclusion":"success"}]
 JSON
 : >"$fx/calls"
+rm -f "$fx/dispatched-flag"
 out=$(RUNS=runs2.json STORIES_RED=1 GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $green" "stories-red: the baseline is the newest nightly with the stories-green artifact"
 check "$out" "cannot list the artifacts of run 60" "stories-red: an artifacts API error warns and the search moves to an older run"
@@ -179,6 +188,7 @@ nocheck "$out" "^e2e regression on main: " "stories-red: the final title is not 
 out=$(b --green "$green" --head HEAD --open-issue 42)
 check "$out" "main is red again" "quickstart failure: the comment still says main is red"
 : >"$fx/calls"
+rm -f "$fx/dispatched-flag"
 out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $head" "quickstart failure: the baseline is the newest green run"
 nocheck "$(cat "$fx/calls")" "stories=true" "quickstart failure: no stories input"

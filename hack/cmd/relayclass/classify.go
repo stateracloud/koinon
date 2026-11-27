@@ -80,6 +80,10 @@ func commentVerdict(body string) (verdict, ready string) {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		// A quoted line (`> question: ...`) repeats an older text. It is not news.
+		if strings.HasPrefix(line, ">") {
+			continue
+		}
 		switch {
 		case stopRe.MatchString(line):
 			return VerdictStop, ready

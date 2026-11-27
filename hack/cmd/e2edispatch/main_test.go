@@ -33,6 +33,7 @@ type fakeGh struct {
 	listCalls   int
 	dispatchOut string
 	dispatchErr error
+	listErr     error
 	calls       []string
 }
 
@@ -42,6 +43,9 @@ func (f *fakeGh) Gh(args ...string) ([]byte, []byte, error) {
 	case "workflow run":
 		return []byte(f.dispatchOut), []byte("koinon_test_stderr"), f.dispatchErr
 	case "run list":
+		if f.listErr != nil {
+			return nil, []byte("koinon_test_stderr"), f.listErr
+		}
 		i := min(f.listCalls, len(f.lists)-1)
 		f.listCalls++
 		var l []Run
@@ -80,7 +84,7 @@ var _ = Describe("e2edispatch", func() {
 	It("passes every input", func() {
 		gh.dispatchOut = url("1")
 		Expect(do("--ref", "main", "--backup-restore", "--stories", "--commit", "abc", "--bisect-id", "99")).To(Equal(0))
-		Expect(gh.calls).To(ConsistOf(
+		Expect(gh.calls).To(ContainElement(
 			"workflow run e2e-kind.yml --ref main -f suite=go -f backup_restore=true -f stories=true -f commit=abc -f bisect_id=99"))
 	})
 
@@ -111,14 +115,30 @@ var _ = Describe("e2edispatch", func() {
 		Expect(stderr.String()).To(ContainSubstring("run=12 url=" + url("12")))
 	})
 
-	It("matches the run of a bisect by its name and does not list before the dispatch", func() {
-		gh.lists = [][]Run{{
-			{ID: 111, URL: url("111"), Title: "e2e-kind (abc) bisect 555"},
-			{ID: 222, URL: url("222"), Title: "e2e-kind (abc) bisect 999"},
-		}}
+	It("matches the run of a bisect by its name and skips a run of an earlier attempt with the same name", func() {
+		earlier := Run{ID: 100, URL: url("100"), Title: "e2e-kind (abc) bisect 999"}
+		other := Run{ID: 111, URL: url("111"), Title: "e2e-kind (abc) bisect 555"}
+		fresh := Run{ID: 222, URL: url("222"), Title: "e2e-kind (abc) bisect 999"}
+		gh.lists = [][]Run{{earlier, other}, {earlier, other, fresh}}
 		Expect(do("--ref", "main", "--commit", "abc", "--bisect-id", "999")).To(Equal(0))
 		Expect(stdout.String()).To(Equal("run=222 url=" + url("222") + "\n"))
-		Expect(gh.calls[0]).To(HavePrefix("workflow run"))
+		Expect(gh.calls[0]).To(HavePrefix("run list"))
+		Expect(gh.calls[1]).To(HavePrefix("workflow run"))
+	})
+
+	It("does not take a bisect run that was there before the dispatch", func() {
+		earlier := Run{ID: 100, URL: url("100"), Title: "e2e-kind (abc) bisect 999"}
+		gh.lists = [][]Run{{earlier}}
+		Expect(do("--ref", "main", "--commit", "abc", "--bisect-id", "999", "--timeout", "10s")).To(Equal(1))
+		Expect(stdout.String()).To(BeEmpty())
+	})
+
+	It("exits 2, not 1, when the first gh run list fails", func() {
+		gh.listErr = errors.New("exit status 1")
+		Expect(do("--ref", "main")).To(Equal(2))
+		Expect(stdout.String()).To(BeEmpty())
+		Expect(stderr.String()).To(ContainSubstring("gh run list"))
+		Expect(gh.calls).To(HaveLen(1), "nothing is dispatched")
 	})
 
 	It("exits 2 when the dispatch fails, so that a caller can tell it from no run in time", func() {
