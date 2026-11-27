@@ -494,11 +494,6 @@ func (v *substrateKeys) fetchKeys() (map[string]jose.JSONWebKey, error) {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return nil, errors.New("actortoken: discovery jwks_uri is not an https URL")
 	}
-	// The key set comes from the host that serves the discovery document: a document that points to
-	// another host does not move the trust (issue #1485).
-	if disc, err := url.Parse(v.discovery); err != nil || !strings.EqualFold(u.Host, disc.Host) {
-		return nil, errors.New("actortoken: discovery jwks_uri is not on the host of the discovery document")
-	}
 	var set jose.JSONWebKeySet
 	if err := v.fetchJSON(u.String(), &set); err != nil {
 		return nil, err

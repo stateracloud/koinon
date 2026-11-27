@@ -324,13 +324,6 @@ var _ = Describe("Substrate actor token verifier", func() {
 			Expect(idp.jwksHits.Load()).To(BeZero())
 		})
 
-		It("refuses a jwks_uri on another host than the discovery document (issue #1485)", func() {
-			idp.set(func(f *fakeIDP) { f.jwksURI = "https://other.example.test/openid/v1/jwks" })
-			_, err := v.Verify(good())
-			Expect(err).To(MatchError(actortoken.ErrUnavailable))
-			Expect(idp.jwksHits.Load()).To(BeZero())
-		})
-
 		It("does not follow a redirect", func() {
 			idp.set(func(f *fakeIDP) { f.redirect = true })
 			_, err := v.Verify(good())

@@ -33,6 +33,14 @@ var _ = Describe("EgressState.ActorLookup (issue #1386)", func() {
 		Expect(got).To(BeEmpty())
 	})
 
+	It("drops an identity that a bad row also claims", func() {
+		bad := acme
+		bad.Org = ""
+		got, err := gateway.EgressState{EgressActors: []gateway.EgressActor{acme, bad}}.ActorLookup()
+		Expect(err).To(HaveOccurred())
+		Expect(got).To(BeEmpty())
+	})
+
 	DescribeTable("skips an actor row it cannot trust and keeps the good rows (issue #1485)",
 		func(mut func(*gateway.EgressActor), dup bool) {
 			bad := acme

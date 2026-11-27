@@ -693,6 +693,9 @@ func (e EgressState) ActorLookup() (map[actortoken.SubstrateActor]actortoken.Act
 		actor := actortoken.Actor{Org: a.Org, Agent: a.Agent, Run: a.Run}
 		if err := actor.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("gateway: egress actor %s/%s: %w: skipped", a.Atespace, a.Name, err))
+			// A second claim on a complete identity makes it ambiguous, also when this row is the bad one.
+			delete(out, k)
+			ambiguous[k] = true
 			continue
 		}
 		if ambiguous[k] {

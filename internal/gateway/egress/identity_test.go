@@ -158,7 +158,10 @@ var _ = Describe("egress routes with the Substrate identifier (issue #1386)", fu
 		})
 		Expect(err).To(MatchError(ContainSubstring("egress: the actors")))
 		Expect(applier.Actors.Len()).To(Equal(1))
-		Expect(do(known).Header.Get(egress.RefusalHeader)).NotTo(Equal(string(route.ReasonUnknownActor)))
+		// The gate allows the good actor; the fake dial then fails, so the upstream error is the answer.
+		resp := do(known)
+		Expect(resp.StatusCode).To(Equal(http.StatusBadGateway))
+		Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal(string(egress.ReasonUpstream)))
 	})
 
 	It("removes the actors also when the routes of a revision are refused", func() {

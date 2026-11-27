@@ -278,7 +278,7 @@ func strings64() string { return strings.Repeat("a", 64) }
 
 // The actor name (issue #1386): "<sandbox>-<16 hex>", new for each call, and found through the adapter.
 var _ = Describe("the actor name", func() {
-	It("is the sandbox name, a dash and 8 lowercase hex characters, and new each time", func() {
+	It("is the sandbox name, a dash and 16 lowercase hex characters, and new each time", func() {
 		d, _ := newDriver()
 		re := regexp.MustCompile(`^kt-0123456789abcdef-[0-9a-f]{16}$`)
 		seen := map[string]bool{}
