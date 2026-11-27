@@ -321,8 +321,24 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		return fmt.Errorf("guest launcher: landlock signal scope required but the kernel ABI is %d, version %d is needed", abi, scopedLandlockABI)
 	}
 	var rules []landlock.Rule
-	if len(l.ReadExec) > 0 {
-		rules = append(rules, landlock.RODirs(l.ReadExec...).IgnoreIfMissing())
+	// Hidden paths (issue #1516) are left out of the read rules: the siblings are granted one by one.
+	readExec, err := l.ReadExecVisible()
+	if err != nil {
+		return err
+	}
+	var readDirs, readFiles []string
+	for _, e := range readExec {
+		if st, serr := os.Stat(e); serr == nil && !st.IsDir() {
+			readFiles = append(readFiles, e)
+		} else {
+			readDirs = append(readDirs, e)
+		}
+	}
+	if len(readDirs) > 0 {
+		rules = append(rules, landlock.RODirs(readDirs...).IgnoreIfMissing())
+	}
+	if len(readFiles) > 0 {
+		rules = append(rules, landlock.ROFiles(readFiles...).IgnoreIfMissing())
 	}
 	if len(l.ReadWrite) > 0 {
 		rules = append(rules, landlock.RWDirs(l.ReadWrite...).IgnoreIfMissing())
@@ -371,7 +387,7 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		log.Warn("guest launcher: landlock signal scope NOT applied, the kernel ABI is too old; the payload can signal processes of its own uid", "kernel_abi", abi)
 		scopeSignal = false
 	}
-	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite, "devices", l.Devices, "scope_signal", scopeSignal)
+	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", readExec, "hidden", l.Hidden, "read_write", l.ReadWrite, "devices", l.Devices, "scope_signal", scopeSignal)
 	return nil
 }
 

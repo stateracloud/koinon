@@ -306,6 +306,61 @@ var _ = Describe("PrepareLogDir", func() {
 		Expect(os.Chmod(filepath.Join(base, "open"), 0o777)).To(Succeed())
 		Expect(guestfront.PrepareLogDir(filepath.Join(base, "open", "jobs"))).To(MatchError(ContainSubstring("lets group or others write")))
 	})
+	// Issue #1516: a directory made before the front starts, with mode 0755, would let the payload
+	// user read the job logs on the gVisor tiers.
+	DescribeTable("refuses a last part that gives others access or the group write",
+		func(mode os.FileMode) {
+			d := filepath.Join(realTemp(), "jobs")
+			Expect(os.Mkdir(d, 0o700)).To(Succeed())
+			Expect(os.Chmod(d, mode)).To(Succeed())
+			Expect(guestfront.PrepareLogDir(d)).To(HaveOccurred())
+		},
+		Entry("0755", os.FileMode(0o755)),
+		Entry("0751", os.FileMode(0o751)),
+		Entry("0770", os.FileMode(0o770)),
+		Entry("0704", os.FileMode(0o704)),
+	)
+	DescribeTable("accepts a last part of 0750 or stricter",
+		func(mode os.FileMode) {
+			d := filepath.Join(realTemp(), "jobs")
+			Expect(os.Mkdir(d, 0o700)).To(Succeed())
+			// BSD and macOS give a new directory the group of its parent; the front wants its own.
+			Expect(os.Chown(d, -1, os.Getegid())).To(Succeed())
+			Expect(os.Chmod(d, mode)).To(Succeed())
+			Expect(guestfront.PrepareLogDir(d)).To(Succeed())
+		},
+		Entry("0750", os.FileMode(0o750)),
+		Entry("0700", os.FileMode(0o700)),
+		Entry("0550", os.FileMode(0o550)),
+	)
+	// The platform decides the group of a new directory (BSD, macOS and a setgid parent give it the group
+	// of the parent), so the front sets its own group on a directory that it makes.
+	It("sets its own group on a directory that it makes below a parent of another group", func() {
+		if os.Geteuid() != 0 {
+			Skip("changing the group of the parent needs root")
+		}
+		base := realTemp()
+		Expect(os.Chown(base, 0, 12345)).To(Succeed())
+		Expect(os.Chmod(base, 0o755|os.ModeSetgid)).To(Succeed())
+		d := filepath.Join(base, "jobs")
+		Expect(guestfront.PrepareLogDir(d)).To(Succeed())
+		st, err := os.Stat(d)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Sys().(*syscall.Stat_t).Gid).To(BeEquivalentTo(os.Getegid()))
+	})
+	It("refuses a last part of another group", func() {
+		if os.Geteuid() != 0 {
+			Skip("changing the group needs root")
+		}
+		d := filepath.Join(realTemp(), "jobs")
+		Expect(os.Mkdir(d, 0o750)).To(Succeed())
+		Expect(os.Chown(d, 0, 12345)).To(Succeed())
+		Expect(guestfront.PrepareLogDir(d)).To(MatchError(ContainSubstring("has gid 12345")))
+	})
+	It("refuses the root directory with a clear message", func() {
+		Expect(guestfront.PrepareLogDir("/")).To(MatchError(ContainSubstring("is the root directory")))
+		Expect(guestfront.PrepareLogDir("//")).To(MatchError(ContainSubstring("is the root directory")))
+	})
 	It("refuses a file and a relative path", func() {
 		f := filepath.Join(realTemp(), "file")
 		Expect(os.WriteFile(f, nil, 0o600)).To(Succeed())

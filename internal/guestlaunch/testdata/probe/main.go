@@ -215,6 +215,9 @@ func main() {
 		_ = os.Remove("/run/koinon-link")
 	}
 	denied("symlink:/run/koinon-link", lerr, "plant a symlink under /run")
+	// Issue #1516: nor may it read the job logs (the policy lists /run/koinon as hidden).
+	_, rderr := os.ReadDir("/run/koinon/ate-jobs")
+	denied("read:/run/koinon/ate-jobs", rderr, "list the job log directory")
 	// Devices: the listed nodes work, nothing else under /dev does.
 	f, ferr := os.OpenFile("/dev/null", os.O_WRONLY, 0)
 	if ferr == nil {

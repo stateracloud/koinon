@@ -67,6 +67,21 @@ func (d *Driver) Upload(ctx context.Context, workspace, sandbox, destDir string,
 	if rerr != nil {
 		return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", rerr)}
 	}
+	if !complete {
+		// fillChunk stops at a full buffer, so an archive of exactly uploadChunk bytes looks as if it had
+		// more. Read one byte more: at the end it is complete and a retry is allowed (issue #1516); else
+		// the byte goes back in front of the rest of the stream.
+		var probe [1]byte
+		n, perr := io.ReadFull(archive, probe[:])
+		switch {
+		case n == 0 && perr == io.EOF:
+			complete = true
+		case perr != nil && perr != io.EOF:
+			return &execution.Error{Op: op, Err: fmt.Errorf("read archive: %w", perr)}
+		default:
+			archive = io.MultiReader(bytes.NewReader(probe[:n]), archive)
+		}
+	}
 	deadline := time.Now().Add(d.cfg.GuestReadyTimeout)
 	delay := d.cfg.PollInterval
 	for {

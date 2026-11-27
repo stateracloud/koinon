@@ -404,6 +404,23 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/a.txt", []byte("hi")))
 		})
 
+		// Issue #1516: an archive of exactly one message (256 KiB) fills the first buffer, and the
+		// driver must still see that the stream ended, or it would not retry.
+		It("retries an archive of exactly one message", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("e"), 256<<10-512-1024) // header, body (a multiple of 512) and two end blocks
+			Expect(tw.WriteHeader(&tar.Header{Name: "exact.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			Expect(buf.Len()).To(Equal(256 << 10))
+			cl.FailNextUploadStreams(ws, "sb", 1)
+			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
+			Expect(cl.Calls("WriteProcessInput")).To(Equal(2), "one failed stream and one that worked")
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/exact.bin", body))
+		})
+
 		It("gives up after the ready timeout when every write ends Unavailable", func(ctx SpecContext) {
 			dd, c := newDriver(substrate.Config{PollInterval: time.Millisecond, GuestReadyTimeout: 50 * time.Millisecond})
 			ready(ctx, dd, "sb")
