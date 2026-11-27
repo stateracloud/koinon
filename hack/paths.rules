@@ -146,6 +146,7 @@ keep scripts \.go$
 
 # --- web ------------------------------------------------------------------------------------------
 job web ^(web/|api/proto/)
+job web ^hack/(playwright-image\.env|playwright-image\.sh)$
 
 # --- generate: every input and output of `make generate` ------------------------------------------
 # hack/ci-changes-test.sh derives them from the Makefile and the generator configs and fails when
@@ -247,7 +248,7 @@ script-check - inputs=hack/fetch-pinned-test.sh,hack/fetch-pinned.sh hack/fetch-
 script-check - inputs=hack/e2e-parts-test.sh,test/e2e/kind/parts.sh hack/e2e-parts-test.sh
 script-check - inputs=hack/apt-retries-test.sh hack/apt-retries-test.sh --self-test
 script-check - inputs=guard hack/apt-retries-test.sh
-script-check - inputs=hack/e2e-remote-test.sh,hack/e2e-remote.sh,hack/e2e-status.sh,hack/versions.env,web/package.json,.github/workflows/ci.yml,hack/versions-check.sh hack/e2e-remote-test.sh
+script-check - inputs=hack/e2e-remote-test.sh,hack/e2e-remote.sh,hack/e2e-status.sh,hack/versions.env,hack/playwright-image.env,hack/playwright-image.sh,web/package.json,.github/workflows/ci.yml,hack/versions-check.sh hack/e2e-remote-test.sh
 script-check - inputs=hack/ci-fail-test.sh,hack/ci-fail.sh,hack/testdata/ci-fail/ hack/ci-fail-test.sh
 script-check - inputs=hack/ci-timing-test.sh,hack/ci-timing.sh,hack/testdata/ci-timing/gh/,hack/testdata/ci-timing/records.json hack/ci-timing-test.sh
 script-check - inputs=.github/,hack/ci-go-gate-test.sh,hack/ci-required.txt,hack/govulncheck.sh hack/ci-go-gate-test.sh
@@ -301,7 +302,7 @@ script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/govuln
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh
-script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
+script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,hack/playwright-image.env,hack/playwright-image.sh,hack/e2e-toolchain/web.Dockerfile,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh

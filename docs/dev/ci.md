@@ -355,7 +355,7 @@ topology stays in the output directory as `topology.json`). The kind topology tu
 the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
 that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
 environment of that process). The `drill` job installs Node and pnpm (`pnpm --dir web install --frozen-lockfile`) and runs the spec in the pinned
-Playwright image (the digest of `web-e2e`) through `go tool drillwebrun` (`hack/cmd/drillwebrun`, ADR 0118), which `test/drill` calls when
+Playwright image (the pin in `hack/playwright-image.env`, the same as `web-e2e`) through `go tool drillwebrun` (`hack/cmd/drillwebrun`, ADR 0118), which `test/drill` calls when
 `KOINON_DRILL_PLAYWRIGHT_IMAGE` is set. The tool mounts the parent of `PLAYWRIGHT_OUTPUT_DIR`, because Playwright removes its output directory and a mount point cannot be removed; its Docker spec runs as non-root in `go-test` on every pull request (#1072); the job installs no browser or OS package from a live mirror (#569). Without
 that image the spec runs through pnpm on the machine, which then needs its own Chromium. Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
 (or `no_proxy`) for the drill: `web/playwright.drill.config.ts` maps them to Playwright's `use.proxy` (Playwright
@@ -1241,3 +1241,11 @@ only when it changes Go or web code (a `paths` filter, allowed because the check
 and query suite are the default setup's (actions, go, javascript-typescript, python; `default`). Not in
 `hack/ci-required.txt`. Switching over: merge the workflow, switch the default setup off in Settings right after
 (both cannot upload for one language), then run the workflow once by hand.
+
+## Playwright bump
+
+The Playwright image of `web-e2e` and of the restore drill is one pin: `PLAYWRIGHT_IMAGE` in `hack/playwright-image.env`
+(tag and digest). The one reader is `hack/playwright-image.sh`; it fails closed and nothing sources the file. The `changes` job of `ci.yml` and a step of the drill job in `e2e-kind.yml` call it. A bump is one pull
+request with no `.github` path: `web/package.json`, `web/pnpm-lock.yaml`, `hack/e2e-toolchain/web.Dockerfile` (`ARG
+PLAYWRIGHT_VERSION`) and `hack/playwright-image.env`. `hack/ci-playwright-image-test.sh` and `hack/e2e-remote-test.sh` fail
+when the four disagree. A drill of a commit from before the pin file existed has no file to read.
