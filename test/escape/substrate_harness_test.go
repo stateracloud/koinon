@@ -58,7 +58,7 @@ import (
 //	                                       koinon-gateway.koinon-system.svc:8080. The driver writes them into
 //	                                       the egress policy of every sandbox (issue #1444, #1508): the only
 //	                                       destinations that policy allows. A host is a lowercase DNS name,
-//	                                       never an IP address. The suite sends no traffic to them
+//	                                       never an IP address. The suite sends one HTTP request to the first, as the positive control of the deny specs
 //	KOINON_ESCAPE_TIER                     the isolation tier of that class: hardened (default), vm or dev
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS  comma-separated host=target entries, as --substrate-image-mirrors
 //	KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY registry that replaces the host of an image with no mirror entry

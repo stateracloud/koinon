@@ -39,10 +39,13 @@ The full list, with defaults, is in the header of `test/escape/substrate_harness
   every sandbox. They are the only destinations that policy allows: default-deny stays for every other
   destination (ADR 0120). The egress gateway spec is the one exception: it replaces the policy of its own
   sandbox with an allow-all rule, as its control. Do not name a host that a deny probe targets (for example in
-  `KOINON_ESCAPE_API` or `KOINON_ESCAPE_INTERNAL`) as a route, or that deny spec fails. The suite sends no traffic to them. A run without this input fails at once, with or
+  `KOINON_ESCAPE_API` or `KOINON_ESCAPE_INTERNAL`) as a route, or that deny spec fails. The suite sends one HTTP request to the first route, as the positive control of the deny specs. A run without this input fails at once, with or
   without `KOINON_REQUIRE`; it does not skip.
 
 `make test-escape-substrate` sets `KOINON_REQUIRE`, so a missing input below fails its spec; it does not skip.
+It also requires `envtest` for the 36 admission specs (label `substrate`) and sets `KUBEBUILDER_ASSETS` itself, with
+`setup-envtest` (`make envtest-assets`). The machine needs a route to download the assets once. To use assets that
+you already have, set `KOINON_ENVTEST_ASSETS=<dir>`. Without the assets the target fails. It does not skip.
 Set these:
 
 - `KOINON_ESCAPE_HOST_KERNEL`: `uname -r` of the worker node. The tier spec checks that the guest kernel
@@ -51,6 +54,9 @@ Set these:
   platform services (the atenet router, and the gateway by ClusterIP: the sandbox may reach the gateway by
   name only).
 - `KOINON_ESCAPE_ATEAPI` and `KOINON_ESCAPE_ATELET`: `host:port` of ateapi and of atelet (a node IP and port).
+- `KOINON_ESCAPE_SUBSTRATE_PEER_ADDRS`: comma-separated host addresses, without port, that org A can route to and
+  that lead to org B's actor: the IP of the worker pod, and any other address on the path. The cross-org spec
+  sends bytes to port 8099 on each of them and on the host of `KOINON_ESCAPE_SUBSTRATE_ROUTER`.
 - `KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_*`: the snapshot bucket, for the restore spec.
 - `KOINON_ESCAPE_TIER`: `hardened` (default), `vm` or `dev`.
 - `KOINON_ESCAPE_EGRESS_CONTROL` (default `example.com:80`): a destination that atenet-egress can reach. The
@@ -104,7 +110,7 @@ no cluster.
 
 ## What the specs check
 
-- Direct egress and cloud metadata are denied.
+- Direct egress and cloud metadata are denied. The specs send bytes (see [A connect proves nothing](#a-connect-proves-nothing-on-substrate)).
 - No ServiceAccount token, SPIFFE socket or kube config in the guest. The API server and the platform
   services are unreachable.
 - No credential and no JWT-shaped value in files or environment.
@@ -119,10 +125,42 @@ no cluster.
 - A restore with a wrong digest returns `ErrInvalid`, a restore into another org's workspace returns
   `ErrNotFound`, and the right digest restores.
 
+## A connect proves nothing on Substrate
+
+On Substrate the guest TCP stack does not leave through the pod network namespace. Each actor has its own network
+namespace. Its nftables rules send every TCP connect to a local atunnel listener. The listener accepts the connection
+first, and then opens a CONNECT tunnel to atenet-egress, and that CONNECT is accepted. atenet-egress reads the Host or the SNI
+and decides then. It never dials the IP address that the guest chose. So `connect()` succeeds for every address, and a probe that only connects reports
+"open" for all of them (issue #1515; in the atenet-egress log, every probe target was a CONNECT with code 200 and 0
+bytes up and down).
+
+The deny specs use the probe op `payload` (`test/escape/testdata/probe.py`). It sends a TLS ClientHello (or an HTTP
+request on port 80, 8080 or 8099) and reads the answer. A target is denied when:
+
+- the connect fails (`ECONNREFUSED`, `ENETUNREACH`, `EHOSTUNREACH`, `ECONNRESET`, `EACCES`, `EPERM`, `timeout`,
+  `gaierror`), or
+- the connection closes with no byte (`closed`: the tunnel closed after atenet-egress refused the CONNECT), or
+- the answer is the egress gateway's own 403, 502 or 503 (an Envoy marker and no `x-envoy-upstream-service-time`).
+
+Use only deny targets that answer bad input with a byte (a TLS or HTTP server, an SSH banner). A service that
+closes with no byte on bad input, such as CoreDNS on TCP 53, looks like a denial. A byte from the target, or a result that is not in this list, fails the spec. Each deny spec runs a positive control in
+the same probe: an HTTP request to the first `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES` entry must answer with a status.
+The spec reports every target, not only the first that fails. Read the result of the IPv6 target
+(`[2606:4700:4700::1111]:443`) in the Ginkgo log: a guest with no IPv6 route gives `ENETUNREACH`, which is a denial,
+and a guest that connects gives `closed`.
+
+gVisor has no network fence in the guest. So the `ateapi` and `atelet` spec expects no byte back (not `EACCES` or
+`EPERM`): the refusal is outside the guest. The cross-org spec uses `169.254.17.2` as a control only. That address is
+the same constant in every actor, each in its own network namespace, so it is not a collision: org A must get
+`ECONNREFUSED` on it while org B's listener is up, and the reach to org B is tested on routable addresses
+(`KOINON_ESCAPE_SUBSTRATE_PEER_ADDRS` and the router).
+
 ## Limits
 
 - The cross-org network spec proves the network half with two atespaces on one node. It does not prove
   separation between nodes.
 - If `NoNewPrivs` or `Seccomp` is missing from `/proc/self/status` on gVisor, the privilege spec fails on the
   missing field. Read the guest `/proc/self/status` before you blame the sandbox.
+- The routable part of the cross-org spec has no control that port 8099 is open on those addresses. It proves that
+  no byte comes back, as the direct egress spec does. It does not prove reach to org B's listener.
 - A result is for one tier and one runtime class. Run again for every class that you ship.
