@@ -27,9 +27,27 @@ job_body() { awk -v j="  $2:" '$0 == j { f = 1; next } f && /^  [a-zA-Z0-9_-]+:/
 ver=$(jq -r '.devDependencies["@playwright/test"] // .dependencies["@playwright/test"]' "$pkg")
 body=$(job_body "$wfdir/ci.yml" web-e2e)
 # The one pin (hack/playwright-image.env): both workflows read it, so a bump touches no .github path.
-image=$(sed -n 's/^PLAYWRIGHT_IMAGE=\(.*\)$/\1/p' "$pin")
+reader=$repo/hack/playwright-image.sh
+image=$("$reader" "$pin" 2>/dev/null || true)
 
 check "the pin file sets PLAYWRIGHT_IMAGE to the Playwright image" test -n "$image"
+# The reader fails closed (nothing sources the pin file): negative cases.
+good_line='PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.2.3-noble@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+pinfx=$(mktemp -d "${TMPDIR:-/tmp}/ci-playwright-pin.XXXXXX") || exit 1
+# shellcheck disable=SC2329 # called through check
+reads() { printf '%s\n' "$2" >"$pinfx/$1.env"; "$reader" "$pinfx/$1.env"; }
+# shellcheck disable=SC2329
+rejects() { ! reads "$@"; }
+check "reader accepts a comment, an empty line and one good line" reads good $'# c\n\n'"$good_line"
+check "reader rejects an extra export line" rejects export "$good_line"$'\nexport PLAYWRIGHT_IMAGE=docker.io/evil/x:latest'
+check "reader rejects a second PLAYWRIGHT_IMAGE line" rejects second "$good_line"$'\n'"$good_line"
+check "reader rejects an unpinned image" rejects tag 'PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright:v1.2.3-noble'
+check "reader rejects another registry" rejects reg "${good_line/mcr.microsoft.com/docker.io\/x}"
+# shellcheck disable=SC2016 # literal on purpose
+check "reader rejects a command substitution in the line" rejects sub "$good_line"'$(id)'
+check "reader rejects a file with no setting line" rejects empty '# only a comment'
+rm -rf "$pinfx"
+
 # shellcheck disable=SC2329 # called through check
 tag_matches() { [[ $image == mcr.microsoft.com/playwright:v"$ver"-*@sha256:* ]]; }
 check "image tag is v$ver-<codename> (the exact @playwright/test version)" tag_matches
@@ -41,6 +59,9 @@ dockerfile_matches() { [[ $(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf") == "$
 check "web.Dockerfile ARG PLAYWRIGHT_VERSION is $ver" dockerfile_matches
 # shellcheck disable=SC2329
 web_e2e_uses_pin() { grep -Eq '^ *image: *\$\{\{ *needs\.changes\.outputs\.playwright_image *\}\}( +#.*)?$' <<<"$body" && ! grep -Eq 'mcr\.microsoft\.com/playwright' <<<"$body"; }
+# shellcheck disable=SC2329
+no_source() { ! grep -Eq '^[^#]*(\.|source) +(\./)?hack/playwright-image\.env' "$wfdir"/*.yml; }
+check "no workflow sources the pin file (hack/playwright-image.sh is the one reader)" no_source
 check "web-e2e takes its image from the changes job output (the pin file), not a literal" web_e2e_uses_pin
 # shellcheck disable=SC2016
 check "web-e2e installs no browser or OS packages" bash -c '! grep -Eq "playwright install|install-deps|--with-deps|apt-get" <<<"$1"' _ "$body"
@@ -51,7 +72,7 @@ if [ -e "$wfdir/e2e-kind.yml" ]; then
   # shellcheck disable=SC2329
   # shellcheck disable=SC2016 # the pattern is literal
   drill_reads_pin() {
-    grep -q 'hack/playwright-image.env' "$wfdir/e2e-kind.yml" && grep -q 'KOINON_DRILL_PLAYWRIGHT_IMAGE=\$PLAYWRIGHT_IMAGE' "$wfdir/e2e-kind.yml" \
+    grep -q 'hack/playwright-image.sh' "$wfdir/e2e-kind.yml" && grep -q 'KOINON_DRILL_PLAYWRIGHT_IMAGE=\$image' "$wfdir/e2e-kind.yml" \
       && ! grep -Eq '^ *[A-Z_]+: *mcr\.microsoft\.com/playwright' "$wfdir/e2e-kind.yml"
   }
   check "the drill job's Playwright image comes from the pin file (same as web-e2e)" drill_reads_pin

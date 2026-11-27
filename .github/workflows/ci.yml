@@ -122,10 +122,8 @@ jobs:
       # The Playwright image of web-e2e lives in hack/playwright-image.env, so a bump touches no .github path.
       - id: pin
         run: |
-          # shellcheck source=hack/playwright-image.env
-          . hack/playwright-image.env
-          test -n "$PLAYWRIGHT_IMAGE"
-          echo "playwright_image=$PLAYWRIGHT_IMAGE" >>"$GITHUB_OUTPUT"
+          image=$(hack/playwright-image.sh)
+          echo "playwright_image=$image" >>"$GITHUB_OUTPUT"
 
   # The Go checks run as parallel jobs (old issue 217). They share one module and build cache
   # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every

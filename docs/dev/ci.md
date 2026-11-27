@@ -1242,7 +1242,7 @@ and query suite are the default setup's (actions, go, javascript-typescript, pyt
 ## Playwright bump
 
 The Playwright image of `web-e2e` and of the restore drill is one pin: `PLAYWRIGHT_IMAGE` in `hack/playwright-image.env`
-(tag and digest). The `changes` job of `ci.yml` and a step of the drill job in `e2e-kind.yml` read it. A bump is one pull
+(tag and digest). The one reader is `hack/playwright-image.sh`; it fails closed and nothing sources the file. The `changes` job of `ci.yml` and a step of the drill job in `e2e-kind.yml` call it. A bump is one pull
 request with no `.github` path: `web/package.json`, `web/pnpm-lock.yaml`, `hack/e2e-toolchain/web.Dockerfile` (`ARG
 PLAYWRIGHT_VERSION`) and `hack/playwright-image.env`. `hack/ci-playwright-image-test.sh` and `hack/e2e-remote-test.sh` fail
 when the four disagree. A drill of a commit from before the pin file existed has no file to read.

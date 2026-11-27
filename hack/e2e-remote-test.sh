@@ -194,7 +194,7 @@ check "web image: Playwright matches web/package.json" \
   test "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")" = "$(jq -r '.devDependencies["@playwright/test"] // .dependencies["@playwright/test"]' "$pkg")"
 # shellcheck disable=SC2016 # the script is single-quoted on purpose
 check "web image: Playwright matches the image tag of hack/playwright-image.env" \
-  bash -c '[[ $(sed -n "s/^PLAYWRIGHT_IMAGE=//p" "$1") == mcr.microsoft.com/playwright:v"$2"-*@sha256:* ]]' _ "$repo/hack/playwright-image.env" "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")"
+  bash -c '[[ $("$1" "$2") == mcr.microsoft.com/playwright:v"$3"-*@sha256:* ]]' _ "$repo/hack/playwright-image.sh" "$repo/hack/playwright-image.env" "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")"
 
 [[ $fail -eq 0 ]] && echo "e2e-remote tests passed"
 exit "$fail"

@@ -628,10 +628,8 @@ jobs:
       # The image of web-e2e in ci.yml: both read hack/playwright-image.env (hack/ci-playwright-image-test.sh checks it).
       - name: Choose the Playwright image (browser sign-in)
         run: |
-          # shellcheck source=hack/playwright-image.env
-          . hack/playwright-image.env
-          test -n "$PLAYWRIGHT_IMAGE"
-          echo "KOINON_DRILL_PLAYWRIGHT_IMAGE=$PLAYWRIGHT_IMAGE" >>"$GITHUB_ENV"
+          image=$(hack/playwright-image.sh)
+          echo "KOINON_DRILL_PLAYWRIGHT_IMAGE=$image" >>"$GITHUB_ENV"
 
       - name: Pull the Playwright image (browser sign-in)
         run: docker pull "$KOINON_DRILL_PLAYWRIGHT_IMAGE"
