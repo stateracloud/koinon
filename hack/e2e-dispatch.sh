@@ -8,7 +8,8 @@
 # that chain, and `gh run list` can return another person's run. Wait for the run in a background
 # task, never with a foreground sleep. The logic is Go:
 # hack/cmd/e2edispatch (ADR 0118), a main-module tool that `go tool` runs, so its exit code passes
-# through (0 found, 1 dispatch failed or no run in time, 2 usage error). GH overrides the gh command.
+# through (0 found; 1 no single run in time, or two new runs that it cannot tell apart, listed on
+# stderr; 2 usage error or a gh call failed). GH overrides the gh command.
 #
 # Usage: hack/e2e-dispatch.sh --ref REF [--suite go|web|drill] [--backup-restore] [--stories]
 #                             [--commit SHA --bisect-id ID] [--timeout 2m] [--dry-run]

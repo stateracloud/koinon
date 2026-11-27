@@ -26,7 +26,8 @@
 #
 # --dry-run calls no GitHub API: it prints what it would do and takes outcomes from --results
 # (default pass). Environment: GH (the gh command), GH_REPO, GITHUB_RUN_ID, GITHUB_RUN_URL, E2E_DISPATCH (the
-# dispatch command, default hack/e2e-dispatch.sh beside this script), DISPATCH_TIMEOUT (default 5m).
+# dispatch command, default hack/e2e-dispatch.sh beside this script), DISPATCH_TIMEOUT (default 5m: the
+# dispatches run one after the other, so a candidate whose run does not show up costs up to that long).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }

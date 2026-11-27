@@ -90,19 +90,21 @@ line:
 | `STOP` | a lane status comment has a line that starts with `STOP` |
 | `question` | a lane status comment has a line that starts with `question` or `needs main` |
 | `red required check` | the newest run of a check in `hack/ci-required.txt` on the head is red |
-| `READY at <sha>` | a lane status comment says `review: READY at <sha>` and the sha is the head |
+| `READY at <sha>` | a lane status comment or the pull request body says `review: READY at <sha>`, and the sha is the head |
 | `draft` | the pull request is a draft |
 | `nothing new` | none of these; also a closed pull request and a READY for an older head |
 
-A lane status comment is an issue comment whose first line is `<!-- koinon-lane-status -->`. Other
+A lane status comment is an issue comment whose first line is `<!-- koinon-lane-status -->`; the
+lane rule that asks for it is in [lane.md](lane.md#status-comments). Other
 comments (bots, CI, people) never make news. When more than one line applies, the line higher in the
 table wins. Exit 0 with a line; exit 2 on a usage or read error (then start the turn, so that no event
 is lost).
 
 The hook calls it like this:
 
-1. For a comment event, pass the comment URL (`.../pull/N#issuecomment-ID`): only that comment counts.
-   For any other event, pass the pull request number and `--since <time of the last event that started
+1. For an issue comment event, pass the comment URL (`.../pull/N#issuecomment-ID`): only that comment
+   counts. For any other event (a review, a review comment with a `#discussion_r` or
+   `#pullrequestreview-` URL, a check run, a push), pass the pull request number and `--since <time of the last event that started
    a turn for this pull request>` (RFC 3339): only the status comments after it count. Without
    `--since`, only the newest status comment counts.
 2. If the line is `nothing new`, drop the event: no turn.

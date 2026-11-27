@@ -102,11 +102,13 @@ var _ = Describe("e2edispatch", func() {
 		Expect(stderr.String()).To(ContainSubstring("no new run showed up within 20s"))
 	})
 
-	It("prints the oldest of two new runs and warns", func() {
+	It("prints no run and exits 1 when two new runs match", func() {
 		gh.lists = [][]Run{{}, {{ID: 12, URL: url("12"), CreatedAt: t0}, {ID: 11, URL: url("11"), CreatedAt: t0}}}
-		Expect(do("--ref", "main")).To(Equal(0))
-		Expect(stdout.String()).To(Equal("run=11 url=" + url("11") + "\n"))
+		Expect(do("--ref", "main")).To(Equal(1))
+		Expect(stdout.String()).To(BeEmpty())
 		Expect(stderr.String()).To(ContainSubstring("2 new runs"))
+		Expect(stderr.String()).To(ContainSubstring("run=11 url=" + url("11")))
+		Expect(stderr.String()).To(ContainSubstring("run=12 url=" + url("12")))
 	})
 
 	It("matches the run of a bisect by its name and does not list before the dispatch", func() {
@@ -119,9 +121,9 @@ var _ = Describe("e2edispatch", func() {
 		Expect(gh.calls[0]).To(HavePrefix("workflow run"))
 	})
 
-	It("exits 1 when the dispatch fails", func() {
+	It("exits 2 when the dispatch fails, so that a caller can tell it from no run in time", func() {
 		gh.dispatchErr = errors.New("exit status 1")
-		Expect(do("--ref", "main")).To(Equal(1))
+		Expect(do("--ref", "main")).To(Equal(2))
 		Expect(stderr.String()).To(ContainSubstring("koinon_test_stderr"))
 	})
 

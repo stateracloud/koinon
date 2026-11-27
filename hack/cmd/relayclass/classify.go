@@ -47,13 +47,27 @@ type PR struct {
 	Merged  bool
 	Draft   bool
 	HeadSHA string
+	Body    string // a lane may also put `review: READY at <sha>` in the body
 }
 
 var (
 	readyRe    = regexp.MustCompile(`review:\s*READY at ([0-9a-f]{7,40})\b`)
 	stopRe     = regexp.MustCompile(`^[^A-Za-z0-9]*STOP\b`)
-	questionRe = regexp.MustCompile(`(?i)^[^a-z0-9]*(question|needs main)\b`)
+	questionRe = regexp.MustCompile(`(?i)^[^a-z0-9]*(?:question|needs main)\b[\s:*_-]*(.*)$`)
 )
+
+// noQuestion are the rests of a question line that say there is none ("Question: none").
+var noQuestion = map[string]bool{"": true, "none": true, "n/a": true, "no": true, "nothing": true, "-": true}
+
+// isQuestion says whether a line asks main something: `question: ...` or `needs main ...` with a rest
+// that is not empty and not "none".
+func isQuestion(line string) bool {
+	m := questionRe.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	return !noQuestion[strings.ToLower(strings.Trim(m[1], " .*_"))]
+}
 
 // commentVerdict classifies the body of one comment. ready is the sha of a READY line, if any.
 // It returns VerdictNothing for a comment without the status marker.
@@ -69,7 +83,7 @@ func commentVerdict(body string) (verdict, ready string) {
 		switch {
 		case stopRe.MatchString(line):
 			return VerdictStop, ready
-		case questionRe.MatchString(line):
+		case isQuestion(line):
 			verdict = VerdictQuestion
 		default:
 			if m := readyRe.FindStringSubmatch(line); m != nil && ready == "" {
@@ -162,11 +176,11 @@ func ClassifyComments(comments []Comment, head string) Result {
 	return res
 }
 
-// ClassifyPR gives the verdict of a pull request from its state, its head checks and the status
-// comments created after since (all of them when since is zero: then only the newest counts).
+// ClassifyPR gives the verdict of a pull request from its state, its body, its head checks and the
+// status comments created after since (when since is zero, only the newest status comment counts).
 func ClassifyPR(pr PR, comments []Comment, runs []CheckRun, required map[string]bool, since time.Time) Result {
-	if pr.State != "open" || pr.Merged {
-		return Result{VerdictNothing, fmt.Sprintf("pull request %d is %s", pr.Number, map[bool]string{true: "merged", false: pr.State}[pr.Merged])}
+	if r, done := closed(pr); done {
+		return r
 	}
 	var picked []Comment
 	if since.IsZero() {
@@ -188,6 +202,9 @@ func ClassifyPR(pr PR, comments []Comment, runs []CheckRun, required map[string]
 		}
 	}
 	res := ClassifyComments(picked, pr.HeadSHA)
+	if m := readyRe.FindStringSubmatch(pr.Body); m != nil && sameCommit(m[1], pr.HeadSHA) {
+		res = better(res, Result{VerdictReady + m[1], fmt.Sprintf("pull request %d body", pr.Number)})
+	}
 	if red := redRequired(runs, required); len(red) > 0 {
 		res = better(res, Result{VerdictRed, "red on " + short(pr.HeadSHA) + ": " + strings.Join(red, ", ")})
 	}
@@ -195,6 +212,17 @@ func ClassifyPR(pr PR, comments []Comment, runs []CheckRun, required map[string]
 		res = better(res, Result{VerdictDraft, fmt.Sprintf("pull request %d is a draft", pr.Number)})
 	}
 	return res
+}
+
+// closed gives nothing new for a closed or merged pull request: no news can change it.
+func closed(pr PR) (Result, bool) {
+	switch {
+	case pr.Merged:
+		return Result{VerdictNothing, fmt.Sprintf("pull request %d is merged", pr.Number)}, true
+	case pr.State != "open":
+		return Result{VerdictNothing, fmt.Sprintf("pull request %d is %s", pr.Number, pr.State)}, true
+	}
+	return Result{}, false
 }
 
 func short(sha string) string {

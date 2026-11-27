@@ -44,6 +44,18 @@ rules for the lane agent are in [the subagent brief](../agents/subagent-brief.md
    every gate is `pass` and no blocker or major finding remains. Minor findings go to the parent.
 7. **Ship.** The parent only. The lane never pushes.
 
+## Status comments
+
+A cloud lane whose brief lets it push and comment tells main its status only on GitHub: a NEW issue
+comment on the issue (before the pull request exists) or on the pull request. Do not only edit an old
+comment. The relay classifier reads these comments ([hooks.md](hooks.md#the-relay-classifier)):
+
+- The first line is `<!-- koinon-lane-status -->`. Without it, the comment is not news for main.
+- A line that starts with `STOP` (the lane stopped and main must act), `question:` or `needs main`
+  (main must answer or do a step). Write `question:` only when there is a question.
+- `review: READY at <full sha>` when the review passed at that head. The same line in the pull
+  request body also counts.
+
 ## Prior art first
 
 For a feature, a mechanism or a process (not a plain bug fix in our own code), look at how

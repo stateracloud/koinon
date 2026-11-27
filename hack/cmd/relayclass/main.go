@@ -64,30 +64,30 @@ func run(args []string, gh GitHub, repoRoot string, stdout, stderr io.Writer) in
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: relayclass [--repo OWNER/REPO] [--since RFC3339] [--required FILE] <PR number | comment URL>")
+		_, _ = fmt.Fprintln(stderr, "usage: relayclass [--repo OWNER/REPO] [--since RFC3339] [--required FILE] <PR number | comment URL>")
 		return 2
 	}
 	var since time.Time
 	if *sinceS != "" {
 		t, err := time.Parse(time.RFC3339, *sinceS)
 		if err != nil {
-			fmt.Fprintf(stderr, "relayclass: --since: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "relayclass: --since: %v\n", err)
 			return 2
 		}
 		since = t
 	}
 	tg, err := parseTarget(fs.Arg(0), *repo)
 	if err != nil {
-		fmt.Fprintf(stderr, "relayclass: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "relayclass: %v\n", err)
 		return 2
 	}
 	res, err := classify(tg, gh, *reqFile, since)
 	if err != nil {
-		fmt.Fprintf(stderr, "relayclass: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "relayclass: %v\n", err)
 		return 2
 	}
-	fmt.Fprintln(stdout, res.Verdict)
-	fmt.Fprintf(stderr, "relayclass: %s\n", res.Why)
+	_, _ = fmt.Fprintln(stdout, res.Verdict)
+	_, _ = fmt.Fprintf(stderr, "relayclass: %s\n", res.Why)
 	return 0
 }
 
@@ -102,6 +102,9 @@ func classify(tg target, gh GitHub, reqFile string, since time.Time) (Result, er
 			pr, err := gh.PR(tg.repo, tg.number)
 			if err != nil {
 				return Result{}, err
+			}
+			if r, done := closed(pr); done {
+				return r, nil
 			}
 			head = pr.HeadSHA
 		}

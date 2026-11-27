@@ -29,6 +29,12 @@ while [[ $# -gt 0 ]]; do
     args+=(--required "$f")
     shift 2
     ;;
+  --required=*)
+    f=${1#--required=}
+    [[ $f == /* ]] || f=$PWD/$f
+    args+=(--required "$f")
+    shift
+    ;;
   *) args+=("$1"); shift ;;
   esac
 done

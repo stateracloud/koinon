@@ -9,8 +9,10 @@
 //
 // It finds the run in this order: the run URL that `gh workflow run` prints (newer gh and GitHub
 // return it); else, with --bisect-id, the dispatched run whose name carries the commit and the bisect
-// id; else the new workflow_dispatch run on the ref that was not there before the dispatch.
-// Exit 0: found. 1: the dispatch failed or no run showed up in time. 2: usage error (ADR 0118).
+// id; else the new workflow_dispatch run on the ref that was not there before the dispatch. When two
+// runs match (another dispatch on the same ref at the same time), it cannot know which one is its
+// own: it prints nothing on stdout, lists them on stderr and exits 1.
+// Exit 0: found. 1: no single run showed up in time. 2: usage error, or a gh call failed (ADR 0118).
 package main
 
 import (
@@ -144,32 +146,29 @@ func listRuns(gh Runner, ref string) ([]Run, error) {
 	return runs, nil
 }
 
-// pick returns the oldest matching run, and how many matched.
-func pick(runs []Run, match func(Run) bool) (Run, int) {
+// matches returns the matching runs, the oldest first.
+func matches(runs []Run, match func(Run) bool) []Run {
 	var m []Run
 	for _, r := range runs {
 		if match(r) {
 			m = append(m, r)
 		}
 	}
-	if len(m) == 0 {
-		return Run{}, 0
-	}
 	sort.Slice(m, func(i, j int) bool { return m[i].ID < m[j].ID })
-	return m[0], len(m)
+	return m
 }
 
 func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 	o, err := parseFlags(args, stderr)
 	if err != nil {
 		if !errors.Is(err, flag.ErrHelp) {
-			fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
 		}
 		return 2
 	}
 	dargs := dispatchArgs(o)
 	if o.dry {
-		fmt.Fprintf(stdout, "would dispatch: gh %s\n", strings.Join(dargs, " "))
+		_, _ = fmt.Fprintf(stdout, "would dispatch: gh %s\n", strings.Join(dargs, " "))
 		return 0
 	}
 	// Without a bisect id, the new run is the one that was not there before.
@@ -177,7 +176,7 @@ func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 	if o.bisectID == "" {
 		runs, err := listRuns(gh, o.ref)
 		if err != nil {
-			fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
 			return 1
 		}
 		for _, r := range runs {
@@ -187,17 +186,14 @@ func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 	start := clk.Now()
 	out, errOut, err := gh.Gh(dargs...)
 	if err != nil {
-		fmt.Fprintf(stderr, "e2edispatch: gh %s: %v: %s\n", strings.Join(dargs, " "), err, strings.TrimSpace(string(errOut)))
-		return 1
+		_, _ = fmt.Fprintf(stderr, "e2edispatch: gh %s: %v: %s\n", strings.Join(dargs, " "), err, strings.TrimSpace(string(errOut)))
+		return 2
 	}
 	if m := runURLRe.FindSubmatch(append(out, errOut...)); m != nil {
-		fmt.Fprintf(stdout, "run=%s url=%s\n", m[1], m[0])
+		_, _ = fmt.Fprintf(stdout, "run=%s url=%s\n", m[1], m[0])
 		return 0
 	}
-	match := func(r Run) bool {
-		// A run created before the dispatch is someone else's; one minute covers clock skew.
-		return !before[r.ID] && !r.CreatedAt.Before(start.Add(-time.Minute))
-	}
+	match := func(r Run) bool { return !before[r.ID] }
 	if o.bisectID != "" {
 		match = func(r Run) bool {
 			return strings.Contains(r.Title, o.commit) && strings.Contains(r.Title, "bisect "+o.bisectID)
@@ -206,19 +202,24 @@ func run(args []string, gh Runner, clk Clock, stdout, stderr io.Writer) int {
 	for {
 		runs, err := listRuns(gh, o.ref)
 		if err != nil {
-			fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
-			return 1
+			_, _ = fmt.Fprintf(stderr, "e2edispatch: %v\n", err)
+			return 2
 		}
-		if r, n := pick(runs, match); n > 0 {
-			if n > 1 {
-				fmt.Fprintf(stderr, "e2edispatch: %d new runs on %s; printing the oldest (another dispatch ran at the same time)\n", n, o.ref)
-			}
-			fmt.Fprintf(stdout, "run=%d url=%s\n", r.ID, r.URL)
+		switch m := matches(runs, match); len(m) {
+		case 0:
+		case 1:
+			_, _ = fmt.Fprintf(stdout, "run=%d url=%s\n", m[0].ID, m[0].URL)
 			return 0
+		default:
+			_, _ = fmt.Fprintf(stderr, "e2edispatch: %d new runs on %s (another dispatch ran at the same time); find yours by its inputs:\n", len(m), o.ref)
+			for _, r := range m {
+				_, _ = fmt.Fprintf(stderr, "  run=%d url=%s\n", r.ID, r.URL)
+			}
+			return 1
 		}
 		left := o.timeout - clk.Now().Sub(start)
 		if left <= 0 {
-			fmt.Fprintf(stderr, "e2edispatch: dispatched on %s, but no new run showed up within %s; look with gh run list --workflow %s --branch %s\n",
+			_, _ = fmt.Fprintf(stderr, "e2edispatch: dispatched on %s, but no new run showed up within %s; look with gh run list --workflow %s --branch %s\n",
 				o.ref, o.timeout, workflow, branch(o.ref))
 			return 1
 		}

@@ -78,6 +78,7 @@ var _ = Describe("commentVerdict", func() {
 		Entry("needs main", StatusMarker+"\nneeds main: the .github PR #12", VerdictQuestion, ""),
 		Entry("a word inside a line is not a verdict", StatusMarker+"\nI do not STOP here. No question remains.", VerdictNothing, ""),
 		Entry("lower-case stop is not STOP", StatusMarker+"\nstop the old run first", VerdictNothing, ""),
+		Entry("Question: none is not a question", StatusMarker+"\nQuestion: none.\n**Needs main:** n/a\nquestions:", VerdictNothing, ""),
 	)
 })
 
@@ -148,6 +149,17 @@ var _ = Describe("ClassifyPR", func() {
 		Expect(ClassifyPR(d, []Comment{status(1, t0, "review: READY at "+head)}, nil, req, time.Time{}).Verdict).To(HavePrefix(VerdictReady))
 	})
 
+	It("reads READY in the pull request body, also for a draft, but not for an older head", func() {
+		d := open
+		d.Draft = true
+		d.Body = "## Summary\n\nreview: READY at " + head
+		res := ClassifyPR(d, nil, nil, req, time.Time{})
+		Expect(res.Verdict).To(Equal("READY at " + head))
+		Expect(res.Why).To(Equal("pull request 7 body"))
+		d.Body = "review: READY at 1111111111111111"
+		Expect(ClassifyPR(d, nil, nil, req, time.Time{}).Verdict).To(Equal(VerdictDraft))
+	})
+
 	It("says nothing new for a closed or merged pull request", func() {
 		m := open
 		m.State, m.Merged = "closed", true
@@ -196,6 +208,13 @@ var _ = Describe("run", func() {
 		Expect(gh.calls).To(ConsistOf("comment o/r", "pr o/r"))
 	})
 
+	It("says nothing new for a comment URL of a merged pull request", func() {
+		gh.pr.State, gh.pr.Merged = "closed", true
+		gh.comments = []Comment{status(42, t0, "STOP")}
+		Expect(run([]string{"https://github.com/o/r/pull/7#issuecomment-42"}, gh, root, stdout, stderr)).To(Equal(0))
+		Expect(stdout.String()).To(Equal("nothing new\n"))
+	})
+
 	It("does not read a pull request for a comment on an issue", func() {
 		gh.comments = []Comment{status(42, t0, "question: scope?")}
 		Expect(run([]string{"https://github.com/o/r/issues/9#issuecomment-42"}, gh, root, stdout, stderr)).To(Equal(0))
@@ -240,17 +259,17 @@ var _ = Describe("ghClient", func() {
 		fake := filepath.Join(dir, "gh")
 		script := `#!/bin/sh
 case "$*" in
-"api repos/o/r/pulls/7") echo '{"number":7,"state":"open","draft":true,"head":{"sha":"` + head + `"}}' ;;
+"api repos/o/r/pulls/7") echo '{"number":7,"state":"open","draft":true,"body":"b","head":{"sha":"` + head + `"}}' ;;
 "api --paginate repos/o/r/issues/7/comments?per_page=100") echo '[{"id":1,"body":"a","created_at":"2026-11-27T12:00:00Z"}]'; echo '[{"id":2,"body":"b","created_at":"2026-11-27T12:01:00Z"}]' ;;
 "api --paginate repos/o/r/commits/` + head + `/check-runs?per_page=100") echo '{"total_count":1,"check_runs":[{"id":5,"name":"go","status":"completed","conclusion":"failure"}]}' ;;
 *) echo "unexpected: $*" >&2; exit 1 ;;
 esac
 `
-		Expect(os.WriteFile(fake, []byte(script), 0o700)).To(Succeed()) //nolint:gosec // a test stub that must be executable
+		Expect(os.WriteFile(fake, []byte(script), 0o700)).To(Succeed())
 		g := &ghClient{bin: fake}
 		pr, err := g.PR("o/r", 7)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(pr).To(Equal(PR{Number: 7, State: "open", Draft: true, HeadSHA: head}))
+		Expect(pr).To(Equal(PR{Number: 7, State: "open", Draft: true, HeadSHA: head, Body: "b"}))
 		cs, err := g.Comments("o/r", 7)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cs).To(HaveLen(2))

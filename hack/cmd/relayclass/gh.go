@@ -67,6 +67,7 @@ func (g *ghClient) PR(repo string, n int) (PR, error) {
 		State  string `json:"state"`
 		Merged bool   `json:"merged"`
 		Draft  bool   `json:"draft"`
+		Body   string `json:"body"`
 		Head   struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -74,7 +75,7 @@ func (g *ghClient) PR(repo string, n int) (PR, error) {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return PR{}, fmt.Errorf("pull request %d: %w", n, err)
 	}
-	return PR{Number: v.Number, State: v.State, Merged: v.Merged, Draft: v.Draft, HeadSHA: v.Head.SHA}, nil
+	return PR{Number: v.Number, State: v.State, Merged: v.Merged, Draft: v.Draft, HeadSHA: v.Head.SHA, Body: v.Body}, nil
 }
 
 type apiComment struct {
