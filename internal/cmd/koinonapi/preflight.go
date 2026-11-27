@@ -101,7 +101,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.substrateAgentdNS, "substrate-agentd-namespace", "", "namespace of Koinon's agentd: the router allow-list must hold its identity (with --substrate-agentd-service-account)")
 	fs.StringVar(&c.substrateAgentdSA, "substrate-agentd-service-account", "", "ServiceAccount of Koinon's agentd, whose pod certificate the router must allow (empty skips the check)")
 	fs.StringVar(&c.substrateIssuer, "substrate-expected-issuer", "", "the service-account issuer Substrate trusts (ate-setup --ateapi-expected-jwt-issuer); empty is the issuer in the API server's discovery document")
-	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod and the user-namespace probe pods in --substrate-probe-namespace")
+	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod, the user-namespace probe pods and the /var/lib/ate filesystem probe pods in --substrate-probe-namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -219,6 +219,18 @@ func newPreflightCommand() *cobra.Command {
 			return err
 		},
 	}, &cobra.Command{
+		Use:   "atefs-probe",
+		Short: "Run inside the Substrate /var/lib/ate probe pod: report whether /var/lib/ate shares the filesystem of the node root or of kubelet",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			shared, missing, err := preflight.SharedFilesystems()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), preflight.AteFSLine(shared, missing))
+			return err
+		},
+	}, &cobra.Command{
 		Use:   "devices-probe",
 		Short: "Run inside the Substrate device probe pod: report that the node's devices were mounted",
 		Args:  cobra.NoArgs,
@@ -318,6 +330,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
 		prober := substrateProber(cfg, kube, *sub)
 		checker.Issuer, checker.IssuerProbe, checker.Devices, checker.UserNS = preflight.NewIssuerResolver(kube), prober, prober, prober
+		checker.AteFS = prober
 	}
 	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
 		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()

@@ -302,7 +302,7 @@ func (c *Checker) SubstrateProbePrerequisites(ctx context.Context) []Result {
 	if c.Config.Substrate.VMTier {
 		results = append(results, c.checkSubstrateDevices(ctx))
 	}
-	results = append(results, c.checkUserNamespaces(ctx))
+	results = append(results, c.checkUserNamespaces(ctx), c.checkAteFS(ctx))
 	return append(results, c.checkIssuer(ctx))
 }
 

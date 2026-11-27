@@ -68,14 +68,12 @@ type LandlockPolicy struct {
 // ScopeSignal is the Landlock scope that blocks signals to processes outside the payload's domain.
 const ScopeSignal = "signal"
 
-// RootDeniedCapabilities are the capabilities that a payload which can run as root must never
-// keep (issue #1496): with them it could trace, signal or reconfigure the Koinon processes of the
-// guest, or widen the guest kernel's attack surface. Validate refuses a policy whose allowlist
-// holds one of them unless the user drop is required.
-var RootDeniedCapabilities = []string{
-	"CAP_SYS_PTRACE", "CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_NET_RAW", "CAP_SYS_BOOT", "CAP_KILL",
-	"CAP_SYS_RAWIO",
-}
+// RootAllowedCapabilities are the only capabilities that a payload which can run as root may keep
+// (issue #1496). Any other capability could trace, signal or reconfigure the Koinon processes of
+// the guest, create device nodes (CAP_MKNOD) or widen the guest kernel's attack surface. It is an
+// allowlist, so a capability that a later kernel adds is refused by default. Validate refuses a
+// policy whose allowlist holds any other capability unless the user drop is required.
+var RootAllowedCapabilities = []string{"CAP_NET_BIND_SERVICE", "CAP_AUDIT_WRITE"}
 
 // SeccompPolicy is the deny filter: every other syscall stays allowed.
 type SeccompPolicy struct {
@@ -201,10 +199,15 @@ func (p Policy) Validate() error {
 		}
 		// A policy without a required drop can leave the payload root (the vm tier, issue #1496).
 		if p.User.Mode != ModeRequire {
-			for _, d := range RootDeniedCapabilities {
-				if dn, _ := capNumber(d); dn == n {
-					return fmt.Errorf("guest launcher policy: capability %s is refused for a payload that can run as root (user mode %q)", d, p.User.Mode)
+			allowed := false
+			for _, a := range RootAllowedCapabilities {
+				if an, _ := capNumber(a); an == n {
+					allowed = true
+					break
 				}
+			}
+			if !allowed {
+				return fmt.Errorf("guest launcher policy: capability %s is refused for a payload that can run as root (user mode %q); allowed: %s", c, p.User.Mode, strings.Join(RootAllowedCapabilities, ", "))
 			}
 		}
 	}

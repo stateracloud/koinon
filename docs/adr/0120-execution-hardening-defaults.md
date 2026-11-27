@@ -151,9 +151,17 @@ driver. A driver may enable the `MEMORY` fidelity only when all of them are met 
    a snapshot cannot hold them. A restore always gets a fresh actor token. An old token is never
    restored. The 0044 exception is refused for a sandbox with snapshots on, or its path is excluded
    from the snapshot.
-2. **Short lifetime.** A snapshot has an expiry. A memory snapshot restores once: a restore consumes it,
-   and a second restore needs a new snapshot. This stops two clones with the same memory and the same
-   random state. Tokens stay short-lived for the same reason.
+2. **Short lifetime.** A snapshot has an expiry. Substrate resumes a suspended actor from its own
+   snapshot. It does not make a second actor from that snapshot, so no two sandboxes share one memory
+   state. Single use (a restore consumes the snapshot) is a Koinon rule: the snapshot record of the
+   v0.2 design enforces it (amendment of 2026-11-25). Substrate does not enforce it. Tokens stay
+   short-lived for the same reason.
+   **Golden snapshots are off by default in every tier** (issue #1492, amendment of 2026-11-27). A golden snapshot clones the memory
+   of one sandbox into many, which this item forbids. The Koinon template sets
+   `GOLDEN_SNAPSHOT_MODE_DISABLED`. An admin can turn golden mode on (`execution.substrate.goldenSnapshots`).
+   That is an explicit exception to the no-memory-clone rule: the admin accepts that sandboxes of one
+   template start from the same memory and the same random state. Golden mode is not needed for speed
+   (see the numbers in [the Substrate install document](../dev/substrate-install.md#golden-snapshots)).
 3. **Encryption at rest.** Every snapshot object is encrypted at rest under a key scoped to one org,
    with a key that Koinon controls (the envelope scheme of the secret keys, with a DEK per org and a
    KEK from the secret store). If the driver's own store does not give that, Koinon encrypts the
@@ -830,6 +838,21 @@ root payload from two tiers and leaves the third as it was.
   sentry checks capabilities against its own user namespace. A drop inside the sandbox through `setresuid` is the
   normal Linux behaviour in the sentry.
 
+## Amendment (2026-11-27, issue #1492): golden snapshots off by default, admin exception
+
+The maintainer decided on 2026-11-27: golden snapshots are an option that is off by default in every tier.
+
+- **Text fix, section 5 item 2.** Substrate resumes a suspended actor from its own snapshot. It does not make a
+  second actor from it. Single use of a snapshot is a Koinon rule that the snapshot record of the v0.2 design
+  enforces. Substrate does not enforce it.
+- **Default.** The Koinon template sets `GOLDEN_SNAPSHOT_MODE_DISABLED`. Golden mode clones the memory of one
+  sandbox into many, which section 5 item 2 forbids.
+- **Exception.** An admin can turn golden mode on with `execution.substrate.goldenSnapshots`. The admin then accepts
+  that sandboxes of one template start from the same memory and the same random state.
+- **Evidence.** In the lab, golden mode was not faster: cold start to the first Exec was p50 1.03 s (off) and 1.05 s
+  (on) on gVisor, and 2.65 s (off) and 3.50 s (on) on the vm tier. A golden build takes 36-38 s. The numbers are
+  in [the Substrate install document](../dev/substrate-install.md#golden-snapshots).
+
 ## Amendment (2026-11-27, issue #1496): a root payload on the `vm` tier in v0.1
 
 Accepted (2026-11-27). The maintainer decided on 2026-11-27 that the payload may run as root in the microVM
@@ -849,17 +872,19 @@ and adds one control.
    capability from the permitted, effective, inheritable and ambient sets, and from the bounding set when the guest
    gives it `CAP_SETPCAP`. `no_new_privs` is set, so no later `execve` gives a capability back. The launcher reads the
    sets back after `capset` and does not start the payload when a capability outside the allowlist remains.
-3. **No policy can give a root payload a dangerous capability.** A policy whose user drop is not `require` fails
-   validation when its allowlist names `CAP_SYS_PTRACE`, `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_NET_RAW`,
-   `CAP_SYS_BOOT`, `CAP_KILL` or `CAP_SYS_RAWIO`.
+3. **A policy can give a root payload only two capabilities.** A policy whose user drop is not `require` fails
+   validation when its allowlist names any capability except `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`. The rule
+   is an allowlist, so `CAP_MKNOD`, `CAP_NET_ADMIN`, `CAP_BPF`, `CAP_PERFMON`, `CAP_SETPCAP`, `CAP_SYS_CHROOT` and
+   every capability that a later kernel adds are refused by default.
 4. **The payload cannot signal the Koinon processes of the guest.** A uid 0 process needs no capability to signal
    another uid 0 process, and the guest front runs as root. So `policy-vm.json` adds the Landlock signal scope
    (`landlock.scoped: ["signal"]`, ABI 6): no signal reaches a process outside the payload's Landlock domain. The
    mode is `require`, so a guest kernel below ABI 6 does not start the payload. Landlock also refuses a `ptrace` of a
    process outside the domain, and the seccomp filter denies `ptrace`, `process_vm_readv`, `process_vm_writev`,
    `pidfd_getfd`, `mount`, the module calls and `reboot` in every tier.
-5. **The home owner differs between tiers.** The home files are owned by uid 0 on the `vm` tier and by uid 10001 on
-   the gVisor tiers.
+5. **The home owner differs between tiers.** The home files are owned by uid 0 in the Substrate guest of v0.1 (the
+   guest has no `CAP_SETUID`, [#1462](https://github.com/stateracloud/koinon/issues/1462)). They are owned by uid
+   10001 when the drop succeeds, and on the gVisor tiers.
 
 The harnesses need none of the removed capabilities: OpenCode, git and package installs into the home (npm, pip, go)
 run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` tier") gives each capability, the
@@ -882,7 +907,7 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   guest (root with only `KILL`, `NET_BIND_SERVICE` and `AUDIT_WRITE`): the payload runs as uid 0 with `CapPrm`,
   `CapEff` and `CapAmb` 0 and `NoNewPrivs` 1. Signal 0 to an outside root process (`kill` and
   `pidfd_send_signal`), `ptrace` of that process, `mount`, `finit_module`, `reboot` and a raw socket are refused. A
-  signal to its own child works. Without the signal scope, the same run shows both signal attempts open.
+  signal to its own child works. No committed spec clears the signal scope. The review ran that case by hand and saw both signal attempts open.
 - **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
   run (clone, build, push).
 

@@ -57,6 +57,10 @@ type Substrate struct {
 	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
 	// the overlay's microVM and gVisor probe results are recorded on issue #1087; then the flag and chart value are removed.
 	AllowUnhardened bool
+	// GoldenSnapshots turns on Substrate's golden snapshot of each template. Off by default in every
+	// tier (issue #1492): a golden clone copies memory from one sandbox to another, which ADR 0120
+	// section 5.2 forbids, and a golden build holds a pool slot. Setting it is an admin's exception.
+	GoldenSnapshots bool
 	// ImageMirrors are "host=target" entries: the registry host of an actor image and the image source
 	// of the node agent that replaces it (issue #1170). The path, tag and digest are kept.
 	ImageMirrors []string
@@ -153,6 +157,7 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
 		}
 	}
+	cfg.GoldenSnapshots = s.GoldenSnapshots
 	if s.SnapshotStore.set() {
 		o, err := s.SnapshotStore.objectStore()
 		if err != nil {
@@ -248,6 +253,7 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.SnapshotStore.AccessKeyFile, "substrate-snapshot-access-key-file", "", "file with the read-only access key id of the snapshot bucket")
 	fs.StringVar(&e.Substrate.SnapshotStore.SecretKeyFile, "substrate-snapshot-secret-key-file", "", "file with the read-only secret key of the snapshot bucket")
 	fs.StringSliceVar(&e.Substrate.RuntimeClassTiers, "substrate-runtime-class-tiers", nil, "class=tier entries (tier: vm, hardened or dev) that give each runtime class its isolation tier, with --execution-driver=substrate")
+	fs.BoolVar(&e.Substrate.GoldenSnapshots, "substrate-golden-snapshots", false, "build a golden snapshot for each template, with --execution-driver=substrate. Off by default in every tier: a golden clone copies memory from one sandbox to another (ADR 0120 section 5.2) and a golden build holds a pool slot. Turning it on is an exception to the no-memory-clone rule")
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
 	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")

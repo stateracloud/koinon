@@ -87,6 +87,12 @@ var _ = Describe("ParsePolicy", func() {
 		Entry(nil, "CAP_SYS_BOOT", "best_effort"),
 		Entry(nil, "kill", "best_effort"),
 		Entry(nil, "CAP_SYS_RAWIO", "best_effort"),
+		Entry(nil, "CAP_MKNOD", "best_effort"),
+		Entry(nil, "CAP_NET_ADMIN", "best_effort"),
+		Entry(nil, "CAP_BPF", "best_effort"),
+		Entry(nil, "CAP_PERFMON", "best_effort"),
+		Entry(nil, "CAP_SETPCAP", "best_effort"),
+		Entry(nil, "CAP_SYS_CHROOT", "best_effort"),
 		Entry(nil, "CAP_SYS_ADMIN", "off"),
 	)
 

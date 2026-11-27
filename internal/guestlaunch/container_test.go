@@ -172,8 +172,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	// skipWithoutLandlock turns the one outcome that means "this Docker host has no Landlock of the
 	// ABI the policy needs" into a skip; every other failure stays a failure.
 	skipWithoutLandlock := func(out string, code int) {
-		if code == 70 && strings.Contains(out, "landlock required but the kernel") {
-			Skip("the Docker host kernel has no Landlock of ABI 5 or newer")
+		if code == 70 && (strings.Contains(out, "landlock required but the kernel") ||
+			strings.Contains(out, "landlock signal scope required but the kernel")) {
+			Skip("the Docker host kernel has no Landlock of the ABI the policy needs")
 		}
 	}
 
