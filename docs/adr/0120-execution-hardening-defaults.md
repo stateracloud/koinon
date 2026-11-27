@@ -802,17 +802,17 @@ root payload from two tiers and leaves the third as it was.
   `ip_unprivileged_port_start`). The lab run above started the front with this set. This is true only when runsc
   uses its own netstack (`--network=sandbox`, the runsc default). With `--network=host` the host kernel checks the
   port, and this set is not sufficient.
-- **Upload with a non-root payload.** The front stays root but has no `CAP_DAC_OVERRIDE`. The driver keeps its
-  Upload code of before #1387 unchanged. Upload under the Substrate driver already fails on main. This is not a
-  result of #1387. Lab, 2026-11-26 (on the head of the #1387 pull request and on `origin/main`): `WriteFile`
-  fails with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root directory "/sandbox"`. The
-  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`. The failure happens before `tar`
-  starts. The home restore in `internal/agentd/checkpoint.go` fails the same way. A second gap exists: the root
-  front writes the archive with mode 0600, and the launcher runs `tar` as uid 10001, so `tar` cannot read it
-  (`ErrInvalid`). [#1478](https://github.com/stateracloud/koinon/issues/1478) must solve both gaps. The safe
-  design in #1478: run `tar` on exec stdin as the payload user, and turn the file service of the guest front off.
-  The root front never writes into a path that the payload can write. A staging directory that the payload owns
-  lets the payload swap a symlink while the root front writes, so this amendment does not contain one.
+- **Upload with a non-root payload** ([#1478](https://github.com/stateracloud/koinon/issues/1478)). The front stays
+  root but has no `CAP_DAC_OVERRIDE`. Upload under the Substrate driver failed on main before #1478. Lab,
+  2026-11-26: `WriteFile` failed with `PermissionDenied: path "/tmp/koinon-upload-..." is outside sandbox root
+  directory "/sandbox"`, and the root front wrote the archive with mode 0600, so `tar` as uid 10001 could not read
+  it. The fix of #1478: the driver runs `mkdir -p`, then `tar -x -f - -C DIR` as the payload user (behind the
+  launcher), and sends the archive on the stdin of `tar`. The guest front starts with the file service off
+  (`EnableFileSystem: false`). The root front never writes into a path that the payload can write. A staging
+  directory that the payload owns would let the payload swap a symlink while the root front writes, so there is
+  none. The command reads every byte of stdin, so the exec stdin cap (about 4 MiB that the command does not read)
+  does not apply. The home restore in `internal/agentd/checkpoint.go` uses the same Upload path. The `-log-dir` of
+  the front must not be a directory that the payload can write.
 - **Lab proof run, 2026-11-26 21:00Z (koinon-lab, gVisor worker).** Head `41a2400b5`, through the real Substrate
   driver and the real front image. The run showed:
   - runsc network mode `--network=sandbox`;
@@ -820,8 +820,9 @@ root payload from two tiers and leaves the third as it was.
   - `/sandbox` at run time is `0:0` mode 777, so the front enters it without `CAP_DAC_READ_SEARCH`;
   - the escape suite: 14 of 18 specs pass (13 of 18 on main). The 4 network failures are the same on main.
     Their cause in the lab setup is not confirmed.
-- **Not proved here.** The Upload and checkpoint restore proof belongs to #1478. The lab run above used the
-  staging design that this amendment later reverted, so it does not cover the current code for these two paths.
+- **Not proved here.** The lab run above used the staging design that #1478 replaced, so it does not cover the
+  current Upload and checkpoint restore code. A lab run of the tar stream (uid 10001 owner on gVisor, a 1 GiB
+  archive, a suspend in the middle of an upload) is still open.
   The maintainer has not yet accepted the 4 network failures in writing, so this change does not close #1387.
   It uses `Refs #1387`.
 
@@ -852,3 +853,73 @@ The maintainer decided on 2026-11-27: golden snapshots are an option that is off
 - **Evidence.** In the lab, golden mode was not faster: cold start to the first Exec was p50 1.03 s (off) and 1.05 s
   (on) on gVisor, and 2.65 s (off) and 3.50 s (on) on the vm tier. A golden build takes 36-38 s. The numbers are
   in [the Substrate install document](../dev/substrate-install.md#golden-snapshots).
+
+## Amendment (2026-11-27, issue #1496): a root payload on the `vm` tier in v0.1
+
+Accepted (2026-11-27). The maintainer decided on 2026-11-27 that the payload may run as root in the microVM
+guest of the `vm` tier in v0.1. A non-root option can come later ([#1462](https://github.com/stateracloud/koinon/issues/1462)).
+The amendment of 2026-11-26 (#1387) stays: the gVisor tiers require a non-root payload.
+
+**What it changes.** Section 4, item 5 ("the payload runs as root with a reduced capability set and the same
+controls") is the accepted state of the `vm` tier in v0.1, and not an open gap. This amendment names the reduced set
+and adds one control.
+
+### Decision
+
+1. **The VM is the host boundary.** The guest has its own kernel under hardware virtualisation (ADR 0075). Egress is
+   enforced outside the guest (section 2), and the guest holds no secret (amendment of 2026-11-26, #1386). Root in the
+   guest gives no route to the host, to the credentials or to the network.
+2. **The payload holds no capability.** `policy-vm.json` keeps an empty allowlist. The launcher removes every
+   capability from the permitted, effective, inheritable and ambient sets, and from the bounding set when the guest
+   gives it `CAP_SETPCAP`. `no_new_privs` is set, so no later `execve` gives a capability back. The launcher reads the
+   sets back after `capset` and does not start the payload when a capability outside the allowlist remains.
+3. **A policy can give a root payload only two capabilities.** A policy whose user drop is not `require` fails
+   validation when its allowlist names any capability except `CAP_NET_BIND_SERVICE` and `CAP_AUDIT_WRITE`. The rule
+   is an allowlist, so `CAP_MKNOD`, `CAP_NET_ADMIN`, `CAP_BPF`, `CAP_PERFMON`, `CAP_SETPCAP`, `CAP_SYS_CHROOT` and
+   every capability that a later kernel adds are refused by default.
+4. **The payload cannot signal the Koinon processes of the guest.** A uid 0 process needs no capability to signal
+   another uid 0 process, and the guest front runs as root. So `policy-vm.json` adds the Landlock signal scope
+   (`landlock.scoped: ["signal"]`, ABI 6): no signal reaches a process outside the payload's Landlock domain. The
+   mode is `require`, so a guest kernel below ABI 6 does not start the payload. Landlock also refuses a `ptrace` of a
+   process outside the domain, and the seccomp filter denies `ptrace`, `process_vm_readv`, `process_vm_writev`,
+   `pidfd_getfd`, `mount`, the module calls and `reboot` in every tier.
+5. **The home owner differs between tiers.** The home files are owned by uid 0 in the Substrate guest of v0.1 (the
+   guest has no `CAP_SETUID`, [#1462](https://github.com/stateracloud/koinon/issues/1462)). They are owned by uid
+   10001 when the drop succeeds, and on the gVisor tiers.
+
+The harnesses need none of the removed capabilities: OpenCode, git and package installs into the home (npm, pip, go)
+run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` tier") gives each capability, the
+control that removes it and the harness need.
+
+This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): the `vm` tier keeps
+its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets one more control.
+
+### Consequences
+
+- A process of one exec cannot signal a process of another exec on the `vm` tier: each launcher run makes its own
+  Landlock domain. The payload and its children share one domain. An agent that starts a server in one exec and stops
+  it from another exec must keep both in one exec (or one process tree).
+- The guest kernel of the `vm` tier must offer Landlock ABI 6 (Linux 6.12). Phase 0 measured ABI 7 in the Substrate
+  guest.
+
+### Proof
+
+- **Docker, `internal/guestlaunch` (container specs).** `policy-vm.json` in the capability shape of the Substrate
+  guest (root with only `KILL`, `NET_BIND_SERVICE` and `AUDIT_WRITE`): the payload runs as uid 0 with `CapPrm`,
+  `CapEff` and `CapAmb` 0 and `NoNewPrivs` 1. Signal 0 to an outside root process (`kill` and
+  `pidfd_send_signal`), `ptrace` of that process, `mount`, `finit_module`, `reboot` and a raw socket are refused. A
+  signal to its own child works. No committed spec clears the signal scope. The review ran that case by hand and saw both signal attempts open.
+- **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
+  run (clone, build, push).
+
+### Prior art
+
+- **Landlock scopes (Linux 6.12, ABI 6).** `LANDLOCK_SCOPE_SIGNAL` limits signals to the sandbox's own domain and its
+  children. It is the same rule as the Landlock `ptrace` restriction since ABI 1. We use it because it covers every
+  signal path (`kill`, `tgkill`, `pidfd_send_signal`, `SIGIO`) in one place. A seccomp filter on the pid argument
+  cannot cover `kill(-1)`, process groups or a pidfd.
+- **Kata Containers.** The kata-agent runs as root in the guest, next to the container processes, and Kata treats the
+  VM as the boundary to the host. We keep the VM as the boundary too, and we add the capability drop and the signal
+  scope so that the payload cannot stop or trace the guest front.
+- **Docker's default capability set.** Docker keeps `KILL`, `NET_RAW` and `SETUID` for a root container. We remove
+  every capability, because the harnesses need none.

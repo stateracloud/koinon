@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -241,6 +242,19 @@ func applyCapabilities(allow []string, u UserPolicy, boundingDropped bool, log *
 	if err := unix.Capset(&hdr, &data[0]); err != nil {
 		return fmt.Errorf("guest launcher: capset: %w", err)
 	}
+	// Read the sets back and fail closed: no_new_privs caps the payload's permitted set at this one
+	// across the exec, also for a root payload whose bounding set could not shrink (issue #1496).
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("guest launcher: capget: %w", err)
+	}
+	for i := range data {
+		if extra := (data[i].Permitted | data[i].Effective) &^ keep[i]; extra != 0 {
+			return fmt.Errorf("guest launcher: capabilities outside the allowlist remain after capset (word %d, mask %#x)", i, extra)
+		}
+	}
+	if !nonRoot {
+		log.Info("guest launcher: the payload runs as root with the allowlist only (accepted on the vm tier, issue #1496)", "allow", allow)
+	}
 	if u.Mode != ModeOff && nonRoot {
 		var failed []string
 		for c := 0; c <= lastCap(); c++ {
@@ -283,6 +297,9 @@ func landlockABI() int {
 // start, and a best-effort one runs without Landlock rules.
 const minLandlockABI = 5
 
+// scopedLandlockABI is the Landlock ABI that adds the IPC scopes (LANDLOCK_SCOPE_SIGNAL, Linux 6.12).
+const scopedLandlockABI = 6
+
 func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 	if l.Mode == ModeOff {
 		log.Info("guest launcher: landlock off by policy")
@@ -298,6 +315,10 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 		}
 		log.Warn("guest launcher: landlock unavailable or too old in this kernel, filesystem rules NOT applied; the gVisor tiers have a writable root by decision (issue #1150), so this gap is open and is recorded here", "kernel_abi", abi)
 		return nil
+	}
+	scopeSignal := slices.Contains(l.Scoped, ScopeSignal)
+	if scopeSignal && abi < scopedLandlockABI && l.Mode == ModeRequire {
+		return fmt.Errorf("guest launcher: landlock signal scope required but the kernel ABI is %d, version %d is needed", abi, scopedLandlockABI)
 	}
 	var rules []landlock.Rule
 	if len(l.ReadExec) > 0 {
@@ -325,19 +346,32 @@ func applyLandlock(l LandlockPolicy, log *slog.Logger) error {
 	if len(devDirs) > 0 {
 		rules = append(rules, landlock.RWDirs(devDirs...).WithIoctlDev().IgnoreIfMissing())
 	}
-	// Filesystem rules only: network and scoped rules would change how agents talk to their tools.
+	// Filesystem rules, and the signal scope when the policy names it. No network rules, and no
+	// abstract Unix socket scope: they would change how agents talk to their tools.
 	cfg := landlock.V5
+	if scopeSignal {
+		cfg = landlock.Config{HandledAccessFS: landlock.V5.HandledAccessFS, Scoped: llsyscall.ScopeSignal}
+	}
 	if l.Mode == ModeBestEffort {
 		cfg = cfg.BestEffort()
 	}
-	if err := cfg.RestrictPaths(rules...); err != nil {
+	restrict := cfg.RestrictPaths
+	if scopeSignal {
+		restrict = cfg.Restrict
+	}
+	if err := restrict(rules...); err != nil {
 		if l.Mode == ModeRequire {
 			return fmt.Errorf("guest launcher: landlock: %w", err)
 		}
 		log.Warn("guest launcher: landlock could not be applied, filesystem rules NOT applied; the gVisor tiers have a writable root by decision (issue #1150), so this gap is open and is recorded here", "error", err.Error())
 		return nil
 	}
-	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite, "devices", l.Devices)
+	if scopeSignal && abi < scopedLandlockABI {
+		// Only best_effort reaches this line: require stopped above.
+		log.Warn("guest launcher: landlock signal scope NOT applied, the kernel ABI is too old; the payload can signal processes of its own uid", "kernel_abi", abi)
+		scopeSignal = false
+	}
+	log.Info("guest launcher: landlock applied", "kernel_abi", abi, "read_exec", l.ReadExec, "read_write", l.ReadWrite, "devices", l.Devices, "scope_signal", scopeSignal)
 	return nil
 }
 

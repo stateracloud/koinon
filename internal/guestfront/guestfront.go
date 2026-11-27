@@ -93,7 +93,7 @@ func New(cfg Config) (*Front, error) {
 		LogDir:           cfg.LogDir,
 		Workspace:        cfg.Workspace,
 		EnableProcess:    false,
-		EnableFileSystem: true,
+		EnableFileSystem: false, // Upload streams a tar on process stdin (#1478): the root front never writes a file
 	})
 	if err != nil {
 		return nil, fmt.Errorf("guestfront: upstream guest server: %w", err)
@@ -150,7 +150,7 @@ func (f *Front) Serve(ctx context.Context, lis net.Listener) error {
 		_ = f.srv.Shutdown(sctx)
 	}()
 	f.cfg.Logger.Info("koinon-guest-front listening", "addr", lis.Addr().String(),
-		"services", guest.FormatEnabledServices(guest.Config{EnableProcess: true, EnableFileSystem: true}),
+		"services", guest.FormatEnabledServices(guest.Config{EnableProcess: true}),
 		"workspace", f.cfg.Workspace)
 	err := f.srv.Serve(lis)
 	if errors.Is(err, http.ErrServerClosed) {

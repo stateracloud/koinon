@@ -41,7 +41,10 @@ Order of steps, all on one locked OS thread, then `execve`:
 4. Landlock filesystem rules, pinned to ABI 5 (V5 adds ioctl on device files; the kernel ABI is read
    with `landlock_create_ruleset(NULL, 0, VERSION)` and logged). In `require` mode a kernel with
    ABI below 5, or none, stops the start; in `best_effort` mode the rules are skipped with one
-   warning. Network and scoped rules are not used: they would change how agents reach their tools.
+   warning. Network rules are not used: they would change how agents reach their tools. The one
+   scope is `landlock.scoped: ["signal"]` (ABI 6, Linux 6.12), in `policy-vm.json` only: the payload
+   cannot send a signal to a process outside its Landlock domain (issue #1496). In `require` mode a
+   kernel below ABI 6 stops the start. The abstract Unix socket scope is not used.
    Devices are named one by one: `/dev/null`, `zero`, `full`, `random`, `urandom`, `tty`, `ptmx`,
    `pts`, `shm` get read, write and ioctl. `/dev` itself can only be listed (`list_dirs`), so a block
    device or any other node cannot be opened, and none can be created.
@@ -59,8 +62,8 @@ architecture has is skipped on this one and logged. `ptrace`, `process_vm_readv`
 
 ### The guest API channel
 
-The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService`,
-`FileSystemService`) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
+The driver reaches the guest API over the pod network, not over vsock: gRPC (`ProcessService` only: the guest
+front has no file service, see Upload below) in plain HTTP/2 (h2c) to TCP port 80 of the actor, through the atenet router,
 which selects the actor by the `ate-target-actor` header and removes that header before it forwards
 the call. The payload runs in the same network namespace in both tiers, so it can reach port 80 on
 `127.0.0.1` or on the pod address. The upstream guest server has no authentication, so the guest
@@ -124,14 +127,18 @@ could not apply (fail closed).
 JSON, unknown fields refused. Each control has a `mode`: `require` (fail closed), `best_effort`
 (apply when the kernel has it and log one clear line when not) or `off`. `seccomp.mode` must be
 `require`: `off` and `best_effort` fail `Validate` (exit 64), because a skipped filter also skips the vsock and process-access denies (ADR 0120 fail closed). A file that names
-`landlock` replaces the path lists.
+`landlock` replaces the path lists. A policy whose `user.mode` is not `require` can leave the
+payload root, so `Validate` refuses it when the allowlist names any capability except `CAP_NET_BIND_SERVICE`
+and `CAP_AUDIT_WRITE` (`RootAllowedCapabilities`, issue #1496). After `capset` the launcher reads the sets back and exits 70
+when a capability outside the allowlist is still permitted or effective.
 
-The overlay image carries two policies that differ in the Landlock and user modes only (ADR 0120
-section 4.2 and 4.3, amendment of 2026-11-26; the driver picks by tier through `LauncherPrefix(tier)`):
+The overlay image carries two policies that differ in the Landlock and user modes and the signal
+scope only (ADR 0120 section 4.2 and 4.3, amendments of 2026-11-26 and 2026-11-27; the driver picks by
+tier through `LauncherPrefix(tier)`):
 
 | Tier | File | Landlock | User |
 | --- | --- | --- | --- |
-| `vm` | `cmd/koinon-guest-launcher/policy-vm.json` | `require`: no ABI 5 Landlock, no start (exit 70) | `best_effort` until issue #1462 |
+| `vm` | `cmd/koinon-guest-launcher/policy-vm.json` | `require` with the signal scope: no ABI 6 Landlock, no start (exit 70) | `best_effort`: root is accepted in v0.1 (issue #1496); the non-root drop is issue #1462 |
 | `hardened`, `dev` (gVisor) | `cmd/koinon-guest-launcher/policy-gvisor.json` | `best_effort`: the kernel may not offer it | `require`: no drop to uid 10001, no start (exit 70) |
 
 ## The sandbox user
@@ -157,13 +164,18 @@ kernel checks the port, and the front then needs `NET_BIND_SERVICE`.
 The guest front stays root, but without `CAP_DAC_OVERRIDE` and `CAP_DAC_READ_SEARCH` it obeys the file
 modes. Two results follow:
 
-- **Upload.** The driver is unchanged by #1387. Upload under the Substrate driver already fails on main: the
-  guest front root is `/sandbox`, and `upload.go` stages the archive in `/tmp`, so `WriteFile` returns
-  `PermissionDenied` before `tar` starts. The checkpoint restore of the home fails the same way. A second gap:
-  the root front writes the archive with mode 0600, and `tar` runs as uid 10001. #1478 must solve both gaps. The
-  safe design in #1478: `tar` on exec stdin as the payload user, and the file service of the guest front off.
-  The root front never writes into a path that the payload can write (a symlink swap).
-- **The home volume.** The front runs processes in `/sandbox` and serves file calls there. The image makes
+- **Upload** (#1478). The driver runs `mkdir -p DIR`, then `tar -x -f - -C DIR` as the payload user (behind the
+  launcher), and sends the archive on the stdin of `tar`. The root front never writes a file, so no root process
+  writes into a path that the payload can write (a symlink swap). The front starts the upstream guest server with
+  the file service off (`EnableFileSystem: false`), so the guest has no `FileSystemService`. The archive goes in
+  one `WriteProcessInput` stream of 256 KiB messages. The last message carries `close`. The driver then compares
+  the bytes that the guest took with the bytes it sent. A guest process does not end when the stream that feeds
+  it ends. So on a read error, a cancelled context or a broken stream (a suspend), the driver sends SIGKILL to
+  `tar` by process id and never sends `close`. When the break came from a suspend, the kill waits until the
+  actor runs again. `StartProcess` also has a 30 minute timeout as a backstop. The router resets a stream after
+  300 s, so an upload that needs more time fails. `-log-dir` of the guest front must not be a directory that the
+  payload can write: the front (root) writes the process logs there.
+- **The home volume.** The front runs processes in `/sandbox`. The image makes
   `/sandbox` `10001:10001` mode `0750`, so root without `CAP_DAC_READ_SEARCH` cannot enter it. The owner
   and mode of the `DurableDir` volume at run time decide the result. The expected state is owner
   `10001:10001` and a mode that lets the front enter the directory (for example `0755`). The lab proof run
@@ -177,6 +189,38 @@ there (`setresgid: operation not permitted`; phase 0 result, comment on #1087). 
 `user.mode: best_effort` until the lab proves the drop on the `vm` tier (issue #1462). As root the
 payload keeps the guest's bounding set when the guest gives no `CAP_SETPCAP`; the permitted and
 effective sets are reduced to the allowlist.
+
+**Root on the `vm` tier (issue #1496, ADR 0120 amendment of 2026-11-27).** In v0.1 the payload may run
+as uid 0 in the microVM guest. The guest kernel under hardware virtualisation is the host boundary.
+Inside the guest, the launcher keeps the payload away from the Koinon processes (the guest front and
+the processes that it starts outside the launcher):
+
+| Capability or path | How the payload loses it | Harness need |
+| --- | --- | --- |
+| `CAP_SYS_PTRACE` | Empty allowlist; `ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `kcmp` denied by seccomp; Landlock refuses a trace of a process outside the domain | None. A debugger in the sandbox does not work on any tier. |
+| `CAP_SYS_ADMIN` | Empty allowlist; `mount`, the new mount API, `setns`, `unshare` and namespace flags of `clone` denied by seccomp | None. |
+| `CAP_SYS_MODULE` | Empty allowlist; `init_module`, `finit_module`, `delete_module` denied by seccomp | None. |
+| `CAP_NET_RAW` | Empty allowlist | None. `ping` does not work; egress is HTTP(S) through the gateway. |
+| `CAP_SYS_BOOT` | Empty allowlist; `reboot`, `kexec_load`, `kexec_file_load` denied by seccomp | None. |
+| `CAP_KILL` | Empty allowlist | None: the payload signals its own processes without it. |
+| Same-uid signals | Landlock signal scope: no signal (`kill`, `tgkill`, `pidfd_send_signal`, `SIGIO` through `F_SETOWN`) reaches a process outside the payload's domain. Uid 0 needs no capability to signal another uid 0 process, so the scope is the control here. | The payload and its children share one domain and signal each other. A process of one exec cannot signal a process of another exec. |
+| `CAP_SYS_RAWIO` | Empty allowlist; `ioperm`, `iopl` denied by seccomp; Landlock names the device nodes one by one | None. |
+
+`no_new_privs` caps the permitted set of every later `execve` at the one before it, so a root payload
+whose bounding set did not shrink does not get its capabilities back from an exec of a root or
+setuid file. OpenCode, git, and package installs into the home and `/tmp` (npm, pip, go) need no
+capability. A system package install (`apt`, `dpkg`) writes to `/usr` and `/var/lib`, which Landlock
+keeps read-only on every tier, so it does not work in either case.
+
+The home files differ in owner between tiers: uid 0 on the `vm` tier, uid 10001 on the gVisor
+tiers. A home that moves between tiers (a restore from a snapshot of the other tier) keeps its owner:
+files that root made are owned by uid 0, and uid 10001 can write them only where the mode allows it.
+
+The container spec "the image policies in the shape the Substrate guest gives a payload" proves the
+`vm` row in Docker (root with only `KILL`, `NET_BIND_SERVICE` and `AUDIT_WRITE`): `kill_other` and
+`pidfd_signal_other` (signal 0 to an outside root process), `ptrace_other`, `mount`, `finit_module`,
+`reboot` and `socket_raw` are blocked, `kill_own_child` works, `CapPrm`, `CapEff` and `CapAmb` are 0. The
+proof in a microVM guest needs KVM and is a lab run.
 
 ## gVisor tiers
 

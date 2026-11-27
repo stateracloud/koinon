@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/pem"
 	"net/http/httptest"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 )
 
 func TestGitPush(t *testing.T) {
@@ -74,7 +74,7 @@ var _ = Describe("the push writer", func() {
 		ctx  = context.Background()
 	)
 	git := func(args ...string) string {
-		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", f.RepoDir("app")}, args...)...).CombinedOutput()
+		out, err := gitenv.Command(ctx, GinkgoT().TempDir(), f.RepoDir("app"), args...).CombinedOutput()
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), string(out))
 		return strings.TrimSpace(string(out))
 	}
