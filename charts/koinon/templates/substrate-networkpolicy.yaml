@@ -157,6 +157,21 @@ spec:
         - {port: egress, protocol: TCP}
         {{- end }}
 {{- end }}
+{{- if include "koinon.modelKoinon" . }}
+    # With gateway.model.driver=koinon also koinon-gateway's model pods: the actors' model calls go there (issue #1523;
+    # Substrate requires this driver, issue #1489). Only the container port "model", by name. The stats port (15020)
+    # stays closed. The port matches the ingress rule of the model-gateway policy (networkpolicy.yaml), which admits
+    # atenet-egress.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "model-gateway") | nindent 14 }}
+      ports:
+        - {port: model, protocol: TCP}
+{{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
