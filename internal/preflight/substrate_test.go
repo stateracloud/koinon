@@ -93,6 +93,7 @@ type substrateCluster struct {
 	probe   *fakeIssuerProbe
 	devices fakeDevices
 	userns  preflight.UserNamespacesProber
+	atefs   preflight.AteFSProber
 	config  preflight.Config
 }
 
@@ -101,6 +102,7 @@ func healthySubstrate() *substrateCluster {
 		minor:  "37",
 		issuer: fakeIssuer{issuer: "https://issuer.example.com"},
 		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "HTTP 200 OK"}},
+		atefs:  fakeAteFS{nodes: []preflight.NodeAteFS{{Node: "w"}}},
 	}
 	c.kube = []runtime.Object{
 		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.1", nil, 1),
@@ -124,7 +126,7 @@ func (c *substrateCluster) run(ctx context.Context) []preflight.Result {
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList", workerPoolGVR: "WorkerPoolList"}, c.dynamic...)
 	checker := &preflight.Checker{
 		Kube: kube, Dynamic: dyn, Config: c.config,
-		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices, UserNS: c.userns,
+		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices, UserNS: c.userns, AteFS: c.atefs,
 	}
 	return checker.Run(ctx)
 }
@@ -133,7 +135,7 @@ var _ = Describe("Substrate checks", func() {
 	It("passes on a complete cluster and runs no OpenShell or Agent Sandbox check", func(ctx SpecContext) {
 		results := healthySubstrate().run(ctx)
 		Expect(checks(results)).To(Equal([]string{
-			"Kubernetes version", "Substrate node devices", "Substrate gVisor user namespaces", "Service-account issuer", "Agent Substrate", "Substrate router",
+			"Kubernetes version", "Substrate node devices", "Substrate gVisor user namespaces", "Substrate /var/lib/ate filesystem", "Service-account issuer", "Agent Substrate", "Substrate router",
 			"Substrate worker pool (vm tier)", "NetworkPolicy enforcement",
 		}))
 		for _, r := range results {

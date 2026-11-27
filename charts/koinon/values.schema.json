@@ -1190,7 +1190,16 @@
             "enabled": {"type": "boolean"},
             "skipCapabilityCheck": {"type": "boolean"},
             "labels": {"type": "object", "additionalProperties": {"type": "string"}},
-            "durableStrandedFor": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"}
+            "durableStrandedFor": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"},
+            "ateFilesystem": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "freeBelowPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                "for": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"}
+              }
+            }
           }
         },
         "grafanaDashboard": {

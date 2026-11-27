@@ -207,6 +207,9 @@ The kubeconfig of the installer needs these rules:
   the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
   plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
   See "Talos: user namespaces for gVisor".
+- `/var/lib/ate` has a filesystem of its own on each worker node (a read-only probe pod per node, the same
+  node selection as the user-namespace check). The check only warns: a node where `/var/lib/ate` shares the
+  filesystem of the node root gets a warning. See "Node protection: /var/lib/ate on its own filesystem".
 - Substrate's api server can validate service-account tokens. The probe pod runs in the probe namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -225,8 +228,8 @@ With `execution.driver: substrate`, the chart's pre-install and pre-upgrade hook
 It also runs the NetworkPolicy probe in the release namespace when `preflight.networkPolicyProbe.enabled` is
 true, as with the OpenShell driver.
 
-The hook does not run the probe pods (issuer, node devices, user namespaces). These pods need a probe namespace
-with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these three checks as
+The hook does not run the probe pods (issuer, node devices, user namespaces, `/var/lib/ate` filesystem). These pods need a probe namespace
+with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these four checks as
 warnings. `koinon-api substrate install` runs them, and `koinon-api preflight --driver substrate` runs them
 again on request. The hook does not check the WorkerPools: at pre-install the chart's own pool does not exist
 yet.
@@ -236,6 +239,47 @@ The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and 
 plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
 Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
 get pod logs, and create and delete NetworkPolicies.
+
+## Node protection: /var/lib/ate on its own filesystem
+
+**v0.1 has no hard per-home cap.** A sandbox home has no size limit of its own in v0.1. The tracking issue for
+per-sandbox volumes and a hard cap is [#1495](https://github.com/stateracloud/koinon/issues/1495). Until it is
+done, Koinon protects the node and not the single home: a full home must fill a filesystem that only sandbox
+homes use.
+
+Why the node needs this:
+
+- The gVisor home is a tmpfs that a file under `/var/lib/ate/actors/<uid>` backs. The microVM home is a host
+  directory in the same place. `/var/lib/ate` is a hostPath that kubelet does not see.
+- A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it, so the usual
+  disk-pressure eviction does not react.
+- Substrate sets the hostPath of the worker in its own code, and one worker can hold up to 1000 actors. A volume
+  for each worker therefore cannot cap one home.
+
+What to do on each worker node:
+
+1. Mount a separate disk or partition at `/var/lib/ate` before kubelet starts. Then a full home fills that
+   filesystem. The root filesystem and the kubelet filesystem stay free.
+2. Optional: mount a separate disk at `/var/lib/ate/snapshots` too. Snapshot data then cannot fill the home
+   filesystem. See Substrate `docs/guides/node-storage.md`.
+3. Size the filesystem for the number of homes that you expect and a margin, as no cap limits one home. On Talos,
+   use a `machine.disks` partition mounted at `/var/lib/ate`. On other Linux nodes, use an `/etc/fstab` entry or a
+   systemd mount unit.
+
+How Koinon helps you check it:
+
+- **Preflight.** `koinon-api preflight --driver substrate` and `koinon-api substrate install` warn on each node
+  where `/var/lib/ate` is on the same filesystem as the node root. The warning does not stop the install.
+  The chart's pre-install hook does not run the probe pod, as for the other probe checks.
+- **Alert.** With `metrics.prometheusRule.enabled` and `execution.driver: substrate`, the rule
+  `KoinonSandboxHomeFilesystemFilling` fires when less than 15 percent of the filesystem at `/var/lib/ate` is free
+  for 10 minutes (`metrics.prometheusRule.ateFilesystem`). It reads the series `node_filesystem_avail_bytes` and
+  `node_filesystem_size_bytes` of node-exporter for the mount point `/var/lib/ate`. So it needs node-exporter on the
+  worker nodes, and it stays silent on a node where `/var/lib/ate` is not a mount point of its own. That is the case
+  that the preflight warns about.
+- **The leak-guard byte alert does not cover this.** The byte cap of ADR 0091 (issue #1058) counts the bytes of
+  MCP calls that leave a run. It does not see the disk of a node. It cannot fire on a full home, so the node-disk
+  alert above is a separate rule.
 
 ## Access in Substrate: the provisioner
 

@@ -219,6 +219,18 @@ func newPreflightCommand() *cobra.Command {
 			return err
 		},
 	}, &cobra.Command{
+		Use:   "atefs-probe",
+		Short: "Run inside the Substrate /var/lib/ate probe pod: report whether /var/lib/ate shares the node root's filesystem",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			same, err := preflight.SameFilesystem()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), preflight.AteFSLine(same))
+			return err
+		},
+	}, &cobra.Command{
 		Use:   "devices-probe",
 		Short: "Run inside the Substrate device probe pod: report that the node's devices were mounted",
 		Args:  cobra.NoArgs,
@@ -318,6 +330,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
 		prober := substrateProber(cfg, kube, *sub)
 		checker.Issuer, checker.IssuerProbe, checker.Devices, checker.UserNS = preflight.NewIssuerResolver(kube), prober, prober, prober
+		checker.AteFS = prober
 	}
 	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
 		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()

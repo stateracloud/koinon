@@ -1508,6 +1508,14 @@ metrics:
     # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
     # a sweep (a minute).
     durableStrandedFor: 15m
+    # With execution.driver=substrate: the alert on a filling /var/lib/ate filesystem on a worker node (issue #1494).
+    # It reads node-exporter's node_filesystem_* series of the mount point /var/lib/ate, so it needs node-exporter and
+    # a filesystem of its own for that path. The byte-cap alert of the leak guard does not cover disk.
+    ateFilesystem:
+      enabled: true
+      # The alert fires when the free space of that filesystem is below this percent for the time in `for`.
+      freeBelowPercent: 15
+      for: 10m
   grafanaDashboard:
     # Grafana dashboards as a ConfigMap for the Grafana dashboard sidecar (templates/grafana-dashboard.yaml;
     # today one row, the leak guard). Needs no CRD. Every query uses only fixed label sets (ADR 0023).

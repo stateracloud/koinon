@@ -17,6 +17,12 @@ database, so every koinon-api replica reports the same value; the rule aggregate
 over by the first koinon-api of the current one, so pending work of a version that no live executor
 runs (a rollback target, or a carry-over that keeps failing) is what the alert names.
 
+Node disk (issue #1494): with execution.driver=substrate, the koinon-sandbox group holds KoinonSandboxHomeFilesystemFilling.
+The home of a sandbox lives under /var/lib/ate on the node, and kubelet does not see that path. The leak-guard byte
+alert (issue #1058, koinon_api_mcp_guard_byte_threshold_runs_total) counts the bytes of MCP calls, not disk, so it does
+not fire on a full home. The rule reads node-exporter's series of the /var/lib/ate mount point, so it needs a mount of
+its own for that path (the preflight warns when there is none) and node-exporter on the worker nodes.
+
 Provider key echo (ADR 0097 section 15, issue #1332): with gateway.model.driver=koinon, the koinon-gateway group
 holds KoinonModelKeyEcho. It fires when the model path saw a provider key in a response (header or body) that
 went back to an agent (koinon_gateway_model_key_echo_total). The body is not changed in v0.2, so the key must be rotated.
@@ -78,6 +84,25 @@ spec:
               The reconciler failed to apply the default-deny NetworkPolicy in a sandbox namespace. OpenShell's
               own policies and the platform's still apply, but Koinon's second layer is missing there. Check
               the reconciler's RBAC for networkpolicies and its log ("sandbox default-deny NetworkPolicy could not be applied").
+    {{- if and (include "koinon.substrate" . | eq "true") $pr.ateFilesystem.enabled }}
+        - alert: KoinonSandboxHomeFilesystemFilling
+          expr: |
+            100 * node_filesystem_avail_bytes{mountpoint="/var/lib/ate"}
+              / node_filesystem_size_bytes{mountpoint="/var/lib/ate"}
+              < {{ $pr.ateFilesystem.freeBelowPercent }}
+          for: {{ $pr.ateFilesystem.for | quote }}
+          labels:
+            severity: warning
+          annotations:
+            summary: The filesystem of /var/lib/ate on a worker node is filling up, so sandbox homes may soon fail to write
+            description: >-
+              Less than {{ $pr.ateFilesystem.freeBelowPercent }} percent of the filesystem mounted at /var/lib/ate is free on this
+              node. Sandbox homes (gVisor and microVM) live there, and kubelet does not report that space, so
+              this is the only warning. v0.1 has no hard cap per home (issue #1495). Find the largest homes under
+              /var/lib/ate/actors, then stop or clean those sandboxes, or grow the filesystem. A node whose
+              /var/lib/ate shares the root filesystem has no series for this mount point, so this alert stays silent
+              there: the preflight warns about that case.
+    {{- end }}
     {{- if include "koinon.modelKoinon" . }}
     - name: koinon-gateway
       rules:
