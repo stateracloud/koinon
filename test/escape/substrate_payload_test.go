@@ -40,8 +40,10 @@ func payloadDenied(res any) bool {
 	return slices.Contains(payloadDenials, any(s)) || gatewayRefusal.MatchString(s)
 }
 
-// httpPorts are the ports that get an HTTP request. Every other port gets a TLS ClientHello: a server
-// on it, TLS or not, sends a byte (a ServerHello, an alert, a banner or an error).
+// httpPorts are the ports that get an HTTP request. Every other port gets a TLS ClientHello. Every deny
+// target must be a service that answers bad input with a byte (a TLS server, an HTTP server, an SSH banner).
+// A service that closes with no byte on bad input (CoreDNS on TCP 53, PostgreSQL) looks like a denial
+// ("closed"): do not list such a port as a deny target.
 var httpPorts = []int{80, 8080, 8099}
 
 // payloadCheck is a check of the op "payload" for a target: an HTTP request on an HTTP port, else a
@@ -76,6 +78,8 @@ func expectNoBytes(ctx context.Context, probe probeFunc, ts []target) {
 	res := probe(ctx, checks...)
 	Expect(res["control"]).To(MatchRegexp(`^status \d{3} `),
 		"control: the gateway route did not answer the probe's request, so a denial below would prove nothing")
+	Expect(gatewayRefusal.MatchString(res["control"].(string))).To(BeFalse(),
+		"control: the egress gateway refused the gateway route itself (%v): the route is not allowed, so a denial below would prove nothing", res["control"])
 	var reached []string
 	for _, c := range checks[1:] {
 		id := c["id"].(string)

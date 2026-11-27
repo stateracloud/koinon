@@ -50,7 +50,7 @@ def client_hello(sni):
     import struct
     import os as _os
     ext = b""
-    if sni and not re.fullmatch(r"[0-9.]+|[0-9a-fA-F:]+", sni):
+    if sni and not re.fullmatch(r"[0-9.]+|[0-9a-fA-F]*:[0-9a-fA-F:.]*", sni):
         name = sni.encode()
         entry = b"\x00" + struct.pack(">H", len(name)) + name
         lst = struct.pack(">H", len(entry)) + entry
@@ -89,12 +89,13 @@ def payload(c):
     except OSError as e:
         s.close()
         return err_name(e)
+    data = b""
     try:
         if c.get("kind", "tls") == "http":
-            s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
+            host = "[%s]" % c["host"] if ":" in c["host"] else c["host"]
+            s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (host, c["port"])).encode())
         else:
             s.sendall(client_hello(c.get("sni", c["host"])))
-        data = b""
         while len(data) < 8192 and (c.get("kind", "tls") != "http" or b"\r\n\r\n" not in data):
             chunk = s.recv(2048)
             if not chunk:
@@ -115,6 +116,8 @@ def payload(c):
         upstream = int("x-envoy-upstream-service-time" in headers)
         return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
     except OSError as e:
+        if data:
+            return "bytes %d" % len(data)  # a byte came before the error: the destination was reached
         return err_name(e)
     finally:
         s.close()

@@ -129,8 +129,8 @@ no cluster.
 
 On Substrate the guest TCP stack does not leave through the pod network namespace. Each actor has its own network
 namespace. Its nftables rules send every TCP connect to a local atunnel listener. The listener accepts the connection
-first, and then opens a CONNECT tunnel to atenet-egress. atenet-egress decides on the Host or the SNI. It never dials
-the IP address that the guest chose. So `connect()` succeeds for every address, and a probe that only connects reports
+first, and then opens a CONNECT tunnel to atenet-egress, and that CONNECT is accepted. atenet-egress reads the Host or the SNI
+and decides then. It never dials the IP address that the guest chose. So `connect()` succeeds for every address, and a probe that only connects reports
 "open" for all of them (issue #1515; in the atenet-egress log, every probe target was a CONNECT with code 200 and 0
 bytes up and down).
 
@@ -142,7 +142,8 @@ request on port 80, 8080 or 8099) and reads the answer. A target is denied when:
 - the connection closes with no byte (`closed`: the tunnel closed after atenet-egress refused the CONNECT), or
 - the answer is the egress gateway's own 403, 502 or 503 (an Envoy marker and no `x-envoy-upstream-service-time`).
 
-A byte from the target, or a result that is not in this list, fails the spec. Each deny spec runs a positive control in
+Use only deny targets that answer bad input with a byte (a TLS or HTTP server, an SSH banner). A service that
+closes with no byte on bad input, such as CoreDNS on TCP 53, looks like a denial. A byte from the target, or a result that is not in this list, fails the spec. Each deny spec runs a positive control in
 the same probe: an HTTP request to the first `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES` entry must answer with a status.
 The spec reports every target, not only the first that fails. Read the result of the IPv6 target
 (`[2606:4700:4700::1111]:443`) in the Ginkgo log: a guest with no IPv6 route gives `ENETUNREACH`, which is a denial,
@@ -160,4 +161,6 @@ the same constant in every actor, each in its own network namespace, so it is no
   separation between nodes.
 - If `NoNewPrivs` or `Seccomp` is missing from `/proc/self/status` on gVisor, the privilege spec fails on the
   missing field. Read the guest `/proc/self/status` before you blame the sandbox.
+- The routable part of the cross-org spec has no control that port 8099 is open on those addresses. It proves that
+  no byte comes back, as the direct egress spec does. It does not prove reach to org B's listener.
 - A result is for one tier and one runtime class. Run again for every class that you ship.
