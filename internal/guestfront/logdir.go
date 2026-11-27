@@ -27,11 +27,16 @@ const DefaultLogDir = "/run/koinon/ate-jobs"
 // on the open parent, so it never follows a symlink and has no check-then-open gap. It fails when a
 // part is a symlink or not a directory, when a part is owned by a user other than root or the
 // current user, or when a part can be written by group or others (a parent with the sticky bit is
-// allowed to be, as /tmp is). The last part must also not be writable by group or others.
+// allowed to be, as /tmp is). The last part must also give others no access and its group no write:
+// a directory made earlier with mode 0755 would let uid 10001 read the job logs on gVisor, so it is
+// refused and not accepted (issue #1516).
 func PrepareLogDir(dir string) error {
 	dir = filepath.Clean(dir)
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("log dir %q is not an absolute path", dir)
+	}
+	if dir == "/" {
+		return errors.New("log dir \"/\" is the root directory: it must be a directory below it")
 	}
 	parts := strings.Split(strings.TrimPrefix(dir, "/"), "/")
 	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
@@ -76,6 +81,9 @@ func checkPart(fd int, dir, name string, last bool) error {
 	sticky := st.Mode&unix.S_ISVTX != 0
 	if st.Mode&0o022 != 0 && (last || !sticky) {
 		return fmt.Errorf("log dir %s: %q has mode %o, which lets group or others write", dir, name, st.Mode&0o7777)
+	}
+	if last && st.Mode&0o027 != 0 {
+		return fmt.Errorf("log dir %s: %q has mode %o, which lets others access it or the group write; want 0750 or stricter", dir, name, st.Mode&0o7777)
 	}
 	return nil
 }

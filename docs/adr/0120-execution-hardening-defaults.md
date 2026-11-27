@@ -916,8 +916,19 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
   payload exists. It walks the path from `/` with `openat` and `O_NOFOLLOW`, and makes a missing part with `mkdirat`
   on the open parent. So it never follows a symlink and has no gap between a check and an open. It refuses a part
   that is not a directory, that another user than root or the front owns, or that group or others can write (a parent
-  with the sticky bit excepted). A new path that the front writes needs a
+  with the sticky bit excepted). For the last part it also refuses any access for others and any group write (mode
+  0750 or stricter), so a directory made earlier with mode 0755 is refused. A new path that the front writes needs a
   policy spec that no `read_write` entry covers it.
+- **The payload cannot read the job logs** (issue #1516). `/run` is in `read_exec`, so a root payload on the `vm` tier
+  could read the job logs in `/run/koinon/ate-jobs`. We close this with Landlock and not with a note. Landlock has no
+  deny rule, so the policy has a `hidden` list (both image policies hold `/run/koinon`). The launcher replaces a
+  `read_exec` entry that holds a hidden path with its entries, and goes down to the hidden path. It leaves symlinks
+  out, because Landlock would grant their targets. The launcher reads the directories when it starts the payload,
+  after the front has made `/run/koinon`. A file that a service makes later in `/run` is not readable for the payload.
+  The payload makes no file in `/run` itself (it cannot write there). The front is not under Landlock, so it is not
+  affected. The policy refuses a `hidden` path that is inside a `read_write`, `devices` or `list_dirs` entry, because
+  Landlock cannot take back a right of a parent. A read error of a directory stops the start. Reads under `/var/log`
+  stay open on purpose: `/var/log` is `read_write` for the payload, and the front writes no log there.
 
 ### Proof
 
@@ -929,7 +940,10 @@ its microVM, its default-deny egress, Landlock in `require` mode and seccomp, an
 - **Docker, issue #1503.** In the container specs, with the image policies, a write of a file and a symlink under `/run`
   are refused, and the control run without the launcher shows both open. The policy specs check that no `read_write`
   entry of either image policy covers `/run/koinon/ate-jobs`. The unit specs of `guestfront.PrepareLogDir` refuse a
-  symlink as the directory or in its path, a directory that others can write, a file and a relative path.
+  symlink as the directory or in its path, a directory that others can write or read (0755), a file, a relative path
+  and `/`. The policy specs also check `hidden` in both image policies, and `ReadExecVisible` on a temporary tree.
+  The container specs have no read probe of `/run/koinon` yet, so the Landlock grant itself is proved only by the
+  lab run on a `vm` worker.
 - **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
   run (clone, build, push).
 

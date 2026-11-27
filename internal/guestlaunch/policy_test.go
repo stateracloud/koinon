@@ -4,6 +4,7 @@ package guestlaunch_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -70,6 +71,10 @@ var _ = Describe("ParsePolicy", func() {
 		Entry("require root", `{"user":{"mode":"require","uid":0}}`, "non-zero uid"),
 		Entry("require the root group", `{"user":{"mode":"require","uid":10001,"gid":0}}`, "non-zero gid"),
 		Entry("not JSON", `nope`, "guest launcher policy"),
+		Entry("relative hidden path", `{"landlock":{"read_exec":["/run"],"hidden":["run/koinon"]}}`, "not absolute"),
+		Entry("hidden root", `{"landlock":{"read_exec":["/run"],"hidden":["/"]}}`, "is the root directory"),
+		Entry("hidden path in a writable path", `{"landlock":{"read_exec":["/run"],"read_write":["/run"],"hidden":["/run/koinon"]}}`, "inside read_write path"),
+		Entry("hidden path in the root writable path", `{"landlock":{"read_write":["/"],"hidden":["/run/koinon"]}}`, "inside read_write path"),
 		Entry("unknown landlock scope", `{"landlock":{"scoped":["abstract_unix_socket"]}}`, "unknown landlock scope"),
 	)
 
@@ -100,6 +105,69 @@ var _ = Describe("ParsePolicy", func() {
 	It("allows those capabilities when the drop to the non-root user is required", func() {
 		_, err := parse(`{"capabilities":{"allow":["CAP_KILL","CAP_NET_RAW"]},"user":{"mode":"require","uid":10001,"gid":10001}}`)
 		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+// covers says whether a rule on dir reaches path: dir itself, or anything below it. The root "/" holds
+// every path (a prefix test on dir+"/" would test "//" and miss it, issue #1516).
+func covers(dir, path string) bool {
+	return dir == path || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
+}
+
+var _ = DescribeTable("covers",
+	func(dir, path string, want bool) { Expect(covers(dir, path)).To(Equal(want)) },
+	Entry("the root holds every path", "/", "/run/koinon/ate-jobs", true),
+	Entry("a parent", "/run", "/run/koinon/ate-jobs", true),
+	Entry("the same path", "/run/koinon/ate-jobs", "/run/koinon/ate-jobs", true),
+	Entry("a sibling with the same prefix", "/run/koi", "/run/koinon/ate-jobs", false),
+	Entry("a child", "/run/koinon/ate-jobs/x", "/run/koinon/ate-jobs", false),
+)
+
+// Issue #1516: a root payload on the vm tier must not read the job logs. Landlock has no deny rule, so
+// the launcher grants the siblings of the hidden path.
+var _ = Describe("ReadExecVisible", func() {
+	// tree makes dir/{koinon/ate-jobs, koinon/x, other/file, lock -> other, sock} and returns dir.
+	tree := func() string {
+		d, err := filepath.EvalSymlinks(GinkgoT().TempDir())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.MkdirAll(filepath.Join(d, "koinon", "ate-jobs"), 0o750)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(d, "koinon", "x"), nil, 0o600)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(d, "other"), 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(d, "other", "file"), nil, 0o600)).To(Succeed())
+		Expect(os.Symlink(filepath.Join(d, "other"), filepath.Join(d, "lock"))).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(d, "sock"), nil, 0o600)).To(Succeed())
+		return d
+	}
+
+	It("keeps an entry that holds no hidden path", func() {
+		l := guestlaunch.LandlockPolicy{ReadExec: []string{"/usr", "/etc"}, Hidden: []string{"/run/koinon"}}
+		Expect(l.ReadExecVisible()).To(Equal([]string{"/usr", "/etc"}))
+	})
+	It("replaces the parent of a hidden path with its other entries", func() {
+		d := tree()
+		l := guestlaunch.LandlockPolicy{ReadExec: []string{d}, Hidden: []string{filepath.Join(d, "koinon")}}
+		Expect(l.ReadExecVisible()).To(ConsistOf(filepath.Join(d, "other"), filepath.Join(d, "sock")), "no hidden path, no symlink")
+	})
+	It("goes down to a hidden path that is not a direct child", func() {
+		d := tree()
+		l := guestlaunch.LandlockPolicy{ReadExec: []string{d}, Hidden: []string{filepath.Join(d, "koinon", "ate-jobs")}}
+		Expect(l.ReadExecVisible()).To(ConsistOf(filepath.Join(d, "koinon", "x"), filepath.Join(d, "other"), filepath.Join(d, "sock")))
+	})
+	It("drops an entry that is itself hidden, and skips a missing one", func() {
+		d := tree()
+		l := guestlaunch.LandlockPolicy{ReadExec: []string{d, filepath.Join(d, "none")}, Hidden: []string{d, filepath.Join(d, "none", "x")}}
+		Expect(l.ReadExecVisible()).To(BeEmpty())
+	})
+	It("is set in both image policies and in the defaults", func() {
+		Expect(guestlaunch.DefaultPolicy().Landlock.Hidden).To(ContainElement("/run/koinon"))
+		for _, name := range []string{"policy-vm.json", "policy-gvisor.json"} {
+			f, err := os.Open("../../cmd/koinon-guest-launcher/" + name)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(f.Close)
+			p, err := guestlaunch.ParsePolicy(f)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Landlock.Hidden).To(ContainElement(filepath.Dir(guestfront.DefaultLogDir)), name)
+		}
 	})
 })
 
