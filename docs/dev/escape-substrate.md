@@ -100,6 +100,11 @@ no cluster.
   services are unreachable.
 - No credential and no JWT-shaped value in files or environment.
 - No capabilities, `no_new_privs` and a seccomp filter. Privileged syscalls fail.
+- On the gVisor tiers, the agent runs as the sandbox user: every uid and gid in `/proc/self/status` is
+  10001, and the supplementary groups are empty (issue #1387). The agent cannot open
+  `koinon-guest-launcher` or `policy-gvisor.json` for writing, and cannot create a file in their
+  directories. On the `vm` tier this spec reports **not applicable**: the payload may run as root in the
+  microVM (issue #1496).
 - The guest agent and the guest server are closed to the agent user.
 - Another org's actor on the same node is unreachable, and its sandbox is invisible to this org's driver.
 - A restore with a wrong digest returns `ErrInvalid`, a restore into another org's workspace returns

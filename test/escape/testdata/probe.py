@@ -210,7 +210,18 @@ def status(_):
     """The security fields of /proc/self/status, as strings."""
     with open("/proc/self/status") as f:
         fields = dict(l.split(":", 1) for l in f if ":" in l)
-    return {k: fields[k].strip() for k in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp") if k in fields}
+    keys = ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp", "Uid", "Gid", "Groups")
+    return {k: fields[k].strip() for k in keys if k in fields}
+
+
+def open_write(c):
+    """Opens an existing file for writing, with no create and no truncate, and closes it: "ok", or the
+    errno name. The file is not changed, so the probe can test a platform file without harm."""
+    try:
+        os.close(os.open(c["path"], os.O_WRONLY))
+        return "ok"
+    except OSError as e:
+        return err_name(e)
 
 
 def write(c):
@@ -433,6 +444,6 @@ def kernel(_):
 
 
 OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
-       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
+       "find": find, "mounts": mounts, "status": status, "write": write, "open_write": open_write, "mode": mode,
+       "syscall": syscall, "kernel": kernel, "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821
