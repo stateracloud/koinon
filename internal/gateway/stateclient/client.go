@@ -316,8 +316,9 @@ func (c *Client) egress(ctx context.Context, rev int64, e gateway.EgressState) {
 	defer cancel()
 	if err := c.cfg.Egress.ApplyEgress(actx, e); err != nil {
 		c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultFailed).Inc()
-		c.log.Error("the org egress routes of a State revision were refused; the platform routes alone are served",
-			"revision", rev, "routes", len(e.EgressRoutes), "credentials", len(e.EgressCredentials), "err", err)
+		// A route fault serves the platform routes alone; an actor fault leaves no Substrate actor known.
+		c.log.Error("the org egress routes or actors of a State revision were refused; the platform routes alone, or no actor, are served",
+			"revision", rev, "routes", len(e.EgressRoutes), "credentials", len(e.EgressCredentials), "actors", len(e.EgressActors), "err", err)
 		return
 	}
 	c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultOK).Inc()

@@ -4,6 +4,7 @@ package fakeate
 
 import (
 	"context"
+	"regexp"
 	"sync"
 	"time"
 
@@ -199,11 +200,17 @@ func (s *controlServer) ListActorTemplates(_ context.Context, r *ateapiv1.ListAc
 	return resp, nil
 }
 
+var shortName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
 func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRequest) (*ateapiv1.Actor, error) {
 	c := s.c
 	c.count("CreateActor")
 	in := r.GetActor()
 	k := key{in.GetMetadata().GetAtespace(), in.GetMetadata().GetName()}
+	if !shortName.MatchString(k.name) {
+		// A resource name is a DNS-1123 label, at most 63 characters (format k8s-short-name, Substrate 20778a6d).
+		return nil, status.Errorf(codes.InvalidArgument, "metadata.name: %q is not a DNS-1123 label of at most 63 characters", k.name)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.atespaces[k.atespace]; !ok {

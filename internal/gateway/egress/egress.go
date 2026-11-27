@@ -17,8 +17,9 @@
 //
 // What the handler guarantees:
 //
-//   - Default deny. No table, no token, a bad token or no route refuses the request. There is no
-//     audit-only mode. A held install (ADR 0107, Options.Held) refuses every request before any check.
+//   - Default deny. No table, no token, a bad or repeated token, the guest's placeholder, an actor that
+//     Koinon's record does not hold, an identity check that cannot run, or no route refuses the request.
+//     There is no audit-only mode. A held install (ADR 0107, Options.Held) refuses every request before any check.
 //   - The upstream leg is HTTPS only, to the exact host and port of the route, through the dialer the
 //     caller gives (the URL policy of package catalog in the binary: no loopback, link-local,
 //     metadata or private address unless the platform allowed the host).
@@ -53,7 +54,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/restorehold"
@@ -121,8 +121,9 @@ func (m *Metrics) count(class route.Class, r route.Reason) {
 
 // Options configure a Gateway.
 type Options struct {
-	// Verifier checks actor tokens. Nil refuses every request.
-	Verifier *actortoken.Verifier
+	// Identifier finds the actor of each request's actor token: the Ed25519 verifier (OpenShell) or the
+	// Substrate identifier (ADR 0120, amendment for issue #1386, item 4). Nil refuses every request.
+	Identifier route.Identifier
 	// Dial opens the upstream connection. It is required: the binary passes the dialer of the URL
 	// policy, so an allowed host that resolves to an internal address is still refused.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -265,14 +266,16 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		st = &state{}
 	}
-	d := route.NewGate(g.opts.Verifier, st.table).Check(route.Request{
+	tok, repeated := route.TokenOf(r.Header)
+	d := route.NewGate(g.opts.Identifier, st.table).Check(route.Request{
 		// The upstream leg is always HTTPS: the gateway dials nothing else.
-		Scheme:    "https",
-		Token:     r.Header.Get(route.TokenHeader),
-		Authority: authority,
-		Method:    r.Method,
-		Path:      path,
-		RawQuery:  r.URL.RawQuery,
+		Scheme:        "https",
+		Token:         tok,
+		RepeatedToken: repeated,
+		Authority:     authority,
+		Method:        r.Method,
+		Path:          path,
+		RawQuery:      r.URL.RawQuery,
 	})
 	if !d.Allowed {
 		g.refuse(w, r, d, authority)
@@ -500,7 +503,7 @@ func (g *Gateway) refuse(w http.ResponseWriter, r *http.Request, d route.Decisio
 		status = http.StatusUnauthorized
 	case route.ReasonBadRequest:
 		status = http.StatusBadRequest
-	case route.ReasonNoTable, ReasonNoCredential, ReasonDraining, ReasonHeld:
+	case route.ReasonNoTable, route.ReasonIdentityUnavailable, ReasonNoCredential, ReasonDraining, ReasonHeld:
 		status = http.StatusServiceUnavailable
 	}
 	g.opts.Metrics.count(d.Route.Class, d.Reason)
@@ -530,6 +533,6 @@ func (g *Gateway) refuse(w http.ResponseWriter, r *http.Request, d route.Decisio
 func (g *Gateway) log(r *http.Request, d route.Decision, host string, status int) {
 	g.opts.Log.Info("egress request",
 		"result", string(d.Reason), "status", status, "method", r.Method, "host", host,
-		"route", d.Route.Name, "class", string(d.Route.Class),
+		"route", d.Route.Name, "class", string(d.Route.Class), "token_reason", d.TokenReason,
 		"org", d.Actor.Org, "agent", d.Actor.Agent, "run", d.Actor.Run)
 }

@@ -43,6 +43,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/approvalroute"
 	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
+	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/gateway/stateclient"
 	"github.com/stateracloud/koinon/internal/gateway/usagewire"
 	"github.com/stateracloud/koinon/internal/gatewaykeys"
@@ -92,10 +93,18 @@ type config struct {
 	// egressAddr serves the forge and registry routes (#1086, package egress) on a listener of their
 	// own. Empty: no egress listener.
 	egressAddr string
-	// actorTokenIssuer and actorTokenKeysDir check the actor token: the issuer the minter writes and a
-	// directory of Ed25519 public keys, one <kid>.pub file each. The gateway holds no minting key.
+	// actorTokenVerifier selects how the egress listener checks the actor token: verifierEd25519 (the
+	// OpenShell driver) or verifierSubstrate (ADR 0120, amendment for issue #1386, item 4).
+	actorTokenVerifier string
+	// actorTokenIssuer and actorTokenKeysDir check the Ed25519 actor token: the issuer the minter writes and
+	// a directory of Ed25519 public keys, one <kid>.pub file each. The gateway holds no minting key.
+	// exit: #1386 PR B, after #1094.
 	actorTokenIssuer  string
 	actorTokenKeysDir string
+	// actorJWTIssuer and actorJWTCAFile check the Substrate actor JWT: the one issuer the gateway trusts and
+	// the PEM bundle that verifies the issuer's TLS certificate.
+	actorJWTIssuer string
+	actorJWTCAFile string
 	// egressRoutesFile holds the platform routes (no org, no credential). Empty: no platform route.
 	egressRoutesFile string
 	// egressCAFile is a PEM bundle of extra roots that verify the egress upstreams, added to the system
@@ -137,9 +146,16 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.podName, "pod-name", "", "base of this process's copy id on the State stream (the pod name); a random boot nonce is appended")
 	fs.StringVar(&c.egressAddr, "egress-addr", "",
 		"address of the egress listener that serves the forge and registry routes at "+egress.PathPrefix+"<host>[:port]/<path>; empty disables it")
-	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "", "issuer of the actor identity tokens that the egress routes accept")
+	fs.StringVar(&c.actorTokenVerifier, "actor-token-verifier", verifierEd25519,
+		"how the egress routes check the actor token: "+verifierEd25519+" (the OpenShell driver: --actor-token-issuer and --actor-token-keys-dir) or "+
+			verifierSubstrate+" (the Substrate driver: --actor-jwt-issuer and --actor-jwt-ca-file)")
+	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "", "issuer of the Ed25519 actor identity tokens that the egress routes accept")
 	fs.StringVar(&c.actorTokenKeysDir, "actor-token-keys-dir", "",
 		"directory of the Ed25519 public keys that check actor tokens, one <key id>.pub PEM file each (a mounted ConfigMap or Secret)")
+	fs.StringVar(&c.actorJWTIssuer, "actor-jwt-issuer", "",
+		"the one issuer of Substrate actor JWTs that the egress routes trust (an https URL, for example https://idp.ate-system.svc); never taken from a token")
+	fs.StringVar(&c.actorJWTCAFile, "actor-jwt-ca-file", "",
+		"PEM file of the CAs that verify the TLS certificate of the Substrate actor JWT issuer; only these roots are used, and the check cannot be skipped")
 	fs.StringVar(&c.egressRoutesFile, "egress-routes-file", "",
 		"JSON file of the platform egress routes, which every org may use: no org and no credential. Empty: only the routes of Koinon state")
 	fs.StringVar(&c.egressCAFile, "egress-ca-file", "",
@@ -171,9 +187,16 @@ func (c *config) validate() error {
 	if !c.mcpPath && !c.modelPath {
 		return errors.New("--mcp-path=false needs --model-path: the gateway would serve nothing")
 	}
+	// On Agent Substrate the model and MCP listeners check the actor JWT too (issue #1489), so the
+	// Substrate verifier needs its flags also in a pod without the egress listener.
+	if c.egressAddr == "" && c.actorTokenVerifier == verifierSubstrate {
+		if err := c.validateActorToken(); err != nil {
+			return err
+		}
+	}
 	if c.egressAddr != "" {
-		if c.actorTokenIssuer == "" || c.actorTokenKeysDir == "" {
-			return errors.New("--egress-addr needs --actor-token-issuer and --actor-token-keys-dir: the egress routes check the actor token")
+		if err := c.validateActorToken(); err != nil {
+			return err
 		}
 		if c.namespace == "" {
 			return errors.New("--egress-addr needs --namespace: the egress dialer refuses Koinon's own Services")
@@ -196,6 +219,35 @@ func (c *config) validate() error {
 	// starts (issue 1347).
 	if c.mcpPath && c.drain < mcpgateway.MinDrain {
 		return fmt.Errorf("--drain-timeout (%s) must be at least %s (the MCP call timeout twice: approval wait and upstream call): a call in flight at SIGTERM would be cut", c.drain, mcpgateway.MinDrain)
+	}
+	return nil
+}
+
+// The values of --actor-token-verifier.
+const (
+	verifierEd25519   = "ed25519"
+	verifierSubstrate = "substrate"
+)
+
+// validateActorToken checks the flags of the actor token check that the egress listener needs.
+func (c *config) validateActorToken() error {
+	switch c.actorTokenVerifier {
+	case verifierEd25519:
+		if c.actorTokenIssuer == "" || c.actorTokenKeysDir == "" {
+			return errors.New("--egress-addr needs --actor-token-issuer and --actor-token-keys-dir: the egress routes check the actor token")
+		}
+		if c.actorJWTIssuer != "" || c.actorJWTCAFile != "" {
+			return errors.New("--actor-jwt-issuer and --actor-jwt-ca-file need --actor-token-verifier=" + verifierSubstrate)
+		}
+	case verifierSubstrate:
+		if c.actorJWTIssuer == "" || c.actorJWTCAFile == "" {
+			return errors.New("--actor-token-verifier=" + verifierSubstrate + " needs --actor-jwt-issuer and --actor-jwt-ca-file: the gateway trusts one issuer and checks its TLS with that CA bundle")
+		}
+		if c.actorTokenIssuer != "" || c.actorTokenKeysDir != "" {
+			return errors.New("--actor-token-issuer and --actor-token-keys-dir are for --actor-token-verifier=" + verifierEd25519 + ", not " + verifierSubstrate)
+		}
+	default:
+		return fmt.Errorf("--actor-token-verifier must be %s or %s, not %q", verifierEd25519, verifierSubstrate, c.actorTokenVerifier)
 	}
 	return nil
 }
@@ -264,7 +316,11 @@ func run(ctx context.Context, cfg config) error {
 	reg := metrics.NewRegistry()
 	// The egress keys and routes load before any listener starts: a bad key directory or route file
 	// stops the start, not a gateway that is half up.
-	eg, egState, err := newEgress(cfg, reg, log, credScrub.Record)
+	sub, err := newSubstrateIdentity(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	eg, egState, err := newEgress(ctx, cfg, sub, reg, log, credScrub.Record)
 	if err != nil {
 		return err
 	}
@@ -274,6 +330,11 @@ func run(ctx context.Context, cfg config) error {
 		Audit:   logAudit{log: log},
 		Logger:  log,
 		Scrub:   credScrub,
+	}
+	if sub != nil && cfg.mcpPath {
+		if gopts.Actors, err = sub.identifier(actortoken.AudienceMCP); err != nil {
+			return err
+		}
 	}
 	// The guard serves the MCP path only: a pod that runs the model path alone opens no database login.
 	var keys *gatewaykeys.Loader
@@ -326,12 +387,18 @@ func run(ctx context.Context, cfg config) error {
 		exp = usagewire.NewExporter(usagewire.ExporterOptions{
 			URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) }, Logger: log,
 		})
-		mg = modelgateway.New(modelgateway.Options{
+		mopts := modelgateway.Options{
 			Sink: exp.Record, Metrics: modelgateway.NewMetrics(reg), Tracer: credScrub.Tracer(otel.Tracer("koinon-gateway")),
 			Logger: log,
 			// Each provider key the model path reads goes into the scrub of every log line and span (#1221).
 			Scrub: credScrub.Record,
-		})
+		}
+		if sub != nil {
+			if mopts.Actors, err = sub.identifier(actortoken.AudienceModel); err != nil {
+				return err
+			}
+		}
+		mg = modelgateway.New(mopts)
 		modelHalf = mg
 		// A dropped record is a lost charge: both numbers are visible to an operator (ADR 0023: no labels).
 		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
@@ -355,8 +422,12 @@ func run(ctx context.Context, cfg config) error {
 		URL: cfg.stateURL, Token: func() (string, error) { return readToken(cfg.stateTokenFile) },
 		CopyID: copyID, MCP: mcpHalf, Model: modelHalf, Metrics: stateclient.NewMetrics(reg), Log: log,
 	}
-	if egState != nil {
+	switch {
+	case egState != nil:
 		scfg.Egress = egState
+	case sub != nil:
+		// No egress listener: each revision still fills the actor table of the model and MCP listeners.
+		scfg.Egress = egress.ActorState{Actors: sub.actors}
 	}
 	sc, err := stateclient.New(scfg)
 	if err != nil {
@@ -487,15 +558,11 @@ func run(ctx context.Context, cfg config) error {
 // newEgress builds the gateway of the forge and registry routes when cfg names an egress listener, and
 // returns nil when it does not. It loads the actor token keys and the platform routes, and returns
 // the applier that merges the org routes of each State revision with them.
-func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub func(kind credkind.Kind, org string, values ...string)) (*egress.Gateway, *egress.StateRoutes, error) {
+func newEgress(ctx context.Context, cfg config, sub *substrateIdentity, reg prometheus.Registerer, log *slog.Logger, scrub func(kind credkind.Kind, org string, values ...string)) (*egress.Gateway, *egress.StateRoutes, error) {
 	if cfg.egressAddr == "" {
 		return nil, nil, nil
 	}
-	keys, err := actortoken.LoadPublicKeys(cfg.actorTokenKeysDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	ver, err := actortoken.NewVerifier(cfg.actorTokenIssuer, keys)
+	ident, actors, keys, err := newIdentifier(cfg, sub)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -507,11 +574,11 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 	}
 	policy := catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: cfg.egressAllowedHosts}
 	eg, err := egress.New(egress.Options{
-		Verifier: ver,
-		RootCAs:  roots,
-		Dial:     policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
-		Metrics:  egress.NewMetrics(reg),
-		Log:      log,
+		Identifier: ident,
+		RootCAs:    roots,
+		Dial:       policy.GatewayDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}),
+		Metrics:    egress.NewMetrics(reg),
+		Log:        log,
 		// Each credential the gateway attaches is masked in its log lines too.
 		Scrub: scrub,
 		// A held gateway is deny-all on the egress listener too (ADR 0107, issue #1390).
@@ -523,7 +590,7 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 	// The platform file is the table until the first State revision; then each revision merges its org
 	// routes with it (egress.StateRoutes). Without a file and before a revision, every request is
 	// refused (no_table).
-	st := &egress.StateRoutes{Gateway: eg}
+	st := &egress.StateRoutes{Gateway: eg, Actors: actors}
 	if cfg.egressRoutesFile != "" {
 		t, err := egress.LoadPlatformRoutes(cfg.egressRoutesFile)
 		if err != nil {
@@ -532,8 +599,77 @@ func newEgress(cfg config, reg prometheus.Registerer, log *slog.Logger, scrub fu
 		st.Platform = t
 		eg.Apply(t)
 	}
-	log.Info("egress routes loaded", "keys", len(keys), "platform_routes", cfg.egressRoutesFile != "")
+	// keys is the count of Ed25519 public keys; the Substrate verifier reads its keys from the issuer
+	// on the first token, so it has none at start.
+	log.Info("egress routes loaded", "actor_token_verifier", cfg.actorTokenVerifier, "keys", keys, "platform_routes", cfg.egressRoutesFile != "")
 	return eg, st, nil
+}
+
+// newIdentifier returns the egress listener's actor token check that cfg selects. For the Substrate
+// verifier it is sub's identifier of the egress audience, with sub's actor table; the table is nil for
+// the Ed25519 verifier. keys is the count of Ed25519 public keys it loaded (0 for the Substrate
+// verifier).
+func newIdentifier(cfg config, sub *substrateIdentity) (_ route.Identifier, _ *route.ActorTable, keys int, _ error) {
+	switch cfg.actorTokenVerifier {
+	case verifierEd25519:
+		// exit: #1386 PR B, after #1094 (the OpenShell driver and the Ed25519 path go away).
+		pub, err := actortoken.LoadPublicKeys(cfg.actorTokenKeysDir)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		ver, err := actortoken.NewVerifier(cfg.actorTokenIssuer, pub)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return ver, nil, len(pub), nil
+	case verifierSubstrate:
+		if sub == nil {
+			return nil, nil, 0, errors.New("the Substrate actor token check is not set up")
+		}
+		id, err := sub.identifier(actortoken.AudienceEgress)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		return id, sub.actors, 0, nil
+	}
+	return nil, nil, 0, fmt.Errorf("--actor-token-verifier must be %s or %s, not %q", verifierEd25519, verifierSubstrate, cfg.actorTokenVerifier)
+}
+
+// substrateIdentity is the Substrate actor JWT check of the process (issue #1489): one verifier, whose
+// issuer key cache every listener shares, and one actor table, which each State revision fills. Each
+// listener gets its own audience (identifier).
+type substrateIdentity struct {
+	verifier *actortoken.SubstrateVerifier
+	actors   *route.ActorTable
+}
+
+// newSubstrateIdentity returns the Substrate check, or nil when cfg selects another verifier. It does not
+// contact the issuer: the verifier reads the issuer's keys on the first token, and ctx bounds those reads.
+//
+// The key policy (ADR 0120 amendment of 2026-11-27): the verifier refetches the issuer's keys at most once
+// a minute (actortoken.KeyRefetchInterval) and uses them for at most actortoken.KeyMaxAge (10 minutes).
+// When the issuer is down for longer, every actor JWT is refused with 503 on every listener until it
+// is back. That is fail closed by design: a key the issuer has withdrawn must not stay valid.
+func newSubstrateIdentity(ctx context.Context, cfg config) (*substrateIdentity, error) {
+	if cfg.actorTokenVerifier != verifierSubstrate {
+		return nil, nil
+	}
+	ver, err := actortoken.NewSubstrateVerifier(ctx, actortoken.SubstrateConfig{
+		Issuer: cfg.actorJWTIssuer, CAFile: cfg.actorJWTCAFile, Audience: actortoken.AudienceEgress,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &substrateIdentity{verifier: ver, actors: &route.ActorTable{}}, nil
+}
+
+// identifier is the check of the listener of audience.
+func (s *substrateIdentity) identifier(audience string) (*route.SubstrateIdentifier, error) {
+	v, err := s.verifier.WithAudience(audience)
+	if err != nil {
+		return nil, err
+	}
+	return route.NewSubstrateIdentifier(v, s.actors)
 }
 
 // egressRoots is the system roots plus the certificates of the PEM file at path, or nil (the system

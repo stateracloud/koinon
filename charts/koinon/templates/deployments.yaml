@@ -162,7 +162,8 @@ spec:
             {{- if eq $component "agentd" }}
             {{- include "koinon.otlpTracesTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
-            {{- if include "koinon.egressListener" $ }}
+            {{- /* Not on substrate: atenet-egress adds the actor token there, and agentd signs nothing (issue #1386). */}}
+            {{- if include "koinon.ed25519ActorToken" $ }}
             # The actor token seed only (#1086 part C2): koinon-agentd signs, the gateway verifies.
             - name: actor-token-key
               mountPath: /secrets/actor-token
@@ -214,7 +215,7 @@ spec:
         {{- if eq $component "agentd" }}
         {{- include "koinon.otlpTracesTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
-        {{- if include "koinon.egressListener" $ }}
+        {{- if include "koinon.ed25519ActorToken" $ }}
         - name: actor-token-key
           secret:
             secretName: {{ include "koinon.actorTokenKeyName" $ }}

@@ -535,12 +535,16 @@ Maintainer decision of 2026-11-26 (PR 1295). It is an INTERIM. Issue #1386 is it
 
 Accepted (2026-11-26). The maintainer decided on 2026-11-26 that #1386 ships before the v0.1.0 final tag.
 The maintainer reviewed this amendment before the code and accepted it on 2026-11-26, with items 5 and 6.
-The interim amendment above (#1086 part C2) stays until the code of #1386 merges. That code removes it.
+The interim amendment above (#1086 part C2) stays until the second pull request of #1386 merges. That pull
+request removes it.
 
 **Scope and order.** This amendment covers the Substrate driver only. The code of #1386 comes after three
 other issues:
 
-- #1094 removes the OpenShell driver. So #1386 writes no OpenShell code.
+- #1094 removes the OpenShell driver. So #1386 writes no OpenShell code. Main's decision of 2026-11-26 (issue
+  #1386) splits #1386 in two pull requests. The first does the Substrate path before #1094: the header rule, the
+  Substrate verifier, the actor record, the chart fences and the escape spec. OpenShell keeps the interim token file.
+  The second comes after #1094. It removes the token file, its writer, the Ed25519 path and the interim amendment.
 - #1446 puts the agentd leg to the Substrate router on TLS. Today every Exec through the router fails.
 - #1444 makes the Substrate driver write the actor's `EgressPolicy`: default deny plus the routes to the
   gateway. Every actor gets the model and MCP listeners. Only an actor whose agent has a code-host grant gets
@@ -565,18 +569,34 @@ it (`no_token`).
    `expiration_seconds: 900`. The rule holds no org host and no credential. The gateway still owns the L7
    rules and the credentials.
 2. **atenet-egress finds the actor from the transport.** In the worker pod, atunnel presents a certificate for the
-   actor. atenet-egress accepts it only for an actor that is placed on a worker (running or resuming). So the identity
-   comes from the connection, not from a value that the guest sets. For a request that carries the header, atenet-egress
-   gets a token from ateapi (`MintActorJwt`). It writes the token over the value of the guest
+   actor. Its SAN is `spiffe://substrate-actor.local/worker-for-actor/<atespace>/<name>`: it names the actor, with no
+   UID. It is valid for 1 hour, and ateapi checks the UID only when it issues it
+   (`cmd/ateapi/internal/workerservice/certificate.go`). atenet-egress accepts the certificate only for an actor that
+   is placed on a worker (running or resuming). It checks this once for each tunnel connection (CONNECT), not for each
+   request (`egress.go`, `validateActor`), and `MintActorJwt` does not check the state of the actor. So the identity
+   comes from the connection, not from a value that the guest sets, but only Koinon's record (item 5) checks each
+   request. For a request that carries the header, atenet-egress gets a token from ateapi (`MintActorJwt`). A request
+   without the header goes out unchanged, with no token. It writes the token over the value of the guest
    (`OVERWRITE_IF_EXISTS_OR_ADD`). It keeps each token until a third of its lifetime remains. Each failure refuses the
-   request (403, 503 or 500, `mapActorJWTError`). Source: `cmd/atenet/internal/router/egress/credentials.go`
-   (`applyEffects`, `actorJWT`) and `actorjwt/actorjwt.go`.
-3. **The gateway URL of a Substrate guest is `http`.** `replace_headers` works on an `HttpRule`, and an
-   `HttpRule` does not match TLS. To replace a header in TLS, Substrate needs an `HttpsRule`. That rule
-   decrypts the request with a gateway CA that the guest must trust, and Koinon does not use it. The chart
-   URL is `http` already. Today `CheckEgressURL` (`internal/agentd/actortoken.go`) accepts `https`. #1386
-   changes it to refuse an `https` egress URL with a clear error.
-4. **The gateway verifies the Substrate token.** The Substrate verifier replaces the Ed25519 verifier:
+   request: 403 for an actor that is not found, 503 when ateapi is unavailable, and 500 for all other errors, the
+   4-second injection timeout and a canceled request included (`mapActorJWTError`). Source:
+   `cmd/atenet/internal/router/egress/credentials.go` (`applyEffects`, `actorJWT`) and `actorjwt/actorjwt.go`.
+   - atenet-egress can also read the certificate from the `x-forwarded-client-cert` header (`SANITIZE_SET`). Upstream
+     has an open `TODO(identity)` to audit that the actor cannot set this header (`egress.go`). A control spec proves
+     that a guest that sends its own `x-forwarded-client-cert` does not change the actor that the gateway sees. If it
+     fails, the code of #1386 does not ship.
+3. **The actor JWT goes only to the gateway egress listener, and its URL is `http`.** `replace_headers` works on
+   an `HttpRule` and also on an `HttpsRule` (MITM): the lab test of 2026-11-27 showed that an `HttpsRule` replaces
+   the header too, and then the upstream host, or the guest through an echo, sees the token. So the driver puts
+   `actor_jwt` on exactly one rule: the clear-text `HttpRule` of the code-host egress route, with its one host and
+   its one port. It refuses to write a policy where any other rule, of any kind, has `replace_headers`
+   (`checkActorTokenEffects`, `internal/execution/substrate/egresspolicy.go`). The driver writes no `HttpsRule`.
+   An `https` egress URL would not match that one rule, so `CheckEgressURL` (`internal/agentd/actortoken.go`)
+   refuses it on Substrate with a clear error. The chart URL is `http` already.
+4. **The gateway verifies the Substrate token.** The Substrate verifier replaces the Ed25519 verifier. Until #1094
+   removes the OpenShell driver, the execution driver of the install selects the verifier: Substrate gets this
+   verifier, and OpenShell keeps the Ed25519 verifier and the interim token file. The second PR of #1386 deletes the
+   Ed25519 path.
    - It trusts exactly one issuer: the `--actor-jwt-issuer` of the Substrate install (the installer default is
      `https://idp.<substrate namespace>.svc`). The value comes from the chart values, never from the `iss` of
      a token. The gateway reads `<issuer>/.well-known/openid-configuration`. The `issuer` of that document
@@ -587,23 +607,27 @@ it (`no_token`).
    - The gateway verifies the TLS certificate of the issuer with a CA bundle from the chart values (the CA of
      the Substrate install, which signs the certificate of `ate-idp-server`). There is no option to skip the
      check. Without the CA bundle, the gateway does not start the Substrate verifier.
-   - The gateway accepts only `ES256` and `RS256`, which the installer uses. It refuses all other values of
-     `alg`, `none` and `HS*` included.
+   - The gateway accepts only `ES256`: ate-idp-server signs `ES256` only (lab test of 2026-11-27). It refuses
+     all other values of `alg`, `RS256`, `none` and `HS*` included, with an error that names the `alg`, and
+     it does not use a published key with another `alg`.
    - The token must have the gateway audience in `aud`, a valid `exp` and `nbf`, and a lifetime of 300 to
-     3600 seconds (section 1.2). Its `sub` must be `actor/<atespace>/<name>`, and the claim `actor.ate.dev`
+     3600 seconds (section 1.2). The lifetime is `exp - iat`. ateapi sets `nbf` to 5 minutes before `iat`
+     (`cmd/ateapi/internal/controlapi/actor.go`), so `exp - nbf` is the lifetime plus 300 seconds. Its `sub` must be `actor/<atespace>/<name>`, and the claim `actor.ate.dev`
      must name the same actor. The gateway refuses a `worker-for-actor` token.
    - The gateway refuses a request that has more than one value of `Koinon-Actor-Token`. Today
      `route.Request` reads only the first value (`Header.Get`, `internal/gateway/route/route.go`).
 5. **Koinon's own record names the agent.** The gateway does not trust the token for the org or the agent.
    It finds them in Koinon's record of the actor, for each request:
    - The driver creates the actor in the org's workspace (the atespace, ADR 0002). The actor name is the
-     sandbox name plus a generation part (item 6). `agent_sandboxes` records the workspace next to the org and
+     sandbox name plus a random part (item 6). `agent_sandboxes` records the workspace next to the org and
      the agent. #1386 adds two columns: `actor_name` and `actor_uid`. The driver writes both for each actor
      that it creates. A new column is necessary, because the CHECK of `sandbox_name` allows at most 19
      characters, and `ka-` plus 16 hex characters already uses all 19.
    - The gateway gets this map through the State stream, as it gets the routes. The map gives the org slug,
      because `actortoken.Actor.Org` is the slug, not `org_id`. The `actorUID` of the token must be equal to the
-     recorded UID. An actor that is not in the map, or a UID that is not equal, is refused. So an archived or
+     recorded UID. An actor that is not in the map, or a UID that is not equal, is refused. As in kagent, the
+     check is on the row: the workspace, the actor name, the actor UID, and a sandbox that is not deleted or
+     archived. So an archived or
      deleted sandbox loses its identity at the next State update. The route check (`route.inScope`) does
      not change.
    - A new actor is not in the map until the next State update. So its first request can be refused. This
@@ -615,11 +639,13 @@ it (`no_token`).
    for up to two thirds of its lifetime. Sandbox names come from a hash of the org and the agent (and the
    task, for an ephemeral agent, `internal/execution/names.go`). So a new actor can have the name of an old
    one and get a token with the old UID. Item 5 refuses that token, so it fails closed, but the new actor
-   cannot reach the gateway for up to 10 minutes. To prevent this, the driver gives each new actor a name
-   that no earlier actor had: the sandbox name plus a short generation part, recorded in
-   `agent_sandboxes.actor_name` (item 5).
+   cannot reach the gateway for up to 10 minutes. To prevent this, each new actor gets a name that no earlier
+   actor had: `<sandbox name>-<8 random hex characters>`, recorded in `agent_sandboxes.actor_name` (item 5).
+   A new name is made for each new actor and is never used again. Kagent does the same with `session-<uuid>`.
 7. **Network and install.** The gateway needs a route to the issuer and to its `jwks_uri`. The chart adds
-   one NetworkPolicy egress rule from the gateway for this route, and a chart check asserts it. This rule is
+   one NetworkPolicy egress rule from the gateway for this route, and a chart check asserts it. The rule
+   allows the pod port of `ate-idp-server` (8443, named `https`), not the Service port 443, because a
+   NetworkPolicy matches the port after the Service maps it. This rule is
    for the verifier. It is not the guest's route to the gateway, which #1444 owns. Substrate's own
    `ate-idp-server` policy admits any source on its `https` port (`ate-system-networkpolicies.yaml`). The
    preflight checks that the gateway can read the discovery document. The gateway does not get a route to
@@ -690,6 +716,8 @@ it (`no_token`).
 - **New trust:** the gateway trusts atenet-egress, ateapi and the signing key of the Substrate issuer. A
   holder of that key can act as any actor. ADR 0119 already trusts Substrate's control plane with the guest
   itself. So this adds no new party. The gateway maps an actor only through Koinon's own record (item 5).
+  Two pods hold the signing keys: ate-api-server signs with them, and ate-idp-server mounts the same Secret
+  `actor-id-jwt-pool`, with the private keys, to publish the key set (`manifests/ate-install/ate-idp-server.yaml`).
 - **What is left:**
   - The leg from atenet-egress to the gateway is HTTP inside the cluster, as the leg from the guest is today.
     A reader of the pod network can see the token while it is valid (15 minutes). TLS to the gateway is not
@@ -699,13 +727,32 @@ it (`no_token`).
 
 ### Open points for the code
 
-- Where ate-idp-server gets the public keys of ateapi, and how it publishes a new key at a rotation. The
-  upstream NetworkPolicy comment says that it serves the discovery document and the key set. The code of
-  #1386 proves this with a spec before it depends on it.
+- Where ate-idp-server gets the public keys of ateapi, and how it publishes a new key at a rotation.
+  Answered from the source (v1.0.1): it serves `/.well-known/openid-configuration` and `/openid/v1/jwks`
+  (`cmd/ate-idp-server/internal/server/server.go`). It reads the key pool from the Secret that ateapi signs
+  with, again at most once each minute, and publishes the active and the inactive keys
+  (`internal/localjwtauthority/localjwtauthority.go`). A rotation is `kubectl ate admin add-jwt-key`, then
+  `activate-jwt-key`, then `remove-jwt-key`. So a new key is in the key set before ateapi signs with it. The
+  code of #1386 still proves the discovery path with a spec before it depends on it.
 - Where the key of the actor certificate is on the microVM tier (ADR 0075). It must be outside the guest
-  kernel. The upstream source puts it in the `BrokerCertificateSource` of atunnel, in the ateworker-microvm
-  process on the host side (`internal/atunnel/tunnel.go`). A spec confirms this before the amendment is
-  accepted.
+  kernel. The upstream source puts it in the `BrokerCertificateSource` of atunnel, which makes the key and
+  sends only the CSR (`internal/atunnel/egress/credential.go`). ateworker-microvm runs atunnel in its own
+  process on the host side (`cmd/ateworker-microvm/main.go`). This is confirmed in the source only. A spec
+  confirms it before the code of #1386 depends on it.
+- **Corrections of 2026-11-26.** Lane c1386 read the Substrate source and corrected items 2, 4, 5, 6 and 7,
+  the threat model and these open points. Main approved the corrections (issue #1386).
+- **Corrections of 2026-11-27.** The lab test and maintainer decision D4 (PR #1480; the maintainer's research store,
+  `2026-11-27-substrate-verified-reference.md`, section 1.3, C7, C8, N6, I5) corrected item 3: an `HttpsRule`
+  also replaces the header, so "clear-text `HttpRule` only" was false, and the driver now enforces the one rule in
+  code. They confirmed item 6: the atenet-egress token cache is keyed by actor name
+  (`cmd/atenet/internal/router/egress/actorjwt/actorjwt.go`), and a new actor with a reused name got a token with
+  the UID of a deleted actor for up to a third of the lifetime, also after its atespace was made again. So a name
+  is never used again, and the gateway keys an actor by atespace, name and UID together, never by UID alone. The
+  JWT is ES256 only in the lab, with `exp - iat` = 900 s, so the gateway now accepts ES256 only (main's
+  decision). The guest cannot steer the identity with fake XFCC or `Ate-Target-Actor` headers. The lane review added
+  two rules: the State carries no actor of a sandbox that is deleted or being deleted (item 5), and the
+  reconciler recreates an actor that runs under its sandbox name (made before this amendment), so that the
+  new actor gets its own name and its UID.
 
 ### Prior art
 
@@ -759,6 +806,68 @@ Maintainer decision of 2026-11-26.
 - **Failure behaviour.** When the router connection fails before a stream opens, agentd fails the run at once with
   the dial error. It does not treat the failure as a lost harness and does not take over the lease: a retry cannot
   help until an operator fixes the install.
+
+## Amendment (2026-11-27, issue #1489): the actor JWT on every gateway listener
+
+Maintainer decisions of 2026-11-27 (issue #1489, comments 7220445863 and 7221191962). This amendment changes items 1,
+3, 5 and 8 of the #1386 amendment for the Substrate driver. The OpenShell driver does not change until #1094.
+
+- **Fact.** The #1386 amendment put `actor_jwt` on the egress listener only. The model and MCP listeners read the
+  agent's gateway key from the guest (`KOINON_MODEL_KEY`). That is a credential inside the guest, against section 1.1.
+- **One rule for each listener.** The driver writes one `HttpRule` for each gateway host and port: the model, the MCP
+  and (with a code-host grant) the egress listener. Each rule has `replace_headers` with `actor_jwt`,
+  `expiration_seconds: 900`, and exactly one audience: `koinon-gateway-model`, `koinon-gateway-mcp` or
+  `koinon-gateway-egress`. A token for one listener is refused on every other listener. Two listeners on one host and
+  port are refused (`ValidateGatewayRoutes`, `internal/execution/substrate/egresspolicy.go`). The rule of item 3 stays:
+  only these `HttpRule`s carry `replace_headers`, and the driver writes no `HttpsRule`.
+- **The header.** The model and MCP listeners read the JWT from `Authorization`, with the prefix `Bearer `, where the
+  harness client sends its key. The egress listener keeps `Koinon-Actor-Token`: the git and HTTP clients of the guest
+  set `Authorization` for the upstream host, and the OpenShell Ed25519 gate uses the same header until #1094. This is
+  a deviation from decision 1 of comment 7220445863. Main can change it when #1094 removes the Ed25519 path.
+- **Section 1.2 and 1.3 on Substrate.** The guest gets the fixed public placeholder `koinon-actor-placeholder` in
+  `KOINON_MODEL_KEY` (`actortoken.Placeholder`). It is the same in every sandbox and it is not a secret. atenet-egress
+  writes over it. The guest holds no gateway key.
+- **The verifier on every listener.** koinon-gateway has one Substrate verifier, with one key cache, and a verifier
+  for each audience (`WithAudience`). On each listener:
+  - It accepts `ES256` only.
+  - It refuses the placeholder, an empty bearer, a token it cannot verify and no token with 401 and the do-not-retry
+    marker. There is no fallback to a gateway key for these values. A real gateway key still works on the model
+    listener for koinon-api.
+  - It checks `iss`, `exp`, `iat`, `nbf` and `jti`, a lifetime of 300 to 3600 seconds, and an `aud` that is exactly
+    the audience of the listener.
+  - The actor must be in the actor table of the State and its UID must be equal to the recorded UID (item 5). An
+    unknown actor gets 403.
+  - When the issuer keys are not available, the listener answers 503 without the do-not-retry marker.
+  - The gateway never sends the JWT upstream.
+- **Key policy.** The verifier uses fetched keys for at most 10 minutes (`KeyMaxAge`). When the issuer is down for more
+  than 10 minutes, every call on every listener gets 503 until the issuer is back. This fails closed. We accept it: an
+  older key set could still accept a key that Substrate removed.
+- **Model calls on Substrate go to koinon-gateway.** Only koinon-gateway checks the actor JWT. So the chart refuses
+  `execution.driver=substrate` without `gateway.model.driver=koinon` and `gateway.mcp.driver=koinon`, with a message
+  that names the value. The koinon model driver needs `gateway.mode=standalone`, so Substrate needs it too. The chart
+  sets the agentd gateway URL and the reconciler `gateway.modelUrl` to the model listener. agentgateway keeps its
+  own policy for the OpenShell driver.
+- **Item 8 on every listener.** The chart NetworkPolicy admits the model, MCP and egress listener ports from the
+  Substrate namespace only for the atenet-egress pods (a `namespaceSelector` and a `podSelector`). It does not admit
+  the whole namespace. An empty `workerNetworkPolicy.atenetEgressSelector` fails the render. The model gateway also gets the egress rule to
+  the `ate-idp-server` pod port (item 7). A chart check asserts each rule.
+- **The run waits for its actor.** koinon-reconciler writes a `gateway_agent_forge` row for every active agent on
+  Substrate, also without a forge grant. The row waits for the later of the credential's revision and the first State
+  revision that holds the actor's UID. koinon-agentd starts the harness only when every live gateway copy acked that
+  revision (`waitForge`). The wait goes through the database and the State stream. No kubelet ConfigMap or volume sync
+  is on its path. Kind has no Substrate agent path, so the added start time is not measured there. Main measures it
+  in the lab.
+- **Restore.** A restore can keep the old token. The token cache is in atenet-egress, keyed by actor name, not in the
+  guest. When the restored actor keeps its name and its UID, its cached token stays valid for it. When it gets a new
+  actor, item 6 gives it a new name, so no old token applies. The guest and its
+  snapshot hold no token (section 5.1).
+- **The #1386 rule for this amendment.** No listener trusts a value that the guest sets for the identity. Each
+  listener trusts only the JWT that atenet-egress adds, checked against Koinon's own record.
+- **Lab risks.** These are not proven in this amendment. Main proves them in the lab.
+  - A reused actor name gets a token with the old UID for up to about 9 minutes (two thirds of 900 seconds, less the
+    time since the mint). Item 6 makes each name new, and the UID check refuses the old token, so this fails closed.
+  - A deleted actor's token passes the signature check for up to about 10 minutes. The actor table drops the actor at
+    the next State update, and then the UID check refuses the token.
 
 ## Amendment (2026-11-26, issue #1387): a non-root payload on the gVisor tiers
 

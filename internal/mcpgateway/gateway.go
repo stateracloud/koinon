@@ -56,6 +56,9 @@ type Options struct {
 	Metrics *Metrics
 	// Logger gets the gateway's own log lines. They never carry arguments, results or tokens.
 	Logger *slog.Logger
+	// Actors checks a bearer that is not a gateway key as a Substrate actor JWT for the MCP audience
+	// (issue #1489, gateway.IdentifyActor). Nil: only gateway keys are accepted.
+	Actors gateway.ActorIdentifier
 	// IdleTTL is how long an unused upstream session lives. Zero means 5 minutes.
 	IdleTTL time.Duration
 	// CallTimeout bounds one upstream call. Zero means [DefaultCallTimeout].

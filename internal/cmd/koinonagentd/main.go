@@ -108,9 +108,9 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.pool.MCPURL, "agent-mcp-url", "",
 		"the MCP URL harnesses get, as sandboxes reach it (koinon-gateway's /mcp with gateway.mcp.driver=koinon); empty: <gateway-url>/mcp")
 	fs.StringVar(&c.pool.EgressURL, "egress-url", "",
-		"the gateway's egress listener as sandboxes reach it (for example http://koinon-mcp-gateway.koinon.svc:8081); git of runs on a code-host connection goes to <url>/egress/<host>/ with a short-lived actor token; empty: git uses the driver's egress. Requires --actor-token-key-file")
+		"the gateway's egress listener as sandboxes reach it (for example http://koinon-mcp-gateway.koinon.svc:8081); git of runs on a code-host connection goes to <url>/egress/<host>/ with a short-lived actor token; empty: git uses the driver's egress. Requires --actor-token-key-file on OpenShell; on Substrate it must be http, and the egress layer adds the actor token")
 	fs.StringVar(&c.actorTokenKeyFile, "actor-token-key-file", "",
-		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key key, mounted read-only); required with --egress-url")
+		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key key, mounted read-only); required with --egress-url on OpenShell, refused on Substrate")
 	fs.StringVar(&c.actorTokenKeyID, "actor-token-key-id", "k1", "key ID of --actor-token-key-file; the gateway reads the public key as <key-id>.pub")
 	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "koinon-agentd", "issuer of actor tokens; the gateway's --actor-token-issuer must match")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
@@ -204,14 +204,21 @@ func (c *config) validate() error {
 			return err
 		}
 	}
-	if (c.pool.EgressURL == "") != (c.actorTokenKeyFile == "") {
+	// On Agent Substrate the egress layer outside the guest adds the actor identity (issue #1386, ADR 0120
+	// amendment of 2026-11-26): koinon-agentd mints no token and holds no signing key there.
+	outside := c.execution.IsSubstrate()
+	c.pool.ActorIdentityOutside = outside
+	switch {
+	case outside && c.actorTokenKeyFile != "":
+		return errors.New("--actor-token-key-file must not be set with --execution-driver=substrate: the Substrate egress layer adds the actor identity, and koinon-agentd holds no signing key")
+	case !outside && (c.pool.EgressURL == "") != (c.actorTokenKeyFile == ""):
 		return errors.New("--egress-url and --actor-token-key-file are required together: the gateway's egress listener refuses requests without an actor token")
 	}
 	if c.pool.EgressURL != "" {
-		if err := agentd.CheckEgressURL(c.pool.EgressURL); err != nil {
+		if err := agentd.CheckEgressURL(c.pool.EgressURL, outside); err != nil {
 			return fmt.Errorf("--egress-url: %w", err)
 		}
-		if c.actorTokenKeyID == "" || c.actorTokenIssuer == "" {
+		if !outside && (c.actorTokenKeyID == "" || c.actorTokenIssuer == "") {
 			return errors.New("--actor-token-key-id and --actor-token-issuer must not be empty with --egress-url")
 		}
 	}

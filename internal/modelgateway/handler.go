@@ -49,6 +49,17 @@ func (g *Gateway) refuse(w http.ResponseWriter, status int, text string) {
 	http.Error(w, text, status)
 }
 
+// refuseActor answers an actor JWT that is not accepted. A 503 (no issuer keys) is not final.
+func (g *Gateway) refuseActor(w http.ResponseWriter, r *gateway.ActorRefusal) {
+	if r.Final {
+		g.refuse(w, r.Status, r.Text)
+		return
+	}
+	g.o.Metrics.request(resRefused)
+	w.Header().Set("Retry-After", "5")
+	http.Error(w, r.Text, r.Status)
+}
+
 // refuseBudget answers a key whose spend reached its limit: 429 budget_exceeded, marked final. The
 // provider is not called. Retry-After is the time until the window ends, which a consumer with a
 // cap reads as final; a limit without a window sends none (only a new limit resets it).
@@ -111,9 +122,23 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, http.StatusUnauthorized, "refused: no gateway key")
 		return
 	}
+	token = strings.TrimSpace(token)
 	snap := g.snap.Load()
-	key, ok := snap.authenticate(strings.TrimSpace(token))
-	if !ok {
+	var key gateway.Key
+	if g.o.Actors != nil && !gateway.IsGatewayKey(token) {
+		// A Substrate guest: atenet-egress put the actor JWT here (issue #1489). No fallback to a key. The
+		// JWT never goes upstream: upstreamHeaders forwards no Authorization of the client.
+		agent, refusal := gateway.IdentifyActor(g.o.Actors, token)
+		if refusal != nil {
+			g.o.Logger.Info("refused a model request: actor token", "reason", refusal.Reason, "status", refusal.Status)
+			g.refuseActor(w, refusal)
+			return
+		}
+		if key, ok = snap.byAgent[agent]; !ok {
+			g.refuse(w, http.StatusForbidden, "refused: the agent has no gateway key")
+			return
+		}
+	} else if key, ok = snap.authenticate(token); !ok {
 		g.refuse(w, http.StatusUnauthorized, "refused: unknown gateway key")
 		return
 	}

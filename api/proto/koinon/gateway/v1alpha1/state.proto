@@ -221,6 +221,25 @@ message EgressState {
   // credentials say where the gateway reads each credential that a route names, and how it sends it
   // (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable).
   repeated EgressCredential credentials = 2;
+  // actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5):
+  // the gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is
+  // not here, or a UID that is not equal, is refused.
+  repeated EgressActor actors = 3;
+}
+
+// EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no
+// token, only names.
+message EgressActor {
+  // atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave
+  // the actor: the three must all be equal to the claims of the token.
+  string atespace = 1;
+  string name = 2;
+  string uid = 3;
+  // org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the
+  // sandbox, empty when the State does not name one.
+  string org = 4;
+  string agent = 5;
+  string run = 6;
 }
 
 // EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR

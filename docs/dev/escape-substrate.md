@@ -18,7 +18,8 @@ The run needs a real cluster with Substrate. Nothing in this page runs in a lane
 | Reach | The machine that runs the command reaches ateapi and the atenet router. |
 | Keys | None. The run makes its own guest-API key; the driver writes the public half into the templates it creates. Never copy the production signing seed to the machine that runs this. |
 | Snapshots | The snapshot bucket with a read-only key. `make test-escape-substrate` requires it: the restore spec fails without it. |
-| Time | About 25 minutes: five sandboxes start (the probe sandbox, two in org B, the restore source and its clone). The Make target sets a 40 minute budget. |
+| Identity stand-in | The actor identity specs serve the gateway's egress code on this machine. atenet-egress must reach it by a DNS name, and this machine must reach the install's actor JWT issuer. See [the precondition](#precondition-of-the-actor-identity-specs). |
+| Time | About 30 minutes: eight sandbox starts (the probe sandbox, two in org B, the restore source and its clone, the identity sandbox, and the actor of spec (f) two times). The Make target sets a 40 minute budget. |
 
 The run does not need `KUBECONFIG`. Set `KUBECONFIG=/dev/null`.
 
@@ -35,7 +36,7 @@ The full list, with defaults, is in the header of `test/escape/substrate_harness
 - `KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES`: the gateway routes, a comma-separated list of `host:port`. The driver
   refuses to create a sandbox without a gateway route (issue #1444), and the suite cannot start without one
   (issue #1508). Use the DNS name of the gateway Service, for example `koinon-gateway.koinon-system.svc:8080`.
-  The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of
+  The host is a lowercase DNS name, not an IP address. The driver writes the routes into the egress policy of The first route is the model route. Every other route is an MCP route.
   every sandbox. They are the only destinations that policy allows: default-deny stays for every other
   destination (ADR 0120). The egress gateway spec is the one exception: it replaces the policy of its own
   sandbox with an allow-all rule, as its control. Do not name a host that a deny probe targets (for example in
@@ -65,6 +66,35 @@ Set these:
 - `KOINON_ESCAPE_EGRESS_REBIND` (default `169-254-169-254.sslip.io:80,127-0-0-1.sslip.io:80,127-0-0-1.sslip.io:15000,0-0-0-0.sslip.io:80`):
   `host:port` names that resolve to the refused addresses. The default needs the public wildcard DNS
   service sslip.io. Set your own names when the cluster has no route to it.
+- `KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY`: `host:port` (a DNS name, not an IP) of the identity stand-in on
+  this machine. The driver writes it as the code-host egress route, so atenet-egress adds the actor JWT to a
+  clear-text request to it (issue #1386).
+- `KOINON_ESCAPE_SUBSTRATE_IDENTITY_LISTEN` (default `:<port of the above>`): the local listen address of the
+  stand-in.
+- `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER` and `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE`: the issuer of
+  the install's actor JWTs and its CA, the same values as the gateway's `--actor-jwt-issuer` and
+  `--actor-jwt-ca-file`.
+- `KOINON_ESCAPE_SUBSTRATE_GATEWAY_DIRECT`: the installed gateway's egress listener as `host:port` by Service
+  name, Service IP and pod IP. Spec (e) connects to each one directly.
+
+### Precondition of the actor identity specs
+
+The stand-in is the gateway's own egress code (`egress.New`, the Substrate verifier and identifier), served
+by the test process. The installed gateway cannot do this work: it knows only the actors in Koinon's State,
+and the rig's sandboxes are not in it. The stand-in has its own State, which the specs fill. Its one route
+is a forge route that never connects, so an accepted identity gets `502` with
+`Koinon-Egress-Refusal: upstream_error`, and a refused one gets the refusal of the gate.
+
+Before you run the suite:
+
+1. Give the test machine a DNS name that the cluster resolves, for example `10-0-0-5.sslip.io` for
+   `10.0.0.5`. Set `KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY` to that name and a free port.
+2. Let atenet-egress connect to that address: add it to `workerNetworkPolicy.extraEgress`, or run the rig
+   with the chart policies off.
+3. Make sure that the test machine reaches the issuer URL (a port-forward to the issuer Service is
+   sufficient).
+
+The specs run in one process (`Serial`), because the stand-in listens on one port.
 
 ### Precondition of the egress gateway spec
 
@@ -80,6 +110,9 @@ export KUBECONFIG=/dev/null
 export KOINON_ESCAPE_SUBSTRATE_CONTROL=... KOINON_ESCAPE_SUBSTRATE_ROUTER=...
 export KOINON_ESCAPE_SUBSTRATE_IMAGE=... KOINON_ESCAPE_SUBSTRATE_GATEWAY_ROUTES=koinon-gateway.koinon-system.svc:8080
 export KOINON_ESCAPE_SUBSTRATE_RUNTIME_CLASS=... KOINON_ESCAPE_HOST_KERNEL="$(ssh node uname -r)"
+export KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY=10-0-0-5.sslip.io:18081
+export KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER=... KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE=...
+export KOINON_ESCAPE_SUBSTRATE_GATEWAY_DIRECT=koinon-gateway.koinon.svc:8081,<service IP>:8081,<pod IP>:8081
 make test-escape-substrate
 ```
 
@@ -97,12 +130,25 @@ On the gVisor tier, every spec passes, except two that report **not applicable**
    by decision (ADR 0120 section 4, issue #1150). The syscall half of the spec runs and passes. On the
    `vm` tier this spec must pass, and the harness fails it if Landlock is missing.
 
-`holds the actor token only in the egress token file that koinon-agentd writes` runs on every tier. It
-writes a real actor token with koinon-agentd's command, checks that the gateway's verifier accepts it, and
-fails if the token or another JWT-shaped value is in any other place that it scans: a file under the
-guest roots (`/dev/shm` included), or the environment or command line of a process. It runs only the
-write command, not git or a harness. The agent user can
-read the file: this is the interim of the ADR 0120 amendment of 2026-11-26, and issue #1386 is its exit.
+The container `Substrate actor identity` (`test/escape/substrate_identity_test.go`) runs on every tier. It
+is the Proof list of the ADR 0120 amendment for issue #1386. Each control name starts with its letter:
+
+- `holds no actor token and no signing key, and its git configuration sends only the placeholder`: the
+  guest has no token directory or file, no readable file, environment or command line holds a JWT or a
+  private key (PEM or JWK), and koinon-agentd's git configuration holds only the placeholder. Its control
+  is a git request with that configuration (or the probe, when the image has no git) that the gateway
+  accepts.
+- `(a) a request with the placeholder reaches the gateway with the actor's JWT, and the gateway accepts it`.
+- `(b) a request without the actor token header reaches the gateway without a token, and gets 401`.
+- `(c) a JWT that the guest forged is replaced, not passed through`.
+- `(d) a request with two actor token values is refused, or reaches the gateway with one minted value`. It
+  also sends two copies of a real token to the stand-in and expects `401`.
+- `(e) a direct connection to the gateway's egress listener, past atenet-egress, is blocked`.
+- `(f) a token of a deleted actor does not work for the actor that replaces it (403)`.
+- `(g) SHIP GATE: forwarded-identity headers that the guest sets (XFCC, x-forwarded-*) do not change the
+  identity`. Each variant must get the same result as the request without the headers. A failure starts
+  with `SHIP GATE` and names the variant. When it fails, issue #1386 does not ship.
+- `(h) an https request to the egress URL gets no token`.
 
 The final line reads `0 Failed`, with these two among the skipped. Any other skip is a fault of the run.
 The offline `contract` specs (token audience and lifetime) run in every `go test ./test/escape/` and need
@@ -114,6 +160,9 @@ no cluster.
 - No ServiceAccount token, SPIFFE socket or kube config in the guest. The API server and the platform
   services are unreachable.
 - No credential and no JWT-shaped value in files or environment.
+- The guest holds no actor token and no signing key. atenet-egress adds the actor's JWT outside the guest,
+  replaces a value that the guest sends, ignores forwarded-identity headers, and adds nothing through TLS. A
+  token of a deleted actor gets `403`.
 - No capabilities, `no_new_privs` and a seccomp filter. Privileged syscalls fail.
 - On the gVisor tiers, the agent runs as the sandbox user: the real, effective and saved uid and gid
   (`getresuid`, `getresgid`) are 10001, and the supplementary groups are empty (issue #1387). The agent cannot open
@@ -164,3 +213,8 @@ the same constant in every actor, each in its own network namespace, so it is no
 - The routable part of the cross-org spec has no control that port 8099 is open on those addresses. It proves that
   no byte comes back, as the direct egress spec does. It does not prove reach to org B's listener.
 - A result is for one tier and one runtime class. Run again for every class that you ship.
+- Spec (e) cannot tell which fence stopped the direct connection: atenet-egress, which has no rule for the
+  listener, or the NetworkPolicy fence of the chart. It proves that the request did not reach the gateway's
+  egress code. The chart checks prove the NetworkPolicy fence alone.
+- The actor identity specs use the gateway's code in the test process, not the installed gateway. They prove
+  what atenet-egress sends, and how the gateway's code decides on it.

@@ -61,13 +61,19 @@ const (
 	ReasonOrgMismatch Reason = "org_mismatch"
 	// ReasonDenied: a deny route matches the request.
 	ReasonDenied Reason = "denied"
+	// ReasonUnknownActor: the Substrate token verified, but Koinon's record has no such actor (an
+	// unknown actor, another UID, or a deleted or archived sandbox; issue #1386).
+	ReasonUnknownActor Reason = "unknown_actor"
+	// ReasonIdentityUnavailable: the gateway cannot check the token now (the Substrate issuer keys cannot
+	// be read). The request is refused, never allowed.
+	ReasonIdentityUnavailable Reason = "identity_unavailable"
 )
 
 // Reasons are all reasons, in a fixed order, for metrics that create every series at start.
 func Reasons() []Reason {
 	return []Reason{
 		ReasonAllowed, ReasonNoToken, ReasonBadToken, ReasonNoTable, ReasonNoRoute, ReasonMethod, ReasonPath,
-		ReasonQuery, ReasonBadRequest, ReasonOrgMismatch, ReasonDenied,
+		ReasonQuery, ReasonBadRequest, ReasonOrgMismatch, ReasonDenied, ReasonUnknownActor, ReasonIdentityUnavailable,
 	}
 }
 
@@ -295,8 +301,11 @@ type Request struct {
 	// Scheme is the scheme of the request. Only "https" is served: a credential never goes over
 	// plain HTTP.
 	Scheme string
-	// Token is the actor identity token as the guest sent it.
+	// Token is the actor identity token as the request carried it: the first value of [TokenHeader].
 	Token string
+	// RepeatedToken is set when the request carried more than one value of [TokenHeader]. The gate
+	// refuses it (ADR 0120, amendment for issue #1386, item 4): no value is chosen.
+	RepeatedToken bool
 	// Authority is the Host of the request: host or host:port.
 	Authority string
 	Method    string
@@ -318,14 +327,25 @@ func FromHTTP(r *http.Request) Request {
 	if r.TLS != nil {
 		scheme = "https"
 	}
+	tok, repeated := TokenOf(r.Header)
 	return Request{
-		Scheme:    scheme,
-		Token:     r.Header.Get(TokenHeader),
-		Authority: host,
-		Method:    r.Method,
-		Path:      r.URL.EscapedPath(),
-		RawQuery:  r.URL.RawQuery,
+		Scheme:        scheme,
+		Token:         tok,
+		RepeatedToken: repeated,
+		Authority:     host,
+		Method:        r.Method,
+		Path:          r.URL.EscapedPath(),
+		RawQuery:      r.URL.RawQuery,
 	}
+}
+
+// TokenOf returns the first value of [TokenHeader] in h, and whether h holds more than one value.
+func TokenOf(h http.Header) (token string, repeated bool) {
+	v := h.Values(TokenHeader)
+	if len(v) == 0 {
+		return "", false
+	}
+	return v[0], len(v) > 1
 }
 
 // TokenHeader carries the actor token from the guest to the gateway. The gateway removes it before
@@ -340,32 +360,53 @@ type Decision struct {
 	Route Route
 	// Actor is the verified actor; it is set whenever the token verified.
 	Actor actortoken.Actor
+	// TokenReason says why the token was refused (actortoken.Reason): a fixed, low-cardinality text for
+	// the log, never token data. It is empty when the token was not refused.
+	TokenReason string
 }
 
 // Gate checks the token and the route of each request.
 type Gate struct {
-	verifier *actortoken.Verifier
-	table    *Table
+	ident Identifier
+	table *Table
 }
 
-// NewGate returns a gate. A nil verifier or a nil table makes the gate refuse every request: the
+// NewGate returns a gate. A nil identifier or a nil table makes the gate refuse every request: the
 // gateway never serves a route it could not load.
-func NewGate(v *actortoken.Verifier, t *Table) *Gate { return &Gate{verifier: v, table: t} }
+func NewGate(id Identifier, t *Table) *Gate { return &Gate{ident: id, table: t} }
 
 // Check decides on r. It never panics and never allows on an error.
 func (g *Gate) Check(r Request) Decision {
-	if g == nil || g.table == nil || g.verifier == nil {
+	if g == nil || g.table == nil || g.ident == nil {
 		return Decision{Reason: ReasonNoTable}
+	}
+	if r.RepeatedToken {
+		return Decision{Reason: ReasonBadToken, TokenReason: actortoken.Reason(actortoken.ErrMultipleTokens)}
 	}
 	if strings.TrimSpace(r.Token) == "" {
 		return Decision{Reason: ReasonNoToken}
 	}
-	claims, err := g.verifier.Verify(r.Token)
-	if err != nil {
-		return Decision{Reason: ReasonBadToken}
+	// The guest's placeholder is never a token, for both identifiers: it means the egress layer did not
+	// replace it.
+	if strings.TrimSpace(r.Token) == actortoken.Placeholder {
+		return Decision{Reason: ReasonBadToken, TokenReason: actortoken.Reason(actortoken.ErrPlaceholder)}
 	}
-	d := g.table.decide(claims.Actor, r)
-	d.Actor = claims.Actor
+	actor, err := g.ident.Identify(r.Token)
+	if err != nil {
+		reason := ReasonBadToken
+		switch {
+		case errors.Is(err, actortoken.ErrUnavailable):
+			reason = ReasonIdentityUnavailable
+		case errors.Is(err, actortoken.ErrUnknownActor):
+			reason = ReasonUnknownActor
+		}
+		return Decision{Reason: reason, TokenReason: actortoken.Reason(err)}
+	}
+	if actor.Validate() != nil {
+		return Decision{Reason: ReasonBadToken, TokenReason: actortoken.Reason(actortoken.ErrInvalid)}
+	}
+	d := g.table.decide(actor, r)
+	d.Actor = actor
 	return d
 }
 

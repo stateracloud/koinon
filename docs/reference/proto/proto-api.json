@@ -10511,6 +10511,69 @@
           ]
         },
         {
+          "name": "EgressActor",
+          "fullName": "koinon.gateway.v1alpha1.EgressActor",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no\ntoken, only names.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "atespace",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave\nthe actor: the three must all be equal to the claims of the token."
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "uid",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the\nsandbox, empty when the State does not name one."
+            },
+            {
+              "name": "agent",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "run",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "EgressCredential",
           "fullName": "koinon.gateway.v1alpha1.EgressCredential",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -10732,6 +10795,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "credentials say where the gateway reads each credential that a route names, and how it sends it\n(#1086 part C). A route whose credential is not here is refused (503 credential_unavailable)."
+            },
+            {
+              "name": "actors",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.EgressActor",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5):\nthe gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is\nnot here, or a UID that is not equal, is refused."
             }
           ]
         },

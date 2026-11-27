@@ -132,15 +132,18 @@ grep -q 'openshell.ai/managed-by' <<<"$mcp_ing" || fail "koinon-gateway does not
 grep -q 'app.kubernetes.io/instance: koinon$' <<<"$mcp_ing" || fail "koinon-gateway does not admit Koinon's own pods"
 if grep -q 'ipBlock' <<<"$mcp_ing"; then fail "koinon-gateway ingress admits an ipBlock"; fi
 sub_ing=$(awk '/^  ingress:/{f=1} f' <<<"$(netpol_doc koinon-mcp-gateway --set execution.driver=substrate \
-  --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 \
+  --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 \
   --set execution.substrate.tokenAudience=ateapi --set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev \
   --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)")
-grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"
+grep -q 'kubernetes.io/metadata.name: "ate-system"$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"
+# Issue #1489: on Substrate the MCP port admits only atenet-egress, which adds the actor JWT, not the whole namespace.
+grep -q 'app: atenet-egress$' <<<"$sub_ing" || fail "koinon-gateway's MCP port does not admit atenet-egress on Substrate"
+if grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing"; then fail "koinon-gateway's MCP port admits all of Substrate's namespace (issue #1489)"; fi
 # Substrate: the control plane's egress reaches koinon-gateway's MCP pods by default, and not with the fallback.
 sub_np=$(render -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml)
 grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
-sub_fb=$(render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" --show-only templates/substrate-networkpolicy.yaml)
-if grep -q 'component: mcp-gateway$' <<<"$sub_fb"; then fail "the Substrate control plane egress reaches koinon-gateway with the fallback"; fi
+# Issue #1489: Substrate refuses the fallback, because only koinon-gateway checks the actor JWT.
+if render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" >/dev/null 2>&1; then fail "Substrate renders with the agentgateway MCP fallback"; fi
 # Issue #1372: the control plane reaches koinon-gateway's MCP pods on the named ports an actor needs, not on every port.
 # The stats port (the metrics of all agents) and the health port stay closed.
 # mcp_rules <rendered policy>: each egress rule that has a koinon-gateway peer, each ended by a line "@@@". A rule ends at the

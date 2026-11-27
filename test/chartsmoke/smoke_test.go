@@ -788,9 +788,14 @@ func describeMode(name, valuesFile string) {
 				Should(ContainSubstring("the leak guard reached its database"), "the gateway's login and grants work; logs:\n%s", w.Logs(ctx))
 			if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
 				// The egress listener (#1086 part C2) loads the public actor token key that the ensure-secrets
-				// Job made, before any listener starts; a missing or bad key stops the pod.
+				// Job made, before any listener starts; a missing or bad key stops the pod. With the Substrate
+				// verifier (#1386) it loads the issuer's CA instead and reads the keys on the first token.
+				want := `egress routes loaded"?,? ?"?actor_token_verifier"?[=:]"?ed25519"?,? ?"?keys"?[=:]1\b`
+				if slices.Contains(c.Args, "--actor-token-verifier=substrate") {
+					want = `egress routes loaded"?,? ?"?actor_token_verifier"?[=:]"?substrate"?,? ?"?keys"?[=:]0\b`
+				}
 				Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
-					Should(MatchRegexp(`egress routes loaded"?,? ?"?keys"?[=:]1\b`), "the egress listener loaded the actor token key; logs:\n%s", w.Logs(ctx))
+					Should(MatchRegexp(want), "the egress listener loaded its actor token check; logs:\n%s", w.Logs(ctx))
 			}
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)

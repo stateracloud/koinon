@@ -154,7 +154,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 		logs = &bytes.Buffer{}
 		addr := upstream.Listener.Addr().String()
 		gw, err = egress.New(egress.Options{
-			Verifier: ver,
+			Identifier: ver,
 			// Every route host resolves to the fake upstream.
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, addr)
@@ -388,7 +388,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 
 		It("refuses every request while the install is held, before the token check, and logs no body or path (#1390)", func() {
 			held, err := egress.New(egress.Options{
-				Verifier: ver, Metrics: metrics, Log: slog.New(slog.NewJSONHandler(logs, nil)), Held: true,
+				Identifier: ver, Metrics: metrics, Log: slog.New(slog.NewJSONHandler(logs, nil)), Held: true,
 				Dial: func(context.Context, string, string) (net.Conn, error) {
 					defer GinkgoRecover()
 					Fail("a held gateway dials no upstream")
@@ -447,7 +447,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 				},
 			}
 			strict, err := egress.New(egress.Options{
-				Verifier: ver, Dial: policy.GatewayDialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
+				Identifier: ver, Dial: policy.GatewayDialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			table, err := route.Compile(routes())
@@ -576,7 +576,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			kinds = nil
 			var err error
 			gw, err = egress.New(egress.Options{
-				Verifier: ver,
+				Identifier: ver,
 				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 					return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
 				},
