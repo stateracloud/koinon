@@ -210,8 +210,14 @@ def status(_):
     """The security fields of /proc/self/status, as strings."""
     with open("/proc/self/status") as f:
         fields = dict(l.split(":", 1) for l in f if ":" in l)
-    keys = ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp", "Uid", "Gid", "Groups")
-    return {k: fields[k].strip() for k in keys if k in fields}
+    return {k: fields[k].strip() for k in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp") if k in fields}
+
+
+def ids(_):
+    """The real, effective and saved uid and gid, and the supplementary groups, from the system calls.
+    The spec does not read them from /proc/self/status: the line format of that file can differ in
+    gVisor."""
+    return {"uid": list(os.getresuid()), "gid": list(os.getresgid()), "groups": os.getgroups()}
 
 
 def open_write(c):
@@ -444,6 +450,6 @@ def kernel(_):
 
 
 OPS = {"tcp": tcp, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "open_write": open_write, "mode": mode,
+       "find": find, "mounts": mounts, "status": status, "ids": ids, "write": write, "open_write": open_write, "mode": mode,
        "syscall": syscall, "kernel": kernel, "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

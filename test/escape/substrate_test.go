@@ -325,18 +325,19 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 			policyDir = "/etc/koinon/guest-launcher"
 		)
 		res := probe(ctx,
-			check{"id": "status", "op": "status"},
+			check{"id": "ids", "op": "ids"},
 			check{"id": "launcher", "op": "open_write", "path": launcher},
 			check{"id": "policy", "op": "open_write", "path": policyDir + "/policy-gvisor.json"},
 			check{"id": "bin dir", "op": "write", "path": "/usr/local/bin/koinon-escape"},
 			check{"id": "policy dir", "op": "write", "path": policyDir + "/koinon-escape"},
 		)
-		st := res["status"].(map[string]any)
-		// /proc/self/status lists the real, effective, saved and filesystem ids.
-		id := fmt.Sprintf(`^%[1]d\s+%[1]d\s+%[1]d\s+%[1]d$`, guestlaunch.DefaultUID)
-		Expect(st).To(HaveKeyWithValue("Uid", MatchRegexp(id)), "every uid of the payload is the sandbox user")
-		Expect(st).To(HaveKeyWithValue("Gid", MatchRegexp(id)), "every gid of the payload is the sandbox group")
-		Expect(st).To(HaveKeyWithValue("Groups", BeEmpty()), "the launcher clears the supplementary groups")
+		ids := res["ids"].(map[string]any)
+		// The real, effective and saved ids (getresuid, getresgid). DefaultUID is the uid and the gid of
+		// the sandbox user. JSON numbers decode as float64.
+		u := float64(guestlaunch.DefaultUID)
+		Expect(ids["uid"]).To(Equal([]any{u, u, u}), "every uid of the payload is the sandbox user")
+		Expect(ids["gid"]).To(Equal([]any{u, u, u}), "every gid of the payload is the sandbox group")
+		Expect(ids["groups"]).To(BeEmpty(), "the launcher clears the supplementary groups")
 		for _, k := range []string{"launcher", "policy", "bin dir", "policy dir"} {
 			Expect(res[k]).To(BeElementOf("EACCES", "EPERM", "EROFS"), k+": the payload must not change the launcher or its policy")
 		}
