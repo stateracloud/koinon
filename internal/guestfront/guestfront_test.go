@@ -13,7 +13,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	ateenvv1alpha "github.com/agent-substrate/env/proto/ateenv/v1alpha"
@@ -62,9 +66,11 @@ var _ = Describe("Front", func() {
 		conn    *grpc.ClientConn
 		process ateenvv1alpha.ProcessServiceClient
 		ws      string
+		noReap  bool
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func() { noReap = false })
+	JustBeforeEach(func() {
 		_, key, err := ed25519.GenerateKey(rand.Reader)
 		Expect(err).NotTo(HaveOccurred())
 		signer, err = guestauth.NewSigner(key)
@@ -72,7 +78,7 @@ var _ = Describe("Front", func() {
 		ws = GinkgoT().TempDir()
 		f, err := guestfront.New(guestfront.Config{
 			Workspace: ws, LogDir: GinkgoT().TempDir(),
-			Keys: []ed25519.PublicKey{signer.PublicKey()},
+			Keys: []ed25519.PublicKey{signer.PublicKey()}, NoReap: noReap,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -161,6 +167,87 @@ var _ = Describe("Front", func() {
 		Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized))
 	})
 
+	// runJob starts a job and waits for its exit. It returns the exit code.
+	runJob := func(script string) int32 {
+		p, err := process.StartProcess(with(self, ""), &ateenvv1alpha.StartProcessRequest{
+			Command: []string{"/bin/sh", "-c", script},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var code int32 = -1
+		Eventually(func() ateenvv1alpha.ProcessState {
+			got, err := process.GetProcess(with(self, ""), &ateenvv1alpha.GetProcessRequest{ProcessId: p.GetProcessId()})
+			Expect(err).NotTo(HaveOccurred())
+			code = got.GetExitCode()
+			return got.GetState()
+		}, racescale.D(10*time.Second)).Should(Equal(ateenvv1alpha.ProcessState_PROCESS_STATE_EXITED))
+		return code
+	}
+
+	Context("reaper", func() {
+		BeforeEach(func() {
+			if runtime.GOOS != "linux" {
+				Skip("the reaper is Linux only")
+			}
+		})
+		// The shell starts a short child in the background and exits at once with code 7. The child
+		// goes to the front (a subreaper here, PID 1 in the guest). It exits 300 ms later and is a zombie
+		// until the front reaps it.
+		const orphanJob = "(sleep 0.3 &) ; exit 7"
+
+		Context("on", func() {
+			BeforeEach(func() { DeferCleanup(func() { setSubreaper(false) }) })
+
+			It("sets the subreaper flag, reaps the orphan and keeps the exit status of the job", func() {
+				Eventually(subreaperFlag, racescale.D(5*time.Second)).Should(BeTrue())
+				Expect(runJob(orphanJob)).To(Equal(int32(7)))
+				Eventually(zombieChildren, racescale.D(10*time.Second)).Should(BeEmpty())
+			})
+
+			It("keeps the exit status of every direct child while orphans are reaped at the same time", func() {
+				var wg sync.WaitGroup
+				codes := make([]int32, 40)
+				slots := make(chan struct{}, 6) // the tracker allows 10 running processes
+				for i := range codes {
+					wg.Add(1)
+					go func() {
+						defer GinkgoRecover()
+						defer wg.Done()
+						slots <- struct{}{}
+						defer func() { <-slots }()
+						// An orphan and a direct child that exits with a known code.
+						codes[i] = runJob("(true &) ; exit 3")
+					}()
+				}
+				wg.Wait()
+				for _, c := range codes {
+					Expect(c).To(Equal(int32(3)))
+				}
+				Eventually(zombieChildren, racescale.D(10*time.Second)).Should(BeEmpty())
+			})
+		})
+
+		Context("off (the control case: without the reaper the orphan stays a zombie)", func() {
+			BeforeEach(func() {
+				noReap = true
+				setSubreaper(true) // the test process takes the place of PID 1
+				DeferCleanup(func() {
+					setSubreaper(false)
+					for _, z := range zombieChildren() { // take what the spec left
+						pid, _ := strconv.Atoi(z)
+						var ws syscall.WaitStatus
+						_, _ = syscall.Wait4(pid, &ws, syscall.WNOHANG, nil)
+					}
+				})
+			})
+
+			It("leaves the orphan as a zombie", func() {
+				Expect(runJob(orphanJob)).To(Equal(int32(7)))
+				Eventually(zombieChildren, racescale.D(10*time.Second)).ShouldNot(BeEmpty())
+				Consistently(zombieChildren, 500*time.Millisecond).ShouldNot(BeEmpty())
+			})
+		})
+	})
+
 	It("refuses a request with two token headers", func() {
 		tok, err := signer.Sign(self, "")
 		Expect(err).NotTo(HaveOccurred())
@@ -186,3 +273,22 @@ var _ = Describe("Gate", func() {
 		Expect(strings.Count(buf.String(), "guest API call refused")).To(Equal(1))
 	})
 })
+
+// zombieChildren lists the zombie children of the test process (the front is a subreaper here).
+func zombieChildren() []string {
+	ents, err := os.ReadDir("/proc")
+	Expect(err).NotTo(HaveOccurred())
+	var out []string
+	for _, e := range ents {
+		b, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		s := string(b)
+		f := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])
+		if len(f) > 1 && f[0] == "Z" && f[1] == strconv.Itoa(os.Getpid()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
