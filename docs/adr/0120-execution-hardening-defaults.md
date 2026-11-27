@@ -829,3 +829,71 @@ root payload from two tiers and leaves the third as it was.
 - **gVisor (runsc).** runsc runs the container process with the user and capabilities of the OCI spec, and the
   sentry checks capabilities against its own user namespace. A drop inside the sandbox through `setresuid` is the
   normal Linux behaviour in the sentry.
+
+## Amendment (2026-11-27, issue #1496): a root payload on the `vm` tier in v0.1
+
+Accepted (2026-11-27). The maintainer decided on 2026-11-27 that the payload may run as root in the microVM
+guest of the `vm` tier in v0.1. A non-root option can come later ([#1462](https://github.com/stateracloud/koinon/issues/1462)).
+The amendment of 2026-11-26 (#1387) stays: the gVisor tiers require a non-root payload.
+
+**What it changes.** Section 4, item 5 ("the payload runs as root with a reduced capability set and the same
+controls") is the accepted state of the `vm` tier in v0.1, and not an open gap. This amendment names the reduced set
+and adds one control.
+
+### Decision
+
+1. **The VM is the host boundary.** The guest has its own kernel under hardware virtualisation (ADR 0075). Egress is
+   enforced outside the guest (section 2), and the guest holds no secret (amendment of 2026-11-26, #1386). Root in the
+   guest gives no route to the host, to the credentials or to the network.
+2. **The payload holds no capability.** `policy-vm.json` keeps an empty allowlist. The launcher removes every
+   capability from the permitted, effective, inheritable and ambient sets, and from the bounding set when the guest
+   gives it `CAP_SETPCAP`. `no_new_privs` is set, so no later `execve` gives a capability back. The launcher reads the
+   sets back after `capset` and does not start the payload when a capability outside the allowlist remains.
+3. **No policy can give a root payload a dangerous capability.** A policy whose user drop is not `require` fails
+   validation when its allowlist names `CAP_SYS_PTRACE`, `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_NET_RAW`,
+   `CAP_SYS_BOOT`, `CAP_KILL` or `CAP_SYS_RAWIO`.
+4. **The payload cannot signal the Koinon processes of the guest.** A uid 0 process needs no capability to signal
+   another uid 0 process, and the guest front runs as root. So `policy-vm.json` adds the Landlock signal scope
+   (`landlock.scoped: ["signal"]`, ABI 6): no signal reaches a process outside the payload's Landlock domain. The
+   mode is `require`, so a guest kernel below ABI 6 does not start the payload. Landlock also refuses a `ptrace` of a
+   process outside the domain, and the seccomp filter denies `ptrace`, `process_vm_readv`, `process_vm_writev`,
+   `pidfd_getfd`, `mount`, the module calls and `reboot` in every tier.
+5. **The home owner differs between tiers.** The home files are owned by uid 0 on the `vm` tier and by uid 10001 on
+   the gVisor tiers.
+
+The harnesses need none of the removed capabilities: OpenCode, git and package installs into the home (npm, pip, go)
+run without one. The table in `docs/dev/guest-launcher.md` ("Root on the `vm` tier") gives each capability, the
+control that removes it and the harness need.
+
+This amendment weakens no control of this ADR or the tiers of [0075](0075-isolation-tiers.md): the `vm` tier keeps
+its microVM, its default-deny egress, Landlock in `require` mode and seccomp, and it gets one more control.
+
+### Consequences
+
+- A process of one exec cannot signal a process of another exec on the `vm` tier: each launcher run makes its own
+  Landlock domain. The payload and its children share one domain. An agent that starts a server in one exec and stops
+  it from another exec must keep both in one exec (or one process tree).
+- The guest kernel of the `vm` tier must offer Landlock ABI 6 (Linux 6.12). Phase 0 measured ABI 7 in the Substrate
+  guest.
+
+### Proof
+
+- **Docker, `internal/guestlaunch` (container specs).** `policy-vm.json` in the capability shape of the Substrate
+  guest (root with only `KILL`, `NET_BIND_SERVICE` and `AUDIT_WRITE`): the payload runs as uid 0 with `CapPrm`,
+  `CapEff` and `CapAmb` 0 and `NoNewPrivs` 1. Signal 0 to an outside root process (`kill` and
+  `pidfd_send_signal`), `ptrace` of that process, `mount`, `finit_module`, `reboot` and a raw socket are refused. A
+  signal to its own child works. Without the signal scope, the same run shows both signal attempts open.
+- **Not proved here.** The run in a microVM guest needs KVM. The lab runs it on a `vm` worker, with a normal agent
+  run (clone, build, push).
+
+### Prior art
+
+- **Landlock scopes (Linux 6.12, ABI 6).** `LANDLOCK_SCOPE_SIGNAL` limits signals to the sandbox's own domain and its
+  children. It is the same rule as the Landlock `ptrace` restriction since ABI 1. We use it because it covers every
+  signal path (`kill`, `tgkill`, `pidfd_send_signal`, `SIGIO`) in one place. A seccomp filter on the pid argument
+  cannot cover `kill(-1)`, process groups or a pidfd.
+- **Kata Containers.** The kata-agent runs as root in the guest, next to the container processes, and Kata treats the
+  VM as the boundary to the host. We keep the VM as the boundary too, and we add the capability drop and the signal
+  scope so that the payload cannot stop or trace the guest front.
+- **Docker's default capability set.** Docker keeps `KILL`, `NET_RAW` and `SETUID` for a root container. We remove
+  every capability, because the harnesses need none.

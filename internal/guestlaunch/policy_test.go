@@ -69,15 +69,41 @@ var _ = Describe("ParsePolicy", func() {
 		Entry("require root", `{"user":{"mode":"require","uid":0}}`, "non-zero uid"),
 		Entry("require the root group", `{"user":{"mode":"require","uid":10001,"gid":0}}`, "non-zero gid"),
 		Entry("not JSON", `nope`, "guest launcher policy"),
+		Entry("unknown landlock scope", `{"landlock":{"scoped":["abstract_unix_socket"]}}`, "unknown landlock scope"),
 	)
+
+	// Issue #1496: a payload that can stay root never keeps a capability that reaches the Koinon
+	// processes of the guest or the guest kernel.
+	DescribeTable("refuses a dangerous capability when the payload can run as root",
+		func(capability, mode string) {
+			_, err := parse(`{"capabilities":{"allow":["` + capability + `"]},"user":{"mode":"` + mode + `","uid":10001,"gid":10001}}`)
+			Expect(err).To(MatchError(ContainSubstring("refused for a payload that can run as root")))
+		},
+		func(capability, mode string) string { return capability + " with user mode " + mode },
+		Entry(nil, "CAP_SYS_PTRACE", "best_effort"),
+		Entry(nil, "CAP_SYS_ADMIN", "best_effort"),
+		Entry(nil, "CAP_SYS_MODULE", "best_effort"),
+		Entry(nil, "CAP_NET_RAW", "best_effort"),
+		Entry(nil, "CAP_SYS_BOOT", "best_effort"),
+		Entry(nil, "kill", "best_effort"),
+		Entry(nil, "CAP_SYS_RAWIO", "best_effort"),
+		Entry(nil, "CAP_SYS_ADMIN", "off"),
+	)
+
+	It("allows those capabilities when the drop to the non-root user is required", func() {
+		_, err := parse(`{"capabilities":{"allow":["CAP_KILL","CAP_NET_RAW"]},"user":{"mode":"require","uid":10001,"gid":10001}}`)
+		Expect(err).NotTo(HaveOccurred())
+	})
 })
 
 func jsonList(l []string) string { return `["` + strings.Join(l, `","`) + `"]` }
 
-// The two image policies differ in the Landlock and user modes only (ADR 0120 section 4.2 and 4.3,
-// amendment of 2026-11-26): the vm tier fails closed without Landlock and keeps a best_effort user
-// drop until its proof (issue #1462); the gVisor tiers record the gap when the kernel has no Landlock
-// (their root is writable by decision, issue #1150) and fail closed without the non-root user (issue #1387).
+// The two image policies differ in the Landlock and user modes and the Landlock signal scope only
+// (ADR 0120 section 4.2 and 4.3, amendments of 2026-11-26 and 2026-11-27): the vm tier fails closed
+// without Landlock, keeps a best_effort user drop (a root payload is accepted in v0.1, issue #1496;
+// the non-root drop is issue #1462) and blocks signals to processes outside the payload's Landlock
+// domain; the gVisor tiers record the gap when the kernel has no Landlock (their root is writable by
+// decision, issue #1150) and fail closed without the non-root user (issue #1387).
 var _ = Describe("the image policies", func() {
 	load := func(name string) guestlaunch.Policy {
 		f, err := os.Open("../../cmd/koinon-guest-launcher/" + name)
@@ -108,9 +134,11 @@ var _ = Describe("the image policies", func() {
 		Entry("gVisor tiers", "policy-gvisor.json", guestlaunch.ModeBestEffort, guestlaunch.ModeRequire),
 	)
 
-	It("differ in nothing but the Landlock and user modes", func() {
+	It("differ in nothing but the Landlock and user modes and the signal scope", func() {
 		vm, gv := load("policy-vm.json"), load("policy-gvisor.json")
-		vm.Landlock.Mode, vm.User.Mode = gv.Landlock.Mode, gv.User.Mode
+		Expect(vm.Landlock.Scoped).To(Equal([]string{guestlaunch.ScopeSignal}), "a root payload on the vm tier cannot signal the guest front (issue #1496)")
+		Expect(gv.Landlock.Scoped).To(BeEmpty(), "the non-root payload of the gVisor tiers cannot signal the root front")
+		vm.Landlock.Mode, vm.User.Mode, vm.Landlock.Scoped = gv.Landlock.Mode, gv.User.Mode, gv.Landlock.Scoped
 		Expect(vm).To(Equal(gv))
 	})
 })

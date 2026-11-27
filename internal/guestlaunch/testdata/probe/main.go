@@ -132,11 +132,15 @@ func fdChecks() {
 	denied("process_vm_readv_other", err, "process_vm_readv(<outside pid>)")
 	err = unix.PtraceAttach(pid)
 	denied("ptrace_other", err, "PTRACE_ATTACH <outside pid>")
+	// Signal 0 runs the kernel's full permission check and delivers nothing (issue #1496: a root
+	// payload must not signal the guest front, which runs as the same uid).
+	denied("kill_other", unix.Kill(pid, 0), "kill(<outside pid>, 0)")
 	pfd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		fmt.Println("pidfd_getfd_other skip pidfd_open:", err)
 		return
 	}
+	denied("pidfd_signal_other", unix.PidfdSendSignal(pfd, 0, nil, 0), "pidfd_send_signal(<outside pid>, 0)")
 	got, err := unix.PidfdGetfd(pfd, 3, 0)
 	if err == nil {
 		_ = unix.Close(got)
@@ -163,7 +167,9 @@ func main() {
 	runtime.LockOSThread()
 	err := unix.PtraceAttach(child.Process.Pid)
 	report("ptrace", err == nil, fmt.Sprint(err))
-	_ = child.Process.Kill()
+	// The payload still signals its own processes: agents stop the tools they start.
+	err = child.Process.Kill()
+	report("kill_own_child", err == nil, fmt.Sprint(err))
 
 	empty, _ := unix.BytePtrFromString("")
 	tmpfs, _ := unix.BytePtrFromString("tmpfs")
@@ -186,6 +192,15 @@ func main() {
 		_ = unix.Close(fd)
 	}
 	denied("socket_vsock", serr, "socket(AF_VSOCK)")
+	// Issue #1496: the capabilities a root payload must not hold. Each call has arguments that make
+	// the kernel answer EBADF or EINVAL when nothing stops it, never a real effect.
+	denied("finit_module", sysErrno(unix.SYS_FINIT_MODULE, ^uintptr(0), 0, 0), "finit_module(-1)")
+	denied("reboot", sysErrno(unix.SYS_REBOOT, 0, 0, 0, 0), "reboot with no magic")
+	rfd, rerr := unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_ICMP)
+	if rerr == nil {
+		_ = unix.Close(rfd)
+	}
+	denied("socket_raw", rerr, "socket(AF_INET, SOCK_RAW)")
 
 	// Devices: the listed nodes work, nothing else under /dev does.
 	f, ferr := os.OpenFile("/dev/null", os.O_WRONLY, 0)
