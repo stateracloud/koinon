@@ -73,7 +73,7 @@ np_pairs() {
 			if (rule != "") {
 				n = split(ports, p, " ")
 				for (i = 1; i <= n; i++) {
-					if (kind == "ingress" && rule ~ /atenet-egress/ && pol_comp != "") print "in " pol_comp " " p[i]
+					if (kind == "ingress" && rule ~ /app: atenet-egress/ && pol_comp != "") print "in " pol_comp " " p[i]
 					if (kind == "egress" && name ~ /-substrate-control$/ && dest != "") print "out " dest " " p[i]
 				}
 			}
@@ -88,16 +88,21 @@ np_pairs() {
 		insel && /app.kubernetes.io\/component:/ && pol_comp == "" { pol_comp = $2; next }
 		/^  [A-Za-z]/ { flush(); insel = 0; kind = ""; if ($1 == "ingress:") kind = "ingress"; if ($1 == "egress:") kind = "egress"; next }
 		kind != "" && /^    - / { flush(); rule = "x" }
-		kind != "" && rule != "" { rule = rule $0 "\n" }
+		kind != "" && rule != "" && $0 !~ /^[ ]*#/ { rule = rule $0 "\n" }
 		kind == "egress" && /app.kubernetes.io\/component:/ { dest = $NF }
 		kind != "" && /^ +- \{?port: [a-z]/ { v = $0; sub(/.*port: /, "", v); sub(/[,}].*/, "", v); ports = ports " " v }
 		END { doc_end() }
 	' | sort -u
 }
-np_all=$(render "${wsub[@]}")
-pairs=$(np_pairs <<<"$np_all")
-ins=$(grep '^in ' <<<"$pairs" || true)
-[[ -n $ins ]] || fail "the substrate render must have gateway ingress rules that admit atenet-egress (np_pairs found none)"
-while read -r _ comp port; do
-	grep -Fxq "out $comp $port" <<<"$pairs" || fail "the gateway policy of $comp admits atenet-egress on port $port, but koinon-substrate-control has no egress rule to that pod and port (issue #1523): the actors' calls would time out"
-done <<<"$ins"
+# Run the pairing on the default render and on one with the egress listener (gateway.mcp.koinon.egress.enabled), which
+# adds the gateway's egress-listener ingress rule for atenet-egress.
+for np_extra in "" "--set gateway.mcp.koinon.egress.enabled=true"; do
+	np_args=($np_extra)
+	np_all=$(render "${wsub[@]}" "${np_args[@]}")
+	pairs=$(np_pairs <<<"$np_all")
+	ins=$(grep '^in ' <<<"$pairs" || true)
+	[[ -n $ins ]] || fail "the substrate render ($np_extra) must have gateway ingress rules that admit atenet-egress (np_pairs found none)"
+	while read -r _ comp port; do
+		grep -Fxq "out $comp $port" <<<"$pairs" || fail "the gateway policy of $comp admits atenet-egress on port $port, but koinon-substrate-control has no egress rule to that pod and port (issue #1523; render: ${np_extra:-default}): the actors' calls would time out"
+	done <<<"$ins"
+done
