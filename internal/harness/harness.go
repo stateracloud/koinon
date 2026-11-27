@@ -29,6 +29,10 @@ const (
 	TierDev Tier = "dev"
 )
 
+// GVisor reports whether the tier runs its guest under gVisor: hardened and dev. The launcher
+// policy and the agent container's capability set (issue #1387) both follow it.
+func (t Tier) GVisor() bool { return t == TierHardened || t == TierDev }
+
 // launcherPolicyDir is where the substrate overlay image carries the launcher's policy files.
 const launcherPolicyDir = "/etc/koinon/guest-launcher/"
 
@@ -45,10 +49,10 @@ const launcherPolicyDir = "/etc/koinon/guest-launcher/"
 // OpenShell paths ignore it.
 func (d Descriptor) LauncherPrefix(tier Tier) (prefix []string, ok bool) {
 	var policy string
-	switch tier {
-	case TierVM:
+	switch {
+	case tier == TierVM:
 		policy = "policy-vm.json"
-	case TierHardened, TierDev:
+	case tier.GVisor():
 		policy = "policy-gvisor.json"
 	default:
 		return nil, false

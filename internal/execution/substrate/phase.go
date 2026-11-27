@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	codeNotFound      = codes.NotFound
-	codeAlreadyExists = codes.AlreadyExists
+	codeNotFound           = codes.NotFound
+	codeAlreadyExists      = codes.AlreadyExists
+	codeAborted            = codes.Aborted
+	codeFailedPrecondition = codes.FailedPrecondition
 )
 
 func isCode(err error, c codes.Code) bool { return err != nil && status.Code(err) == c }

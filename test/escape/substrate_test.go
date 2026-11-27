@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/guestauth"
+	"github.com/stateracloud/koinon/internal/guestlaunch"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
@@ -308,6 +309,38 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
 		expectNoPrivileges(ctx, probe)
+	}, NodeTimeout(2*time.Minute))
+
+	// Issue #1387 (ADR 0120 amendment of 2026-11-26): on the gVisor tiers the launcher drops the payload
+	// to the sandbox user, and a guest that cannot drop does not start the payload. The root
+	// filesystem of these tiers is writable by decision (#1150) and gVisor has no Landlock, so the
+	// file modes of the image are the only control that keeps the payload from replacing the launcher
+	// or its policy. The spec proves both. The vm tier allows root in its microVM: issue #1496 covers it.
+	It("runs the agent as the non-root sandbox user, who cannot replace the launcher or its policy", func(ctx SpecContext) {
+		if !rig.tier.GVisor() {
+			Skip(notApplicable + "tier " + string(rig.tier) + ": the payload may run as root in the microVM guest (issue #1496); this spec is for the gVisor tiers (issue #1387)")
+		}
+		const (
+			launcher  = "/usr/local/bin/koinon-guest-launcher"
+			policyDir = "/etc/koinon/guest-launcher"
+		)
+		res := probe(ctx,
+			check{"id": "ids", "op": "ids"},
+			check{"id": "launcher", "op": "open_write", "path": launcher},
+			check{"id": "policy", "op": "open_write", "path": policyDir + "/policy-gvisor.json"},
+			check{"id": "bin dir", "op": "write", "path": "/usr/local/bin/koinon-escape"},
+			check{"id": "policy dir", "op": "write", "path": policyDir + "/koinon-escape"},
+		)
+		ids := res["ids"].(map[string]any)
+		// The real, effective and saved ids (getresuid, getresgid). DefaultUID is the uid and the gid of
+		// the sandbox user. JSON numbers decode as float64.
+		u := float64(guestlaunch.DefaultUID)
+		Expect(ids["uid"]).To(Equal([]any{u, u, u}), "every uid of the payload is the sandbox user")
+		Expect(ids["gid"]).To(Equal([]any{u, u, u}), "every gid of the payload is the sandbox group")
+		Expect(ids["groups"]).To(BeEmpty(), "the launcher clears the supplementary groups")
+		for _, k := range []string{"launcher", "policy", "bin dir", "policy dir"} {
+			Expect(res[k]).To(BeElementOf("EACCES", "EPERM", "EROFS"), k+": the payload must not change the launcher or its policy")
+		}
 	}, NodeTimeout(2*time.Minute))
 
 	// Landlock is best effort on the gVisor tiers (ADR 0120 section 4, issue #1150): gVisor has no Landlock,

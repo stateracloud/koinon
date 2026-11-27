@@ -76,6 +76,18 @@ REL=${REL:-koinon}
 if test -n "$(kubectl -n "$NS" get job -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=key-admin -o name)"; then
   kubectl -n "$NS" wait --for=condition=complete job -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=key-admin --timeout=15m
 fi
+# Note the replica count of each Deployment in koinon-replicas.txt: start brings each one back to it. A count of 0 is
+# from an earlier run of stop: then the note of that run stays. With no note and a count of 0, stop fails.
+for d in api reconciler agentd mcp-gateway; do
+  kubectl -n "$NS" get deployment/"$REL-$d" > /dev/null 2>&1 || continue
+  n=$(kubectl -n "$NS" get deployment/"$REL-$d" -o jsonpath='{.spec.replicas}')
+  if test "$n" = 0 && test -f koinon-replicas.txt; then n=$(awk -v d="$d" '$1 == d {print $2}' koinon-replicas.txt); fi
+  case "$n" in
+    '' | 0 | *[!0-9]*) echo "deployment/$REL-$d runs 0 copies and no note has its count: add \"$d <count>\" to koinon-replicas.txt" >&2; false ;;
+  esac
+  echo "$d $n"
+done > koinon-replicas.txt.new
+mv koinon-replicas.txt.new koinon-replicas.txt
 kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=0
 kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/instance=$REL,app.kubernetes.io/component=agentd --timeout=10m
 kubectl -n "$NS" scale deployment/"$REL"-reconciler deployment/"$REL"-api --replicas=0
@@ -169,12 +181,18 @@ fi
 # e1=start
 NS=${NS:-koinon}
 REL=${REL:-koinon}
-kubectl -n "$NS" scale deployment/"$REL"-api deployment/"$REL"-reconciler --replicas=1
+# Each Deployment goes back to the replica count that stop noted in koinon-replicas.txt. The MCP credential format
+# gate counts the copies: with fewer koinon-api, reconciler or koinon-mcp-gateway copies than the chart expects, new
+# MCP credentials stay in envelope v1.
+test -s koinon-replicas.txt || { echo "koinon-replicas.txt is missing: run stop in this directory first" >&2; false; }
+replicas() { awk -v d="$1" '$1 == d {print $2}' koinon-replicas.txt; }
+kubectl -n "$NS" scale deployment/"$REL"-api --replicas="$(replicas api)"
+kubectl -n "$NS" scale deployment/"$REL"-reconciler --replicas="$(replicas reconciler)"
 kubectl -n "$NS" rollout status deployment/"$REL"-api deployment/"$REL"-reconciler --timeout=5m
-kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas=1
+kubectl -n "$NS" scale deployment/"$REL"-agentd --replicas="$(replicas agentd)"
 kubectl -n "$NS" rollout status deployment/"$REL"-agentd --timeout=5m
 if kubectl -n "$NS" get deployment/"$REL"-mcp-gateway > /dev/null 2>&1; then
-  kubectl -n "$NS" scale deployment/"$REL"-mcp-gateway --replicas=1
+  kubectl -n "$NS" scale deployment/"$REL"-mcp-gateway --replicas="$(replicas mcp-gateway)"
 fi
 # e1=resync
 NS=${NS:-koinon}

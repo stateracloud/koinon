@@ -8,5 +8,5 @@
     "list_dirs": ["/dev"]
   },
   "seccomp": { "mode": "require" },
-  "user": { "mode": "best_effort", "uid": 10001, "gid": 10001 }
+  "user": { "mode": "require", "uid": 10001, "gid": 10001 }
 }

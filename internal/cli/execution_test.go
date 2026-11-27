@@ -68,6 +68,14 @@ var _ = Describe("Execution", func() {
 		Expect(cfg.ImageRegistry).To(Equal("mirror.example.com/all"))
 		Expect(cfg.ImageMirrors).To(Equal(map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io", "docker.io": "cache.koinon.svc/docker.io"}))
 	})
+	It("leaves golden snapshots off unless the setting is on (#1492)", func() {
+		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeFalse())
+		cfg, err = cli.Substrate{DefaultTier: "dev", GoldenSnapshots: true}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeTrue())
+	})
 	It("builds the content digest from the snapshot store flags, or fails closed without them", func() {
 		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -85,6 +93,17 @@ var _ = Describe("Execution", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.ContentDigest).NotTo(BeNil())
 	})
+	It("copies valid gateway routes into the driver config, and refuses invalid ones (#1444)", func() {
+		cfg, err := cli.Substrate{}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GatewayRoutes).To(BeEmpty(), "agentd sets none: it creates no sandbox")
+		routes := []substrate.GatewayRoute{{Host: "koinon-gateway.koinon.svc", Port: 8080}}
+		cfg, err = cli.Substrate{GatewayRoutes: routes}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GatewayRoutes).To(Equal(routes))
+		_, err = cli.Substrate{GatewayRoutes: []substrate.GatewayRoute{{Host: "10.0.0.1", Port: 8080}}}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("IP address")))
+	})
 	It("reads the guest API signing key, or refuses a malformed one", func() {
 		cfg, err := cli.Substrate{GuestKeyFile: guestKeyFile()}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -101,6 +120,7 @@ var _ = Describe("Execution", func() {
 		cfg, err := cli.Substrate{
 			GuestKeyFile:      guestKeyFile(),
 			RuntimeClassTiers: []string{"kata=vm", "gvisor=hardened"}, DefaultTier: "dev",
+			GatewayRoutes: []substrate.GatewayRoute{{Host: fakeate.GatewayHost, Port: fakeate.GatewayPort}},
 		}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
 		cfg.PollInterval, cfg.GuestReadyTimeout = 5*time.Millisecond, 2*time.Second

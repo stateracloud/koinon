@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	"github.com/stateracloud/koinon/internal/guestauth"
+	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -40,6 +41,19 @@ const (
 	HomeVolume    = "home"
 	HomeMountPath = "/sandbox"
 )
+
+// GVisorCapAdd returns the capability set of the agent container on the gVisor tiers (hardened and
+// dev; issue #1387, ADR 0120 amendment of 2026-11-26). Every capability is dropped, then these are
+// added: SETUID and SETGID for the launcher's drop to the non-root user, SETPCAP for the drop of the
+// bounding set before it, and KILL for the guest front, which signals the processes it starts. The
+// payload keeps none of them: the launcher policy of the tier has an empty allowlist and requires the
+// user drop, so a guest that cannot drop does not start the payload. The guest front keeps its
+// listener on port 80 without NET_BIND_SERVICE: the gVisor netstack has no privileged-port check.
+// This is true only while runsc runs with its own netstack (--network=sandbox, the runsc default);
+// with --network=host the host kernel checks the port and the front needs NET_BIND_SERVICE.
+// The vm tier keeps the Substrate default set until the lab proves it (issue #1462). Each call
+// returns a new slice.
+func GVisorCapAdd() []string { return []string{"KILL", "SETGID", "SETPCAP", "SETUID"} }
 
 // templatePrefix starts the name of every template the driver derives.
 const templatePrefix = "kt-"
@@ -122,6 +136,8 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 		SnapshotConfig: &ateapiv1.SnapshotConfig{
 			StorageLocation:   cfg.SnapshotStorageLocation,
 			PreferredFidelity: cfg.SnapshotFidelity,
+			// Substrate builds golden snapshots when this config is omitted, so the mode is always set.
+			GoldenSnapshotConfig: &ateapiv1.GoldenSnapshotConfig{Mode: goldenMode(cfg.GoldenSnapshots)},
 		},
 	}
 	if cpu > 0 || mem > 0 {
@@ -132,11 +148,35 @@ func renderTemplate(workspace string, spec execution.SandboxSpec, cfg Config) (*
 	if spec.RuntimeClassName != "" {
 		t.WorkerSelector = &ateapiv1.Selector{MatchLabels: map[string]string{RuntimeClassSelector: spec.RuntimeClassName}}
 	}
+	var capAdd []string // nil: the Substrate default set
+	var capDrop []string
+	if templateTier(spec, cfg).GVisor() {
+		capDrop, capAdd = []string{"ALL"}, GVisorCapAdd()
+		t.Containers[0].SecurityContext = &ateapiv1.SecurityContext{Capabilities: &ateapiv1.Capabilities{Drop: capDrop, Add: capAdd}}
+	}
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "v3\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s", workspace, image, spec.Command, cpu, mem,
-		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath)
+	_, _ = fmt.Fprintf(h, "v5\x00%s\x00%s\x00%q\x00%d\x00%d\x00%s\x00%s\x00%d\x00%s\x00%s:%s\x00%q\x00%q\x00%t", workspace, image, spec.Command, cpu, mem,
+		spec.RuntimeClassName, cfg.SnapshotStorageLocation, cfg.SnapshotFidelity, keys, HomeVolume, HomeMountPath, capDrop, capAdd, cfg.GoldenSnapshots)
 	t.Metadata.Name = templatePrefix + hex.EncodeToString(h.Sum(nil))[:20]
 	return t, nil
+}
+
+// goldenMode is the template's golden snapshot mode: disabled unless an admin turns it on (issue #1492).
+func goldenMode(on bool) ateapiv1.GoldenSnapshotMode {
+	if on {
+		return ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_ENABLED
+	}
+	return ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_DISABLED
+}
+
+// templateTier is the isolation tier of a spec, resolved the way Exec resolves it from the template:
+// the tier of the runtime class, or Config.DefaultTier without one. An unknown class has no tier here;
+// Exec then refuses every process of the sandbox.
+func templateTier(spec execution.SandboxSpec, cfg Config) harness.Tier {
+	if spec.RuntimeClassName == "" {
+		return cfg.DefaultTier
+	}
+	return cfg.RuntimeClassTiers[spec.RuntimeClassName]
 }
 
 // verifyKeys returns the value of guestauth.VerifyKeysEnv: the signer's public key first, then

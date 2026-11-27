@@ -366,6 +366,10 @@ func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRe
 	resumed := false
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
+		if _, ok := c.policies[k]; !ok {
+			// Substrate resumes it; its guest then reaches nothing (issue #1444). Specs check the count.
+			c.calls["ResumeWithoutEgressPolicy"]++
+		}
 		a.state, resumed = ateapiv1.ActorState_ACTOR_STATE_RESUMING, true
 		c.bootLocked(k, a)
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING, ateapiv1.ActorState_ACTOR_STATE_RESUMING:
@@ -391,11 +395,13 @@ func (s *controlServer) DeleteActor(_ context.Context, r *ateapiv1.DeleteActorRe
 			c.mu.Lock()
 			if c.actors[k] == a {
 				delete(c.actors, k)
+				delete(c.policies, k) // ON DELETE CASCADE
 			}
 			c.mu.Unlock()
 		})
 	} else {
 		delete(c.actors, k)
+		delete(c.policies, k) // the policy row cascades with the actor row (atepg 000001_initial.sql)
 	}
 	out := a.pb()
 	c.mu.Unlock()

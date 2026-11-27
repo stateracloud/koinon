@@ -14,6 +14,10 @@ script=$PWD/hack/lane-gates.sh
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 export TMPDIR=$tmp
+# The envtest gates (#1296): every case gets found assets and a lock directory that does not exist,
+# so the stubs below never see the envtest-assets call. The envtest cases further down unset them.
+mkdir -p "$tmp/assets"
+export KOINON_ENVTEST_ASSETS=$tmp/assets LANE_GATES_ENVTEST_LOCKDIR=$tmp/no-lock-dir
 
 # Stub preflight: --list prints $STUB_GATES ("name: reason" lines); --only <g> behaves as $STUB_<g>.
 cat >"$tmp/preflight" <<'EOF'
@@ -58,6 +62,9 @@ sandbox) echo "open /x: operation not permitted"; exit 1 ;;
 dockerperm) echo "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"; exit 1 ;;
 network) echo "go: github.com/x/y@v1: Get \"https://proxy.golang.org/x\": proxyconnect tcp: CONNECT tunnel failed, response 403"; exit 1 ;;
 netallow) echo "failed downloading schema at https://schemas.example.invalid/x.json: not in this command's allowed_domains ? re-run the command"; exit 1 ;;
+tlsproxy) echo '#30 0.212 curl: (60) SSL certificate problem: self-signed certificate in certificate chain'; exit 1 ;;
+ratelimit) echo 'ERROR: failed to solve: unexpected status from HEAD request to https://registry.example.invalid/v2/x/manifests/1: 429 Too Many Requests'; exit 1 ;;
+agentproxy) echo 'govulncheck: fetching vulnerabilities: Get "https://vuln.example.invalid/index.json": Forbidden (agent proxy: no rule or network setting allows this host)'; exit 1 ;;
 networkfail) printf -- '--- FAIL: TestX (0.1s)\ndial tcp: lookup proxy.golang.org: no such host\n'; exit 1 ;;
 esac
 EOF
@@ -155,6 +162,12 @@ run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=network
 expect "job network denied" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=netallow
 expect "job allowed_domains denial" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=agentproxy
+expect "job agent proxy refusal" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=tlsproxy
+expect "job TLS interception" 3 '^gate=escape rc=1 .*verdict=notrun reason="network denied \(TLS interception\)"'
+run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=ratelimit
+expect "job registry rate limit" 3 '^gate=escape rc=1 .*verdict=notrun reason="registry rate limit"'
 run PATH="$tmp/bin-up:$PATH" STUB_GATES="" STUB_JOBS="escape" STUB_MAKE=networkfail
 expect "a real failure beats a network line" 1 '^gate=escape rc=1 .*verdict=fail'
 
@@ -353,7 +366,7 @@ expect "start unknown base" 2 'unknown base'
 
 # --start by a relative path from a subdirectory: the run must find the script (the first cut did not).
 mkdir -p "$repo/hack" "$repo/sub"
-cp hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/paths.rules "$repo/hack/"
+cp hack/lane-gates.sh hack/paths-lib.sh hack/gate-reuse-lib.sh hack/gate-state-lib.sh hack/paths.rules "$repo/hack/"
 vfile=$(cd "$repo/sub" && env LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make" STUB_GATES="go" bash ../hack/lane-gates.sh --start "$nonempty_base" 2>/dev/null)
 waitrun "$vfile" --max 30
 expect "start by a relative path from a subdirectory" 0 '^gate=go .*verdict=pass' '^lane-gates ok'
@@ -363,6 +376,90 @@ echo "bash: boom: command not found" >"$tmp/odd/verdict"
 echo 127 >"$tmp/odd/rc"
 waitrun "$tmp/odd/verdict"
 expect "wait maps a non-verdict exit code to 1" 1 'exited 127 before it had a verdict' 'command not found'
+
+# Tool state (#1296). A stub make that prints the state each gate sees, and the envtest assets.
+cat >"$tmp/make-state" <<'EOF2'
+#!/usr/bin/env bash
+target=${!#} # lane-gates passes flags (-s --no-print-directory) before the target
+case $target in
+envtest-assets)
+	[[ -z ${STUB_ASSETS_MARK:-} ]] || : >"$STUB_ASSETS_MARK"
+	case ${STUB_ASSETS:-ok} in
+	ok) echo "$STUB_ASSETS_DIR" ;;
+	sandbox) echo "mkdir /home/x/.local/share/kubebuilder-envtest: operation not permitted" >&2; exit 1 ;;
+	broken) echo "make: *** No rule to make target" >&2; exit 2 ;;
+	esac ;;
+*) echo "target=$target buildx=${BUILDX_CONFIG:-unset} pnpm=${KOINON_PNPM_STORE:-unset} buf=${BUF_CACHE_DIR:-unset} docker=${DOCKER_CONFIG:-unset} assets=${KOINON_ENVTEST_ASSETS:-unset}" ;;
+esac
+EOF2
+chmod +x "$tmp/make-state"
+staterun() { # <env assignments...>: one run with the state stub; sets out and rc
+	out=$(cd "$repo" && env -u KOINON_ENVTEST_ASSETS LANE_GATES_PREFLIGHT="$tmp/preflight" LANE_GATES_CHANGES="$tmp/changes" LANE_GATES_MAKE="$tmp/make-state" STUB_GATES="" STUB_ASSETS_DIR="$tmp/assets" PATH="$tmp/bin-up:$PATH" "$@" bash "$script" "$nonempty_base" 2>&1)
+	rc=$?
+}
+gate_log() { # <gate>: the log path of the gate's line in $out
+	sed -n "s/^gate=$1 .* log=\(.*\)$/\1/p" <<<"$out"
+}
+mkdir -p "$tmp/home/.docker/buildx/instances"
+echo mybuilder >"$tmp/home/.docker/buildx/current"
+echo '{"Name":"mybuilder"}' >"$tmp/home/.docker/buildx/instances/mybuilder"
+mkdir -p "$tmp/home/.docker/buildx/activity" "$tmp/home/.docker/contexts"
+echo '{"auths":{}}' >"$tmp/home/.docker/config.json"
+echo seed >"$tmp/home/.docker/.token_seed" && echo x >"$tmp/home/.docker/.foo"
+staterun STUB_JOBS="escape harnesses" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= BUF_CACHE_DIR= DOCKER_CONFIG=
+expect "state: gates pass with the tool state in sandbox paths" 0 '^gate=escape .*verdict=pass' '^gate=harnesses .*verdict=pass'
+st=$(cat "$(gate_log harnesses)")
+total=$((total + 1))
+case $st in
+*"buildx=$tmp/koinon-preflight/"*"/state/buildx pnpm=$tmp/koinon-pnpm-store buf=$tmp/koinon-buf-cache docker=$tmp/koinon-preflight/"*"/state/docker assets=$tmp/assets"*) ;;
+*) echo "FAIL: state: buildx, pnpm, buf and envtest paths: $st"; fails=$((fails + 1)) ;;
+esac
+bx=${st#*buildx=}; bx=${bx%% *}
+total=$((total + 1))
+if [[ $(cat "$bx/current" 2>/dev/null) != mybuilder || ! -f $bx/instances/mybuilder || -e $bx/activity ]]; then
+	echo "FAIL: state: the buildx copy has the builder selection and no activity: $(/bin/ls -A "$bx" 2>&1)"; fails=$((fails + 1))
+fi
+dc=${st#*docker=}; dc=${dc%% *}
+total=$((total + 1))
+if [[ $(readlink "$dc/config.json") != "$tmp/home/.docker/config.json" || $(readlink "$dc/contexts") != "$tmp/home/.docker/contexts" || -e $dc/buildx || -e $dc/.token_seed || ! -L $dc/.foo || ! -w $dc ]]; then
+	echo "FAIL: state: the docker config dir links config.json, contexts and dotfiles, not buildx or .token_seed: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
+fi
+# A builder removed after the last run goes from the copy too.
+rm -f "$tmp/home/.docker/buildx/current" && rm -rf "$tmp/home/.docker/buildx/instances"
+rm -f "$tmp/home/.docker/config.json"
+staterun STUB_JOBS="harnesses" HOME="$tmp/home" BUILDX_CONFIG= KOINON_PNPM_STORE= DOCKER_CONFIG=
+total=$((total + 1))
+if [[ -e $bx/current || -e $bx/instances ]]; then
+	echo "FAIL: state: a removed builder stays in the buildx copy"; fails=$((fails + 1))
+fi
+total=$((total + 1))
+if [[ -L $dc/config.json || ! -L $dc/contexts ]]; then
+	echo "FAIL: state: the docker config links do not follow ~/.docker: $(/bin/ls -lA "$dc" 2>&1)"; fails=$((fails + 1))
+fi
+# A value that is set wins.
+staterun STUB_JOBS="harnesses" BUILDX_CONFIG=/own/buildx KOINON_PNPM_STORE=/own/store BUF_CACHE_DIR=/own/buf DOCKER_CONFIG=/own/docker
+expect "state: own values win" 0 '^gate=harnesses .*verdict=pass'
+total=$((total + 1))
+grep -q 'buildx=/own/buildx pnpm=/own/store buf=/own/buf docker=/own/docker' "$(gate_log harnesses)" || { echo "FAIL: state: own values were replaced"; fails=$((fails + 1)); }
+# envtest assets the sandbox cannot fetch: the envtest gates are notrun with the reason, the others run.
+staterun STUB_JOBS="escape harnesses" STUB_ASSETS=sandbox
+expect "state: envtest assets denied is notrun" 3 '^gate=escape rc=0 .*verdict=notrun reason="envtest assets not found \(sandbox denial\); run make envtest-assets once outside the sandbox"' '^gate=harnesses .*verdict=pass'
+# envtest-assets broken for another reason: the gate runs and gives its own verdict (here the stub passes).
+staterun STUB_JOBS="escape" STUB_ASSETS=broken
+expect "state: other envtest-assets failure is left to the gate" 0 '^gate=escape .*verdict=pass'
+# A port lock directory that exists but cannot be written in (a file stands in for the denial).
+echo x >"$tmp/lockfile"
+staterun STUB_JOBS="escape harnesses" LANE_GATES_ENVTEST_LOCKDIR="$tmp/lockfile"
+expect "state: unwritable port locks are notrun" 3 '^gate=escape rc=0 .*verdict=notrun reason="sandbox denial: the envtest port locks in .* are not writable' '^gate=harnesses .*verdict=pass'
+# No envtest gate selected: envtest-assets is not called.
+staterun STUB_JOBS="harnesses" STUB_ASSETS_MARK="$tmp/assets-called"
+expect "state: no envtest gate, no envtest-assets call" 0 '^gate=harnesses .*verdict=pass'
+total=$((total + 1))
+[[ ! -e $tmp/assets-called ]] || { echo "FAIL: state: envtest-assets ran without an envtest gate"; fails=$((fails + 1)); }
+# The control: with an envtest gate it is called.
+staterun STUB_JOBS="escape" STUB_ASSETS_MARK="$tmp/assets-called"
+total=$((total + 1))
+[[ -e $tmp/assets-called ]] || { echo "FAIL: state: envtest-assets did not run for the escape gate"; fails=$((fails + 1)); }
 
 # Usage errors.
 out=$(cd "$repo" && bash "$script" --nope 2>&1); rc=$?

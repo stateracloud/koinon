@@ -39,6 +39,11 @@
 #
 # Test hooks (hack/lane-gates-test.sh): LANE_GATES_PREFLIGHT, LANE_GATES_CHANGES, LANE_GATES_MAKE
 # replace hack/preflight.sh, hack/ci-changes.sh and make; LANE_GATES_MISSING_TOOLS="helm go" hides tools.
+# LANE_GATES_ENVTEST_LOCKDIR replaces the envtest port lock directory (hack/gate-state-lib.sh).
+#
+# Tool state (#1296): the gates write buildx and pnpm state under the worktree's gate directory or
+# $TMPDIR, and find the envtest binaries once, so a run in the Claude Code sandbox gets real
+# verdicts (hack/gate-state-lib.sh says which path and why).
 # Setting any of them prints a warning on stderr.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -129,12 +134,14 @@ git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "lane-gates
 . "$(dirname "$0")/paths-lib.sh" || exit 2
 # shellcheck source=/dev/null
 . "$(dirname "$0")/gate-reuse-lib.sh" || exit 2
+# shellcheck source=/dev/null
+. "$(dirname "$0")/gate-state-lib.sh" || exit 2
 paths_load || exit 2 # the `lane` lines of hack/paths.rules say which local gate stands for a CI job
 preflight=${LANE_GATES_PREFLIGHT:-hack/preflight.sh}
 changes=${LANE_GATES_CHANGES:-hack/ci-changes.sh}
 make_cmd=${LANE_GATES_MAKE:-make}
 export KUBECONFIG=/dev/null
-for v in LANE_GATES_PREFLIGHT LANE_GATES_CHANGES LANE_GATES_MAKE LANE_GATES_MISSING_TOOLS; do
+for v in LANE_GATES_PREFLIGHT LANE_GATES_CHANGES LANE_GATES_MAKE LANE_GATES_MISSING_TOOLS LANE_GATES_ENVTEST_LOCKDIR; do
 	if [[ -n ${!v:-} ]]; then
 		echo "lane-gates: warning: test hook $v is set; this run is not a real verdict" >&2
 		export KOINON_GATE_REUSE=0 # a stubbed run proves nothing: it neither reuses nor records a verdict
@@ -142,6 +149,8 @@ for v in LANE_GATES_PREFLIGHT LANE_GATES_CHANGES LANE_GATES_MAKE LANE_GATES_MISS
 done
 
 logdir=$(mktemp -d "${TMPDIR:-/tmp}/lane-gates.XXXXXX") || exit 2
+# The tools under the gates write their state where the sandbox allows it (#1296; hack/gate-state-lib.sh).
+gate_state_env || { echo "lane-gates: cannot prepare the gate state under $(gate_logdir)/state" >&2; exit 2; }
 failed=0 notrun=0 ran=0
 
 # A real failure marker in a log: a gate with one of these failed, whatever else the log says
@@ -179,8 +188,13 @@ env_problem() { # <log> [<ignore-failures>]: prints the reason when the log show
 		echo "docker unhealthy"
 	elif grep -qiE 'cannot connect to the docker daemon|docker: command not found|docker\.sock.*(permission denied|no such file)|permission denied while trying to connect to the docker|is the docker daemon running|docker is not available' "$log"; then
 		echo "docker unavailable"
-	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
+	elif grep -qiE 'CONNECT tunnel failed, response 403|proxyconnect tcp|dial tcp: lookup [^ ]+: (no such host|server misbehaving)|not in this command.s allowed_domains|agent proxy: no rule|server hosted at that remote is unavailable|the server hosted at that remote' "$log"; then
 		echo "network denied"
+	elif grep -qE 'SSL certificate problem: self-signed certificate in certificate chain' "$log"; then
+		# A proxy that intercepts TLS, with a CA that a build container does not trust (#1296).
+		echo "network denied (TLS interception)"
+	elif grep -qE 'unexpected status from [A-Z]+ request to https://[^ ]+: 429 Too Many Requests|toomanyrequests: ' "$log"; then
+		echo "registry rate limit"
 	elif grep -qE 'deny\([0-9]+\)|Sandbox: .* deny' "$log"; then
 		echo "sandbox denial"
 	elif grep -qiE 'operation not permitted' "$log"; then
@@ -223,6 +237,13 @@ run_cmd() {
 	local t
 	for t in $needs; do
 		[[ $t == - ]] && continue
+		if [[ $t == envtest ]]; then # found once before the gates start (below); not a tool on the PATH
+			if [[ -n $envtest_reason ]]; then
+				report "$g" 0 0 notrun "$envtest_reason" "$logdir/envtest-assets.log"
+				return
+			fi
+			continue
+		fi
 		if ! have_tool "$t"; then
 			if [[ $t == docker ]]; then reason="docker unavailable"; else reason="$t not installed"; fi
 			report "$g" 0 0 notrun "$reason" "$log"
@@ -341,6 +362,34 @@ run_job() { # <job>: the heavy CI job's local gate, from its `lane` line
 		;;
 	esac
 }
+
+# The envtest binaries, found once before the gates run in parallel (#1296): the envtest gates
+# (`envtest` in the needs of their lane line) then share one directory, and setup-envtest does not run
+# once per gate. setup-envtest only reads a store that has the version, so this works in the sandbox
+# after one `make envtest-assets` outside it. A machine problem (sandbox denial, no network) makes
+# those gates notrun with that reason, and so does a port lock directory the sandbox does not allow
+# (hack/gate-state-lib.sh). Any other failure is left to the gate itself, which then fails.
+envtest_reason=""
+needs_envtest=0
+for j in $jobs; do
+	lane=$(paths_raw lane "$j")
+	case ",${lane%% *}," in *,envtest,*) needs_envtest=1 ;; esac
+done
+if [[ $needs_envtest == 1 ]]; then
+	envtest_reason=$(gate_envtest_lock_problem)
+	if [[ -n $envtest_reason ]]; then
+		echo "$envtest_reason" >"$logdir/envtest-assets.log"
+	elif [[ -z ${KOINON_ENVTEST_ASSETS:-} ]]; then
+		assets=$("$make_cmd" -s --no-print-directory envtest-assets 2>"$logdir/envtest-assets.log" | tail -n 1)
+		if [[ -n $assets && -d $assets ]]; then
+			export KOINON_ENVTEST_ASSETS=$assets
+		else
+			echo "envtest-assets printed: ${assets:-nothing}" >>"$logdir/envtest-assets.log"
+			envtest_reason=$(env_problem "$logdir/envtest-assets.log" ignore)
+			[[ -z $envtest_reason ]] || envtest_reason="envtest assets not found ($envtest_reason); run make envtest-assets once outside the sandbox"
+		fi
+	fi
+fi
 
 # 2. Run them in parallel (#990): LANE_GATES_JOBS at a time (default 4), each in its own subshell,
 #    its line printed in plan order as soon as it and every earlier one has finished. Two gates change

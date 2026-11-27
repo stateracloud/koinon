@@ -11,7 +11,9 @@
 //   - a guest request for an actor that is still RESUMING fails with Unavailable (the guest daemon
 //     does not listen yet);
 //   - a process's output is a spool that StreamProcessOutput reads from a byte offset;
-//   - a tag needs a suspended source actor, and an actor seeded from a tag must use the tag's template.
+//   - a tag needs a suspended source actor, and an actor seeded from a tag must use the tag's template;
+//   - an actor's egress policy is a singleton that goes away with the actor, and EgressAllowed decides an
+//     HTTP request as atenet-egress does (issue #1444).
 //
 // Guest commands are Go: cat, mkdir -p, tar -x -f F -C D and rm -f F. Any other command exits 127.
 // The router needs no TLS and no SPIFFE ID here.
@@ -51,19 +53,22 @@ type Cluster struct {
 	atespacePolicies map[string]*ateapiv1.AccessPolicy
 	polVersion       int64
 
-	mu        sync.Mutex
-	uid       int
-	atespaces map[string]string // name to uid
-	templates map[key]*ateapiv1.ActorTemplate
-	actors    map[key]*actor
-	tags      map[key]*ateapiv1.Tag
-	tagAuth   map[key]*guestauth.Verifier // the guest front's state in a tag's memory snapshot
-	resumes   map[key]int
-	calls     map[string]int
-	holds     map[key]*getHold
-	tagHolds  map[key]*getHold
-	delays    map[key]*delay
-	stop      chan struct{}
+	mu               sync.Mutex
+	uid              int
+	atespaces        map[string]string // name to uid
+	templates        map[key]*ateapiv1.ActorTemplate
+	actors           map[key]*actor
+	tags             map[key]*ateapiv1.Tag
+	policies         map[key]*ateapiv1.EgressPolicy // the actor egress policies
+	policyWrites     map[key]int
+	failPolicyWrites int
+	tagAuth          map[key]*guestauth.Verifier // the guest front's state in a tag's memory snapshot
+	resumes          map[key]int
+	calls            map[string]int
+	holds            map[key]*getHold
+	tagHolds         map[key]*getHold
+	delays           map[key]*delay
+	stop             chan struct{}
 
 	ctl, rtr         *grpc.Server
 	ctlLis, routerLn *bufconn.Listener
@@ -77,6 +82,8 @@ func New() *Cluster {
 		templates:        map[key]*ateapiv1.ActorTemplate{},
 		actors:           map[key]*actor{},
 		tags:             map[key]*ateapiv1.Tag{},
+		policies:         map[key]*ateapiv1.EgressPolicy{},
+		policyWrites:     map[key]int{},
 		tagAuth:          map[key]*guestauth.Verifier{},
 		resumes:          map[key]int{},
 		calls:            map[string]int{},

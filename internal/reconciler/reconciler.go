@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
+	"github.com/stateracloud/koinon/internal/reconciler/leaderterm"
 	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -256,9 +257,12 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg     Config
-	log     *slog.Logger
-	pool    *pgxpool.Pool
+	cfg  Config
+	log  *slog.Logger
+	pool *pgxpool.Pool
+	// db is the pool behind the leader term: the statements of a lead carry its term, and the database
+	// refuses them once a newer leader took the term (issue 635). q runs on it.
+	db      leaderterm.DB
 	q       *store.Queries
 	backend execution.Backend
 	gw      gateway.ModelGateway
@@ -422,8 +426,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
+	db := leaderterm.DB{Pool: pool}
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
+		cfg: cfg, log: cfg.Logger, pool: pool, db: db, q: store.New(db), states: staterev.Publisher{DB: stateDB(cfg, db)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
 		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
@@ -435,11 +440,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 }
 
 // stateDB is the database the State stream's revisions go to: the pool, unless the config names one.
-func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
+// Both carry the leader term, so a stale leader cannot publish (issue 635).
+func stateDB(cfg Config, db leaderterm.DB) staterev.DB {
 	if cfg.StateRevisionDB != nil {
-		return cfg.StateRevisionDB
+		return leaderterm.TxDB{DB: cfg.StateRevisionDB}
 	}
-	return pool
+	return db
 }
 
 // statePublishTimeout bounds one attempt of publishState; statePublishAttempts and
@@ -801,7 +807,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// gateway's 401 or 429 (old issue 188).
 	for _, i := range draft.Stops {
 		w := items[i]
-		if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
+		if n, err := ledger.StopSpent(ctx, r.db, w.agent, now); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
 			errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 		} else if n > 0 {
@@ -1431,6 +1437,18 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
+	// The sandbox's gateway access (issue #1444), for a driver with a per-sandbox allow list (Substrate):
+	// the egress listener under the same condition as the egressRule entry above. It is set on every pass,
+	// before this pass creates or starts the sandbox, and the driver applies it in place: a changed grant
+	// never replaces the sandbox, and a removed one takes the listener away at once (within the data plane's
+	// policy cache TTL). It is not in spec or
+	// hash for that reason.
+	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
+		access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
+		if err := s.SetGatewayAccess(ctx, ws, names.Sandbox, access); err != nil {
+			return err
+		}
+	}
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{
 		IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
 		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute,
@@ -1533,7 +1551,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		r.m.SandboxRepairs.Inc()
 		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": names.Sandbox, "reason": w.sb.UnhealthyReason.String, "home_generation": sb.ID},
 		}); err != nil {
@@ -1647,13 +1665,13 @@ func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (executio
 //
 // release gives the slot back; call it when the backend call that followed failed.
 func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (release func(), held bool, err error) {
-	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.db, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
 	if err != nil {
 		return nil, false, fmt.Errorf("reserve a sandbox creation: %w", err)
 	}
 	if ok {
 		return func() {
-			if err := res.Release(context.WithoutCancel(ctx), r.pool); err != nil {
+			if err := res.Release(context.WithoutCancel(ctx), r.db); err != nil {
 				r.log.Warn("release a sandbox creation slot", append(w.logAttrs(), "error", err)...)
 			}
 		}, false, nil
@@ -1752,7 +1770,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		}
 		r.m.AgentsUnhealthy.Inc()
 		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": name, "reason": reason, "recreations_in_24h": n},
 		}); err != nil {
@@ -1771,7 +1789,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	}
 	r.m.SandboxRepairs.Inc()
 	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
-	if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+	if err := audit.RecordAfter(ctx, r.db, audit.Event{
 		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": name, "reason": "sandbox " + detail, "phase": string(sb.Phase), "message": truncate(sb.Message, 300), "home_generation": sb.ID},
 	}); err != nil {

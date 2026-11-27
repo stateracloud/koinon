@@ -66,6 +66,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"substrate-guest-key-file":             "execution.substrate.guestKeyFile",
 	"substrate-runtime-class-tiers":        "execution.substrate.runtimeClassTiers",
 	"substrate-default-tier":               "execution.substrate.defaultTier",
+	"substrate-golden-snapshots":           "execution.substrate.goldenSnapshots",
 	"substrate-image-mirrors":              "execution.substrate.imageMirrors",
 	"substrate-image-registry":             "execution.substrate.imageRegistry",
 	"substrate-snapshot-endpoint":          "execution.substrate.snapshotStore.endpoint",
@@ -184,6 +185,11 @@ func (c *config) finish(v *viper.Viper) error {
 			if on {
 				return fmt.Errorf("%s acts on OpenShell's namespaces and needs --execution-driver=openshell", flag)
 			}
+		}
+		// Every actor's egress policy allows the gateway URLs and nothing else (issue #1444): refuse at
+		// start a URL that the policy cannot carry, not at the first sandbox.
+		if _, _, err := c.substrateGatewayRoutes(); err != nil {
+			return err
 		}
 	}
 	if err := catalog.ValidateClusterDomain(c.clusterDomain); err != nil {

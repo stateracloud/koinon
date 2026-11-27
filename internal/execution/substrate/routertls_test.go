@@ -178,7 +178,7 @@ func startFakeControl() (*fakeate.Cluster, *grpc.ClientConn) {
 func testConfig(guestReady time.Duration) substrate.Config {
 	return substrate.Config{
 		PollInterval: 5 * time.Millisecond, GuestReadyTimeout: guestReady, DrainTimeout: 200 * time.Millisecond,
-		DefaultTier: harness.TierDev, GuestSigner: fakeate.Signer(),
+		DefaultTier: harness.TierDev, GuestSigner: fakeate.Signer(), GatewayRoutes: gatewayRoutes,
 	}
 }
 

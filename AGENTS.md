@@ -43,8 +43,8 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 - Local cluster: kind is the dev loop (`make dev-kind-up`, `make dev`, `make test-e2e-kind`); see CONTRIBUTING.md,
   `docs/dev/loop.md` and `docs/dev/real-model-tests.md`.
 - Before you hand over or push: `hack/lane-gates.sh` (blocks; one `gate=… verdict=pass|fail|notrun` line per gate your
-  change touches, `docs/dev/ci.md#the-local-gate-command`) or `hack/preflight.sh` (the diff-selected gates without the
-  heavy jobs). Maintainers ship and merge with [their own scripts](docs/maintainers/agent-workflow.md#commands).
+  change touches, `docs/dev/ci.md#the-local-gate-command`; a long run: `--start`, then `--wait <file> --max 540` again
+  after each exit 75) or `hack/preflight.sh` (the diff-selected gates without the heavy jobs). Maintainers ship and merge with [their own scripts](docs/maintainers/agent-workflow.md#commands).
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - A draft PR runs nothing in CI (its `go` and `web` report "draft: not run") and its green is not merge evidence; mark
   it ready (`gh pr ready`) for CI, and get WIP feedback from `hack/preflight.sh`.
@@ -117,6 +117,8 @@ The file of the folder you edit adds to this one. How they are made: [docs/agent
 - **Non-interactive shell.** No pagers and no prompts: `git --no-pager`, `GH_PAGER=cat`, `PAGER=cat`, `gh ... --json` or
   `--jq` instead of tables. Use the real tool, not a shell alias (`/bin/ls`, not an `ls` that is really `eza`), and do
   not assume your human's aliases or interactive shell setup exist.
+- **No token on a screen.** Never screenshot or snapshot a page that shows a token or a key; read the value from the
+  secret store.
 
 ## Principles
 

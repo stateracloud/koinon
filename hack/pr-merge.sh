@@ -415,7 +415,7 @@ if [ "$glass" = 1 ]; then
 - Checks not green at merge: ${wait_warn:-none (every required context was green on the head)}
 - Skipped: the queue build (every required check on main plus the PR, and the kind e2e)
 
-Follow-up: find why the queue could not merge, and run the e2e on main (\`gh workflow run e2e-kind.yml --ref main\`)."
+Follow-up: find why the queue could not merge, and run the e2e on main (\`hack/e2e-dispatch.sh --ref main\`, which prints the run id)."
   gh issue create --title "$gtitle" --body "$gbody" --label break-glass >/dev/null 2>&1 ||
     gh issue create --title "$gtitle" --body "$gbody" >/dev/null 2>&1 ||
     echo "pr-merge: WARNING: could not open the break-glass issue; open one by hand (title: $gtitle)" >&2

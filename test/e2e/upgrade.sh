@@ -144,6 +144,9 @@ if [[ -n ${UPGRADE_IMAGE_TAG:-} ]]; then
   tag: \"$UPGRADE_IMAGE_TAG\"#" "$work/values-prev.yaml" >"$work/values-prev.tmp" && mv "$work/values-prev.tmp" "$work/values-prev.yaml"
 fi
 grep -q "registry: $IMAGE_REGISTRY" "$work/values-prev.yaml" || fail "the values file of $V has no image registry line to point at $IMAGE_REGISTRY"
+# A tag from #1295 on holds the egress CA placeholder too: fill it with this run's CA, as run.sh does (#1487).
+(cd "$root" && go run ./test/e2e/kindvalues/fill-egress-ca -if-present -values "$work/values-prev.yaml" -ca "$OUT/faketls/ca.crt") ||
+  fail "the egress CA of the values file of $V"
 (cd "$work/prev" && go test -c -o "$OUT/bin/e2e-prev.test" ./test/e2e/) || fail "the quickstart driver of $V does not build"
 
 step "install N-1 ($V)"

@@ -254,9 +254,15 @@ func installKoinon(ctx context.Context, s *side, hold bool, cp *drill.Checkpoint
 	must(err, "values overlay")
 	overlayFile := filepath.Join(workDir, in.Release+"-values.yaml")
 	must(os.WriteFile(overlayFile, []byte(overlay), 0o600), "write values")
+	// The kind base file turns koinon-gateway's egress listener on with a CA placeholder (#1487): it gets the CA of
+	// this run's fake MCP server (made in the first step), as the quickstart gives it the CA of its fakes.
+	base, err := drill.BaseValues(top.Path(repoRoot, top.ValuesFile), mcpTLS.CA)
+	must(err, "base values")
+	baseFile := filepath.Join(workDir, in.Release+"-base-values.yaml")
+	must(os.WriteFile(baseFile, base, 0o600), "write base values")
 	args := []string{
 		"install", in.Release, top.Path(repoRoot, top.ChartPath), "--namespace", in.Namespace,
-		"-f", top.Path(repoRoot, top.ValuesFile), "-f", overlayFile, "--timeout", "12m",
+		"-f", baseFile, "-f", overlayFile, "--timeout", "12m",
 	}
 	// The images are under this cluster's path on the shared registry (run.sh sets imageRegistry in the topology copy).
 	if top.ImageRegistry != "" {

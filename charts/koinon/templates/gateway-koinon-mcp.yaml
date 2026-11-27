@@ -40,6 +40,10 @@ key of the external Secret (postgres.external.keys.mcpgateway) as the URL file.
 {{- if eq (int $eg.port) (int $m.port) }}
 {{- fail "gateway.mcp.koinon.egress.port must differ from gateway.mcp.koinon.port" }}
 {{- end }}
+{{- /* koinon-gateway refuses an --egress-ca-file without a PEM certificate and does not start (#1487): fail the render instead of a pod in CrashLoopBackOff. */ -}}
+{{- if and $eg.caBundle (not (regexMatch `(?s)-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+/=]+.*?-----END CERTIFICATE-----` $eg.caBundle)) }}
+{{- fail "gateway.mcp.koinon.egress.caBundle holds no PEM certificate (-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----): set it to the PEM bundle of the extra CA roots, or leave it empty for the system roots only" }}
+{{- end }}
 {{- end }}
 {{- if eq .Values.postgres.mode "cnpg" }}
 ---

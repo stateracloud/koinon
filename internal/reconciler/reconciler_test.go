@@ -1898,6 +1898,28 @@ var _ = Describe("Reconciler", func() {
 			Expect(holders(ctx)).To(Equal(1))
 		})
 
+		It("refuses the writes of a leader whose term a newer leader took, and ends its lead (#635)", func(ctx SpecContext) {
+			cfg.ResyncInterval = time.Hour
+			run(newReconciler())
+			Eventually(leading).Should(Equal(1))
+			var first int64
+			Expect(pool.QueryRow(ctx, "SELECT term FROM reconciler_leader").Scan(&first)).To(Succeed())
+			Expect(logs.String()).To(ContainSubstring(fmt.Sprintf("term=%d", first)))
+
+			// A newer leader takes the term, as after a silent connection loss before the heartbeat
+			// sees it. The old leader's next pass reads and writes the database: the term is refused.
+			_, err := pool.Exec(ctx, "SELECT reconciler_take_term()")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, "SELECT pg_notify($1, '')", reconciler.NotifyChannel)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(logs.String).WithTimeout(racescale.D(5*time.Second)).Should(ContainSubstring("a newer reconciler leader holds the term"),
+				"the lead ends with the refusal")
+			// The process leads again only with the lock and a new term of its own.
+			Eventually(leading).WithTimeout(racescale.D(5 * time.Second)).Should(Equal(2))
+			Expect(logs.String()).To(ContainSubstring(fmt.Sprintf("term=%d", first+2)))
+		})
+
 		It("cancels a blocked lock wait on the server, so no backend takes the lock later", func(ctx SpecContext) {
 			key := leaderKey + seq.Add(1)
 			holder, err := pool.Acquire(ctx)

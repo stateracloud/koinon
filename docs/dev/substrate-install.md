@@ -174,6 +174,29 @@ it did not create. How the probe namespace pulls the probe image is part of S2 (
 `koinon-api preflight --driver substrate` runs only the checks. It creates and removes the probe namespace in
 the same way, so it also runs after `helm install`.
 
+### Golden snapshots
+
+Golden snapshots are off by default in every tier (issue #1492). The Koinon template sets
+`GOLDEN_SNAPSHOT_MODE_DISABLED`. To turn them on, set `execution.substrate.goldenSnapshots=true` in the chart
+(the reconciler flag is `--substrate-golden-snapshots`). The setting is part of the template hash, so a
+change makes new templates. An upgrade to this version, and each change of the setting, make the reconciler
+recreate every Substrate sandbox, because the sandbox spec hash changes.
+
+Turn it on only with a reason. A golden snapshot clones memory from one sandbox to another. ADR 0120
+section 5.2 forbids that, and an admin who turns it on makes an exception to that rule.
+
+Cost, from the koinon-lab experiment of 2026-11-27 (lab-notes `experiments/2026-11-27-substrate-edges`,
+sections O8 and O8 vm tier). Time from create to the first successful Exec, 20 sandboxes per arm, 0 failures:
+
+| Tier | Golden off p50 / p95 | Golden on p50 / p95 |
+|---|---|---|
+| gVisor | 1.03 s / 1.42 s | 1.05 s / 1.58 s |
+| vm (microVM) | 2.65 s / 2.78 s | 3.50 s / 3.64 s |
+
+- Golden mode was not faster in these runs. On the vm tier it was slower.
+- A golden build takes 36-38 s. It holds a pool slot for about 21-23 s each time a template changes.
+- All runs used the 40 MB/s lab disk cap. The times include an extra chmod call, so they are an upper bound.
+
 ### Permissions of the installer
 
 The kubeconfig of the installer needs these rules:
@@ -207,6 +230,10 @@ The kubeconfig of the installer needs these rules:
   the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
   plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
   See "Talos: user namespaces for gVisor".
+- `/var/lib/ate` has a filesystem of its own on each worker node (a read-only probe pod per node, the same
+  node selection as the user-namespace check). The check only warns: a node where `/var/lib/ate` shares the
+  filesystem of the node root or of `/var/lib/kubelet` gets a warning. A node without `/var/lib/ate` gets a
+  warning too. See "Node protection: /var/lib/ate on its own filesystem".
 - Substrate's api server can validate service-account tokens. The probe pod runs in the probe namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -225,8 +252,8 @@ With `execution.driver: substrate`, the chart's pre-install and pre-upgrade hook
 It also runs the NetworkPolicy probe in the release namespace when `preflight.networkPolicyProbe.enabled` is
 true, as with the OpenShell driver.
 
-The hook does not run the probe pods (issuer, node devices, user namespaces). These pods need a probe namespace
-with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these three checks as
+The hook does not run the probe pods (issuer, node devices, user namespaces, `/var/lib/ate` filesystem). These pods need a probe namespace
+with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these four checks as
 warnings. `koinon-api substrate install` runs them, and `koinon-api preflight --driver substrate` runs them
 again on request. The hook does not check the WorkerPools: at pre-install the chart's own pool does not exist
 yet.
@@ -236,6 +263,54 @@ The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and 
 plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
 Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
 get pod logs, and create and delete NetworkPolicies.
+
+## Node protection: /var/lib/ate on its own filesystem
+
+**v0.1 has no hard per-home cap.** A sandbox home has no size limit of its own in v0.1. The tracking issue for
+per-sandbox volumes and a hard cap is [#1495](https://github.com/stateracloud/koinon/issues/1495). Until it is
+done, Koinon protects the node and not the single home: a full home must fill a filesystem that only sandbox
+homes use.
+
+Why the node needs this:
+
+- The gVisor home is a tmpfs that a file under `/var/lib/ate/actors/<uid>` backs. The microVM home is a host
+  directory in the same place. `/var/lib/ate` is a hostPath that kubelet does not see.
+- A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it in the pod stats of
+  the sandbox. When `/var/lib/ate` shares the node filesystem, kubelet sees the free space fall and sets disk
+  pressure. The sandbox pods report no use for the home, so the eviction does not target the large home.
+- Substrate sets the hostPath of the worker in its own code, and one worker can hold up to 1000 actors. A volume
+  for each worker therefore cannot cap one home.
+
+What to do on each worker node:
+
+1. Mount a separate disk or partition at `/var/lib/ate` before kubelet starts. Then a full home fills that
+   filesystem. The root filesystem and the kubelet filesystem stay free.
+2. You can also mount a separate disk at `/var/lib/ate/snapshots`. Snapshot data then cannot fill the home
+   filesystem. See Substrate `docs/guides/node-storage.md`.
+3. Make the filesystem large enough for the homes that you expect, plus a margin, because no cap limits one home.
+   How you mount it depends on the node OS. On kubeadm nodes, use an `/etc/fstab` entry or a systemd mount unit.
+   There is no tested method for Talos yet. On Talos, `/var` is the only writable filesystem, and a Talos user
+   volume mounts under `/var/mnt`. Do not use a kubelet `extraMounts` entry for this: it changes the mount
+   namespace of the kubelet only, and the data of the home stays on `/var`.
+
+The check compares device numbers. A btrfs subvolume or a ZFS dataset has its own device number, but it shares
+the space of its pool. The preflight does not see this case, so it reports no warning for it.
+
+How Koinon helps you check it:
+
+- **Preflight.** `koinon-api preflight --driver substrate` and `koinon-api substrate install` warn on each node
+  where `/var/lib/ate` is on the same filesystem as the node root or as `/var/lib/kubelet`. The warning does not stop the install.
+  The chart's pre-install hook does not run the probe pod, as for the other probe checks.
+- **Alert.** With `metrics.prometheusRule.enabled` and `execution.driver: substrate`, the rule
+  `KoinonSandboxHomeFilesystemFilling` fires when less than 15 percent of the filesystem at `/var/lib/ate` is free
+  for 10 minutes (`metrics.prometheusRule.ateFilesystem`). It reads the series `node_filesystem_avail_bytes` and
+  `node_filesystem_size_bytes` of node-exporter for the mount point `/var/lib/ate`. So it needs node-exporter on the
+  worker nodes, and it stays silent on a node where `/var/lib/ate` is not a mount point of its own. That is the case
+  that the preflight warns about. The preflight runs at install and on request only. Run
+  `koinon-api preflight --driver substrate` again after you add a worker node.
+- **The leak-guard byte alert does not cover this.** The byte cap of ADR 0091 (issue #1058) counts the bytes of
+  MCP calls that leave a run. It does not see the disk of a node. It cannot fire on a full home, so the node-disk
+  alert above is a separate rule.
 
 ## Access in Substrate: the provisioner
 
@@ -606,6 +681,14 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- Each actor gets one Substrate `EgressPolicy` (issue #1444). The driver writes it while the actor is suspended,
+  before each create, restore, start and resume: one `http` rule for each gateway host. Every actor gets the ports
+  of `--gateway-url` and `--gateway-mcp-url`. Only an actor whose agent has a code-host grant also gets the port of
+  `--gateway-egress-url`. When the grant changes, the reconciler changes the policy in place on its next pass, and
+  the sandbox is not replaced. There is no other rule, so an actor reaches the gateway and nothing else. The gateway
+  URLs must be `http://` URLs with a DNS name (no IP address), and the egress listener must not be on the host and
+  port of another gateway URL: the reconciler refuses to start otherwise. `DeleteActor` also deletes the policy.
+  The chart NetworkPolicy of the atenet-egress pods is the second fence.
 - The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
   pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
   no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server ports only (to any address). The `rustfs-bucket-init`
@@ -686,6 +769,58 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   adjust the node agent rule to match.
 - `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
   the same, add the gateway's SPIFFE ID to that list.
+
+## Snapshot bucket: encryption, credential, checksums
+
+Substrate stores the snapshot of each sandbox in the snapshot bucket (`--storage-bucket`). Substrate does not
+encrypt these objects. Per-org encryption is planned for v0.2 (ADR 0120 section 5.3). In v0.1 there is no
+install check for any point in this section. The operator must do each point.
+
+1. **Turn on server-side encryption (SSE) for the bucket.** Without it, the plain text of every file in a
+   home, also a file with mode 0600, is readable in the snapshot objects. The lab bucket had no SSE, and the
+   objects `fs/pages.img.zstd` (gVisor), `durable-dir-home.tar.zstd` and `memory-ranges.zstd` (vm tier) held
+   plain data. Set the default encryption of the bucket before the first sandbox starts:
+   - AWS S3: S3 applies `SSE-S3` to new objects by default. To use `SSE-KMS`, set the default encryption of
+     the bucket (`aws s3api put-bucket-encryption`).
+   - Google Cloud Storage: a default customer-managed key on the bucket (`gcloud storage buckets update
+     --default-encryption-key`). Google encrypts at rest with its own key when you set none.
+   - MinIO: bucket encryption with a KMS key (`mc encrypt set`).
+   - rustfs (the bundled store): put the `rustfs-data` volume on an encrypted StorageClass or an encrypted
+     disk. Also check the rustfs documentation for server-side encryption; this page does not verify it.
+
+   Encryption at rest protects the stored object against loss of a disk or a bucket export. It does not
+   protect against a holder of the bucket credential: the store decrypts for that holder (point 2).
+2. **Limit who holds the bucket credential.** The credential reads every home, including 0600 files, and
+   the root key can also write and delete every snapshot. Give the Koinon reconciler its own read-only key
+   (see [What `generic` corrects](#what-generic-corrects)). Keep the root key out of CI, out of sandboxes and
+   out of the Koinon namespace. Limit who can read the Secret `koinon-rustfs-credentials` in the Substrate
+   namespace.
+3. **Substrate has no snapshot checksums.** Substrate does not check a snapshot when it restores it. A
+   damaged or changed object in the bucket is not found. Use the object versioning of your store when you need
+   to find a change. Do not use object lock on the bucket: it can block the deletes that Substrate makes.
+
+## Substrate database: not in the Koinon backup
+
+Substrate keeps its own state in its own database: the StatefulSet `ate-system/postgres`, database
+`atepg`. The Koinon CNPG backup does not include this database. The Koinon backup restores homes only from
+kopia, not from the snapshots in the Substrate bucket.
+
+- To keep the Substrate state, the operator must back up `atepg` and the snapshot bucket, and restore
+  them together. A restore of one without the other gives a mismatch between the actors and their
+  snapshots. Use `pg_dump` of `atepg` or a volume snapshot of the `postgres` claim.
+- Without such a backup, a lost Substrate database loses the actors and their snapshots. Koinon can still
+  restore the homes from kopia and create new sandboxes.
+
+### Storage of the Substrate database
+
+Put the Substrate PostgreSQL on storage that does not share a disk with the snapshot store. Substrate ends
+an actor lease when one PostgreSQL commit stalls for more than about 10 s. The lease renews every 10 s and
+has a fixed deadline of 20 s (`lease.go`). A suspend that loses its lease fails after 20.9 s with a
+`Canceled` error and writes no log line. On koinon-lab, the snapshot upload loaded the same disk as the
+PostgreSQL write-ahead log. Commits stalled for 8 to 9.1 s, and the margin was 0.4 s. Use `--postgres-storage-class`
+for a class that maps to a different disk than the class of `rustfs-data` (`--rustfs-storage-class`). A
+class name alone does not prove this: for example, `local-path` can place both claims on one node disk.
+See [Options](#options).
 
 ## Verified and unverified
 

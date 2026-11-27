@@ -284,7 +284,10 @@ e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` lab
 amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
 `hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
-explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
+explains. To start a run by hand, use `hack/e2e-dispatch.sh --ref <branch or tag> [--suite go|web|drill] [--backup-restore]`:
+it dispatches, finds the new run on that ref and prints `run=<id> url=<url>` (issue 1488). Do not chain `gh workflow run`, a
+sleep and `gh run list`: the sleep hook refuses that chain, and the list can return another person's run.
+The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
@@ -357,7 +360,7 @@ kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <ru
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the `drill` job of
 `e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 55` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
-branch): nightly, on every release tag (rc and final) and on `gh workflow run e2e-kind.yml -f suite=drill --ref <tag>`, which runs only the
+branch): nightly, on every release tag (rc and final) and on `hack/e2e-dispatch.sh --ref <tag> --suite drill`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
 merge queue check: it is not a merge check, it is a release check (`hack/release-gate.sh` demands it for every tag; listed in `hack/ci-required.txt` in that sense). A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
@@ -537,6 +540,37 @@ session and prints a verdict file path at once (next to it: `pid`, and `rc` when
 `hack/lane-gates.sh --wait <file> [--max N]` prints the `gate=…` lines and the closing `lane-gates …` line
 and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
 looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
+
+**Tool state in the sandbox (#1296).** A lane runs `lane-gates.sh` in the Claude Code sandbox, which
+lets a process write only to the worktree, `$TMPDIR` and the `allowWrite` entries of the settings. The
+tools under the gates wrote state outside those paths, so a sandboxed run got `operation not permitted`
+in place of a verdict. `hack/gate-state-lib.sh` now gives each tool a path the sandbox allows, and a
+value that is already set (CI, your shell) wins:
+
+- `BUILDX_CONFIG` is `<gate log directory>/state/buildx`: a copy, made again each run, of the builder
+  selection and client certificates in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
+  client state moves; the build cache stays in the builder.
+- `DOCKER_CONFIG` is `<gate log directory>/state/docker`: a directory with a symbolic link to each
+  entry of `~/.docker` (`config.json`, `contexts`, `cli-plugins`) except `buildx`, made again each run. BuildKit's
+  registry auth writes its `.token_seed` file there on each image pull of a build. The links keep the
+  registry credentials in one place: nothing is copied.
+- `KOINON_PNPM_STORE` is `$TMPDIR/koinon-pnpm-store`, the store of `make test-opencode-plugin`. The web
+  gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
+  pnpm links the plugin `node_modules` again when the store changes, so the first gate run in a
+  worktree (and a later plain `make test-opencode-plugin`) downloads from the registry again.
+- `BUF_CACHE_DIR` is `$TMPDIR/koinon-buf-cache`, the module cache of buf (the proto and generate
+  gates). buf writes it to `~/.cache/buf` by default. The lanes with the same `$TMPDIR` share it. The
+  first run with an empty cache downloads the BSR modules from `buf.build`. If the sandbox blocks that
+  host, run `BUF_CACHE_DIR=$TMPDIR/koinon-buf-cache make generate` once outside the sandbox.
+- The envtest binaries: lane-gates runs `make envtest-assets` once, before the gates start, and passes
+  the directory to `make test-chart-smoke` and `make test-admission` as `KOINON_ENVTEST_ASSETS`.
+  setup-envtest only reads a store that has the version, so run `make envtest-assets` once outside the
+  sandbox. If the sandbox denies the download, the envtest gates are `notrun` with that reason.
+- The envtest port locks stay in `os.UserCacheDir()/kubebuilder-envtest` (`~/Library/Caches` on macOS),
+  because all envtest processes of a machine must share them, and on macOS only `$HOME` moves them. If
+  that directory exists and the sandbox denies writes to it, the envtest gates are `notrun` with
+  `sandbox denial: the envtest port locks ... are not writable`. If it does not exist, controller-runtime
+  uses `$TMPDIR/kubebuilder-envtest`.
 
 **Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
 to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs

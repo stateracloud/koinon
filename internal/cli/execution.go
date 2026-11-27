@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -56,6 +57,10 @@ type Substrate struct {
 	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
 	// the overlay's microVM and gVisor probe results are recorded on issue #1087; then the flag and chart value are removed.
 	AllowUnhardened bool
+	// GoldenSnapshots turns on Substrate's golden snapshot of each template. Off by default in every
+	// tier (issue #1492): a golden clone copies memory from one sandbox to another, which ADR 0120
+	// section 5.2 forbids, and a golden build holds a pool slot. Setting it is an admin's exception.
+	GoldenSnapshots bool
 	// ImageMirrors are "host=target" entries: the registry host of an actor image and the image source
 	// of the node agent that replaces it (issue #1170). The path, tag and digest are kept.
 	ImageMirrors []string
@@ -75,6 +80,13 @@ type Substrate struct {
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
 	SnapshotStore SnapshotStore
+	// GatewayRoutes are the gateway listeners that the driver writes into the egress policy of every actor
+	// (issue #1444): the model and MCP listeners. Only the reconciler sets them, from its gateway URLs: it is
+	// the only binary that creates, starts or resumes sandboxes, and without routes those calls fail closed.
+	GatewayRoutes []substrate.GatewayRoute
+	// CodeHostEgressRoute is the gateway's egress listener, or nil. The driver adds it to the policy of an
+	// actor whose agent has a code-host grant only (execution.GatewayAccess).
+	CodeHostEgressRoute *substrate.GatewayRoute
 }
 
 // SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
@@ -122,6 +134,16 @@ func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
 // checks only that the flag is set, and Dial reads and parses the key.
 func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
+	if len(s.GatewayRoutes) > 0 || s.CodeHostEgressRoute != nil {
+		if err := substrate.ValidateGatewayRoutes(s.GatewayRoutes, s.CodeHostEgressRoute); err != nil {
+			return cfg, fmt.Errorf("substrate egress policy: %w", err)
+		}
+		cfg.GatewayRoutes = slices.Clone(s.GatewayRoutes)
+		if s.CodeHostEgressRoute != nil {
+			e := *s.CodeHostEgressRoute
+			cfg.CodeHostEgressRoute = &e
+		}
+	}
 	if readKey && s.GuestKeyFile != "" {
 		b, err := os.ReadFile(s.GuestKeyFile)
 		if err != nil {
@@ -135,6 +157,7 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
 		}
 	}
+	cfg.GoldenSnapshots = s.GoldenSnapshots
 	if s.SnapshotStore.set() {
 		o, err := s.SnapshotStore.objectStore()
 		if err != nil {
@@ -230,6 +253,7 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.SnapshotStore.AccessKeyFile, "substrate-snapshot-access-key-file", "", "file with the read-only access key id of the snapshot bucket")
 	fs.StringVar(&e.Substrate.SnapshotStore.SecretKeyFile, "substrate-snapshot-secret-key-file", "", "file with the read-only secret key of the snapshot bucket")
 	fs.StringSliceVar(&e.Substrate.RuntimeClassTiers, "substrate-runtime-class-tiers", nil, "class=tier entries (tier: vm, hardened or dev) that give each runtime class its isolation tier, with --execution-driver=substrate")
+	fs.BoolVar(&e.Substrate.GoldenSnapshots, "substrate-golden-snapshots", false, "build a golden snapshot for each template, with --execution-driver=substrate. Off by default in every tier: a golden clone copies memory from one sandbox to another (ADR 0120 section 5.2) and a golden build holds a pool slot. Turning it on is an exception to the no-memory-clone rule")
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
 	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")
