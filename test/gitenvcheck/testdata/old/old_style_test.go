@@ -10,8 +10,8 @@ import (
 	"os/exec"
 )
 
-func runGit(repo string) error {
-	c := exec.Command("git", "-C", repo, "status")
+func runGit(repo string) error { //nolint:unused // fixture: the check reads it as text
+	c := exec.Command("git", "-C", repo, "status") //nolint:noctx // fixture: the old style the check must find
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	return c.Run()
 }
