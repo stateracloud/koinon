@@ -3,16 +3,28 @@
 package codehost_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
+
+// linux says that the machine is Linux. The script uses GNU stat -c and mv -T and runs only in the Linux guest; it
+// is not ported to BSD flags (#1519).
+var linux = testenv.Check("linux", func() error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("the token script needs GNU stat and mv, and this machine is %s", runtime.GOOS)
+	}
+	return nil
+})
 
 // The token script runs in a real shell: the guest owns /tmp, so a link it plants at the token
 // directory must not send the token into the home (#1086 part C2).
@@ -25,6 +37,8 @@ var _ = Describe("the actor token write script", func() {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
+
+	BeforeEach(func() { testenv.Require(linux) })
 
 	It("writes the file in a new private directory and replaces it on the next write", func() {
 		dir := filepath.Join(GinkgoT().TempDir(), ".koinon-egress")
