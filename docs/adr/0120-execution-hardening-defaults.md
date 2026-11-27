@@ -843,8 +843,8 @@ Maintainer decisions of 2026-11-27 (issue #1489, comments 7220445863 and 7221191
   than 10 minutes, every call on every listener gets 503 until the issuer is back. This fails closed. We accept it: an
   older key set could still accept a key that Substrate removed.
 - **Model calls on Substrate go to koinon-gateway.** Only koinon-gateway checks the actor JWT. So the chart refuses
-  `execution.driver=substrate` without `gateway.model.driver=koinon` and `gateway.mcp.driver=koinon`, with a message
-  that names the value. The koinon model driver needs `gateway.mode=standalone`, so Substrate needs it too. The chart
+  `execution.driver=substrate` without `gateway.model.driver=koinon` (the default with Substrate, ADR 0097 section 16)
+  and `gateway.mcp.driver=koinon`, with a message that names the value. The koinon model driver needs `gateway.mode=standalone`, so Substrate needs it too. The chart
   sets the agentd gateway URL and the reconciler `gateway.modelUrl` to the model listener. agentgateway keeps its
   own policy for the OpenShell driver.
 - **Item 8 on every listener.** The chart NetworkPolicy admits the model, MCP and egress listener ports from the

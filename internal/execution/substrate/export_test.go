@@ -2,7 +2,10 @@
 
 package substrate
 
-import "github.com/prometheus/client_golang/prometheus/testutil"
+import (
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"google.golang.org/grpc"
+)
 
 // GateCount is the number of suspend gates the driver holds, for the tests that check they do not leak.
 func (d *Driver) GateCount() int {
@@ -47,3 +50,13 @@ var CheckActorTokenEffects = checkActorTokenEffects
 
 // RulesEqual is rulesEqual, for the spec that the same routes give the same rules.
 var RulesEqual = rulesEqual
+
+// DialRouter is dialRouter, for the specs of a router that refuses the identity of the driver.
+var DialRouter = dialRouter
+
+// NewWithRouterRefusal is New with the refusal reader of a dialRouter connection.
+func NewWithRouterRefusal(control, router grpc.ClientConnInterface, refusal func(error) error, cfg Config) *Driver {
+	d := New(control, router, cfg)
+	d.routerRefusal = refusal
+	return d
+}

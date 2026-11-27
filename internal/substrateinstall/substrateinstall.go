@@ -85,6 +85,9 @@ type Profile struct {
 	// SNAPSHOT_TRANSFER_GSA_NAME). They are refused on other platforms.
 	GCPProjectID            string
 	SnapshotTransferGSAName string
+	// EgressDNSV4Preferred sets dns_lookup_family V4_PREFERRED on the egress gateway (egress.go) instead of
+	// Substrate's ALL. Off by default. Turn it on for a cluster without an IPv6 route.
+	EgressDNSV4Preferred bool
 }
 
 // csiDrivers are the values of ate-setup --setup-csi (cmd/ate-setup/internal/steps/csi.go ValidateCSIDriver).
@@ -482,6 +485,10 @@ func (i *Installer) Install(ctx context.Context) error {
 			setup.Cleanup()
 		}
 	}()
+	// Corrections of the egress gateway apply on every platform (egress.go, issue #1486). File work only.
+	if err := i.Profile.ApplyEgressCorrections(setup.Dir()); err != nil {
+		return err
+	}
 	var setupEnv []string
 	switch platform {
 	case PlatformGeneric:

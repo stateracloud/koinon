@@ -24,7 +24,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/peer"
@@ -288,23 +287,65 @@ var _ = Describe("the router connection", func() {
 })
 
 var _ = Describe("a router that cannot be reached", func() {
-	It("fails an Exec at once with ErrUnreachable and the dial error, not after the guest's start-up time", func(ctx SpecContext) {
-		cl, control := startFakeControl()
-		// The router address has no listener: the connection never opens.
-		router, err := grpc.NewClient("127.0.0.1:1", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	const routerName = "atenet-router.ate-system.svc"
+	const agentd = "spiffe://cluster.local/ns/koinon/sa/koinon-agentd"
+
+	// driverOn returns a driver on a router connection of Dial's kind, with an extra dial option.
+	driverOn := func(ctx context.Context, ep substrate.Endpoint, guestReady time.Duration, opts ...grpc.DialOption) *substrate.Driver {
+		_, control := startFakeControl()
+		router, refusal, err := substrate.DialRouter(ep, opts...)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(router.Close)
-		d := substrate.New(control, router, testConfig(30*time.Second))
+		d := substrate.NewWithRouterRefusal(control, router, refusal, testConfig(guestReady))
 		_, err = d.EnsureWorkspace(ctx, ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		ready(ctx, d, "sb")
+		return d
+	}
+
+	It("keeps ErrUnavailable and retries for a router that refuses the connection, also in a new process", func(ctx SpecContext) {
+		servers := newPKI("servicedns")
+		dir := GinkgoT().TempDir()
+		// The router address has no listener: the connection never opens (an outage, not an install error).
+		d := driverOn(ctx, substrate.Endpoint{
+			RouterAddr: "127.0.0.1:1", RouterServerName: routerName, RouterCAFile: write(dir, "ca.pem", servers.pem),
+		}, 600*time.Millisecond)
 		started := time.Now()
-		_, err = d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
+		_, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
+		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(MatchError(execution.ErrUnreachable))
+		Expect(err).To(MatchError(execution.ErrUnavailable))
+		Expect(time.Since(started)).To(BeNumerically(">=", 500*time.Millisecond), "the driver waits for the router")
+	})
+
+	It("fails an Exec at once with ErrUnreachable and the TLS error when the router refuses the client certificate", func(ctx SpecContext) {
+		servers, clients, other := newPKI("servicedns"), newPKI("podidentity"), newPKI("another")
+		dir := GinkgoT().TempDir()
+		r := startRouter(servers.server(routerName), clients, agentd)
+		d := driverOn(ctx, substrate.Endpoint{
+			RouterAddr: "passthrough:///router", RouterServerName: routerName,
+			RouterCAFile: write(dir, "ca.pem", servers.pem), RouterCertFile: write(dir, "bundle.pem", other.client(agentd)),
+		}, 30*time.Second, grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return r.lis.DialContext(ctx) }))
+		started := time.Now()
+		_, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
 		Expect(err).To(MatchError(execution.ErrUnreachable))
 		Expect(err).NotTo(MatchError(execution.ErrUnavailable))
-		Expect(err).To(MatchError(ContainSubstring("cannot connect to the atenet router")))
+		Expect(err).To(MatchError(ContainSubstring("tls:")))
 		Expect(time.Since(started)).To(BeNumerically("<", 10*time.Second), "GuestReadyTimeout is 30 s")
-		Expect(cl.Started(ws, "sb")).To(BeEmpty())
+		Expect(r.lastSeen()).To(BeEmpty(), "no call reached the router")
+	})
+
+	It("fails an Exec at once with ErrUnreachable when the driver does not trust the router certificate", func(ctx SpecContext) {
+		servers, clients := newPKI("servicedns"), newPKI("podidentity")
+		dir := GinkgoT().TempDir()
+		r := startRouter(servers.server(routerName), clients, agentd)
+		d := driverOn(ctx, substrate.Endpoint{
+			RouterAddr: "passthrough:///router", RouterServerName: routerName,
+			RouterCAFile: write(dir, "ca.pem", newPKI("rogue").pem), RouterCertFile: write(dir, "bundle.pem", clients.client(agentd)),
+		}, 30*time.Second, grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return r.lis.DialContext(ctx) }))
+		_, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"true"}})
+		Expect(err).To(MatchError(execution.ErrUnreachable))
+		Expect(err).To(MatchError(ContainSubstring("x509")))
 	})
 
 	It("keeps ErrUnavailable for a router that served a call and then went away", func(ctx SpecContext) {

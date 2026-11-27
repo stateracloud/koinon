@@ -171,9 +171,12 @@ type Driver struct {
 	// routerSeen is set once the router connection was READY in this process. After that, a connection
 	// failure is an outage that may pass, not an install error.
 	routerSeen atomic.Bool
-	cfg        Config
-	closers    []io.Closer
-	lineage    lineages
+	// routerRefusal returns the identity refusal (TLS alert, x509 error) that a router call error carries, or
+	// nil. It is nil when the connection is not a Dial connection.
+	routerRefusal func(error) error
+	cfg           Config
+	closers       []io.Closer
+	lineage       lineages
 
 	mu    sync.Mutex
 	gates map[key]*gate
@@ -690,13 +693,24 @@ func (d *Driver) noteRouter() {
 // routerDown maps an Unavailable error of a router call that never reached a guest to
 // [execution.ErrUnreachable]; it returns nil for any other error. A guest that does not listen yet answers through a
 // working connection, which is why the callers retry Unavailable. A connection that has never been READY in
-// this process (a wrong address, a failed handshake, a client certificate the router refuses) is in
-// TRANSIENT_FAILURE and no retry fixes it, so the caller fails with the dial error at once instead of waiting
-// out the guest's start-up time (issue #1446). Once the connection has been READY, a failure is an outage
-// (a router rollout, an eviction, a node drain): it stays Unavailable and the callers retry and resume.
+// this process and that the router or the driver refused on identity (a TLS alert, a client certificate the
+// router refuses, a router certificate the driver does not trust) is in TRANSIENT_FAILURE and no retry fixes
+// it, so the caller fails with the TLS error at once instead of waiting out the guest's start-up time
+// (issue #1446). Connection refused and timeouts stay Unavailable, also in a new agentd process: a router
+// outage that passes must not fail the runs that this process picks up (issue #1454). Once the connection has
+// been READY, a failure is an outage (a router rollout, an eviction, a node drain): it stays Unavailable and
+// the callers retry and resume.
+//
+// Known limit: the state check is a sample, not a watcher. A connection that goes READY and fails inside one
+// call is still seen as a startup failure if the failure is an identity refusal.
 func (d *Driver) routerDown(op string, err error) error {
-	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerState() != connectivity.TransientFailure || d.routerSeen.Load() {
+	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerRefusal == nil ||
+		d.routerState() != connectivity.TransientFailure || d.routerSeen.Load() {
 		return nil
 	}
-	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("cannot connect to the atenet router: %w", err)}
+	refused := d.routerRefusal(err)
+	if refused == nil {
+		return nil
+	}
+	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("the atenet router refused the TLS identity: %w", refused)}
 }

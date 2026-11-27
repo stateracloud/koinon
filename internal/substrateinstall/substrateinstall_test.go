@@ -72,6 +72,10 @@ func (r *runner) Run(_ context.Context, dir, name string, args, env []string, _ 
 				if r.tarFiles != nil {
 					return writeFilesTar(out, r.tarFiles)
 				}
+				if r.tarEntries == nil {
+					// The default export is one source file and the egress manifest the installer edits on every platform.
+					return writeFilesTar(out, map[string]string{"cmd/ate-setup/main.go": "main", egressPath: egressFixture})
+				}
 				return writeTar(out, r.tarEntries)
 			}
 		}

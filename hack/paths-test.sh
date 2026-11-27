@@ -129,6 +129,7 @@ example "a workflow other than ci.yml" "scripts shell" 1 .github/workflows/secre
 example "the Go test wrapper" "go scripts shell" 1 hack/go-test.sh
 example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
 example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
+example "the Playwright image pin alone runs web-e2e (#1399)" "go scripts web" 1 hack/playwright-image.env
 example "a web source file" "web" 1 web/src/app.ts
 example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
 example "the rules themselves" "chart chartsmoke escape harnesses fuzz generate go opencodeplugin scripts shell tidy vuln web" 1 hack/paths.rules
