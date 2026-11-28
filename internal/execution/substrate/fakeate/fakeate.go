@@ -362,6 +362,50 @@ func (c *Cluster) FailNextUploadStreams(atespace, name string, n int) {
 	}
 }
 
+// LagNextExits makes the next n processes of an actor publish their exit lag after they exit. In
+// that window their stdin pipe is closed already: a write fails with Internal "writing stdin: ...
+// file already closed" and a close with Internal "closing stdin: close |1: file already closed".
+// That is the real guest between cmd.Wait, which closes the pipe, and the reaper's mark of the exit
+// after it synced the output spool (upstream env guest/process/tracker.go, reap and CloseInput).
+// Remove it with the driver's interim handling when a Substrate env update closes the window (issue
+// #1549).
+func (c *Cluster) LagNextExits(atespace, name string, n int, lag time.Duration) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.lagExits, a.exitLag = n, lag
+		a.smu.Unlock()
+	}
+}
+
+// FailNextTarsEarly makes the next n `tar -x` processes of an actor fail with exit code 2 at once,
+// before they read their standard input, as a tar does that cannot write its destination.
+func (c *Cluster) FailNextTarsEarly(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.tarEarly = n
+		a.smu.Unlock()
+	}
+}
+
+// FailNextCloses makes the next n stdin close messages of an actor end with Unavailable, as a
+// stream that breaks before the guest answers. The process keeps its stdin open.
+func (c *Cluster) FailNextCloses(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failClose = n
+		a.smu.Unlock()
+	}
+}
+
 // Running returns the commands of the processes of an actor that have not exited, as the guest runs
 // them (the launcher prefix is removed).
 func (c *Cluster) Running(atespace, name string) [][]string {
@@ -383,6 +427,30 @@ func (c *Cluster) Running(atespace, name string) [][]string {
 		p.mu.Unlock()
 	}
 	return out
+}
+
+// PipesGone returns how many processes of an actor exited with their exit not published yet
+// (LagNextExits): their stdin pipe is closed and a close of it fails. A spec waits for it before it
+// closes stdin, so the close lands in the window.
+func (c *Cluster) PipesGone(atespace, name string) int {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	var procs []*fproc
+	if a != nil {
+		for _, p := range a.procs {
+			procs = append(procs, p)
+		}
+	}
+	c.mu.Unlock()
+	n := 0
+	for _, p := range procs {
+		p.mu.Lock()
+		if p.pipeGone && !p.exited {
+			n++
+		}
+		p.mu.Unlock()
+	}
+	return n
 }
 
 // Files returns the files that tar extracted into an actor, by path.
