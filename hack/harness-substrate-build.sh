@@ -25,9 +25,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 
 builder=koinon-substrate
 # Two runs at the same time can both find no builder: the second create then fails. Look again before it is an error.
+# The last inspect starts the builder (--bootstrap), so the run that lost the race waits until it is up.
 docker buildx inspect "$builder" >/dev/null 2>&1 ||
   docker buildx create --name "$builder" --driver docker-container >&2 ||
-  docker buildx inspect "$builder" >/dev/null 2>&1
+  docker buildx inspect --bootstrap "$builder" >/dev/null 2>&1
 
 # Outside any output directory that CI uploads: the layout holds the whole harness image.
 work=$(mktemp -d "${TMPDIR:-/tmp}/flavor-oci.XXXXXX")

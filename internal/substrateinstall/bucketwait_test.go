@@ -90,7 +90,7 @@ func TestGVisorStagingStopsAStalledBucketRequestAtTheWaitTimeout(t *testing.T) {
 	start := time.Now()
 	err := i.EnsureGVisorAssets(ctx)
 
-	g.Expect(err).To(HaveOccurred())
+	g.Expect(err).To(MatchError(context.DeadlineExceeded))
 	g.Expect(ctx.Err()).NotTo(HaveOccurred(), "the parent context is still alive")
 	g.Expect(time.Since(start)).To(BeNumerically("<", 5*time.Second))
 }
