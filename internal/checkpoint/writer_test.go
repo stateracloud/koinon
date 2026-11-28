@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	kfs "github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
@@ -106,6 +107,33 @@ var _ = Describe("Writer", func() {
 			Expect(err).To(MatchError(checkpoint.ErrDigestMismatch))
 			Expect(out.Len()).To(BeZero(), "no byte reaches the sandbox")
 		}
+	})
+
+	It("keeps a file that changed with its size and time unchanged since the last checkpoint (issue #1090)", func() {
+		// An hourly checkpoint reads a file while the harness writes it; the harness writes it again in
+		// the same second with the same length (a JSON timestamp, a status flag). The tar stream has
+		// whole-second times, so the stop checkpoint sees the same name, mode, size and time with other
+		// bytes. The snapshot must hold the new bytes, or no restore matches the recorded digest.
+		pw := "koinon_test_not-a-real-token"
+		at := time.Date(2026, 11, 28, 9, 23, 20, 0, time.UTC)
+		session := func(body string) *bytes.Buffer {
+			var b bytes.Buffer
+			tw := tar.NewWriter(&b)
+			Expect(tw.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: at})).To(Succeed())
+			Expect(tw.WriteHeader(&tar.Header{Name: "./s1.json", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)), ModTime: at})).To(Succeed())
+			_, err := tw.Write([]byte(body))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tw.Close()).To(Succeed())
+			return &b
+		}
+		_, err := w.Backup(ctx, prefix, pw, session(`{"status":"busy"}`), checkpoint.Meta{CheckpointID: "hourly"})
+		Expect(err).NotTo(HaveOccurred())
+		stop, err := w.Backup(ctx, prefix, pw, session(`{"status":"idle"}`), checkpoint.Meta{CheckpointID: "stop"})
+		Expect(err).NotTo(HaveOccurred())
+
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, stop.SnapshotID, stop.Digest, &out)).To(Succeed())
+		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("s1.json", `{"status":"idle"}`))
 	})
 
 	It("digests a home with unreadable modes and links, and ignores times", func() {
