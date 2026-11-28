@@ -427,6 +427,27 @@ var _ = Describe("Pool", func() {
 			WithTimeout(racescale.D(5 * time.Second)).Should(HaveLen(2))
 	})
 
+	It("does not tell a taken-over run again about a revert its first owner reported (issue 1526)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		r := e.enqueue(ctx, e.task(ctx, markHang))
+		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
+		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
+		_, err := q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.sandbox_reverted") }).
+			WithTimeout(racescale.D(5 * time.Second)).Should(HaveLen(1))
+
+		killA()
+		e.pool("agentd-b")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(getRun(ctx, r).OwnerID.String).To(HavePrefix("agentd-b/"))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(HaveLen(1))
+		// The new owner starts from the count the run already reported, in the first epoch's event.
+		reported, err := q.LastRunSandboxRevertReported(ctx, store.LastRunSandboxRevertReportedParams{OrgID: e.org, RunID: r.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(reported).To(Equal(int32(1)))
+	})
+
 	It("does not tell a run about a revert from before it started (issue 1526)", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		_, err := q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})

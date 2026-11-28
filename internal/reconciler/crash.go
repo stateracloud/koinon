@@ -634,9 +634,6 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 	}
 	r.crash.noteRevert(id, now)
 	r.crash.notReady(id)
-	if err := r.noteRevertFact(ctx, w); err != nil {
-		return true, err
-	}
 	lost := "the writes after the last snapshot (its time is unknown)"
 	event := map[string]any{"sandbox": name, "crash": truncate(sb.Message, 300), "cause": detail}
 	if w.sb.LastSnapshotAt.Valid {
@@ -649,6 +646,10 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-revert"), Action: "sandbox.revert", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: event,
 	}); err != nil {
+		return true, err
+	}
+	// The audit comes first: a failed fact write then loses the run's note, not the audit row.
+	if err := r.noteRevertFact(ctx, w); err != nil {
 		return true, err
 	}
 	return true, r.record(ctx, w, res, hash, "reverted a sandbox to its last snapshot; lost: "+lost)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -22,6 +23,9 @@ import (
 // every epoch, so a worker that takes the run over does not report a revert twice. Reverts between two
 // heartbeats give one event, with the newest count and snapshot time. A run whose owner is fenced
 // writes nothing (Record returns ErrFenced), and its successor reports the revert from the same row.
+// A revert after the last heartbeat of a run that ends is not reported: nothing runs after the loop.
+// The run's sandbox is checked: an ephemeral agent's run does not hear of the revert of a sandbox of
+// another task, and a run that waits for its sandbox has not used the sandbox yet.
 
 // sandboxRevertedKind is the run event kind. It is a note: nothing reads it back to decide state.
 const sandboxRevertedKind = "run.sandbox_reverted"
@@ -34,7 +38,8 @@ type revertNotice struct {
 }
 
 // noteRevert is one check of the sandbox row. It never fails the run: a read or write that does not
-// work is tried again at the next heartbeat.
+// work is tried again at the next heartbeat. A diagnostic event that Record drops after its tries (the
+// database is down) is not tried again: the note is lost, like any diagnostic event.
 func (r *runner) noteRevert(ctx context.Context, n *revertNotice) {
 	if !n.loaded {
 		reported, err := r.q.LastRunSandboxRevertReported(ctx, store.LastRunSandboxRevertReportedParams{OrgID: r.run.OrgID, RunID: r.run.ID})
@@ -51,6 +56,9 @@ func (r *runner) noteRevert(ctx context.Context, n *revertNotice) {
 		return
 	}
 	if sb.RevertCount <= n.reported {
+		return
+	}
+	if agentconfig.IsEphemeral(r.vcfg) && sb.SandboxName != r.taskSandboxName() {
 		return
 	}
 	// A revert from before the run started is not a loss of this run. The run's start and the revert
