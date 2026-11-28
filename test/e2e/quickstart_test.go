@@ -624,6 +624,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
 		t.begin()
 		mcpServerID = mcpServerE2E(ctx, admin, org, agent.GetId())
+		if substrateEscapeMCP() {
+			// Here, and not in mcpServerE2E's hook: write_item and fetch_url are still auto and undeclared until this
+			// spec ends (leakGuardExfilE2E's DeferCleanup), and the case needs a task.
+			substrateLeakGuardEscapeE2E(ctx, c, org, agent.GetId(), strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/"))
+		}
 
 		By("inside a task, the same kind of call is held for an approval of the exact call, and runs only once approved")
 		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
@@ -838,6 +843,13 @@ var _ = Describe("the quickstart", Ordered, func() {
 		total := time.Since(t.t0)
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
+	})
+
+	It("8. (not part of the quickstart, after its time check) on Substrate, the actor of a run is a gVisor guest with the guest launcher's hardening on (#1428)", func(ctx SpecContext) {
+		if !substrateDriver() {
+			Skip("Substrate only: the OpenShell leg proves its runtime in test/escape (make test-escape-kind)")
+		}
+		substrateGVisorE2E(ctx, c, os.Getenv("KOINON_E2E_KUBECTL"), org, agent.GetId())
 	})
 
 	It("8. (not part of the quickstart, after its time check) an agent with a Gitea connection clones through koinon-gateway's egress listener; its sandbox holds no credential (#1086 part C2)", Label("egress"), func(ctx SpecContext) {
