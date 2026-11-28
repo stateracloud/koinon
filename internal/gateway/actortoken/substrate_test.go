@@ -244,6 +244,40 @@ var _ = Describe("Substrate actor token verifier", func() {
 			Expect(err).To(MatchError(ContainSubstring("not both")))
 		})
 
+		It("dials the test address but keeps the issuer name for the certificate check", func() {
+			// The fake IDP certificate is valid for example.com, not for wrong.example.net.
+			addr := idp.srv.Listener.Addr().String()
+			dialed := func(name string) *actortoken.SubstrateVerifier {
+				idp.set(func(f *fakeIDP) { f.issuer, f.jwksURI = name, name+"/openid/v1/jwks" })
+				sv, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
+					Issuer: name, RootCAs: idp.pool(), Now: clock, Audience: actortoken.AudienceEgress, IssuerAddr: addr,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				return sv
+			}
+			_, err := dialed("https://example.com").Verify(mintWith(ecKey, jose.ES256, ecKID, substrateClaims("https://example.com", now, 900*time.Second)))
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = dialed("https://wrong.example.net").Verify(mintWith(ecKey, jose.ES256, ecKID, substrateClaims("https://wrong.example.net", now, 900*time.Second)))
+			Expect(err).To(MatchError(actortoken.ErrUnavailable))
+			var hostErr x509.HostnameError
+			Expect(errors.As(err, &hostErr)).To(BeTrue(), "the cause is the certificate name check: %v", err)
+		})
+
+		DescribeTable("refuses a bad issuer address",
+			func(addr, want string) {
+				_, err := actortoken.NewSubstrateVerifier(context.Background(), actortoken.SubstrateConfig{
+					Issuer: iss, RootCAs: idp.pool(), Audience: actortoken.AudienceEgress, IssuerAddr: addr,
+				})
+				Expect(err).To(MatchError(ContainSubstring(want)))
+			},
+			Entry("no port", "127.0.0.1", "host:port"),
+			Entry("empty host", ":443", "empty host"),
+			Entry("named port", "127.0.0.1:https", "numeric port"),
+			Entry("port 0", "127.0.0.1:0", "numeric port"),
+			Entry("port too large", "127.0.0.1:70000", "numeric port"),
+		)
+
 		It("reads a PEM CA file and refuses a file with no certificate", func() {
 			dir := GinkgoT().TempDir()
 			good := filepath.Join(dir, "ca.pem")

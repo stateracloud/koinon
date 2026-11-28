@@ -126,6 +126,8 @@ func startIdentityGateway(ctx context.Context) *identityGateway {
 	// tokens for the egress listener's audience (issue #1489), and the stand-in checks that one.
 	cfg := actortoken.SubstrateConfig{
 		Issuer: issuer, CAFile: os.Getenv("KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE"), Audience: actortoken.AudienceEgress,
+		// Optional: dial this address (a port-forward) and keep the issuer name for SNI and the certificate check.
+		IssuerAddr: os.Getenv("KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER_ADDR"),
 	}
 	v, err := actortoken.NewSubstrateVerifier(context.WithoutCancel(ctx), cfg)
 	Expect(err).NotTo(HaveOccurred(), "the Substrate verifier of the stand-in")
