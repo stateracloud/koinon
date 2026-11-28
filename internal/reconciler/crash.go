@@ -619,10 +619,10 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 		// fails, and let the next pass read the state. The run still lost its writes after the
 		// snapshot, so the fact is written here too.
 		r.crash.noteRevert(id, now)
+		r.crash.notReady(id)
 		if err := r.noteRevertFact(ctx, w); err != nil {
 			return true, err
 		}
-		r.crash.notReady(id)
 		r.log.Warn("the sandbox was reverted and did not resume", append(w.logAttrs(), "err", err)...)
 		return true, r.record(ctx, w, sb, hash, "reverted to the last snapshot; the resume did not work yet")
 	default:

@@ -958,6 +958,34 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
 	})
 
+	It("does not tell an ephemeral run about the revert of the previous task's sandbox (issue 1526)", func(ctx SpecContext) {
+		e := newEnvWith(ctx, harness.OpenCode, func(*env) string {
+			return `{"model":"` + model + `","instructions":"` + instructions + `","ephemeral":true}`
+		})
+		task := e.task(ctx, "hello")
+		r := e.enqueue(ctx, task)
+		prev := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, [16]byte{1})
+		_, err := q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: prev})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
+
+		// The previous task's sandbox is reverted after the run was claimed, then the row moves to the
+		// task's own sandbox. The revert belongs to the old sandbox.
+		_, err = q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		name := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, task.ID.Bytes)
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: name})
+		Expect(err).NotTo(HaveOccurred())
+		e.sandbox = name
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(BeEmpty())
+	})
+
 	It("requeues a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")

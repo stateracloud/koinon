@@ -209,7 +209,11 @@ SET sandbox_name = @sandbox_name,
     home_dirtied_at = NULL,
     -- The task sandbox is a new actor: it gets a new actor name (issue #1386).
     actor_name = NULL,
-    actor_uid = NULL
+    actor_uid = NULL,
+    -- A revert belonged to the previous sandbox (issue #1526). The count only goes up, so an owner that
+    -- reported it is not told twice; without a revert time, a new run does not report it.
+    reverted_at = NULL,
+    revert_snapshot_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 

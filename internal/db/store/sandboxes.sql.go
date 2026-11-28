@@ -1032,7 +1032,11 @@ SET sandbox_name = $1,
     home_dirtied_at = NULL,
     -- The task sandbox is a new actor: it gets a new actor name (issue #1386).
     actor_name = NULL,
-    actor_uid = NULL
+    actor_uid = NULL,
+    -- A revert belonged to the previous sandbox (issue #1526). The count only goes up, so an owner that
+    -- reported it is not told twice; without a revert time, a new run does not report it.
+    reverted_at = NULL,
+    revert_snapshot_at = NULL
 WHERE org_id = $2 AND agent_id = $3
 RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at, revert_count, reverted_at, revert_snapshot_at
 `
