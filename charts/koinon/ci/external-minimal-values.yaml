@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
+# External database with the optional guards off: no NetworkPolicy, no sandbox policy, no fence, no KEK
+# guard, no seccomp probe (was external-kubernetes until #1093 moved it to the standalone gateway).
 # No client TLS Secret: the mesh provides mTLS (openshell.insecure).
 openshell:
   address: openshell.openshell.svc:8080
@@ -7,11 +9,14 @@ postgres:
   mode: external
   external:
     secretName: koinon-db
+# The v0.1.0 Substrate shape: koinon-gateway on the model and MCP paths, because only it checks the
+# actor JWT (issue #1489), and Substrate refuses gateway.mode=kubernetes.
 gateway:
-  mode: kubernetes
-  # koinon-gateway, the default MCP driver, needs standalone mode: kubernetes mode keeps agentgateway.
+  mode: standalone
+  model:
+    driver: koinon
   mcp:
-    driver: agentgateway
+    driver: koinon
 networkPolicy:
   enabled: false
 sandboxPolicy:

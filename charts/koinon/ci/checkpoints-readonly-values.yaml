@@ -4,11 +4,14 @@
 openshell:
   address: openshell.openshell.svc:8080
   insecure: true
+# The v0.1.0 Substrate shape: koinon-gateway on the model and MCP paths, because only it checks the
+# actor JWT (issue #1489), and Substrate refuses gateway.mode=kubernetes.
 gateway:
-  mode: kubernetes
-  # koinon-gateway, the default MCP driver, needs standalone mode: kubernetes mode keeps agentgateway.
+  mode: standalone
+  model:
+    driver: koinon
   mcp:
-    driver: agentgateway
+    driver: koinon
 postgres:
   cnpg:
     instances: 3

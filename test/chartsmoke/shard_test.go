@@ -23,7 +23,7 @@ const shardEnv = "KOINON_CHARTSMOKE_SHARD"
 // a mode never drops out of CI without a message.
 var shards = map[string][]string{
 	"core": {
-		"cnpg-kubernetes", "cnpg-standalone", "external-durable", "external-kubernetes",
+		"cnpg-ha", "cnpg-standalone", "external-durable", "external-minimal",
 		"external-standalone", "run-evidence",
 	},
 	"external": {

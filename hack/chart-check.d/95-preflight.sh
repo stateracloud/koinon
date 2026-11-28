@@ -22,7 +22,8 @@ for f in "${value_files[@]}"; do
 		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
 	done
 	# Substrate is the default (#1093): every ci values file runs the Substrate checks. Only values.yaml,
-	# rendered with execution.driver=openshell by insecure_for, keeps the OpenShell hook under test.
+	# rendered with execution.driver=openshell by insecure_for, and the files that set that driver
+	# themselves (openshell, kms-awskms: the agentgateway fallback) keep the OpenShell hook under test.
 	if grep -qF -- '--driver=substrate' <<<"$rendered"; then
 		# execution.driver=substrate (#1089): the hook runs the Substrate checks (Kubernetes 1.37, the CRDs, the
 		# pinned api server, the router), not the OpenShell ones, and starts no Substrate probe pod: those
@@ -48,7 +49,7 @@ for f in "${value_files[@]}"; do
 		if "$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --set gateway.mcp.koinon.egress.enabled=false --show-only templates/preflight.yaml >/dev/null 2>&1; then
 			echo "$name: Substrate renders in kubernetes mode" >&2; exit 1
 		fi
-	elif [[ $name != values && $name != openshell-values ]]; then
+	elif [[ $name != values ]] && ! grep -qx '  driver: openshell' "$f"; then
 		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
 	fi

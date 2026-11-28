@@ -52,7 +52,7 @@ has "the CA bundle is a ConfigMap" 'name: koinon-mcp-gateway-egress-ca$' "${eg[@
 # A bundle without a PEM certificate fails the render (#1487): the gateway would refuse the file and crash-loop.
 # The kind e2e values hold such a placeholder until test/e2e/kindvalues fills it; unfilled, they must not render.
 for bad in koinon-test-not-a-real-ca '@E2E_EGRESS_CA@' '-----BEGIN CERTIFICATE-----'; do
-  msg=$("$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${eg[@]}" \
+  msg=$("$HELM" template koinon "$CHART" --namespace koinon "${OPENSHELL_ARGS[@]}" --set openshell.insecure=true --set "$ADDRESS" "${eg[@]}" \
     --set-string gateway.mcp.koinon.egress.caBundle="$bad" 2>&1 >/dev/null || true)
   [[ $msg == *"egress.caBundle holds no PEM certificate"* ]] ||
     fail "the egress CA bundle '$bad' renders, or fails for another reason, but it holds no PEM certificate: $msg"
