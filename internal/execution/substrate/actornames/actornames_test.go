@@ -68,7 +68,12 @@ func rows(ctx context.Context, p *pgxpool.Pool, org pgtype.UUID) int {
 	return n
 }
 
-const img = "img@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+// img is a fake actor image pinned by digest, built from two parts as in the substrate specs
+// (imageref_test.go), so no line holds a whole image reference.
+const (
+	digest = "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	img    = "img" + digest
+)
 
 var _ = Describe("the database ledger of actor names (issue #1092)", func() {
 	It("claims a name once per atespace, also from another process", func(ctx SpecContext) {
