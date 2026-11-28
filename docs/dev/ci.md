@@ -293,6 +293,41 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
 
+### The Substrate leg of the kind e2e (issue #1091)
+
+`make test-e2e-kind-substrate` (`DRIVER=substrate test/e2e/run.sh`) runs the quickstart pass with `execution.driver:
+substrate` on kind, on the gVisor class (tier `dev`; a standard runner has no KVM, ADR 0119 D10). What differs from the
+OpenShell run:
+
+- `kind/up.sh` leaves out Agent Sandbox, the `runc` RuntimeClass and OpenShell.
+- `kind/substrate.sh harness` builds the substrate overlay of the harness image (guest front and launcher) and pushes it as
+  `<registry>/<cluster>/sandbox-substrate:e2e`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
+  digest, #1192).
+- `kind/substrate.sh install` runs `koinon-api substrate install --platform kind --sandbox-classes gvisor` from a clone
+  at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into `~/.cache/koinon/substrate`). `GVISOR_MIRROR`
+  is for a host that cannot reach `storage.googleapis.com`.
+- The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
+
+What the leg proves: Substrate installs on kind, the provisioner creates the atespace of an org, an actor of the gVisor class
+starts from the digest-pinned overlay through the image cache, and the quickstart reaches an approved pull request (the
+gateway routes and the actor token of #1086 are merged). The image cache is the one image source on this leg too: the
+registry of the kind cluster is its upstream (`imageCache.upstreams` with `allowHTTP`, and `imageCache.egress.extra` for
+the range of the docker network `kind`, which run.sh reads with `docker network inspect`). `kind/values-rewrite.sh` fills the
+placeholders of `kind/substrate-values.yaml`; the registry host `localhost:5001` of the cache upstream stays as it is.
+
+The harness contract tests (`make harness-suite`, `./test/harnesses/...`) are a step of this leg: after
+`kind/substrate.sh harness`, `test/e2e/run.sh` runs them with `KOINON_HARNESS_IMAGE_OPENCODE` set to the Substrate overlay
+image, so the leg tests the image the actors run. The suite needs no cluster and starts its containers with its own
+entrypoint, so the overlay's guest-front entrypoint does not get in the way. The OpenShell leg does not run them. The
+`harnesses` job of `ci.yml` (required, merge queue and main) still runs them against the plain OpenCode image.
+
+The leg is advisory (a comment in `hack/ci-required.txt`, not a listed name: it is a driver of the `quickstart` job and
+runs on dispatch only). Issue #1091 is done when the quickstart and the contract suite on the overlay image are green on
+this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the restore drill
+(`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a message that names #1090 part 3), the gVisor-class assertion on the actor, the Substrate escape case and the missing-image step
+(skipped until its Substrate form is proven). The CI wiring is already in `e2e-kind.yml` as the `driver` dispatch input; the leg
+becomes a required leg at the switch (#1093, no soak).
+
 ### The N-1 to N upgrade e2e (issue #519)
 
 `UPGRADE_FROM=<release tag> make test-e2e-kind` (for example `UPGRADE_FROM=v0.1.0-rc.27`, `SUITE=go`) runs

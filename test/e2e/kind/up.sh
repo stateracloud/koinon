@@ -13,6 +13,10 @@ set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}
 CTX="kind-${CLUSTER}"
+# DRIVER=substrate (#1091) leaves out Agent Sandbox, the runc RuntimeClass and OpenShell: the substrate driver needs none of
+# them. test/e2e/kind/substrate.sh installs Substrate itself after this script. The default is the OpenShell prerequisites.
+DRIVER=${DRIVER:-openshell}
+case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 # kind v0.33.0 default node image (Kubernetes 1.37.0).
 NODE_IMAGE=kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 
@@ -80,7 +84,7 @@ done_step registry-attach
 step "fetch the add-on manifests (kube-network-policies $KNP_VERSION, CloudNativePG $CNPG_VERSION, Agent Sandbox $AS_VERSION)"
 bg "$here/../../../hack/fetch-pinned.sh" "$KNP_URL" "$KNP_SHA256" "$tmp/knp.yaml"
 bg "$here/../../../hack/fetch-pinned.sh" "$CNPG_URL" "$CNPG_SHA256" "$tmp/cnpg.yaml"
-bg "$here/../../../hack/fetch-pinned.sh" "$AS_URL" "$AS_SHA256" "$tmp/agent-sandbox.yaml"
+[[ $DRIVER == substrate ]] || bg "$here/../../../hack/fetch-pinned.sh" "$AS_URL" "$AS_SHA256" "$tmp/agent-sandbox.yaml"
 wait_all
 done_step fetch
 
@@ -89,8 +93,9 @@ sed -i.bak "s#image: ghcr.io/cloudnative-pg/cloudnative-pg:${CNPG_VERSION}\$#ima
 grep -q "@${CNPG_IMAGE_DIGEST}" "$tmp/cnpg.yaml" || { echo "CNPG image pin not applied" >&2; exit 1; }
 "${K[@]}" apply -f "$tmp/knp.yaml"
 "${K[@]}" apply --server-side -f "$tmp/cnpg.yaml"
-"${K[@]}" apply --server-side -f "$tmp/agent-sandbox.yaml"
-"${K[@]}" apply -f - <<'EOF'
+if [[ $DRIVER == openshell ]]; then
+  "${K[@]}" apply --server-side -f "$tmp/agent-sandbox.yaml"
+  "${K[@]}" apply -f - <<'EOF'
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
@@ -100,12 +105,13 @@ metadata:
     openshell.ai/sandbox-attachable: "true"
 handler: runc
 EOF
+fi
 done_step apply
 
 step "wait for kube-network-policies, CloudNativePG, Agent Sandbox and OpenShell, together"
 bg "${K[@]}" -n kube-system rollout status ds/kube-network-policies --timeout=120s
 bg "${K[@]}" -n cnpg-system rollout status deploy/cnpg-controller-manager --timeout=180s
-bg install_openshell
+[[ $DRIVER == substrate ]] || bg install_openshell
 wait_all
 done_step rollouts
 

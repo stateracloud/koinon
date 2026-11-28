@@ -837,7 +837,7 @@
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["host", "url"],
-                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https://"}}
+                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https?://"}, "allowHTTP": {"type": "boolean"}}
                   }
                 },
                 "clusterDomain": {"$ref": "#/definitions/nonEmpty"},
@@ -850,7 +850,7 @@
                 "egress": {
                   "type": "object",
                   "additionalProperties": false,
-                  "properties": {"cidrs": {"type": "array", "items": {"type": "string"}}, "exceptCIDRs": {"type": "array", "items": {"type": "string"}}}
+                  "properties": {"cidrs": {"type": "array", "items": {"type": "string"}}, "exceptCIDRs": {"type": "array", "items": {"type": "string"}}, "extra": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["cidr", "port"], "properties": {"cidr": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}}}
                 },
                 "resources": {"type": "object"},
                 "nodeSelector": {"type": "object"},

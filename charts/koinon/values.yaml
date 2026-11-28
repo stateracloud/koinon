@@ -858,7 +858,8 @@ execution:
   # checks (Kubernetes 1.37, the CRDs, the pinned api server, the router) without the Substrate probe pods.
   driver: openshell
   substrate:
-    # ateapi's host:port, for example api.ate-system.svc.cluster.local:443. Required with substrate.
+    # ateapi's host:port, for example api.ate-system.svc:443. Required with substrate. Use that exact name: the
+    # ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the TLS handshake.
     controlAddress: ""
     # The atenet router's host:port, for example atenet-router.ate-system.svc:443. The router serves TLS on 443
     # only (Substrate v1.0.1 has no plain listener) and requires a client certificate: koinon-agentd, the one
@@ -873,7 +874,8 @@ execution:
     caSecret: ""
     # Name checked against ateapi's certificate. Empty uses the host of controlAddress.
     serverName: ""
-    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
+    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi. Set
+    # api.ate-system.svc: ate-setup makes ateapi accept that audience only, and any other gives "invalid bearer token".
     tokenAudience: ""
     # The provisioner (ADR 0128). Substrate lets only its global owner create an atespace, and the reconciler must
     # not hold that role. The provisioner is a small pod of its own with its own ServiceAccount: it creates the
@@ -1205,6 +1207,8 @@ execution:
       # url is where the cache pulls it. A reference whose host is not listed is not rewritten, so atelet (which has no
       # route to it) cannot pull it: add the host here, or leave it out on purpose. Docker Hub redirects blob downloads
       # to a CDN, and the cache follows the redirect itself; atelet never sees the redirect host.
+      # A plain http url (a private registry) is refused unless the entry sets allowHTTP: true; add its range and port to
+      # egress.extra as well.
       upstreams:
         - {host: ghcr.io, url: "https://ghcr.io"}
         - {host: docker.io, url: "https://registry-1.docker.io"}
@@ -1229,6 +1233,10 @@ execution:
       egress:
         cidrs: []
         exceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, fc00::/7, fe80::/10]
+        # Off by default. One more egress rule for each entry: TCP <port> to <cidr>. Use it for an upstream on another port
+        # or in a private range (an operator registry, the registry of a kind test cluster); also add it to upstreams.
+        # Example: extra: [{cidr: 172.18.0.0/16, port: 5000}]
+        extra: []
       resources:
         requests: {cpu: 50m, memory: 128Mi}
         limits: {memory: 512Mi}

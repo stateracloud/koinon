@@ -446,6 +446,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
 
 		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		if substrateDriver() {
+			// Substrate has no supervisor pod and no reconciler LimitRange. Its form (issue #1091): the chart makes the worker
+			// namespace with a LimitRange and the default WorkerPool.
+			By("on Substrate: the chart's LimitRange and WorkerPool exist in the worker namespace (the form of #76)")
+			kcs := func(args ...string) string {
+				GinkgoHelper()
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+				return strings.TrimSpace(string(out))
+			}
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "limitrange", "-o", "name")).To(ContainSubstring("worker-limits"))
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "workerpools.ate.dev", "-o", "name")).NotTo(BeEmpty())
+			t.end("4. Task → run streamed → approval pending")
+			return
+		}
 		kc := func(args ...string) string {
 			GinkgoHelper()
 			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
@@ -1114,6 +1129,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 	// runs, and the spec puts the config back at its end (the story suite runs next in the same cluster).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
+		if substrateDriver() {
+			// The Substrate driver refuses an image that is not pinned by digest before any pull (internal/execution/substrate/
+			// imageref.go RequireDigest, #1192), so a tag-only broken image fails at a different place than this spec checks. The
+			// pod reason (ErrImagePull) and the sandbox observer metrics are OpenShell-only: sandboxObserver is off on this leg and
+			// the driver reports the cause from the actor (phase.go Observe). Whether the run.failed payload then carries
+			// sandboxCause image_pull on Substrate is not proven. Exit condition: a digest-pinned missing image on Substrate is
+			// proven to reach the sandbox wait with the cause image_pull; then port this spec (issue #1091 keeps it open).
+			Skip("issue #1091: the missing-image spec needs a Substrate form (digest-pinned broken image, actor cause); not ported yet")
+		}
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
 		kc := func(args ...string) string {
@@ -1568,3 +1592,10 @@ func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(con
 	Expect(fetches()[before:]).To(HaveLen(1))
 	Expect(refusedURLRule() - refusedBefore).To(BeNumerically("==", 1))
 }
+
+// substrateWorkerNamespace is the chart's default execution.substrate.workerNamespace.
+const substrateWorkerNamespace = "ate-workers"
+
+// substrateDriver is true when test/e2e/run.sh runs with DRIVER=substrate (issue #1091): the OpenShell objects that some
+// steps read do not exist then, and each such step reads its Substrate form instead.
+func substrateDriver() bool { return os.Getenv("DRIVER") == "substrate" }

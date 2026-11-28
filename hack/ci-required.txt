@@ -60,3 +60,10 @@ advisory ci-red
 # final, and on dispatch), so it can never be required here (a required name must report on every PR, push and
 # merge_group build). hack/release-gate.sh demands its result for every tag instead. It is `continue-on-error`, so a red
 # drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.
+
+# The Substrate leg of the kind e2e (`make test-e2e-kind-substrate`, the `driver: substrate` dispatch input of
+# .github/workflows/e2e-kind.yml, #1091) is advisory. It is a driver of the `quickstart` job, not a job of its own, so it has
+# no name to list above and can never be required here: a required name must report on every PR, push and merge_group
+# build, and this leg runs on dispatch only. A red leg never changes the `e2e result` check. It becomes a required leg at
+# the switch (#1093), which makes it a job of its own. The leg runs the harness contract suite itself
+# (test/e2e/run.sh) against the Substrate overlay image; the required `harnesses` job above runs it against the plain harness image.

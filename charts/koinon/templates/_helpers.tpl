@@ -846,7 +846,7 @@ image source of the node agent, and the driver rewrites the registry host of eve
 
 {{/*
 The "host=target" entries that rewrite the registry host of an actor image, as JSON (the driver's
---substrate-image-mirrors). With the cache: each upstream host maps to <cache host>/<host>. Otherwise: the operator's
+--substrate-image-mirrors). With the cache: each upstream host maps to <cache host>/<host with ':' written '_'> (a port in a repository path is not a valid image reference). Otherwise: the operator's
 execution.substrate.imageMirrors. The two together fail the render, because the node agent has one image source.
 */}}
 {{- define "koinon.imageMirrorEntries" -}}
@@ -856,7 +856,8 @@ execution.substrate.imageMirrors. The two together fail the render, because the 
 {{- if or $s.imageMirrors $s.imageRegistry -}}{{- fail "execution.substrate.imageCache.enabled is the one image source: do not set imageMirrors or imageRegistry with it. For an operator mirror set imageCache.enabled=false" -}}{{- end -}}
 {{- if not $s.imageCache.upstreams -}}{{- fail "execution.substrate.imageCache.upstreams is empty: the cache would sync nothing" -}}{{- end -}}
 {{- range $s.imageCache.upstreams -}}
-{{- $entries = append $entries (printf "%s=%s/%s" (lower .host) (include "koinon.imageCache.host" $) (lower .host)) -}}
+{{- if and (hasPrefix "http://" .url) (not .allowHTTP) -}}{{- fail (printf "execution.substrate.imageCache.upstreams: %s is a plain http URL; set allowHTTP: true on that entry to accept it (a private registry), and add its range to imageCache.egress.extra" .host) -}}{{- end -}}
+{{- $entries = append $entries (printf "%s=%s/%s" (lower .host) (include "koinon.imageCache.host" $) (lower .host | replace ":" "_")) -}}
 {{- end -}}
 {{- else -}}
 {{- range $host := keys ($s.imageMirrors | default dict) | sortAlpha -}}

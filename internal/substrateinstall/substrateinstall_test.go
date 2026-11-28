@@ -54,7 +54,7 @@ type runner struct {
 	existed bool
 	// built is the binary path "go build" wrote.
 	built string
-	// cloneErr is what "git clone" returns.
+	// cloneErr is what "git fetch" of the pinned commit returns.
 	cloneErr error
 }
 
@@ -64,7 +64,10 @@ func (r *runner) Run(_ context.Context, dir, name string, args, env []string, _ 
 	r.dirs = append(r.dirs, dir)
 	switch {
 	case name == "git":
-		if slices.Contains(args, "clone") {
+		if slices.Contains(args, "init") {
+			return nil
+		}
+		if slices.Contains(args, "fetch") {
 			return r.cloneErr
 		}
 		for _, a := range args {
@@ -313,12 +316,14 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 	b, err := i.BuildSetup(t.Context())
 	g.Expect(err).NotTo(HaveOccurred())
 	defer b.Cleanup()
-	// The source repository is only cloned: its config, attributes and replace refs never reach the export.
-	g.Expect(r.calls[0][:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet"}))
-	g.Expect(r.calls[0]).To(ContainElements("--bare", "/src/substrate"))
+	// The source repository only supplies the commit, fetched by its id into a fresh bare repository: its
+	// config, attributes and replace refs never reach the export.
+	g.Expect(r.calls[0][:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "init", "--quiet"}))
+	g.Expect(r.calls[0]).To(ContainElement("--bare"))
 	clone := r.calls[0][len(r.calls[0])-1]
 	g.Expect(filepath.Base(clone)).To(Equal("repo.git"))
-	g.Expect(r.calls[1]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
+	g.Expect(r.calls[1]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", "/src/substrate", substrateinstall.PinnedCommit}))
+	g.Expect(r.calls[2]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
 	var archive, build []string
 	for _, c := range r.calls {
 		switch {

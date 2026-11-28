@@ -22,7 +22,8 @@ import (
 // router (TLS on 443 with a client certificate: the router serves no plain listener and allows a client
 // by the SPIFFE ID of its certificate, ADR 0119 amendment, issue #1446).
 type Endpoint struct {
-	// ControlAddr is ateapi's host:port, for example api.ate-system.svc.cluster.local:443.
+	// ControlAddr is ateapi's host:port, for example api.ate-system.svc:443 (the
+	// ateapi certificate names that host only).
 	ControlAddr string
 	// RouterAddr is the router's host:port, for example atenet-router.ate-system.svc:443.
 	RouterAddr string

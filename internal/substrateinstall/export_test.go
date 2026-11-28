@@ -15,6 +15,12 @@ func (i *Installer) ExportPin(ctx context.Context, tmp, dst string) error {
 	return i.exportPin(ctx, tmp, dst)
 }
 
+// ExportCommit is exportCommit for the tests: the same export for a commit that a test creates (the pin is a
+// constant, so no test repository can hold it).
+func (i *Installer) ExportCommit(ctx context.Context, tmp, dst, commit string) error {
+	return i.exportCommit(ctx, tmp, dst, commit)
+}
+
 // PinGVisorForTest makes the pinned digest of each architecture the SHA-256 of body for the test, so a fake
 // fetcher needs no 60 MB tarball. It returns the key of each architecture.
 func PinGVisorForTest(t interface{ Cleanup(func()) }, body []byte) {

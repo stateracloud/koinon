@@ -232,7 +232,22 @@ func (i *Installer) EnsureGVisorAssets(ctx context.Context) error {
 	if fetch == nil {
 		fetch = NewHTTPFetcher()
 	}
-	res, err := StageGVisor(ctx, store, fetch, i.Profile.GVisorMirror, i.Out)
+	// The bucket-init Job of the object store may still run when the installer gets here (ate-setup does not
+	// wait for it): retry while the bucket is missing, up to the wait timeout.
+	waitCtx, cancel := context.WithTimeout(ctx, orDuration(i.WaitTimeout, 2*time.Minute))
+	defer cancel()
+	var res StageResult
+	for {
+		res, err = StageGVisor(ctx, store, fetch, i.Profile.GVisorMirror, i.Out)
+		if err == nil || !errors.Is(err, ErrNoBucket) || waitCtx.Err() != nil {
+			break
+		}
+		_, _ = fmt.Fprintln(i.Out, "waiting for the bucket of the cluster object store (its bucket-init Job is still running)")
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(orDuration(i.PollInterval, 2*time.Second)):
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("stage gvisor: %w", err)
 	}

@@ -24,7 +24,7 @@ No credential reaches a sandbox or a worker pod: the cache holds none (public up
 {{- $np := .Values.execution.substrate.workerNetworkPolicy }}
 {{- $registries := list }}
 {{- range $c.upstreams }}
-{{- $registries = append $registries (dict "urls" (list .url) "onDemand" true "tlsVerify" true "maxRetries" 2 "retryDelay" "30s" "content" (list (dict "prefix" "**" "destination" (printf "/%s" (lower .host)) "stripPrefix" true))) }}
+{{- $registries = append $registries (dict "urls" (list .url) "onDemand" true "tlsVerify" true "maxRetries" 2 "retryDelay" "30s" "content" (list (dict "prefix" "**" "destination" (printf "/%s" (lower .host | replace ":" "_")) "stripPrefix" true))) }}
 {{- end }}
 {{- $conf := dict "distSpecVersion" "1.1.0"
     "storage" (dict "rootDirectory" "/var/lib/zot" "gc" true "gcDelay" "1h" "gcInterval" "6h")
@@ -229,4 +229,12 @@ spec:
         {{- end }}
       ports:
         - {port: 443, protocol: TCP}
+    {{- /* Extra upstreams on another port or a private range (egress.extra): one rule for each entry. */}}
+    {{- range $c.egress.extra }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        - {port: {{ int .port }}, protocol: TCP}
+    {{- end }}
 {{- end }}

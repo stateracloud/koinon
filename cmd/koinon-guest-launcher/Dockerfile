@@ -11,11 +11,14 @@
 # image. The OpenShell driver (the default) keeps the plain harness image and its exec path.
 #
 # Build: make harness-substrate-opencode. Both binaries come from the named build context "launcher"
-# (build/guest-launcher/linux-<arch>/, `make guest-launcher`); the harness image is FLAVOR_IMAGE. The
-# release builds the same image with hack/release-harness-substrate.sh. There is no RUN step, so a
-# multi-platform build needs no emulation.
-ARG FLAVOR_IMAGE
-FROM ${FLAVOR_IMAGE}
+# (build/guest-launcher/linux-<arch>/, `make guest-launcher`); the harness image is the named build context
+# "flavor". A local build passes it as an OCI layout (hack/harness-flavor-context.sh), so a docker-container builder
+# needs no registry; the release passes docker-image://<digest reference> (hack/release-harness-substrate.sh). There
+# is no RUN step, so a multi-platform build needs no emulation.
+# "flavor" is a named build context, not a stage
+# hadolint ignore=DL3006
+# dockerfile-lint: allow=digest flavor is a named build context; the caller passes the harness image pinned by digest (OCI layout or docker-image://<digest>)
+FROM flavor
 ARG TARGETARCH
 # "launcher" is a named build context, not a stage
 # hadolint ignore=DL3022

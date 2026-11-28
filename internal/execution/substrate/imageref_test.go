@@ -37,6 +37,8 @@ var _ = Describe("RewriteImage", func() {
 		Entry("the registry replaces a host with no entry", "quay.io/org/app:1", "mirror.example.com/all", mirrors, "mirror.example.com/all/org/app:1"),
 		Entry("a mirror wins over the registry", "ghcr.io/org/app:1", "mirror.example.com/all", mirrors, "cache.koinon.svc/ghcr.io/org/app:1"),
 		Entry("a reference in the mirror is not prefixed twice", "cache.koinon.svc/ghcr.io/org/app:1", "", mirrors, "cache.koinon.svc/ghcr.io/org/app:1"),
+		Entry("a mirror host with a port: the real host is the key, the path segment has no colon", "localhost:5001/koinon-e1/sandbox-substrate:e2e"+digest, "", map[string]string{"localhost:5001": "cache.koinon.svc/localhost_5001"},
+			"cache.koinon.svc/localhost_5001/koinon-e1/sandbox-substrate:e2e"+digest),
 		Entry("a host with a port", "localhost:5000/app:1", "r.example.com", nil, "r.example.com/app:1"),
 		Entry("nothing is set", "ghcr.io/org/app:1", "", nil, "ghcr.io/org/app:1"),
 	)

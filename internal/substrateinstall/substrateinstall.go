@@ -126,6 +126,24 @@ func (p Profile) UsesGVisor() bool {
 	return false
 }
 
+// UsesMicroVM says whether the install has the microvm sandbox class, which needs /dev/kvm and the other microVM
+// devices on a node: the default classes (gvisor,microvm) or a list that names microvm. The generic platform
+// installs gvisor only.
+func (p Profile) UsesMicroVM() bool {
+	if p.Platform == PlatformGeneric {
+		return false
+	}
+	if p.SandboxClasses == "" {
+		return true
+	}
+	for _, class := range strings.Split(p.SandboxClasses, ",") {
+		if strings.TrimSpace(class) == "microvm" {
+			return true
+		}
+	}
+	return false
+}
+
 // noDevEnvFlag is passed to ate-setup deploy and delete alike, so a delete undoes the same install.
 const noDevEnvFlag = "--no-dev-env"
 
@@ -274,24 +292,34 @@ func (b *Build) Cleanup() { _ = os.RemoveAll(b.tmp) }
 
 // exportPin exports PinnedCommit from SourceRepo into dst. Scratch files go into tmp.
 func (i *Installer) exportPin(ctx context.Context, tmp, dst string) error {
-	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
-	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
-	// of the source runs in git archive and no replace ref substitutes the pinned objects.
+	return i.exportCommit(ctx, tmp, dst, PinnedCommit)
+}
+
+// exportCommit exports the commit with this id from SourceRepo into dst.
+func (i *Installer) exportCommit(ctx context.Context, tmp, dst, commit string) error {
+	// The export comes from a fresh bare repository that fetches the commit by its id, not from SourceRepo
+	// itself: a fetch copies the objects but not the source's config, hooks, info/attributes or replace refs,
+	// so no filter driver of the source runs in git archive and no replace ref substitutes the pinned objects.
+	// The fetch names the id, so the source needs no ref that points at it (a cache that holds the commit
+	// only as FETCH_HEAD works), and no other history is copied.
 	repo := filepath.Join(tmp, "repo.git")
-	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
-	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
-		return fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err)
+	if err := i.Runner.Run(ctx, "", "git", []string{"--no-replace-objects", "-c", "core.fsmonitor=", "init", "--quiet", "--bare", "--", repo}, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: init %s: %w", ErrPin, repo, err)
 	}
-	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
+	fetch := gitArgs(repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", i.SourceRepo, commit)
+	if err := i.Runner.Run(ctx, "", "git", fetch, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, commit, i.SourceRepo, err)
+	}
+	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", commit+"^{commit}"))
 	if err != nil {
-		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err)
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, commit, i.SourceRepo, err)
 	}
-	if strings.TrimSpace(got) != PinnedCommit {
+	if strings.TrimSpace(got) != commit {
 		return fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got))
 	}
 	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
-		return fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err)
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, commit), nil, i.Out); err != nil {
+		return fmt.Errorf("%w: git archive %s: %w", ErrPin, commit, err)
 	}
 	if err := extractTar(archive, dst); err != nil {
 		return fmt.Errorf("%w: %w", ErrPin, err)
@@ -468,11 +496,15 @@ func (i *Installer) Install(ctx context.Context) error {
 	// The installed classes decide whether the gVisor node check applies.
 	sub.GVisor = i.Profile.UsesGVisor()
 	i.Checker.Config.Substrate = &sub
-	if platform == PlatformGeneric {
-		// Only the gvisor class is installed, so the node devices of the vm tier are not needed.
+	if !i.Profile.UsesMicroVM() {
+		// No microvm class is installed, so the node devices of the vm tier are not needed.
 		sub.VMTier = false
 		i.Checker.Config.Substrate = &sub
-		_, _ = fmt.Fprintln(i.Out, "platform generic: the vm tier (microVM) is not installed; the sandbox class is gvisor")
+		if platform == PlatformGeneric {
+			_, _ = fmt.Fprintln(i.Out, "platform generic: the vm tier (microVM) is not installed; the sandbox class is gvisor")
+		} else {
+			_, _ = fmt.Fprintf(i.Out, "sandbox classes %q: the vm tier (microVM) is not installed, so the node devices are not checked\n", i.Profile.SandboxClasses)
+		}
 	}
 	setup, err := i.BuildSetup(ctx)
 	if err != nil {

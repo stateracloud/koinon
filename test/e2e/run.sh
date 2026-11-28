@@ -56,6 +56,12 @@
 #   `helm upgrade` to this build, and checks convergence (test/e2e/upgrade.sh, issue 519). It skips (exit 0) when the
 #   tag, the chart, the images or registry.k8s.io cannot be reached; KOINON_REQUIRE=e2e-upgrade makes that a failure.
 #   UPGRADE_STORIES=0 leaves out the run-1 story suite on the upgraded install.
+#   DRIVER=openshell|substrate (default openshell; issue #1091). substrate runs the same quickstart with execution.driver:
+#   substrate on the gVisor class (no KVM needed): kind/up.sh leaves out Agent Sandbox and OpenShell, kind/substrate.sh
+#   builds the substrate overlay of the harness image and installs Substrate (`koinon-api substrate install --platform kind`,
+#   gvisor class only), the values are kind/substrate-values.yaml and the OpenShell client certificate block, the OpenShell
+#   escape cases and the OpenShell diagnostics are left out. `make test-e2e-kind-substrate` sets it. SUBSTRATE_SOURCE,
+#   SUBSTRATE_CACHE and GVISOR_MIRROR are described in kind/substrate.sh.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -74,6 +80,11 @@ FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
 SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
+DRIVER=${DRIVER:-openshell}
+case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
+export DRIVER
+[[ $DRIVER == openshell || ${BACKUP_RESTORE:-0} != 1 ]] || { echo "BACKUP_RESTORE=1 is not wired for DRIVER=substrate yet: the restore drill on the Substrate leg is a follow-up in #1090 part 3 (docs/dev/ci.md)" >&2; exit 2; }
+[[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
 # The quickstart's port-forward block (docs) uses 8080; run.sh checks that this port is free.
@@ -131,7 +142,9 @@ ln -sfn "$root/charts" "$OUT/quickstart/charts"
 # The images live under this cluster's path on the shared registry (kind/imagerepo.sh), so the static
 # localhost:5001 of the files below is rewritten to it.
 IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
-sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/koinon-values.yaml" >"$OUT/quickstart/values.yaml"
+values_src="$here/kind/koinon-values.yaml"
+[[ $DRIVER != substrate ]] || values_src="$here/kind/substrate-values.yaml"
+"$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -165,7 +178,22 @@ diagnostics() {
   for c in fakemodel fakegithub fakemcp fakegitea; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
-  "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
+  if [[ $DRIVER == substrate ]]; then
+    # Substrate: its control plane and the worker pools (the worker namespace is the chart's default, ate-workers).
+    "${K[@]}" -n ate-system get pods -o wide >"$d/ate-system-pods.txt" 2>&1 || true
+    "${K[@]}" -n ate-workers get pods,deploy,workerpools.ate.dev -o yaml >"$d/ate-workers.yaml" 2>&1 || true
+    # The image cache, the provisioner and the Job that gives atelet the cache CA (the Substrate leg's own parts).
+    for c in imagecache provisioner; do
+      "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
+    done
+    "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=imagecache-ca --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-imagecache-ca.log" 2>&1 || true
+    for c in ate-api-server ate-controller atelet; do
+      "${K[@]}" -n ate-system logs -l "app.kubernetes.io/name=$c" --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/$c.log" 2>&1 || true
+    done
+    docker exec "${CLUSTER}-control-plane" journalctl -u containerd --no-pager -n 200 >"$d/node-containerd.txt" 2>&1 || true
+  else
+    "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
+  fi
   # Sandbox namespaces (old issue 159): pod status with exit codes and termination messages. Koinon's
   # admission policy denies pods/log there, so the containers' output is read on the kind node
   # with crictl, below the API.
@@ -219,7 +247,7 @@ fi
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell (the image build ran at the same time)"
+  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG$([[ $DRIVER == substrate ]] || echo ", Agent Sandbox, runc, OpenShell") (the image build ran at the same time)"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
@@ -234,6 +262,28 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     CLUSTER="$CLUSTER" "$here/kind/images.sh"
     done_step "Images: ko build and push (8 binaries), OpenCode harness (pull or buildx) and push"
   fi
+fi
+
+if [[ $DRIVER == substrate ]]; then
+  # The substrate overlay of the harness image, pinned by digest in the values (#1192), then Substrate itself. The probe pods of
+  # the installer run the koinon-api image, so this comes after the images. Not on the quickstart clock (ADR 0049): a reader
+  # installs the prerequisites first, as for OpenShell.
+  step "Substrate: harness overlay and install (kind/substrate.sh)"
+  digest=$(OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" harness | tail -n1)
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest for the substrate overlay (got '$digest')" >&2; exit 1; }
+  # The harness contract suite against the overlay image itself (it is the image the actors run), so the Substrate leg tests
+  # what it deploys. The suite starts its containers with its own entrypoint and needs no cluster.
+  step "Substrate: harness contract suite against the overlay image ($IMAGE_REPO/sandbox-substrate:e2e)"
+  (cd "$root" && KOINON_HARNESS_IMAGE_OPENCODE="$IMAGE_REPO/sandbox-substrate:e2e" make harness-suite)
+  # The CIDR of the docker network "kind" (the kind registry's range): the image cache needs an egress rule for it. The network
+  # exists only after kind/up.sh, so the values file is written again here with the range filled in.
+  KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)
+  [[ -n $KIND_CIDR ]] || { echo "run.sh: no IPv4 subnet in docker network inspect kind" >&2; exit 1; }
+  "$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
+  sed -i.bak "s#sha256:0\{64\}#$digest#" "$OUT/quickstart/values.yaml"
+  grep -q "$digest" "$OUT/quickstart/values.yaml" || { echo "the harness digest was not put into values.yaml" >&2; exit 1; }
+  OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" install 2>&1 | tee "$OUT/substrate-install.log"
+  done_step "Substrate: harness overlay pushed, koinon-api substrate install --platform kind (gvisor)"
 fi
 
 step "fakes ($FAKES)"
@@ -263,7 +313,10 @@ done_step "Fakes deployed"
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
 step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
-e1 client-cert
+# Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
+[[ $DRIVER == substrate ]] || e1 client-cert
+# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names.
+[[ $DRIVER != substrate ]] || OUT="$OUT" CLUSTER="$CLUSTER" NAMESPACE="$NS" "$here/kind/substrate.sh" ca
 if [[ $SUITE == go ]]; then
   e1 model-provider
   # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
@@ -392,7 +445,7 @@ web)
   ;;
 esac
 
-if [[ $SUITE == go && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
+if [[ $SUITE == go && $DRIVER == openshell && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
   step "escape suite, OpenShell cases (test/escape, chart policy live)"
   CLUSTER="$CLUSTER" KOINON_NAMESPACE="$NS" "$here/escape-openshell.sh" 2>&1 | tee "$OUT/escape-openshell.log"
   done_step "Escape suite (OpenShell cases)"
