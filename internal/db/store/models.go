@@ -3158,6 +3158,12 @@ type SpendSettlement struct {
 	CreatedAt     pgtype.Timestamptz
 }
 
+type SubstrateActorName struct {
+	Atespace  string
+	Name      string
+	ClaimedAt pgtype.Timestamptz
+}
+
 type Task struct {
 	OrgID                    pgtype.UUID
 	ID                       pgtype.UUID

@@ -56,6 +56,10 @@ var (
 	ErrFrontDown = errors.New("guest front does not answer")
 	// ErrStreamClosed: an exec stream ended without an exit status.
 	ErrStreamClosed = errors.New("exec stream ended without exit status")
+	// ErrNameReused: the driver refuses to create a sandbox under a name that an earlier sandbox used, also one
+	// that is deleted now (the Substrate driver, issue #1092). No sandbox was created. The name stays used: the
+	// caller must pick a new name ([ActorNamer]), never retry this one.
+	ErrNameReused = errors.New("name used by an earlier sandbox")
 )
 
 // FrontDownError is the ErrFrontDown of CheckFront with the worker that hosts the sandbox. The

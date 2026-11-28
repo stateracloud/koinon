@@ -67,9 +67,11 @@ var _ = Describe("the actor egress policy", func() {
 		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeFalse())
 		Expect(c.Calls("DeleteActorEgressPolicy")).To(BeZero(), "Substrate cascades the policy with the actor")
 
-		By("a new actor with the same name gets a new policy")
-		ready(ctx, d, "a")
-		Expect(c.EgressAllowed(ws, "a", gw, gwPort)).To(BeTrue())
+		By("the name is not used again (issue #1092), and a new actor under a new name gets a new policy")
+		_, err = d.CreateSandbox(ctx, ws, spec("a"))
+		Expect(err).To(MatchError(execution.ErrNameReused))
+		ready(ctx, d, "a2")
+		Expect(c.EgressAllowed(ws, "a2", gw, gwPort)).To(BeTrue())
 	})
 
 	It("removes the policy when an actor that goes away slowly is gone", func(ctx SpecContext) {
@@ -329,7 +331,11 @@ var _ = Describe("the egress listener in the actor egress policy", func() {
 	})
 
 	It("forgets the grant with the sandbox, so a new sandbox of that name has no egress listener until it is set", func(ctx SpecContext) {
-		d, c := newDriver()
+		// The ledger refuses the name again (issue #1092). A ledger that forgets every name shows the second
+		// guard: the grant goes with the sandbox, also when a name does come back.
+		cfg := specConfig()
+		cfg.ActorNames = forgetfulNames{}
+		d, c := newDriver(cfg)
 		Expect(d.SetGatewayAccess(ctx, ws, "a", grant)).To(Succeed())
 		ready(ctx, d, "a")
 		Expect(c.EgressAllowed(ws, "a", gw, egressPort)).To(BeTrue())

@@ -139,6 +139,11 @@ type Config struct {
 	// ([Driver.SetGatewayAccess]). It must not be one of GatewayRoutes: then every actor would reach
 	// it. Check it with [ValidateGatewayRoutes].
 	CodeHostEgressRoute *GatewayRoute
+	// ActorNames is the durable record of the actor names that were sent to CreateActor (issue #1092).
+	// CreateSandbox and RestoreSandbox claim each name in it first and refuse a name that was claimed
+	// before with [execution.ErrNameReused]. Required: without it every create and restore fails with
+	// [execution.ErrFailedPrecondition]. Production passes the database ledger of package actornames.
+	ActorNames ActorNameLedger
 }
 
 func (c Config) withDefaults() Config {
@@ -370,16 +375,26 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	if _, err := d.control.CreateActorTemplate(ctx, &ateapiv1.CreateActorTemplateRequest{ActorTemplate: tmpl}); err != nil && !isCode(err, codeAlreadyExists) {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
-	actor, err := d.control.CreateActor(ctx, &ateapiv1.CreateActorRequest{Actor: &ateapiv1.Actor{
-		Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
-		ActorTemplate: ref(workspace, tmpl.GetMetadata().GetName()),
-	}})
-	created := err == nil
-	if isCode(err, codeAlreadyExists) {
-		actor, err = d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, spec.Name)})
-	}
+	// A name is claimed before CreateActor, and a used name gets no new actor (issue #1092). A live actor
+	// of a claimed name is this create again: it is returned as an existing sandbox.
+	actor, err := d.claimActorName(ctx, op, key{workspace, spec.Name})
 	if err != nil {
-		return execution.Sandbox{}, execution.GRPCError(op, err)
+		return execution.Sandbox{}, err
+	}
+	created := false
+	if actor == nil {
+		actor, err = d.control.CreateActor(ctx, &ateapiv1.CreateActorRequest{Actor: &ateapiv1.Actor{
+			Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
+			ActorTemplate: ref(workspace, tmpl.GetMetadata().GetName()),
+		}})
+		created = err == nil
+		if isCode(err, codeAlreadyExists) {
+			// An actor that a driver made before the ledger had the name (an upgrade).
+			actor, err = d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, spec.Name)})
+		}
+		if err != nil {
+			return execution.Sandbox{}, execution.GRPCError(op, err)
+		}
 	}
 	// Substrate creates an actor suspended (v1.0.0), and the Compute contract says a created sandbox
 	// becomes ready: the driver resumes the actor it made (issue #1092). A sandbox that already

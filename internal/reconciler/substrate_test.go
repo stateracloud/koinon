@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/execution/substrate/actornames"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/staterev"
@@ -121,6 +122,8 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				GuestSigner: fakeate.Signer(),
 				// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
 				RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
+				// The production ledger on the test database: a new driver here is a restart.
+				ActorNames: actornames.New(pool),
 			})
 		}
 		d = newDriver(0)
@@ -1149,6 +1152,13 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		Expect(cl.State(ws, first.ActorName.String)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_UNSPECIFIED), "nothing under the old name")
 		Eventually(func() ateapiv1.ActorState { return cl.State(ws, second.ActorName.String) }).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 		Expect(cl.EgressAllowed(ws, second.ActorName.String, fakeate.GatewayHost, fakeate.GatewayPort)).To(BeTrue(), "the new name has its gateway access")
+
+		By("the database ledger holds both names, so no driver creates the old one again (issue #1092)")
+		for _, n := range []string{first.ActorName.String, second.ActorName.String} {
+			fresh, err := actornames.New(pool).ClaimActorName(ctx, ws, n)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fresh).To(BeFalse(), n)
+		}
 	})
 })
 

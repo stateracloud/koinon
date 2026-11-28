@@ -169,6 +169,13 @@ type Querier interface {
 	// One run restores at a time; a claim older than @lease_seconds is taken over. No row: nothing
 	// to restore, or another run is restoring.
 	ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxRestoreParams) (AgentSandbox, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The ledger of Substrate actor names (issue #1092), written by the Substrate driver in koinon-reconciler
+	// and koinon-agentd through package actornames.
+	// Claims a Substrate actor name before the driver creates the actor. One row: the name is new. No row: a
+	// create claimed it before, and the driver refuses it. A claim is never removed.
+	ClaimSubstrateActorName(ctx context.Context, arg ClaimSubstrateActorNameParams) (int64, error)
 	// Clears the agent's run-limit overrides and leaves its continuation overrides.
 	ClearAgentRunLimits(ctx context.Context, arg ClearAgentRunLimitsParams) error
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)

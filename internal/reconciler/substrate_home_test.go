@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/execution/substrate/actornames"
 	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
 	"github.com/stateracloud/koinon/internal/harness"
@@ -130,6 +131,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			GatewayRoutes:     []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 			GuestSigner:       fakeate.Signer(),
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
+			ActorNames:        actornames.New(pool),
 		})
 		kube = fake.NewClientset() // kept across a rebuild of the reconciler, as in a restart
 		now.Store(nil)
