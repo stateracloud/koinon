@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -163,9 +164,10 @@ type SubstrateConfig struct {
 	Audience string
 	// Now is the clock. Nil means time.Now. It is for tests.
 	Now func() time.Time
-	// IssuerAddr is for tests only. When set (host:port), every connection of the issuer client dials this
-	// address instead of the one in the URL, for example a port-forward on 127.0.0.1. The URL still gives the
-	// TLS server name and the certificate check, so verification stays on. Production leaves it empty.
+	// IssuerAddr is for tests only. Never wire it to a flag, an environment variable or a chart value.
+	// When set (host:port), every connection of the issuer client dials this address instead of the one
+	// in the URL, for example a port-forward on 127.0.0.1. The URL still gives the TLS server name and the
+	// certificate check, so verification stays on. Production leaves it empty.
 	IssuerAddr string
 }
 
@@ -216,8 +218,8 @@ func NewSubstrateVerifier(ctx context.Context, cfg SubstrateConfig) (*SubstrateV
 		return nil, err
 	}
 	if cfg.IssuerAddr != "" {
-		if _, _, err := net.SplitHostPort(cfg.IssuerAddr); err != nil {
-			return nil, fmt.Errorf("actortoken: the Substrate issuer address %q must be host:port: %w", cfg.IssuerAddr, err)
+		if err := checkIssuerAddr(cfg.IssuerAddr); err != nil {
+			return nil, err
 		}
 	}
 	now := cfg.Now
@@ -264,6 +266,21 @@ func checkIssuerURL(issuer string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" ||
 		u.Fragment != "" || strings.HasSuffix(issuer, "#") || strings.HasSuffix(issuer, "?") {
 		return fmt.Errorf("actortoken: the Substrate issuer %q must be an https URL with no user, query or fragment", issuer)
+	}
+	return nil
+}
+
+// checkIssuerAddr requires host:port with a non-empty host and a numeric port from 1 to 65535.
+func checkIssuerAddr(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("actortoken: the Substrate issuer address %q must be host:port: %w", addr, err)
+	}
+	if host == "" {
+		return fmt.Errorf("actortoken: the Substrate issuer address %q has an empty host", addr)
+	}
+	if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
+		return fmt.Errorf("actortoken: the Substrate issuer address %q has no numeric port from 1 to 65535", addr)
 	}
 	return nil
 }
