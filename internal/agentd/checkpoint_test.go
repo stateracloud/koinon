@@ -939,6 +939,20 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-b", cps(ctx))
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "the newest was refused; the older one restored")
+		By("the run is told which checkpoint was skipped, when it was taken, why, and what is lost (issue #1538)")
+		evs := events(ctx, r2)
+		fb := slices.IndexFunc(evs, func(ev store.RunEvent) bool { return ev.Kind == "run.home_fell_back" })
+		Expect(fb).To(BeNumerically(">=", 0), "a fallback event")
+		Expect(kinds(evs)).To(ContainElement("run.home_restored"))
+		fell := payload(evs[fb])
+		Expect(fell).To(HaveKeyWithValue("checkpoint", older.String()))
+		Expect(fell).To(HaveKeyWithValue("taken_at", checkpointOf(ctx, older)().FinishedAt.Time.UTC().Format(time.RFC3339)))
+		Expect(fell).To(HaveKeyWithValue("lost", "the writes after "+checkpointOf(ctx, older)().FinishedAt.Time.UTC().Format(time.RFC3339)))
+		Expect(fell["skipped"]).To(ConsistOf(And(
+			HaveKeyWithValue("checkpoint", newer.String()),
+			HaveKeyWithValue("taken_at", checkpointOf(ctx, newer)().FinishedAt.Time.UTC().Format(time.RFC3339)),
+			HaveKeyWithValue("reason", "its files do not match the recorded digest"),
+		)))
 
 		By("every checkpoint's record is wrong: the run fails and the restore stays owed")
 		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET content_digest = $1 WHERE org_id = $2 AND agent_id = $3`,

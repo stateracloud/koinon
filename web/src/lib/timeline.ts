@@ -370,6 +370,21 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
       const lost = snap ? `the writes after ${snap} are lost` : 'the writes after its last snapshot are lost'
       return { key, at, type: 'note', text: `Run ${shortId(runId)}: the sandbox crashed and was reverted to its last snapshot; ${lost}`, runId }
     }
+    case 'run.home_fell_back': {
+      // agentd tells the run that its home restore skipped newer checkpoints (#1538): {checkpoint,
+      // taken_at, skipped: [{checkpoint, taken_at, reason}], lost}. The restore used the checkpoint taken at taken_at.
+      const used = str(p.taken_at)
+      const skipped = arr(p.skipped).map((s) => {
+        const o = obj(s)
+        const when = str(o?.taken_at)
+        const why = str(o?.reason)
+        return `${when ? `the checkpoint of ${when}` : 'a checkpoint'}${why ? ` (${why})` : ''}`
+      })
+      const from = used ? `the checkpoint of ${used}` : 'an older checkpoint'
+      const lost = used ? `the writes after ${used} are lost` : 'the writes after it are lost'
+      const what = skipped.length > 0 ? `skipped ${skipped.join(', ')} and ` : ''
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: the home restore ${what}used ${from}; ${lost}`, runId }
+    }
     default:
       // The user's message chunks (already on the task), plans, usage and
       // mode updates, and agentd's bookkeeping are not shown.

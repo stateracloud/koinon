@@ -154,6 +154,24 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a home restore that fell back to an older checkpoint as a note', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.home_fell_back', {
+          checkpoint: 'c-old',
+          taken_at: '2026-11-28T01:00:00Z',
+          skipped: [{ checkpoint: 'c-new', taken_at: '2026-11-28T02:00:00Z', reason: 'its files do not match the recorded digest' }],
+          lost: 'the writes after 2026-11-28T01:00:00Z',
+        }),
+        runEvent(2, 'run.home_fell_back', {}),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456: the home restore skipped the checkpoint of 2026-11-28T02:00:00Z (its files do not match the recorded digest) and used the checkpoint of 2026-11-28T01:00:00Z; the writes after 2026-11-28T01:00:00Z are lost',
+      'Run r-123456: the home restore used an older checkpoint; the writes after it are lost',
+    ])
+  })
+
   it('says why a task waits on its owner after a run hit its time limit', () => {
     const items = buildTimeline(
       [
