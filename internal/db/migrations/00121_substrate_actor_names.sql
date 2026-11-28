@@ -5,11 +5,12 @@
 -- actor got the deleted actor's token (lab, rc.33). The driver claims each name here before CreateActor and
 -- refuses a name that is here already. The record outlives a restart and is shared by every replica.
 --
---   * atespace, name: the Substrate atespace (the org's workspace) and the actor name.
+--   * org_id: the org whose workspace is the atespace (org_workspaces.workspace).
+--   * atespace, name: the Substrate atespace and the actor name. Unique.
 --   * claimed_at: when the first create claimed the name (the database clock).
 --
--- A row is never removed, also not with its org: it is the proof that a name was used. The table has no
--- foreign key to the org for that reason. One row per actor ever created.
+-- A row stays while its org exists, and goes with the org: the atespace name derives from the org ID, which
+-- is never used again, so no actor can be created in that atespace after the org is gone.
 --
 -- The backfill records the actor names that agent_sandboxes holds now, so a name that the reconciler recorded
 -- before this migration is not created again.
@@ -19,15 +20,17 @@
 -- +goose Up
 
 CREATE TABLE substrate_actor_names (
+    org_id     uuid        NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
     -- Substrate checks the format of both names; a name it refuses is still claimed, so only the length is
     -- bounded here.
     atespace   text        NOT NULL CHECK (length(atespace) BETWEEN 1 AND 253),
     name       text        NOT NULL CHECK (length(name) BETWEEN 1 AND 253),
     claimed_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (atespace, name)
+    PRIMARY KEY (org_id, atespace, name),
+    UNIQUE (atespace, name)
 );
 
-INSERT INTO substrate_actor_names (atespace, name)
-SELECT workspace, actor_name FROM agent_sandboxes
+INSERT INTO substrate_actor_names (org_id, atespace, name)
+SELECT org_id, workspace, actor_name FROM agent_sandboxes
 WHERE actor_name IS NOT NULL
 ON CONFLICT DO NOTHING;

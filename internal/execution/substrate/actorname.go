@@ -40,7 +40,8 @@ func (d *Driver) NewActorName(sandbox string) string {
 // here before CreateActor and refuses a name that was claimed before ([execution.ErrNameReused]).
 //
 // The record must outlive a restart of the driver and be shared by every driver replica: production uses the
-// Koinon database (package actornames, table substrate_actor_names). A record is never removed.
+// Koinon database (package actornames, table substrate_actor_names). A record goes only with its org, whose ID
+// the atespace name derives from and which is never used again.
 type ActorNameLedger interface {
 	// ClaimActorName records that the driver sends the actor name in atespace to CreateActor. It returns true
 	// when this call recorded the name, and false when the name was recorded before, by any driver, also before

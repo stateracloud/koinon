@@ -202,6 +202,9 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		}
 		_, err := d.EnsureWorkspace(ctx, ws, nil)
 		Expect(err).NotTo(HaveOccurred())
+		// The ledger claims a name for the org of the workspace (issue #1092): the reconciler records it first.
+		_, err = pool.Exec(ctx, `INSERT INTO org_workspaces (org_id, workspace) VALUES ($1, $2) ON CONFLICT DO NOTHING`, org, ws)
+		Expect(err).NotTo(HaveOccurred())
 		_, err = d.CreateSandbox(ctx, ws, withEgress)
 		Expect(errors.Is(err, execution.ErrUnsupported)).To(BeTrue(), "plain driver: %v", err)
 		_, err = execution.WithoutEgress(d).CreateSandbox(ctx, ws, withEgress)

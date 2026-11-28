@@ -3159,6 +3159,7 @@ type SpendSettlement struct {
 }
 
 type SubstrateActorName struct {
+	OrgID     pgtype.UUID
 	Atespace  string
 	Name      string
 	ClaimedAt pgtype.Timestamptz

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -38,7 +40,7 @@ var _ = BeforeEach(func(ctx context.Context) {
 	dsn = tmpl.DSN(ctx)
 })
 
-// newPool opens a pool of its own on the suite's database: two pools are two processes.
+// newPool opens a pool of its own on the spec's database: two pools are two processes.
 func newPool(ctx context.Context) *pgxpool.Pool {
 	GinkgoHelper()
 	p, err := pgxpool.New(ctx, dsn)
@@ -47,28 +49,93 @@ func newPool(ctx context.Context) *pgxpool.Pool {
 	return p
 }
 
+// newOrg makes a team org and its workspace record, as the reconciler does, and returns the org and its
+// atespace.
+func newOrg(ctx context.Context, p *pgxpool.Pool) (pgtype.UUID, string) {
+	GinkgoHelper()
+	org, _, _ := pgtest.NewOrg(ctx, p)
+	ws := execution.WorkspaceName(org.Bytes)
+	_, err := p.Exec(ctx, `INSERT INTO org_workspaces (org_id, workspace) VALUES ($1, $2)`, org, ws)
+	Expect(err).NotTo(HaveOccurred())
+	return org, ws
+}
+
+// rows counts the ledger rows of org.
+func rows(ctx context.Context, p *pgxpool.Pool, org pgtype.UUID) int {
+	GinkgoHelper()
+	var n int
+	Expect(p.QueryRow(ctx, `SELECT count(*) FROM substrate_actor_names WHERE org_id = $1`, org).Scan(&n)).To(Succeed())
+	return n
+}
+
 const img = "img@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 var _ = Describe("the database ledger of actor names (issue #1092)", func() {
 	It("claims a name once per atespace, also from another process", func(ctx SpecContext) {
-		a, b := actornames.New(newPool(ctx)), actornames.New(newPool(ctx))
+		p := newPool(ctx)
+		a, b := actornames.New(p), actornames.New(newPool(ctx))
+		_, wsA := newOrg(ctx, p)
+		_, wsB := newOrg(ctx, p)
 		name := pgtest.Uniq("kt")
-		fresh, err := a.ClaimActorName(ctx, "org-a", name)
+		fresh, err := a.ClaimActorName(ctx, wsA, name)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fresh).To(BeTrue())
-		fresh, err = a.ClaimActorName(ctx, "org-a", name)
+		fresh, err = a.ClaimActorName(ctx, wsA, name)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fresh).To(BeFalse(), "the same ledger")
-		fresh, err = b.ClaimActorName(ctx, "org-a", name)
+		fresh, err = b.ClaimActorName(ctx, wsA, name)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fresh).To(BeFalse(), "a ledger of another process")
-		fresh, err = b.ClaimActorName(ctx, "org-b", name)
+		fresh, err = b.ClaimActorName(ctx, wsB, name)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(fresh).To(BeTrue(), "another atespace")
+		Expect(fresh).To(BeTrue(), "the atespace of another org")
+	})
+
+	It("refuses to claim in an atespace that no org has", func(ctx SpecContext) {
+		fresh, err := actornames.New(newPool(ctx)).ClaimActorName(ctx, "kw-no-such-org", "kt-1")
+		Expect(err).To(MatchError(ContainSubstring("no org has the workspace")))
+		Expect(fresh).To(BeFalse())
+	})
+
+	It("drops the rows of a deleted org, and keeps the rows of another org", func(ctx SpecContext) {
+		p := newPool(ctx)
+		l := actornames.New(p)
+		orgA, wsA := newOrg(ctx, p)
+		orgB, wsB := newOrg(ctx, p)
+		name := pgtest.Uniq("kt")
+		for _, ws := range []string{wsA, wsB} {
+			fresh, err := l.ClaimActorName(ctx, ws, name)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fresh).To(BeTrue(), ws)
+		}
+		Expect(rows(ctx, p, orgA)).To(Equal(1))
+
+		// The org goes for good, with its owner, its membership and its workspace record.
+		err := pgx.BeginFunc(ctx, p, func(tx pgx.Tx) error {
+			for _, q := range []string{
+				`DELETE FROM org_memberships WHERE org_id = $1`,
+				`DELETE FROM users WHERE personal_org_id = $1`,
+				`DELETE FROM org_workspaces WHERE org_id = $1`,
+				`DELETE FROM orgs WHERE id = $1`,
+			} {
+				if _, err := tx.Exec(ctx, q, orgA); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows(ctx, p, orgA)).To(BeZero(), "the rows go with the org")
+		Expect(rows(ctx, p, orgB)).To(Equal(1), "another org's row of the same name stays")
+		fresh, err := l.ClaimActorName(ctx, wsB, name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fresh).To(BeFalse(), "the other org still holds its claim")
 	})
 
 	It("gives exactly one of many concurrent claims of a name", func(ctx SpecContext) {
-		l := actornames.New(newPool(ctx))
+		p := newPool(ctx)
+		l := actornames.New(p)
+		_, ws := newOrg(ctx, p)
 		name := pgtest.Uniq("kt")
 		var (
 			wg   sync.WaitGroup
@@ -80,7 +147,7 @@ var _ = Describe("the database ledger of actor names (issue #1092)", func() {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
-				fresh, err := l.ClaimActorName(ctx, "org-a", name)
+				fresh, err := l.ClaimActorName(ctx, ws, name)
 				Expect(err).NotTo(HaveOccurred())
 				if fresh {
 					mu.Lock()
@@ -107,11 +174,12 @@ var _ = Describe("the database ledger of actor names (issue #1092)", func() {
 				GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 			}
 		}
-		const ws = "org-acme"
+		p := newPool(ctx)
+		_, ws := newOrg(ctx, p)
 		name := pgtest.Uniq("kt")
 		spec := execution.SandboxSpec{Name: name, Image: img, CPULimit: "500m", MemoryLimit: "512Mi"}
 
-		first := substrate.New(control, router, cfg(actornames.New(newPool(ctx))))
+		first := substrate.New(control, router, cfg(actornames.New(p)))
 		_, err = first.EnsureWorkspace(ctx, ws, nil)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = first.CreateSandbox(ctx, ws, spec)
