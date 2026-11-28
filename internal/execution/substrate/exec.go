@@ -384,6 +384,12 @@ func (s *stdin) Close() error {
 		return nil // the command ended while the close was on its way
 	case <-t.C:
 	}
+	// select picks at random when the exit and the timer are both ready: the exit wins.
+	select {
+	case <-s.p.done:
+		return nil
+	default:
+	}
 	return err
 }
 

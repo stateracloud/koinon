@@ -429,6 +429,30 @@ func (c *Cluster) Running(atespace, name string) [][]string {
 	return out
 }
 
+// PipesGone returns how many processes of an actor exited with their exit not published yet
+// (LagNextExits): their stdin pipe is closed and a close of it fails. A spec waits for it before it
+// closes stdin, so the close lands in the window.
+func (c *Cluster) PipesGone(atespace, name string) int {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	var procs []*fproc
+	if a != nil {
+		for _, p := range a.procs {
+			procs = append(procs, p)
+		}
+	}
+	c.mu.Unlock()
+	n := 0
+	for _, p := range procs {
+		p.mu.Lock()
+		if p.pipeGone && !p.exited {
+			n++
+		}
+		p.mu.Unlock()
+	}
+	return n
+}
+
 // Files returns the files that tar extracted into an actor, by path.
 func (c *Cluster) Files(atespace, name string) map[string][]byte {
 	c.mu.Lock()

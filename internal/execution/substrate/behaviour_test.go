@@ -172,9 +172,11 @@ var _ = Describe("the Substrate driver", func() {
 		// that window fails with Internal (kind e2e run 46151688093, "prepare the session directory").
 		It("closes stdin without error when the guest fails the close because the command exited", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
-			cl.LagNextExits(ws, "sb", 1, 200*time.Millisecond)
+			cl.LagNextExits(ws, "sb", 1, time.Second)
 			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
 			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() int { return cl.PipesGone(ws, "sb") }).WithTimeout(500*time.Millisecond).Should(Equal(1),
+				"mkdir exited and its exit is not published yet, so the close lands in the window")
 			Expect(p.Stdin().Close()).To(Succeed(), "the command ended, so the failed close is no error")
 			code, err := p.Wait()
 			Expect(err).NotTo(HaveOccurred())
@@ -188,6 +190,7 @@ var _ = Describe("the Substrate driver", func() {
 			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(p.Close)
+			Eventually(func() int { return cl.PipesGone(ws, "sb") }).WithTimeout(time.Second).Should(Equal(1))
 			Expect(p.Stdin().Close()).To(MatchError(ContainSubstring("closing stdin")))
 		}, SpecTimeout(15*time.Second))
 
