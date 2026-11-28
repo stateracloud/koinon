@@ -323,10 +323,19 @@ entrypoint, so the overlay's guest-front entrypoint does not get in the way. The
 
 The leg is advisory (a comment in `hack/ci-required.txt`, not a listed name: it is a driver of the `quickstart` job and
 runs on dispatch only). Issue #1091 is done when the quickstart and the contract suite on the overlay image are green on
-this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the restore drill
-(`BACKUP_RESTORE=1` with `DRIVER=substrate` is refused with a message that names #1090 part 3), the gVisor-class assertion on the actor, the Substrate escape case and the missing-image step
-(skipped until its Substrate form is proven). The CI wiring is already in `e2e-kind.yml` as the `driver` dispatch input; the leg
-becomes a required leg at the switch (#1093, no soak).
+this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the gVisor-class assertion on
+the actor, the Substrate escape case and the missing-image step (skipped until its Substrate form is proven). The CI wiring
+is already in `e2e-kind.yml` as the `driver` dispatch input; the leg becomes a required leg at the switch (#1093, no soak).
+
+The restore drill of this leg is the home restore drill (#1090 part 3): `BACKUP_RESTORE=1 make test-e2e-kind-substrate`,
+or a dispatch with `driver=substrate` and `backup_restore=true`. After the quickstart pass, `test/e2e/run.sh` runs the
+spec `test/e2e/home_restore_test.go` (label `home-restore`). It starts the S3 server of the ADR 0109 drill in the fakes
+namespace and turns home checkpoints on with `helm upgrade --reuse-values` (idle timeout 2m, archive delay 1m). An agent
+writes a marker into its home, goes idle, takes its stop checkpoint and is archived: the actor and its durable directory
+are deleted. With every recorded digest of the agent's checkpoints made wrong, the next run fails before the harness
+starts and names the digest mismatch. With the digests put back, the next run restores the home through the Substrate
+upload path, records `run.home_restored` with `verified: true`, loads the task's session and reads the marker. The
+database and keys drill (`test/e2e/backup-restore.sh`) does not run on this leg yet.
 
 ### The N-1 to N upgrade e2e (issue #519)
 

@@ -517,11 +517,17 @@ func (p mcpPath) orgServerAgentHeader(agentID string) string {
 // portForward forwards a free local port to target's port in the koinon namespace until the spec ends.
 func portForward(ctx context.Context, kubectl, target, port string) string {
 	GinkgoHelper()
+	return portForwardIn(ctx, kubectl, "koinon", target, port)
+}
+
+// portForwardIn is portForward for a target in namespace ns.
+func portForwardIn(ctx context.Context, kubectl, ns, target, port string) string {
+	GinkgoHelper()
 	l, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	Expect(err).NotTo(HaveOccurred())
 	_, p, _ := net.SplitHostPort(l.Addr().String())
 	Expect(l.Close()).To(Succeed())
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), kubectl, "-n", "koinon", "port-forward", target, p+":"+port)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), kubectl, "-n", ns, "port-forward", target, p+":"+port)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	Expect(cmd.Start()).To(Succeed())
 	DeferCleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })

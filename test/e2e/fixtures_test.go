@@ -5,9 +5,14 @@ package e2e_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	fakemodelscripts "github.com/stateracloud/koinon/test/fakemodel"
 )
 
 // declaredProvider is the part of a labelled model-provider Secret the fixture check reads.
@@ -51,5 +56,39 @@ func TestE2EQuickstartProviderDeclaresRepoHelperFirst(t *testing.T) {
 	quickstart, models := readProvider(t, "model-provider.yaml")
 	if len(models) == 0 || models[0] != "repo-helper" {
 		t.Fatalf("the quickstart provider %q must declare repo-helper first, step 3 makes it the org default; got %v", quickstart, models)
+	}
+}
+
+// The home restore drill (home_restore_test.go) finds "home-drill-marker-found" in a run's events only when the
+// shell tool printed it: no command of the script may hold either result word, and the provider must declare the
+// model. Checked offline with `go test ./...`; the drill itself needs the Substrate leg on kind.
+func TestE2EHomeDrillScriptPrintsTheMarkerOnlyFromTheShell(t *testing.T) {
+	all, err := fakemodel.LoadFS(fakemodelscripts.FS, "scripts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, s := range all {
+		if s.Model != homeDrillModel {
+			continue
+		}
+		found = true
+		for _, turn := range s.Turns {
+			for _, c := range turn.ToolCalls {
+				cmd, _ := c.Arguments["command"].(string)
+				for _, word := range []string{"home-drill-marker-found", "home-drill-marker-missing"} {
+					if strings.Contains(cmd, word) {
+						t.Fatalf("the %s command %q holds %q: the drill could not tell a read from the script", homeDrillModel, cmd, word)
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no fake model script for %s", homeDrillModel)
+	}
+	_, models := readProvider(t, "model-provider.yaml")
+	if !slices.Contains(models, homeDrillModel) {
+		t.Fatalf("kind/model-provider.yaml does not declare %s: %v", homeDrillModel, models)
 	}
 }

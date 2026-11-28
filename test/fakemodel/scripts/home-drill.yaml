@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The home restore drill on the Substrate leg (test/e2e/home_restore_test.go, issue #1090 part 3). A message that
+# holds "home-drill-write" makes the agent write /sandbox/work/home-drill-marker.txt (inside the checkpointed home)
+# with its shell tool. A message that holds "home-drill-read" makes it print "home-drill-marker-found" when the file
+# is there and "home-drill-marker-missing" when it is not. The command's text never holds either word, so the spec
+# finds "home-drill-marker-found" in a run's events only when the file was read. The same shape as the archive
+# check of the ADR 0109 drill (test/drill/fakemodel/drill.yaml). Selection takes the first turn whose `when` holds
+# (on the latest user text), so the tool-result turns come first and the plain answer last.
+model: home-drill
+turns:
+  - when:
+      userContains: "home-drill-write"
+      toolResult: bash
+    text: "marker written"
+    usage:
+      inputTokens: 120
+      outputTokens: 4
+  - when:
+      userContains: "home-drill-write"
+    toolCalls:
+      - name: bash
+        arguments:
+          command: "mkdir -p /sandbox/work && echo home-drill-token > /sandbox/work/home-drill-marker.txt"
+          description: "write the home drill marker"
+    usage:
+      inputTokens: 110
+      outputTokens: 30
+  - when:
+      userContains: "home-drill-read"
+      toolResult: bash
+    text: "marker read"
+    usage:
+      inputTokens: 130
+      outputTokens: 4
+  - when:
+      userContains: "home-drill-read"
+    toolCalls:
+      - name: bash
+        arguments:
+          command: "echo home-drill-marker-$(test -f /sandbox/work/home-drill-marker.txt && echo found || echo missing)"
+          description: "read the home drill marker"
+    usage:
+      inputTokens: 110
+      outputTokens: 30
+  # The end-of-turn note and anything else.
+  - text: "home drill ok"
+    usage:
+      inputTokens: 100
+      outputTokens: 5
