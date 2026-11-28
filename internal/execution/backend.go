@@ -223,6 +223,40 @@ func ReverterOf(b Backend) (Reverter, bool) {
 	return nil, false
 }
 
+// Repointer is an optional capability of a driver: give a sandbox another spec and keep its home, with no
+// delete and no restore (issue #1482). The OpenShell driver does not implement it.
+type Repointer interface {
+	// RepointSandbox makes the sandbox run spec. A running sandbox is suspended first, with a durable
+	// snapshot. It fails with ErrRepointRefused, and changes nothing, when the new spec would not keep the
+	// home: the caller then deletes the sandbox and restores the home from a checkpoint. It fails with
+	// ErrRepointResume when the sandbox was repointed and the step after it failed: the caller must not
+	// delete it. On success the sandbox is resumed.
+	RepointSandbox(ctx context.Context, workspace, name string, spec SandboxSpec) (Sandbox, error)
+}
+
+// RepointerOf returns the [Repointer] of b, or false when b has none. It looks through wrappers like
+// [ActorNamerOf].
+func RepointerOf(b Backend) (Repointer, bool) {
+	var cur any = b
+	for range 8 {
+		// The adapter of WithoutEgress drops the fields of the Egress half from a spec before the driver sees it.
+		if ne, ok := cur.(noEgress); ok {
+			if n, ok := ne.Compute.(Repointer); ok {
+				return strippedRepointer{n}, true
+			}
+		}
+		if n, ok := cur.(Repointer); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
 // SnapshotKind says what a snapshot holds.
 type SnapshotKind string
 

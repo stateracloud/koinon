@@ -1096,3 +1096,27 @@ not mean that a TCP handshake fails on Substrate. This amendment says where the 
   with the positive control passing, is the evidence. Until then, "no product hole" is a hypothesis.
 - **Docs.** [escape-substrate.md](../dev/escape-substrate.md#a-connect-proves-nothing-on-substrate) gives the
   denial results that a spec accepts.
+
+## Amendment (2026-11-28, issue #1482): a spec change on a suspended actor repoints it, the home stays
+
+Section 5.4 says that a changed sandbox spec deletes the sandbox and restores the home from kopia. On Substrate
+that is now the fallback. The first choice keeps the home where it is.
+
+- **Repoint.** A spec change on the same tier gives a new template. The driver suspends the actor with synchronous
+  durability, calls UpdateActor with the new template, and resumes the actor. The actor name, the home and the
+  snapshot stay. The driver then takes one more synchronous suspend, so a revert does not go back to a snapshot of
+  the old template. The seal is best effort. When it or the resume fails, the driver keeps a mark in memory and takes
+  the seal at the next resume. A restart of the driver loses the mark. A repoint resumes an idle sandbox too. The
+  recreate cap limits how many repoints one pass makes.
+- **Invariants.** A repoint is legal only when these stay equal: the container names, the volumes, the volume
+  mounts of every container, the snapshot storage location, the isolation tier and the runtime class. On gVisor the home checkpoint
+  is keyed by the container name. A rename leaves the home empty, and Substrate gives no error. Golden tests in
+  `internal/execution/substrate` fail when one of these changes in a rendered template.
+- **Fallback.** A tier change, a Substrate refusal (FailedPrecondition or InvalidArgument) or a lost old template
+  gives `ErrRepointRefused`. The reconciler then deletes the actor and restores the home from kopia, as before.
+  A failed resume after the repoint gives `ErrRepointResume`. The actor names the new template and holds its home,
+  so the reconciler does not delete it.
+- **Templates.** The driver never deletes a template that an actor names. `DeleteUnusedTemplate` checks
+  ListActors first. No production path calls it before v0.2.
+- **What stays.** Default-deny egress, the isolation tiers of ADR 0075 and the snapshot rules of section 5 are
+  unchanged. The metric `koinon_reconciler_sandbox_repoints_total{result}` counts repoints by result.

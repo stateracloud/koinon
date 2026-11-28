@@ -189,6 +189,9 @@ type Driver struct {
 	// owed holds the actors that SnapshotSandbox suspended and could not resume. A retry of the
 	// snapshot resumes them, because the seam says the sandbox keeps running.
 	owed map[key]bool
+	// sealOwed holds the actors that a repoint changed and that did not get the synchronous suspend of the new
+	// template yet (issue #1482). The next resume takes it. The mark lives in memory: a restart of the driver loses it.
+	sealOwed map[key]bool
 	// tiers caches the tier of a template by atespace and name. A template name is a hash of its
 	// content, so the entry never goes stale.
 	tiers map[key]harness.Tier
@@ -224,6 +227,7 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		cfg:        cfg.withDefaults(),
 		gates:      map[key]*gate{},
 		owed:       map[key]bool{},
+		sealOwed:   map[key]bool{},
 		tiers:      map[key]harness.Tier{},
 		access:     map[key]execution.GatewayAccess{},
 		lineage:    lineages{m: map[string]lineage{}},
@@ -267,6 +271,23 @@ func (d *Driver) setOwed(k key, owed bool) {
 	} else {
 		delete(d.owed, k)
 	}
+}
+
+// setSealOwed records whether a repoint owes k a synchronous suspend of its new template.
+func (d *Driver) setSealOwed(k key, owed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if owed {
+		d.sealOwed[k] = true
+	} else {
+		delete(d.sealOwed, k)
+	}
+}
+
+func (d *Driver) isSealOwed(k key) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sealOwed[k]
 }
 
 func (d *Driver) isOwed(k key) bool {
@@ -590,13 +611,13 @@ func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execut
 	k := key{workspace, name}
 	// An actor with no snapshot boots for the first time. A revert of it would give an empty home, so
 	// it gets one synchronous suspend as soon as it runs (issue #1481, decision 8).
-	first := false
+	first := d.isSealOwed(k)
 	if before, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)}); err != nil {
 		// Without this read the driver cannot tell a first boot. The actor then runs without the seal, and a
 		// revert of it would give an empty home: say so.
 		d.cfg.Logger.Warn("substrate: could not read the actor to detect a first boot; no seal is taken", "op", op, "sandbox", k.String(), "err", err)
 	} else {
-		first = before.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED && len(before.GetStatus().GetSnapshots()) == 0
+		first = first || (before.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED && len(before.GetStatus().GetSnapshots()) == 0)
 	}
 	resp, err := d.retryResume(ctx, workspace, name)
 	if err != nil {
@@ -605,6 +626,7 @@ func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execut
 	d.setOwed(k, false)
 	if first && resp.GetResumed() {
 		if sb, ok := d.sealFirstBoot(ctx, op, k); ok {
+			d.setSealOwed(k, false)
 			return sb, nil
 		}
 	}
