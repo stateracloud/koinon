@@ -271,8 +271,12 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 // Validate checks the driver name and what the chosen driver needs. openshellAddress is the
 // binary's OpenShell address setting, which only the openshell driver needs.
 func (e *Execution) Validate(openshellAddress string) error {
+	// Empty means substrate, as in execution.ParseDriver (the default since #1093).
+	if e.Driver == "" {
+		e.Driver = DriverSubstrate
+	}
 	switch e.Driver {
-	case "", DriverOpenShell:
+	case DriverOpenShell:
 		if openshellAddress == "" {
 			return errors.New("--openshell-address is required with --execution-driver=openshell")
 		}
@@ -300,7 +304,7 @@ func (e *Execution) Validate(openshellAddress string) error {
 }
 
 // IsSubstrate reports whether the substrate driver is selected.
-func (e Execution) IsSubstrate() bool { return e.Driver == DriverSubstrate }
+func (e Execution) IsSubstrate() bool { return e.Driver == DriverSubstrate || e.Driver == "" }
 
 // Connection is a dialed execution driver.
 type Connection struct {

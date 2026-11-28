@@ -22,10 +22,9 @@ hit 'defaultTier: "hardened"' <<<"$default_out" || fail "the default tier fits t
 hit -e '- name: gvisor' <<<"$default_out" || fail "the default worker pool is gvisor"
 if hit 'KOINON_OPENSHELL_ADDRESS' <<<"$default_out"; then fail "the default driver gives no OpenShell address to any component"; fi
 if hit -E 'sandbox-default-deny|sandbox-networkpolicy' <<<"$default_out"; then fail "no OpenShell sandbox NetworkPolicy writer with the default driver"; fi
-# OpenShell fails closed: without the default-deny NetworkPolicy writer (ADR 0045) the chart refuses to render.
-if render --set sandboxNetworkPolicy.enabled=false >/dev/null 2>"$out/os.err"; then fail "openshell with sandboxNetworkPolicy off must not render"; fi
-hit 'sandboxNetworkPolicy.enabled=true' "$out/os.err" || fail "the openshell error must name sandboxNetworkPolicy.enabled"
-# The OpenShell driver stays selectable until #1094: it needs its address, TLS choice and three features on.
+# The OpenShell opt-out of the default-deny writer renders as on main (32-sandbox-networkpolicy.sh checks what it renders).
+render --set sandboxNetworkPolicy.enabled=false >/dev/null || fail "openshell with sandboxNetworkPolicy.enabled=false renders, as before #1093"
+# The OpenShell driver stays selectable until #1094: it needs its address and TLS choice; the three features are on unless set false.
 # The openshell ci values file (charts/koinon/ci/openshell-values.yaml) keeps the driver in the preflight and smoke renders.
 has "the openshell driver is still selectable" 'driver: openshell' --show-only templates/config.yaml
 # Upgrade from an OpenShell install (#1093): openshell.address set and execution.driver left empty fails, and the

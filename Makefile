@@ -301,7 +301,7 @@ load-gateway: ## Gateway load suite (issue 280): cloud only, never in CI or `mak
 
 .PHONY: dev-kind-up
 dev-kind-up: ## Create the kind cluster kind-koinon-dev with Koinon's prerequisites (CNPG, Agent Sandbox, OpenShell)
-	CLUSTER=$(DEV_KIND_CLUSTER) test/e2e/kind/up.sh
+	CLUSTER=$(DEV_KIND_CLUSTER) DRIVER=openshell test/e2e/kind/up.sh
 
 .PHONY: dev-kind-down
 dev-kind-down: ## Delete the kind cluster kind-koinon-dev

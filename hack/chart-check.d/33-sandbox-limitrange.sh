@@ -36,7 +36,8 @@ grep -A3 -F -- 'sandboxLimitRange:' <<<"$off_cfg" | hit -- 'name:' && fail "sand
 if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1; then
 	fail "sandboxLimitRange without a Deny validation action must not render"
 fi
-if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false "${off[@]}" >/dev/null 2>&1; then fail "validation actions without Deny and the LimitRange writer off must not render: with openshell the default-deny writer is required (#1093)"; fi
+render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false "${off[@]}" >/dev/null 2>&1 ||
+	fail "validation actions without Deny and the LimitRange writer off must render"
 if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false >/dev/null 2>&1; then
 	fail "sandboxLimitRange.enabled needs sandboxPolicy.enabled"
 fi

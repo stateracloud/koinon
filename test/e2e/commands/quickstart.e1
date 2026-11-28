@@ -9,6 +9,11 @@
 # SUBSTRATE_SOURCE is a clone of github.com/agent-substrate/substrate at the pinned commit, KUBECONFIG_FILE and
 # CONTEXT name the cluster, PROBE_IMAGE is the koinon-api image, BUCKET the snapshot bucket and PLATFORM the platform
 # (generic, or kind for a kind cluster).
+# Still needed between namespace and install, and not a block yet: a Secret with the CA that signs ateapi's certificate
+# (the ClusterTrustBundle of the signer servicedns.podcert.ate.dev/identity), named by execution.substrate.caSecret.
+# test/e2e/run.sh makes it with test/e2e/kind/substrate.sh ca. With caSecret empty the chart trusts the system roots, and
+# every ateapi call fails TLS. Interim until https://github.com/stateracloud/koinon/issues/1551 (the chart mounts that
+# ClusterTrustBundle when caSecret is empty); then this step goes.
 # client-cert is the OpenShell alternative only (execution.driver=openshell), so it is last: that path skips
 # substrate-install and runs client-cert after namespace. The Substrate driver reads no OpenShell certificate.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/quickstart.e1

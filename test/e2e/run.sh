@@ -90,6 +90,8 @@ case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; e
 DRIVER=${DRIVER:-substrate}
 case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 export DRIVER
+# The browser suite has no Substrate leg yet: make test-e2e-web passes DRIVER=openshell.
+[[ $DRIVER == openshell || $SUITE != web ]] || { echo "SUITE=web needs DRIVER=openshell: the browser suite has no Substrate leg yet (the default DRIVER is substrate since #1093)" >&2; exit 2; }
 [[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
@@ -254,7 +256,7 @@ fi
 
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
-  CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
+  CLUSTER="$CLUSTER" DRIVER="$DRIVER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
   done_step "Prerequisites: registry, kind, kube-network-policies, CNPG$([[ $DRIVER == substrate ]] || echo ", Agent Sandbox, runc, OpenShell") (the image build ran at the same time)"
 fi
 
@@ -293,9 +295,13 @@ if [[ $DRIVER == substrate ]]; then
   # The quickstart's substrate-install block, with the kind values of its variables. The koinon-api build, its wrapper
   # (gvisor class only) and the admin kubeconfig stay outside $OUT: CI uploads $OUT as an artifact (7 days).
   substrate_tools=$(mktemp -d "${TMPDIR:-/tmp}/substrate-tools.XXXXXX")
-  substrate_vars=()
-  while IFS= read -r line; do substrate_vars+=("$line"); done < <(TOOLS="$substrate_tools" OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" tools)
-  ((${#substrate_vars[@]} == 7)) || { echo "run.sh: substrate.sh tools printed ${#substrate_vars[@]} variables, not 7" >&2; exit 1; }
+  # A plain command, so set -e stops the run when it fails.
+  TOOLS="$substrate_tools" OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" tools >"$substrate_tools/vars"
+  mapfile -t substrate_vars <"$substrate_tools/vars"
+  # The block names the variables it needs; each must come back as NAME=<value>, so the list lives only in quickstart.e1.
+  for want in $(E1_FILE="$root/test/e2e/commands/quickstart.e1" "$root/hack/docs-e1.sh" show substrate-install | grep -oE '\$[A-Z_]+' | tr -d '$' | sort -u); do
+    grep -qE "^$want=.+" "$substrate_tools/vars" || { echo "run.sh: substrate.sh tools gives no value for $want, which the substrate-install block needs" >&2; exit 1; }
+  done
   step "quickstart: substrate-install (koinon-api substrate install --platform kind, gvisor class only)"
   "${e1_env[@]}" "PATH=$substrate_tools:$OUT/bin:$PATH" "${substrate_vars[@]}" "$root/hack/docs-e1.sh" run substrate-install 2>&1 | tee "$OUT/substrate-install.log"
   done_step "Substrate: harness overlay pushed, koinon-api substrate install --platform kind (gvisor)"
@@ -330,7 +336,8 @@ step "quickstart: namespace, OpenShell client certificate (openshell driver only
 e1 namespace
 # Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
 [[ $DRIVER == substrate ]] || e1 client-cert
-# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names.
+# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names. Not a
+# quickstart block: interim until #1551 (the chart mounts Substrate's ClusterTrustBundle when caSecret is empty).
 [[ $DRIVER != substrate ]] || OUT="$OUT" CLUSTER="$CLUSTER" NAMESPACE="$NS" "$here/kind/substrate.sh" ca
 if [[ $SUITE == go ]]; then
   e1 model-provider

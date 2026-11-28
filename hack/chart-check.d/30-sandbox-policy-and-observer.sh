@@ -94,7 +94,7 @@ grep -q 'sandboxObserver.enabled needs sandboxPolicy.enabled' "$out/obs.err" || 
 render --set sandboxPolicy.enabled=false "${off[@]}" --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1 || fail "the sandbox policy off with the observer and NetworkPolicy writer off must render"
 if render --set 'sandboxPolicy.validationActions={Warn}' >/dev/null 2>&1; then fail "the observer without a Deny validation action must not render"; fi
 # sandboxNetworkPolicy and sandboxLimitRange (on by default) also require Deny; turn those fences off to prove Warn alone can render.
-if render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then fail "validation actions without Deny and the observer and NetworkPolicy writer off must not render: with openshell the default-deny writer is required (#1093)"; fi
+render --set 'sandboxPolicy.validationActions={Warn}' "${off[@]}" --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1 || fail "validation actions without Deny and the observer and NetworkPolicy writer off must render"
 if render --set openshell.gatewayId=Not_Valid >/dev/null 2>&1; then fail "an invalid openshell.gatewayId must not render"; fi
 
 

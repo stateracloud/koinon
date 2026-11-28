@@ -1746,9 +1746,6 @@ and only koinon-gateway checks it. agentgateway cannot, so the model and MCP pat
 {{- end }}
 {{- end }}
 {{- end }}
-{{- if and (ne (include "koinon.substrate" .) "true") (ne (include "koinon.featureOn" (list $ "sandboxNetworkPolicy")) "true") .Values.sandboxPolicy.enabled }}
-{{- fail "execution.driver=openshell with sandboxPolicy.enabled needs sandboxNetworkPolicy.enabled=true (unset, it is on with the OpenShell driver): the default-deny NetworkPolicy of ADR 0045 is applied only when it is on. Remove sandboxNetworkPolicy.enabled=false" }}
-{{- end }}
 {{- if and (ne (include "koinon.substrate" .) "true") (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
 {{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}
 {{- end }}

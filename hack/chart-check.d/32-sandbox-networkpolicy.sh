@@ -37,19 +37,19 @@ cfg=$(render --show-only templates/config.yaml)
 grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'enabled: true' || fail "the reconciler is told the sandbox NetworkPolicy is on"
 grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$cfg" | hit -F -- 'name: "koinon-koinon-sandbox-default-deny"' || fail "the reconciler is told the sandbox NetworkPolicy name"
 
-# The writer is the default-deny of ADR 0045: with the openshell driver and the sandbox policy on, turning it
-# off refuses the render (#1093; the default is off only because the default driver is substrate).
 off=(--set sandboxNetworkPolicy.enabled=false)
-if render "${off[@]}" >/dev/null 2>&1; then fail "openshell with the sandbox policy on and sandboxNetworkPolicy.enabled=false must not render"; fi
-# With the sandbox policy off too, nothing is applied (the opt-out of the whole sandbox policy).
-lacks "sandboxNetworkPolicy and sandboxPolicy off render no writer" 'sandbox-default-deny' "${off[@]}" --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false
+lacks "sandboxNetworkPolicy.enabled=false renders no writer" 'sandbox-default-deny' "${off[@]}"
+off_cfg=$(render "${off[@]}" --show-only templates/config.yaml)
+grep -A2 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit -F -- 'enabled: false' || fail "sandboxNetworkPolicy.enabled=false tells the reconciler"
+grep -A3 -F -- 'sandboxNetworkPolicy:' <<<"$off_cfg" | hit -- 'name:' && fail "sandboxNetworkPolicy.enabled=false names no policy to the reconciler"
 
 # Without Deny the writer ClusterRole would be unbounded (validationActions Warn/Audit only).
 # sandboxLimitRange (on by default) also requires Deny; turn it off for the NetworkPolicy-only checks.
 if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy without a Deny validation action must not render"
 fi
-if render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false "${off[@]}" >/dev/null 2>&1; then fail "validation actions without Deny and the NetworkPolicy writer off must not render: with openshell the default-deny writer is required (#1093)"; fi
+render --set 'sandboxPolicy.validationActions={Warn}' --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false "${off[@]}" >/dev/null 2>&1 ||
+	fail "validation actions without Deny and the NetworkPolicy writer off must render"
 if render --set sandboxPolicy.enabled=false --set sandboxObserver.enabled=false --set sandboxLimitRange.enabled=false >/dev/null 2>&1; then
 	fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled"
 fi
