@@ -366,7 +366,17 @@ func (s *stdin) Close() error {
 	// the output spool; a close in that window gets Internal "closing stdin: close |1: file already
 	// closed" (upstream env guest/process/tracker.go, reap and CloseInput). The exit message follows
 	// that mark, so wait for it: a command that ended has no input to close. A command that still
-	// runs after the grace keeps the error.
+	// runs after the grace keeps the error. Only Internal comes from that window; any other error
+	// (Unavailable: the stream broke) returns at once. Interim until a Substrate env update closes
+	// the window (issue #1549).
+	if status.Code(err) != codes.Internal {
+		select {
+		case <-s.p.done:
+			return nil // the command ended while the close was on its way (finish cancels ctx after done)
+		default:
+		}
+		return err
+	}
 	t := time.NewTimer(s.p.d.exitGrace)
 	defer t.Stop()
 	select {

@@ -283,6 +283,16 @@ func (g *guestServer) untar(a *actor, p *fproc, args []string) {
 		fail(file + ": only standard input is supported")
 		return
 	}
+	a.smu.Lock()
+	early := a.tarEarly > 0
+	if early {
+		a.tarEarly--
+	}
+	a.smu.Unlock()
+	if early {
+		fail(dir + ": Cannot open: Permission denied")
+		return
+	}
 	var data []byte
 	for {
 		p.mu.Lock()
@@ -405,7 +415,14 @@ func (g *guestServer) WriteProcessInput(stream ateenvv1alpha.ProcessService_Writ
 			if fail {
 				a.failWrite--
 			}
+			failClose := !fail && a.failClose > 0
+			if failClose {
+				a.failClose--
+			}
 			a.smu.Unlock()
+			if failClose {
+				return status.Error(codes.Unavailable, "the stream broke at close")
+			}
 			if fail {
 				return status.Error(codes.Unavailable, "the stream broke before close")
 			}

@@ -367,6 +367,8 @@ func (c *Cluster) FailNextUploadStreams(atespace, name string, n int) {
 // file already closed" and a close with Internal "closing stdin: close |1: file already closed".
 // That is the real guest between cmd.Wait, which closes the pipe, and the reaper's mark of the exit
 // after it synced the output spool (upstream env guest/process/tracker.go, reap and CloseInput).
+// Remove it with the driver's interim handling when a Substrate env update closes the window (issue
+// #1549).
 func (c *Cluster) LagNextExits(atespace, name string, n int, lag time.Duration) {
 	c.mu.Lock()
 	a := c.actors[key{atespace, name}]
@@ -374,6 +376,32 @@ func (c *Cluster) LagNextExits(atespace, name string, n int, lag time.Duration) 
 	if a != nil {
 		a.smu.Lock()
 		a.lagExits, a.exitLag = n, lag
+		a.smu.Unlock()
+	}
+}
+
+// FailNextTarsEarly makes the next n `tar -x` processes of an actor fail with exit code 2 at once,
+// before they read their standard input, as a tar does that cannot write its destination.
+func (c *Cluster) FailNextTarsEarly(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.tarEarly = n
+		a.smu.Unlock()
+	}
+}
+
+// FailNextCloses makes the next n stdin close messages of an actor end with Unavailable, as a
+// stream that breaks before the guest answers. The process keeps its stdin open.
+func (c *Cluster) FailNextCloses(atespace, name string, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failClose = n
 		a.smu.Unlock()
 	}
 }

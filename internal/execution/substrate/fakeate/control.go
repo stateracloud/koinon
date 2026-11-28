@@ -80,6 +80,8 @@ type actor struct {
 	failWrite int           // the next tar upload streams that end with Unavailable at their close message
 	lagExits  int           // the next processes that publish their exit exitLag late (LagNextExits)
 	exitLag   time.Duration // how late they publish it; their stdin pipe closes at the exit
+	tarEarly  int           // the next tar -x processes that exit 2 before they read stdin
+	failClose int           // the next stdin close messages that end with Unavailable
 	failRes   int           // the next ResumeActor calls that fail with Unavailable
 	failSkip  int           // how many ResumeActor calls work before failRes starts
 	// frontDead: pid 1 exited. The actor stays RUNNING and the guest answers nothing (KillFront).
