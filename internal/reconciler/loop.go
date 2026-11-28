@@ -125,6 +125,8 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	}
 	r.log.Info("reconciler is leading", "waited", time.Since(start).Round(time.Millisecond),
 		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout, "term", term)
+	// Registered first, so it runs last: after the work queue stops, no front check adds a mark.
+	defer r.endLeadFleet()
 
 	lctx, cancel := context.WithCancelCause(ctx)
 	// A refused term ends the whole lead, as a lost lock connection does: a newer leader works now.

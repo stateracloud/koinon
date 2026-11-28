@@ -478,6 +478,42 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				Expect(trips()).To(Equal(1.0))
 			})
 
+			It("(e) gives a front that stays silent across the close a full new window after the close", func(ctx SpecContext) {
+				a := on(ctx, "worker-a")
+				b := on(ctx, "worker-b")
+				cl.KillFront(ws, a)
+				cl.KillFront(ws, b)
+				passes(ctx, silence...)
+				Expect(breakerOpen()).To(Equal(1.0))
+
+				By("the router recovers worker-b first: the breaker closes while the front on worker-a is still silent")
+				cl.ReviveFront(ws, b)
+				passes(ctx, 2*time.Minute+40*time.Second)
+				Expect(breakerOpen()).To(BeZero())
+				passes(ctx, 3*time.Minute)
+				Expect(cl.Calls("RevertActor")).To(BeZero(), "the silence held by the open breaker starts again at the close")
+
+				By("the front stays silent for a full window after the close")
+				passes(ctx, 3*time.Minute+20*time.Second, 3*time.Minute+40*time.Second)
+				Expect(cl.Calls("RevertActor")).To(Equal(1))
+			})
+
+			It("(f) sets the open gauge to 0 when the lead ends", func(ctx SpecContext) {
+				a := on(ctx, "worker-a")
+				b := on(ctx, "worker-b")
+				cl.KillFront(ws, a)
+				cl.KillFront(ws, b)
+				passes(ctx, silence...)
+				Expect(breakerOpen()).To(Equal(1.0))
+				r.EndLeadForTest()
+				Expect(breakerOpen()).To(BeZero(), "a former leader must not keep the max over the replicas at 1")
+
+				By("the next lead starts with no marks and no silence")
+				passes(ctx, 2*time.Minute+40*time.Second, 3*time.Minute, 3*time.Minute+20*time.Second)
+				Expect(cl.Calls("RevertActor")).To(BeZero())
+				Expect(breakerOpen()).To(Equal(1.0))
+			})
+
 			It("(d) holds back the deadline verdict too", func(ctx SpecContext) {
 				d = newDriver(300 * time.Millisecond)
 				r = newR()

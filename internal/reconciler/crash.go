@@ -74,9 +74,10 @@ const (
 // fronts checked in the window. One silent front, or several on one worker below the share, still
 // reverts.
 //
-// The breaker state is in memory, like the revert cap (crashTracker, a v0.1 decision): a restart or a
-// leader change starts with no marks, and the next passes fill the window again before any front can
-// get its verdict (frontProbes over frontSilence).
+// The breaker state is in memory, like the revert cap (crashTracker, a v0.1 decision). A restart starts
+// with no marks, and the end of a lead (endLeadFleet) drops the marks and the silences and sets the
+// open gauge to 0, so a former leader does not report an open breaker. The next lead fills the window
+// again before any front can get its verdict (frontProbes over frontSilence).
 const (
 	// fleetShare is the share of the checked fronts that may be silent at once before the breaker
 	// opens: the Kubernetes default --unhealthy-zone-threshold. A real crash is one guest; more than
@@ -281,7 +282,26 @@ func (t *crashTracker) fleet(now time.Time, window time.Duration) (fleetState, b
 	st.open = st.workers > 1 || (st.down >= fleetMinDown && float64(st.down) >= fleetShare*float64(st.checked))
 	changed := st.open != t.breakerOpen
 	t.breakerOpen = st.open
+	if changed && !st.open {
+		// Every front that is silent now was held by the open breaker. Its silence starts again at the
+		// close, so it needs a full window (frontProbes over frontSilence) after it: when a router recovers
+		// one worker at a time, the fronts of the last worker do not revert at the first check.
+		for id, s := range t.silent {
+			s.since, s.probes = now, 0
+			t.silent[id] = s
+		}
+	}
 	return st, changed
+}
+
+// endLead forgets the marks and the silences of the fleet and closes the breaker: the next lead fills
+// the window again before any front gets its verdict.
+func (t *crashTracker) endLead() {
+	t.mu.Lock()
+	t.fronts = nil
+	t.silent = nil
+	t.breakerOpen = false
+	t.mu.Unlock()
 }
 
 // noteSilent counts a failed front check and returns the count and when the silence began.
@@ -346,11 +366,14 @@ func (r *Reconciler) checkFront(ctx context.Context, w *work, ws, name string, s
 		return false, nil
 	}
 	// Both verdicts of the driver (the router's report and the deadline) come here, with the worker.
-	probes, since := r.crash.noteSilent(id, now)
 	r.crash.noteFront(id, now, true, execution.FrontWorker(err))
-	if r.fleetBreaker(now) {
-		// Silence across the fleet: no verdict. The silence keeps counting, so a front that stays dead
-		// after the breaker closes reverts at its next check.
+	open := r.fleetBreaker(now)
+	// The silence is counted after the breaker evaluation: a close in this evaluation restarts it, and
+	// this check is then the first of the new window.
+	probes, since := r.crash.noteSilent(id, now)
+	if open {
+		// Silence across the fleet: no verdict. The close restarts the silence of every front that is
+		// still silent, so it gets its verdict only after a full window from the close.
 		return false, nil
 	}
 	if probes < frontProbes || now.Sub(since) < frontSilence {
@@ -378,9 +401,16 @@ func (r *Reconciler) fleetBreaker(now time.Time) bool {
 		return true
 	}
 	r.m.FrontBreakerOpen.Set(0)
-	r.log.Info("the fleet breaker of the front check is closed: silent fronts get their verdict again",
+	r.log.Info("the fleet breaker of the front check is closed: silent fronts get their verdict after a new silence window",
 		"silent_fronts", st.down, "workers", st.workers, "checked_fronts", st.checked)
 	return false
+}
+
+// endLeadFleet runs when a lead ends: the fleet marks go, and the open gauge is 0 on a replica that does
+// not lead (the alert takes the max over the replicas).
+func (r *Reconciler) endLeadFleet() {
+	r.crash.endLead()
+	r.m.FrontBreakerOpen.Set(0)
 }
 
 // restoredMark reports whether the sandbox got a home restore that no snapshot holds yet. The mark is in
@@ -452,6 +482,9 @@ func (r *Reconciler) revertCrashed(ctx context.Context, w *work, ws, name string
 	if sb.Phase != execution.PhaseError {
 		return false, nil
 	}
+	// A crashed sandbox is not ready: its old front mark must not count for the fleet breaker, with an
+	// unrelated silent front, and its old silence must not count against its next run.
+	r.crash.notReady(w.agent.ID)
 	// A revert does not fix an image that cannot be pulled: the repair path (a new sandbox) handles it.
 	// The kind comes from the actor state and the crash message, never from a gRPC code.
 	if execution.ClassifySandboxWait(sb.Reason, sb.Message) == execution.WaitCauseImagePull {
