@@ -46,6 +46,7 @@ type Metrics struct {
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
 	SandboxRepairs        prometheus.Counter
+	SandboxRepoints       *prometheus.CounterVec
 	// SandboxCreationsHeld counts creations deferred by an org's creation rate (issue #27). No org label (ADR 0023).
 	SandboxCreationsHeld prometheus.Counter
 	AgentsUnhealthy      prometheus.Counter
@@ -107,6 +108,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
+		SandboxRepoints: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_reconciler_sandbox_repoints_total",
+			Help: "Sandboxes given a changed spec in place, with the home kept (issue #1482), by result (repointed, refused or resume_failed). A refused repoint goes on with a delete and a restore.",
+		}, []string{"result"}),
 		SandboxCreationsHeld: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_creations_held_total", Help: "Reconciler passes that deferred a sandbox creation or start (counted per pass, not per sandbox) because the org was at its sandbox creations per minute (issue #27, ADR 0066).",
 		}),
@@ -160,7 +165,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
-			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped,
+			m.SandboxRepairs, m.SandboxRepoints, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped,
 			m.FrontBreakerOpen, m.FrontBreakerTrips)
 	}
 	return m

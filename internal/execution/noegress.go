@@ -59,3 +59,13 @@ func IdentifiesSpecs(b any) bool {
 	_, ok := b.(SpecIdentifier)
 	return ok
 }
+
+// strippedRepointer is the [Repointer] of a driver behind [WithoutEgress]: like CreateSandbox, it gives the
+// driver a spec without the fields of the Egress half.
+type strippedRepointer struct{ Repointer }
+
+func (n strippedRepointer) RepointSandbox(ctx context.Context, workspace, name string, spec SandboxSpec) (Sandbox, error) {
+	spec.Providers = nil
+	spec.Policy = Policy{}
+	return n.Repointer.RepointSandbox(ctx, workspace, name, spec)
+}

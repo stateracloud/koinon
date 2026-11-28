@@ -63,6 +63,8 @@ type actor struct {
 	failGetsAfterSuspend int
 	// failGets is how many more GetActor calls fail with Unavailable.
 	failGets int
+	// refuseUpdate is the code the next UpdateActor fails with (RefuseNextUpdateActor); OK is none.
+	refuseUpdate codes.Code
 
 	// the guest: it survives a suspend, as the memory of a snapshotted VM does
 	// auth is the guest front's token check (internal/guestauth, issue #1309), from the template's

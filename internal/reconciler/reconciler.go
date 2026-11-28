@@ -1627,6 +1627,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			// whose gate is still waiting keeps its slot, so at most the cap are in the gate at a time.
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot")
 		}
+		// A driver that can repoint keeps the home: no delete, no restore (issue #1482). A refusal falls through.
+		if done, err := r.repoint(ctx, w, ws, spec, sb, hash); done || err != nil {
+			return err
+		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
 				return err

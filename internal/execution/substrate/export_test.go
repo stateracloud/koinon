@@ -64,3 +64,6 @@ func NewWithRouterRefusal(control, router grpc.ClientConnInterface, refusal func
 // FrontUnreachable is frontUnreachable, for the specs of the router's two reports of a guest it could not
 // reach.
 var FrontUnreachable = frontUnreachable
+
+// RepointInvariants is repointInvariants, for the specs of the template invariants of issue #1482.
+var RepointInvariants = repointInvariants
