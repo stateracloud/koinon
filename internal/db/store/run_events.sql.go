@@ -257,6 +257,26 @@ func (q *Queries) GetRunEventBySource(ctx context.Context, arg GetRunEventBySour
 	return i, err
 }
 
+const lastRunSandboxRevertReported = `-- name: LastRunSandboxRevertReported :one
+SELECT coalesce(max((payload->>'revert')::int), 0)::int AS reported
+FROM run_events
+WHERE org_id = $1 AND run_id = $2 AND kind = 'run.sandbox_reverted'
+`
+
+type LastRunSandboxRevertReportedParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+// The newest revert count the run reported with a run.sandbox_reverted event, over every epoch (0: none).
+// A new owner after a takeover starts from it, so a revert is never reported twice (issue #1526).
+func (q *Queries) LastRunSandboxRevertReported(ctx context.Context, arg LastRunSandboxRevertReportedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, lastRunSandboxRevertReported, arg.OrgID, arg.RunID)
+	var reported int32
+	err := row.Scan(&reported)
+	return reported, err
+}
+
 const listRunEventsAfter = `-- name: ListRunEventsAfter :many
 SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq, content_purged_at FROM run_events
 WHERE org_id = $1 AND run_id = $2 AND seq > $3

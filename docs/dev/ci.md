@@ -250,7 +250,11 @@ Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canari
   the port-forwarded fake server; a skip is a failure there. No extra job and no model call, so
   `hack/ci-required.txt` is unchanged (the `e2e result` status covers it). `make test-escape-kind`
   alone still skips the case (`make dev-kind-up` installs OpenShell only). Locally:
-  `ESCAPE_MCP=1 test/e2e/run.sh`.
+  `ESCAPE_MCP=1 test/e2e/run.sh`. With `DRIVER=substrate` the hook is not set: `run.sh` sets
+  `KOINON_E2E_ESCAPE_SUBSTRATE=1`, and step 6b runs the same attack from a raw MCP client in the agent's own actor,
+  inside a task (the fake model's `raw mcp exfil` turn). The gateway knows an actor only by the JWT that atenet-egress
+  adds, so a probe sandbox is not the agent. Inside a task the guard holds the sends for approval; the case denies them
+  and checks that the fake server saw the read and no `write_item` or `fetch_url` (#1428).
 
 Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`)
 and the call reaches the server. The escape case sends the canary in `title`, the one argument the fake
@@ -323,9 +327,12 @@ entrypoint, so the overlay's guest-front entrypoint does not get in the way. The
 
 The leg is advisory (a comment in `hack/ci-required.txt`, not a listed name: it is a driver of the `quickstart` job and
 runs on dispatch only). Issue #1091 is done when the quickstart and the contract suite on the overlay image are green on
-this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the gVisor-class assertion on
-the actor, the Substrate escape case and the missing-image step (skipped until its Substrate form is proven). The CI wiring
-is already in `e2e-kind.yml` as the `driver` dispatch input; the leg becomes a required leg at the switch (#1093, no soak).
+this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the missing-image step
+(skipped until its Substrate form is proven). Two specs cover the security of the actor (#1428, `test/e2e/substrate_test.go`):
+step 8 checks that every WorkerPool runs the `gvisor` class only, and that the agent's shell in the actor of a run reads a
+gVisor kernel (`uname -r` ends in `-gvisor`) and the launcher's controls (uid 10001, `NoNewPrivs` 1, `Seccomp` 2, `CapEff` 0);
+step 6b runs the leak guard escape case as a raw MCP client in that actor (`ESCAPE_MCP=1`, see the escape suite above). The CI wiring is already in `e2e-kind.yml` as the `driver` dispatch input; the leg
+becomes a required leg at the switch (#1093, no soak).
 
 The restore drill of this leg is the home restore drill (#1090 part 3): `BACKUP_RESTORE=1 make test-e2e-kind-substrate`,
 or a dispatch with `driver=substrate` and `backup_restore=true`. After the quickstart pass, `test/e2e/run.sh` runs the

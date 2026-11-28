@@ -77,6 +77,38 @@ var _ = Describe("the repo-helper scenario", func() {
 		Expect(string(raw)).To(Equal(p.TrackerGuardArgs), "the e2e compares the approval's arguments to this exactly")
 	})
 
+	// The two shell cases of the Substrate leg (#1428): the run goes on only when the command printed the marker,
+	// and the command text never holds the marker, so a harness that echoes the command cannot satisfy the turn.
+	DescribeTable("lets a shell case go on only on its marker, which the command builds at run time",
+		func(prompt, marker string, inCommand ...string) {
+			var answer, command string
+			for _, t := range script.Turns {
+				if t.When.UserContains != prompt {
+					continue
+				}
+				if t.When.ToolResult == "bash" {
+					Expect(t.When.ToolResultContains).To(Equal(marker))
+					answer = t.Text
+				}
+				for _, c := range t.ToolCalls {
+					if c.Name == "bash" {
+						command, _ = c.Arguments["command"].(string)
+					}
+				}
+			}
+			Expect(answer).NotTo(BeEmpty(), "the turn that answers the marker")
+			Expect(command).NotTo(BeEmpty(), "the turn that runs the command")
+			Expect(command).NotTo(ContainSubstring(marker))
+			for _, s := range inCommand {
+				Expect(command).To(ContainSubstring(s))
+			}
+		},
+		Entry("the sandbox check", scenarios.PullRequest.SandboxCheck.Prompt, scenarios.PullRequest.SandboxCheck.Marker, "-gvisor", "NoNewPrivs", "Seccomp", "CapEff"),
+		Entry("the raw MCP client", scenarios.PullRequest.RawExfil.Prompt, scenarios.PullRequest.RawExfil.Marker,
+			scenarios.PullRequest.RawExfil.Canary, scenarios.PullRequest.RawExfil.Attacker, "KOINON_MCP_URL",
+			"_"+scenarios.PullRequest.RawExfil.WriteTool, "_"+scenarios.PullRequest.RawExfil.FetchTool),
+	)
+
 	It("reads the canary, then searches with the clean, below, exact and threshold queries the canary control names", func() {
 		c := scenarios.PullRequest.TrackerCanary
 		query := map[int]string{} // assistant messages in the request -> the query of the turn

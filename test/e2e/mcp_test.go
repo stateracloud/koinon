@@ -571,6 +571,16 @@ func setToolSinkE2E(ctx context.Context, admin func(context.Context, string, str
 // so the e2e compares it before and after a task.
 func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass string) float64 {
 	GinkgoHelper()
+	n, found := guardDecisionsMatching(ctx, kubectl, regexp.QuoteMeta(decision), regexp.QuoteMeta(reason), regexp.QuoteMeta(sinkClass))
+	Expect(found).To(BeTrue(), "the guard's processes export its decisions for %s/%s/%s", decision, reason, sinkClass)
+	return n
+}
+
+// guardDecisionsMatching sums koinon_api_mcp_guard_decisions_total over every series whose decision, reason
+// and sink class match the three regular expressions, from the processes that run the leak guard on the
+// agent's MCP path. found is false when no target exports a matching series.
+func guardDecisionsMatching(ctx context.Context, kubectl, decision, reason, sinkClass string) (sum float64, found bool) {
+	GinkgoHelper()
 	// The guard counts its decisions in the process that runs it: koinon-api behind agentgateway, and
 	// each koinon-mcp-gateway pod with driver koinon (#1239). A call goes to one pod, so the sum counts it once.
 	targets := []string{"deploy/koinon-api"}
@@ -583,9 +593,8 @@ func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass st
 		Expect(targets).NotTo(BeEmpty(), "a running koinon-mcp-gateway pod")
 		port = "15020"
 	}
-	re := regexp.MustCompile(`(?m)^koinon_api_mcp_guard_decisions_total\{decision="` + regexp.QuoteMeta(decision) +
-		`",reason="` + regexp.QuoteMeta(reason) + `",sink_class="` + regexp.QuoteMeta(sinkClass) + `"\} (\S+)$`)
-	var sum float64
+	re := regexp.MustCompile(`(?m)^koinon_api_mcp_guard_decisions_total\{decision="(?:` + decision +
+		`)",reason="(?:` + reason + `)",sink_class="(?:` + sinkClass + `)"\} (\S+)$`)
 	for _, t := range targets {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+portForward(ctx, kubectl, t, port)+"/metrics", nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -594,13 +603,13 @@ func guardDecisions(ctx context.Context, kubectl, decision, reason, sinkClass st
 		b, err := io.ReadAll(res.Body)
 		_ = res.Body.Close()
 		Expect(err).NotTo(HaveOccurred())
-		m := re.FindSubmatch(b)
-		Expect(m).NotTo(BeNil(), "%s exports the guard's decisions for %s/%s/%s", t, decision, reason, sinkClass)
-		n, err := strconv.ParseFloat(string(m[1]), 64)
-		Expect(err).NotTo(HaveOccurred())
-		sum += n
+		for _, m := range re.FindAllSubmatch(b, -1) {
+			n, err := strconv.ParseFloat(string(m[1]), 64)
+			Expect(err).NotTo(HaveOccurred())
+			sum, found = sum+n, true
+		}
 	}
-	return sum
+	return sum, found
 }
 
 // setToolTierE2E sets a tool's tier as the console does (e2eclient.SetToolTier): an unreviewed tool stays

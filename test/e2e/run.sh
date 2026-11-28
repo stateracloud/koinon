@@ -41,7 +41,9 @@
 #   keys drill of backup-restore.sh is not wired for Substrate yet.
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
-#   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it.
+#   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it. With DRIVER=substrate the
+#   case runs as a raw MCP client in the agent's own actor, inside a task (KOINON_E2E_ESCAPE_SUBSTRATE=1,
+#   test/e2e/substrate_test.go; #1428): test/escape/kind.sh is OpenShell only.
 #   ESCAPE_OPENSHELL=1 (default; SUITE=go) runs the escape suite's OpenShell cases against the install after the
 #   Go driver (test/e2e/escape-openshell.sh; #109): the chart's sandbox admission policy is live, so the
 #   real supervisor and workload pods are admitted by it and the escape cases are refused. 0 leaves it out
@@ -405,7 +407,8 @@ go)
     KOINON_E2E_FAKES="$FAKES" \
     KOINON_E2E_PASSWORD="$password" \
     KOINON_E2E_NEW_PASSWORD="$new_password" \
-    KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 ]] && echo "$here/escape-mcp.sh" || true)" \
+    KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 && $DRIVER != substrate ]] && echo "$here/escape-mcp.sh" || true)" \
+    KOINON_E2E_ESCAPE_SUBSTRATE="$([[ ${ESCAPE_MCP:-0} == 1 && $DRIVER == substrate ]] && echo 1 || true)" \
     CLUSTER="$CLUSTER" \
     KOINON_E2E_T0="$T0" \
     KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \

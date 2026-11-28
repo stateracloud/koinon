@@ -372,8 +372,8 @@ jobs:
           # Advisory on the schedule event: a red pass leaves the quickstart result alone (hack/release-gate.sh reads it) and
           # sets the job output `stories_red`. A dispatch with stories=true (the bisect) is blocking: it needs pass or fail.
           STORIES_ADVISORY: ${{ github.event_name == 'schedule' && '1' || '0' }}
-          # Also run the escape suite's leak guard case from a sandbox against this install (#348).
-          ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && inputs.driver != 'substrate' && '1' || '0' }}
+          # Also run the leak guard escape case from a sandbox against this install (#348; on Substrate from the agent's actor, #1428).
+          ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
           # The harness image the step above pulled (the harnesses job pushed it for this harnesses/ tree). Empty after

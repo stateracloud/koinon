@@ -209,7 +209,11 @@ SET sandbox_name = @sandbox_name,
     home_dirtied_at = NULL,
     -- The task sandbox is a new actor: it gets a new actor name (issue #1386).
     actor_name = NULL,
-    actor_uid = NULL
+    actor_uid = NULL,
+    -- A revert belonged to the previous sandbox (issue #1526). The count only goes up, so an owner that
+    -- reported it is not told twice; without a revert time, a new run does not report it.
+    reverted_at = NULL,
+    revert_snapshot_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
@@ -268,3 +272,15 @@ SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));
 -- Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 -- no org-owned row, so it takes no @org_id.
 SELECT state, count(*)::bigint AS n FROM agent_sandboxes GROUP BY state;
+
+-- name: NoteSandboxRevert :one
+-- Records that the reconciler reverted the agent's sandbox to its last snapshot (issue #1526). The
+-- reconciler does not own a run, so it writes this fact and the run's owner turns it into a run event.
+-- The count goes up once per accepted revert; the snapshot time is the one known at the revert (NULL:
+-- not known).
+UPDATE agent_sandboxes
+SET revert_count = revert_count + 1,
+    reverted_at = clock_timestamp(),
+    revert_snapshot_at = last_snapshot_at
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
