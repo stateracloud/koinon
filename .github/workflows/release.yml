@@ -83,9 +83,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write # creates the draft release
-      packages: write # pushes the images and the chart
-    outputs:
-      chart_ref: ${{ steps.chart.outputs.ref }}
+      packages: write # pushes the images (the chart-publish job pushes the chart)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,16 +104,11 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false # no cache, as with setup-go above; turns automatic caching off explicitly
-      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
-        with:
-          version: ${{ env.HELM_VERSION }}
       - name: log in to ghcr.io
         env:
           TOKEN: ${{ github.token }}
           ACTOR: ${{ github.actor }}
-        run: |
-          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
 
       # goreleaser's kos pipe pulls its base image (pinned by digest, .goreleaser.yaml) and, for every image, copies
       # its layer blobs across registries to ghcr.io. A fault of gcr.io (HTTP 500, "Too many connections" on a blob
@@ -167,19 +160,6 @@ jobs:
           gh api --method POST "https://uploads.github.com/repos/$REPO/releases/$id/assets?name=drill-result.json" \
             -H 'Content-Type: application/json' --input drill-result/drill-result.json >/dev/null
           echo "attached drill-result.json to the draft release of $TAG"
-
-      # The chart takes its version and appVersion from the tag; nothing is committed for it.
-      - name: package and push the chart
-        id: chart
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          version=${TAG#v}
-          helm package charts/koinon --version "$version" --app-version "$version" --destination dist/chart
-          helm push "dist/chart/koinon-$version.tgz" "$CHART_REPOSITORY" 2>&1 | tee dist/chart/push.log
-          digest=$(awk '/^Digest:/ { print $2 }' dist/chart/push.log)
-          [[ $digest == sha256:* ]] || { echo "no chart digest in the helm push output" >&2; exit 1; }
-          echo "ref=${CHART_REPOSITORY#oci://}/koinon@$digest" >>"$GITHUB_OUTPUT" # package <repo>/charts/koinon
 
       # What the sign job needs: the image digests and SBOMs from GoReleaser.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -340,6 +320,63 @@ jobs:
           out=$(push_retry hack/release-harness-substrate.sh "${TAG#v}" "$KOINON_IMAGE_REGISTRY" "$SHA" "$HARNESS_REF")
           echo "$out" >>"$GITHUB_OUTPUT"
 
+  # The chart (#1360). It is packaged after `harness-substrate`, because the chart must carry the digest of the
+  # sandbox-substrate image that this release built: with the default driver (substrate) the reconciler refuses to
+  # start without a pinned harness digest (#1192), and values.yaml keeps `harnesses.opencode.image.digest` empty in
+  # the repository. hack/cmd/chartdigest writes the digest into the checked-out values.yaml of this job only;
+  # nothing is committed. The chart takes its version and appVersion from the tag.
+  # Named chart-publish: `chart` is a required check of ci.yml (hack/ci-required.txt), and a second job of that name
+  # in a workflow without merge_group would break the required-check rules.
+  chart-publish:
+    name: chart-publish
+    needs: [release, harness-substrate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # pushes the chart
+    outputs:
+      chart_ref: ${{ steps.chart.outputs.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
+      - name: tool versions (hack/versions.env)
+        run: hack/versions-env.sh >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache: false # a release never restores a cache that a pull request or branch build could have written
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: log in to ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+      - name: write the harness digest into the chart
+        env:
+          HARNESS_SUBSTRATE_REF: ${{ needs.harness-substrate.outputs.ref }} # <registry>/sandbox-substrate@sha256:<hex>
+        run: |
+          set -euo pipefail
+          [[ $HARNESS_SUBSTRATE_REF == *@sha256:* ]] || { echo "no digest in the sandbox-substrate ref: $HARNESS_SUBSTRATE_REF" >&2; exit 1; }
+          # chartdigest refuses a value that is not sha256:<64 hex>, so a bad ref fails here and not at install time.
+          go run ./hack/cmd/chartdigest -values charts/koinon/values.yaml -digest "${HARNESS_SUBSTRATE_REF#*@}"
+      - name: package and push the chart
+        id: chart
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          mkdir -p dist/chart
+          helm package charts/koinon --version "$version" --app-version "$version" --destination dist/chart
+          helm push "dist/chart/koinon-$version.tgz" "$CHART_REPOSITORY" 2>&1 | tee dist/chart/push.log
+          digest=$(awk '/^Digest:/ { print $2 }' dist/chart/push.log)
+          [[ $digest == sha256:* ]] || { echo "no chart digest in the helm push output" >&2; exit 1; }
+          echo "ref=${CHART_REPOSITORY#oci://}/koinon@$digest" >>"$GITHUB_OUTPUT" # package <repo>/charts/koinon
+
   # The test images the drills need (#928, #952): the fake model and fake MCP servers and the RT1 fixture
   # images, built at the tagged commit and pushed under the same repository path as the release images
   # (koinon-fakemodel, koinon-fakemcp, rt1-*; tags
@@ -434,7 +471,7 @@ jobs:
   # Keyless cosign signing and SBOM attestations. Off unless RELEASE_SIGNING is 'true'.
   sign:
     name: sign
-    needs: [release, harness, harness-substrate]
+    needs: [release, chart-publish, harness, harness-substrate]
     if: vars.RELEASE_SIGNING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -463,7 +500,7 @@ jobs:
         run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - name: sign and attest
         env:
-          CHART_REF: ${{ needs.release.outputs.chart_ref }}
+          CHART_REF: ${{ needs.chart-publish.outputs.chart_ref }}
           HARNESS_REF: ${{ needs.harness.outputs.ref }}
           HARNESS_SUBSTRATE_REF: ${{ needs.harness-substrate.outputs.ref }}
         run: |
