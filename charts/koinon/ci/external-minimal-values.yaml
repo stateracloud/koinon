@@ -17,12 +17,21 @@ gateway:
     driver: koinon
   mcp:
     driver: koinon
+    koinon:
+      recipientKey:
+        # The key Secret's guard is a cluster-scoped ValidatingAdmissionPolicy: off in this fixture only.
+        guard:
+          enabled: false
 networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
-# The KEK guard policy and the reconciler Secret fence are cluster-scoped too (issue #604), so both
-# are off here: this install may not create cluster-scoped objects.
+# A namespace-scoped install: every optional cluster-scoped guard is off (the KEK guard and the reconciler
+# Secret fence, issue #604; the gateway key guard; the Substrate worker policies, pool and namespace). The
+# only cluster-scoped objects left are the ones it needs, and hack/chart-check.d/59-external-minimal-scope.sh
+# fails on any other: the ClusterRoles and ClusterRoleBindings of platform-recovery, preflight,
+# reconciler-openshell-config and the Substrate provisioner, and the platform-recovery
+# ValidatingAdmissionPolicy and its binding.
 secrets:
   reconcilerFence:
     enabled: false
@@ -56,3 +65,12 @@ execution:
   driver: substrate
   substrate:
     allowUnhardened: true
+    # Cluster-scoped admission policies and the worker Namespace: off in this fixture only (product defaults stay on).
+    workerPolicy:
+      enabled: false
+    workerPool:
+      enabled: false
+    workerNetworkPolicy:
+      enabled: false
+    workerLimits:
+      enabled: false
