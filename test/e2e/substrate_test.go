@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
@@ -87,6 +88,15 @@ func substrateLeakGuardEscapeE2E(ctx context.Context, c *e2eclient.Client, org, 
 	x := scenarios.PullRequest.RawExfil
 	By("the same attack from a raw MCP client in the agent's actor is stopped too (Substrate form of ESCAPE_MCP, #1428)")
 	all := len(fakeMCPRequests(ctx, fake))
+	kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+	Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+	// The guard's reasons, from its decision counter (fixed labels, ADR 0023): the sends must stop for what they
+	// carry. A refusal for the identity, an internal error, a budget of the check, no run or a changed tool would
+	// mean the actor's identity or the guard broke, and that is a failure of this case, not a pass.
+	const notFlow = "identity|error|check|no_run|tool_changed|ambiguous_address"
+	const flowRefusal = "url_rule"
+	badBefore, _ := guardDecisionsMatching(ctx, kubectl, "refuse", notFlow, ".*")
+	urlBefore, _ := guardDecisionsMatching(ctx, kubectl, "refuse", flowRefusal, ".*")
 	runID, taskID, w := substrateTaskRun(ctx, c, org, agentID, "Raw MCP exfil", x.Prompt+": read an item, then send it out.")
 	var seq int64
 	var kinds []string
@@ -106,7 +116,10 @@ func substrateLeakGuardEscapeE2E(ctx context.Context, c *e2eclient.Client, org, 
 		ap := d.GetApproval()
 		Expect(ap.GetConnector()).To(Equal("mcp"))
 		Expect(ap.GetTool()).To(BeElementOf(x.WriteTool, x.FetchTool))
-		Expect(ap.GetMcp().GetLeakGuard()).NotTo(BeNil(), "the approval is the leak guard's")
+		lg := ap.GetMcp().GetLeakGuard()
+		Expect(lg).NotTo(BeNil(), "the approval is the leak guard's")
+		Expect(lg.GetReasons()).To(Or(ContainElement("taint"), ContainElement("both_legs")),
+			"the guard held the call for what it carries")
 		if ap.GetStatus() == approvalv1alpha1.Status_STATUS_PENDING {
 			_, err = c.Approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: ap.GetId()})
 			Expect(err).NotTo(HaveOccurred())
@@ -117,6 +130,13 @@ func substrateLeakGuardEscapeE2E(ctx context.Context, c *e2eclient.Client, org, 
 		r = w.until(ctx, c, org, runID, 5*time.Minute, &seq, &kinds, func(r *runv1alpha1.Run) bool { return terminal(r.GetState()) })
 	}
 	Expect(r.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), "events: %v", kinds)
+
+	By("the guard stopped both sends for what they carry: an approval or a URL-rule refusal each, no other refusal")
+	badAfter, _ := guardDecisionsMatching(ctx, kubectl, "refuse", notFlow, ".*")
+	Expect(badAfter-badBefore).To(BeZero(), "a refusal for the identity or an error is not the guard stopping the canary")
+	urlAfter, _ := guardDecisionsMatching(ctx, kubectl, "refuse", flowRefusal, ".*")
+	Expect(float64(len(list.GetApprovals()))+urlAfter-urlBefore).To(BeNumerically("==", 2),
+		"each of the two sends is held for an approval or refused by the URL rule")
 
 	By("nothing the guard stopped reached the fake server")
 	got := fakeMCPRequests(ctx, fake)[all:]
@@ -129,7 +149,20 @@ func substrateLeakGuardEscapeE2E(ctx context.Context, c *e2eclient.Client, org, 
 }
 
 // substrateEscapeMCP reports whether the run asked for the Substrate form of the leak guard escape case:
-// test/e2e/run.sh sets KOINON_E2E_ESCAPE_SUBSTRATE=1 with DRIVER=substrate and ESCAPE_MCP=1.
+// test/e2e/run.sh sets KOINON_E2E_ESCAPE_SUBSTRATE=1 with DRIVER=substrate and ESCAPE_MCP=1. ESCAPE_MCP=1 without
+// it fails the spec: the case was asked for and would otherwise not run, without a word (e2e-kind.yml sets
+// ESCAPE_MCP for the Go suite). It does not Skip when the case is off, because the rest of step 6b must run.
 func substrateEscapeMCP() bool {
-	return substrateDriver() && os.Getenv("KOINON_E2E_ESCAPE_SUBSTRATE") == "1"
+	GinkgoHelper()
+	if !substrateDriver() {
+		return false
+	}
+	on := os.Getenv("KOINON_E2E_ESCAPE_SUBSTRATE") == "1"
+	if os.Getenv("ESCAPE_MCP") == "1" {
+		Expect(on).To(BeTrue(), "ESCAPE_MCP=1 on the Substrate driver, but KOINON_E2E_ESCAPE_SUBSTRATE is not 1: test/e2e/run.sh did not wire the escape case")
+	}
+	if !on {
+		_, _ = fmt.Fprintln(GinkgoWriter, "the Substrate leak guard escape case is off (ESCAPE_MCP is not 1)")
+	}
+	return on
 }
