@@ -1013,6 +1013,10 @@ type Querier interface {
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
 	ListGitHubUserLinks(ctx context.Context, orgID pgtype.UUID) ([]ListGitHubUserLinksRow, error)
 	ListGitHubUserLinksOfUser(ctx context.Context, arg ListGitHubUserLinksOfUserParams) ([]GithubUserLink, error)
+	// The complete checkpoints that ListCompleteHomeCheckpoints hides and that are newer than the one a
+	// restore used (@used_finished_at, @used_id): newest first, each with why it is hidden. A restore
+	// that uses an older checkpoint reports them, so the loss of newer work is never silent (issue #1538).
+	ListHiddenNewerHomeCheckpoints(ctx context.Context, arg ListHiddenNewerHomeCheckpointsParams) ([]ListHiddenNewerHomeCheckpointsRow, error)
 	// Every repository epoch of the agent, epoch 0 first, with whether it still opens (a deleted one
 	// has no blobs, a lost one no password) and whether the sweeper may have deleted its blobs (retired
 	// and past its deadline: after a database restore, deleted_at can predate the sweep). A taken one's

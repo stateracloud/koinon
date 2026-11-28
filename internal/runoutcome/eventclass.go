@@ -79,6 +79,7 @@ var eventClasses = map[string]EventClass{
 	"run.sandbox_swept":         ClassDiagnostic,
 	"run.sandbox_reverted":      ClassDiagnostic,
 	"run.home_restored":         ClassDiagnostic,
+	"run.home_fell_back":        ClassDiagnostic,
 	"run.instructions_restored": ClassDiagnostic,
 	"run.mcp_server_missing":    ClassDiagnostic,
 	"run.mcp_server_recovered":  ClassDiagnostic,

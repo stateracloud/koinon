@@ -549,6 +549,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 	// does not hold the checkpoints written before it started.
 	repos := map[int32]checkpoint.Repository{}
 	var errs []error
+	var skipped []skippedCheckpoint
 	for i, cp := range cps {
 		repo, ok := repos[cp.RepositoryEpoch]
 		if !ok {
@@ -558,6 +559,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 				// Nothing to open it with: an older checkpoint, in another epoch, may still restore.
 				r.log.Warn("restoring the home: the checkpoint's repository cannot be opened", "checkpoint", cp.ID.String(), "repository_epoch", cp.RepositoryEpoch, "err", err)
 				errs = append(errs, fmt.Errorf("checkpoint %s (repository epoch %d): %w", cp.ID, cp.RepositoryEpoch, err))
+				skipped = append(skipped, newSkippedCheckpoint(cp, skipRepository))
 				continue
 			}
 			if err != nil {
@@ -565,6 +567,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			}
 			repos[cp.RepositoryEpoch] = repo
 		}
+		reason := skipRestore
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {
@@ -578,6 +581,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 				}); recErr != nil {
 					r.log.Warn("recording the home restore failed", "err", recErr)
 				}
+				r.noteHomeFallback(ctx, cp, skipped)
 				return nil
 			}
 			if ctx.Err() != nil {
@@ -592,12 +596,14 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
 			if errors.Is(err, checkpoint.ErrDigestMismatch) {
 				// Another try reads the same snapshot: go to the next older checkpoint.
+				reason = skipDigest
 				break
 			}
 			if try < c.RestoreTries && !sleep(ctx, time.Second<<try) {
 				return ctx.Err()
 			}
 		}
+		skipped = append(skipped, newSkippedCheckpoint(cp, reason))
 	}
 	return &failure{reason: "restoring the home failed: " + truncateText(errors.Join(errs...).Error(), 600), class: classTransient}
 }
