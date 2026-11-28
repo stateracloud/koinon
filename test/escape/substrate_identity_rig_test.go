@@ -95,6 +95,7 @@ func (a arrival) accepted() bool { return acceptedReply(a.Status, a.Refusal) }
 
 // identityGateway is the stand-in. Make it with startIdentityGateway.
 type identityGateway struct {
+	cfg      actortoken.SubstrateConfig
 	verifier *actortoken.SubstrateVerifier
 	actors   route.ActorTable
 	handler  http.Handler
@@ -121,11 +122,15 @@ func startIdentityGateway(ctx context.Context) *identityGateway {
 		listen = fmt.Sprintf(":%d", rig.identity.Port)
 	}
 
-	v, err := actortoken.NewSubstrateVerifier(context.WithoutCancel(ctx), actortoken.SubstrateConfig{
-		Issuer: issuer, CAFile: os.Getenv("KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE"),
-	})
+	// The stand-in is the code-host egress route (substrate.EgressRoute), so atenet-egress mints its
+	// tokens for the egress listener's audience (issue #1489), and the stand-in checks that one.
+	cfg := actortoken.SubstrateConfig{
+		Issuer: issuer, CAFile: os.Getenv("KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE"), Audience: actortoken.AudienceEgress,
+	}
+	v, err := actortoken.NewSubstrateVerifier(context.WithoutCancel(ctx), cfg)
 	Expect(err).NotTo(HaveOccurred(), "the Substrate verifier of the stand-in")
 	g := &identityGateway{
+		cfg:      cfg,
 		verifier: v,
 		state:    map[actortoken.SubstrateActor]actortoken.Actor{},
 		arrivals: map[string][]arrival{},
@@ -156,6 +161,18 @@ func startIdentityGateway(ctx context.Context) *identityGateway {
 	DeferCleanup(func(ctx context.Context) error { return srv.Shutdown(ctx) })
 	GinkgoWriter.Printf("identity stand-in on %s, reached by the guests as %s:%d\n", ln.Addr(), rig.identity.Host, rig.identity.Port)
 	return g
+}
+
+// verifierFor returns a verifier of the install's issuer for the listener audience, with the clock now
+// (nil: time.Now). The specs use it to check a token that the issuer really signed against another
+// listener or another time.
+func (g *identityGateway) verifierFor(ctx context.Context, audience string, now func() time.Time) *actortoken.SubstrateVerifier {
+	GinkgoHelper()
+	cfg := g.cfg
+	cfg.Audience, cfg.Now = audience, now
+	v, err := actortoken.NewSubstrateVerifier(context.WithoutCancel(ctx), cfg)
+	Expect(err).NotTo(HaveOccurred())
+	return v
 }
 
 // path is the request path of probe id on the stand-in's route.
