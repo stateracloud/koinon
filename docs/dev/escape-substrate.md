@@ -74,6 +74,9 @@ Set these:
 - `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER` and `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_CA_FILE`: the issuer of
   the install's actor JWTs and its CA, the same values as the gateway's `--actor-jwt-issuer` and
   `--actor-jwt-ca-file`.
+- `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER_ADDR` (optional, `host:port`): the address that the stand-in dials for
+  the issuer, for example `127.0.0.1:443` for a port-forward. The issuer name stays the TLS server name and the
+  certificate is still checked against it and the CA file. Test only: the gateway has no such flag.
 - `KOINON_ESCAPE_SUBSTRATE_GATEWAY_DIRECT`: the installed gateway's egress listener as `host:port` by Service
   name, Service IP and pod IP. Spec (e) connects to each one directly.
 
@@ -91,8 +94,10 @@ Before you run the suite:
    `10.0.0.5`. Set `KOINON_ESCAPE_SUBSTRATE_IDENTITY_GATEWAY` to that name and a free port.
 2. Let atenet-egress connect to that address: add it to `workerNetworkPolicy.extraEgress`, or run the rig
    with the chart policies off.
-3. Make sure that the test machine reaches the issuer URL (a port-forward to the issuer Service is
-   sufficient).
+3. Make sure that the test machine reaches the issuer. A port-forward alone is not enough: the issuer name (for
+   example `idp.ate-system.svc`) does not resolve on the test machine. Start the port-forward to the issuer
+   Service and set `KOINON_ESCAPE_SUBSTRATE_ACTOR_JWT_ISSUER_ADDR=127.0.0.1:443` (the forwarded port). Do not edit
+   `/etc/hosts`. The issuer certificate must still be valid for the issuer name.
 
 The specs run in one process (`Serial`), because the stand-in listens on one port.
 

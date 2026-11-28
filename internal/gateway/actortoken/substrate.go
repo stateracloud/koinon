@@ -163,6 +163,10 @@ type SubstrateConfig struct {
 	Audience string
 	// Now is the clock. Nil means time.Now. It is for tests.
 	Now func() time.Time
+	// IssuerAddr is for tests only. When set (host:port), every connection of the issuer client dials this
+	// address instead of the one in the URL, for example a port-forward on 127.0.0.1. The URL still gives the
+	// TLS server name and the certificate check, so verification stays on. Production leaves it empty.
+	IssuerAddr string
 }
 
 // SubstrateClaims are the checked contents of a Substrate actor token.
@@ -211,6 +215,11 @@ func NewSubstrateVerifier(ctx context.Context, cfg SubstrateConfig) (*SubstrateV
 	if err != nil {
 		return nil, err
 	}
+	if cfg.IssuerAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.IssuerAddr); err != nil {
+			return nil, fmt.Errorf("actortoken: the Substrate issuer address %q must be host:port: %w", cfg.IssuerAddr, err)
+		}
+	}
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
@@ -220,7 +229,7 @@ func NewSubstrateVerifier(ctx context.Context, cfg SubstrateConfig) (*SubstrateV
 			ctx:       ctx,
 			issuer:    cfg.Issuer,
 			discovery: strings.TrimSuffix(cfg.Issuer, "/") + wellKnownPath,
-			client:    newIssuerClient(pool),
+			client:    newIssuerClient(pool, cfg.IssuerAddr),
 			now:       now,
 		},
 		audience: cfg.Audience,
@@ -285,11 +294,19 @@ func rootPool(cfg SubstrateConfig) (*x509.CertPool, error) {
 var errRedirect = errors.New("actortoken: the Substrate issuer sent a redirect; redirects are refused")
 
 // newIssuerClient returns an HTTP client that trusts only pool, connects directly (no proxy),
-// refuses redirects and has timeouts.
-func newIssuerClient(pool *x509.CertPool) *http.Client {
+// refuses redirects and has timeouts. A non-empty dialAddr (tests only) replaces the dialed address;
+// the TLS server name still comes from the request URL.
+func newIssuerClient(pool *x509.CertPool, dialAddr string) *http.Client {
+	d := &net.Dialer{Timeout: dialTimeout}
+	dial := d.DialContext
+	if dialAddr != "" {
+		dial = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return d.DialContext(ctx, network, dialAddr)
+		}
+	}
 	tr := &http.Transport{
 		Proxy:                 nil,
-		DialContext:           (&net.Dialer{Timeout: dialTimeout}).DialContext,
+		DialContext:           dial,
 		TLSClientConfig:       &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout:   dialTimeout,
 		ResponseHeaderTimeout: fetchTimeout,
