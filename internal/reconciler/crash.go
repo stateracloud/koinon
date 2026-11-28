@@ -616,8 +616,12 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 	case errors.Is(err, execution.ErrRevertResume):
 		// The revert worked and the resume (or the egress write) did not. The snapshot is good: the
 		// repair path must not delete it. Count the revert, so the cap stops a front that always
-		// fails, and let the next pass read the state.
+		// fails, and let the next pass read the state. The run still lost its writes after the
+		// snapshot, so the fact is written here too.
 		r.crash.noteRevert(id, now)
+		if err := r.noteRevertFact(ctx, w); err != nil {
+			return true, err
+		}
 		r.crash.notReady(id)
 		r.log.Warn("the sandbox was reverted and did not resume", append(w.logAttrs(), "err", err)...)
 		return true, r.record(ctx, w, sb, hash, "reverted to the last snapshot; the resume did not work yet")
@@ -630,6 +634,9 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 	}
 	r.crash.noteRevert(id, now)
 	r.crash.notReady(id)
+	if err := r.noteRevertFact(ctx, w); err != nil {
+		return true, err
+	}
 	lost := "the writes after the last snapshot (its time is unknown)"
 	event := map[string]any{"sandbox": name, "crash": truncate(sb.Message, 300), "cause": detail}
 	if w.sb.LastSnapshotAt.Valid {
@@ -645,6 +652,17 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 		return true, err
 	}
 	return true, r.record(ctx, w, res, hash, "reverted a sandbox to its last snapshot; lost: "+lost)
+}
+
+// noteRevertFact writes the revert on the sandbox row (issue #1526). The reconciler does not own a
+// run, so it writes no run event: the run's owner (koinon-agentd) reads this fact and writes the event
+// at its own epoch. It is one counted update per accepted revert, so a retry of the pass after the
+// revert does not count it again (the sandbox is not crashed then).
+func (r *Reconciler) noteRevertFact(ctx context.Context, w *work) error {
+	if _, err := r.q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: w.org.ID, AgentID: w.agent.ID}); err != nil {
+		return fmt.Errorf("record the sandbox revert: %w", err)
+	}
+	return nil
 }
 
 // repairInstead sends the sandbox through the repair path. A crashed sandbox goes back to the caller

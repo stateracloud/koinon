@@ -345,6 +345,13 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(cl.Calls("RevertActor")).To(Equal(1))
 			Expect(cl.Calls("DeleteActor")).To(BeZero())
 			Expect(after.Message).To(ContainSubstring("lost: the writes after"))
+			// The reconciler writes no run event. It leaves the fact on the sandbox row for the run's
+			// owner (issue #1526), once per revert: a later pass does not count it again.
+			Expect(after.RevertCount).To(Equal(int32(1)))
+			Expect(after.RevertedAt.Valid).To(BeTrue())
+			Expect(after.RevertSnapshotAt).To(Equal(after.LastSnapshotAt), "the loss is the writes after the snapshot")
+			pass(ctx)
+			Expect(sandboxRow(ctx, agent.ID).RevertCount).To(Equal(int32(1)), "a retry of the pass does not count the revert twice")
 		})
 
 		// readyActor creates the agent's actor, waits until it runs, and lets one pass see it ready.

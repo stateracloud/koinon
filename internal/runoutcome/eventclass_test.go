@@ -223,7 +223,7 @@ var _ = Describe("Run event classes", func() {
 
 			"acp.agent_thought_chunk": D, "acp.user_message_chunk": D, "acp.plan": D,
 			"acp.available_commands_update": D, "acp.current_mode_update": D, "acp.usage_update": D,
-			"run.uncached": D, "run.sandbox_swept": D, "run.home_restored": D,
+			"run.uncached": D, "run.sandbox_swept": D, "run.sandbox_reverted": D, "run.home_restored": D,
 			"run.instructions_restored": D, "run.mcp_server_missing": D, "run.mcp_server_recovered": D,
 			"run.waiting_for_model": D, "run.waiting_for_forge": D, "run.refusal": D, "run.retry": D, "run.loop_nudge": D, "run.wrap_up_notice": D,
 			"run.summary": D, "run.summary_failed": D, "run.summary_refused": D,

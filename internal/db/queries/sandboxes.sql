@@ -268,3 +268,15 @@ SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));
 -- Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 -- no org-owned row, so it takes no @org_id.
 SELECT state, count(*)::bigint AS n FROM agent_sandboxes GROUP BY state;
+
+-- name: NoteSandboxRevert :one
+-- Records that the reconciler reverted the agent's sandbox to its last snapshot (issue #1526). The
+-- reconciler does not own a run, so it writes this fact and the run's owner turns it into a run event.
+-- The count goes up once per accepted revert; the snapshot time is the one known at the revert (NULL:
+-- not known).
+UPDATE agent_sandboxes
+SET revert_count = revert_count + 1,
+    reverted_at = clock_timestamp(),
+    revert_snapshot_at = last_snapshot_at
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;

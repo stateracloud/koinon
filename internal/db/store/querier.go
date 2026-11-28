@@ -848,6 +848,9 @@ type Querier interface {
 	// the row with FOR UPDATE (SetConnectionSecret via GetConnectionForUpdate, and the declared update,
 	// which locks the row the same way before its UPDATE); a plain UPDATE would not block this lock.
 	KeyShareConnection(ctx context.Context, arg KeyShareConnectionParams) (KeyShareConnectionRow, error)
+	// The newest revert count the run reported with a run.sandbox_reverted event, over every epoch (0: none).
+	// A new owner after a takeover starts from it, so a revert is never reported twice (issue #1526).
+	LastRunSandboxRevertReported(ctx context.Context, arg LastRunSandboxRevertReportedParams) (int32, error)
 	// The newest complete checkpoint of the home's lineage, whichever sandbox took it. A sandbox no
 	// harness ever ran in (home_dirtied_at NULL) holds exactly what this checkpoint holds, so it is
 	// the restore of a recreation or archive of that sandbox.
@@ -1432,6 +1435,11 @@ type Querier interface {
 	// The earliest next_poll_at over every org's pollers, NULL when there are none: how long the
 	// leader may sleep. A time only, no org.
 	NextCodeHostPollAt(ctx context.Context) (pgtype.Timestamptz, error)
+	// Records that the reconciler reverted the agent's sandbox to its last snapshot (issue #1526). The
+	// reconciler does not own a run, so it writes this fact and the run's owner turns it into a run event.
+	// The count goes up once per accepted revert; the snapshot time is the one known at the revert (NULL:
+	// not known).
+	NoteSandboxRevert(ctx context.Context, arg NoteSandboxRevertParams) (AgentSandbox, error)
 	NotifyGatewayStateRevision(ctx context.Context, payload string) error
 	// The gateway asks the prober to sync one server now (#1173). The channel is
 	// mcpservers.ProbeWakeChannel and the payload mcpservers.ProbeWakePayload: IDs only, no tool text.
