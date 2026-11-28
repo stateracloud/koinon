@@ -62,12 +62,13 @@
 #   `helm upgrade` to this build, and checks convergence (test/e2e/upgrade.sh, issue 519). It skips (exit 0) when the
 #   tag, the chart, the images or registry.k8s.io cannot be reached; KOINON_REQUIRE=e2e-upgrade makes that a failure.
 #   UPGRADE_STORIES=0 leaves out the run-1 story suite on the upgraded install.
-#   DRIVER=openshell|substrate (default openshell; issue #1091). substrate runs the same quickstart with execution.driver:
+#   DRIVER=substrate|openshell (default substrate since #1093; issue #1091). substrate runs the quickstart with execution.driver:
 #   substrate on the gVisor class (no KVM needed): kind/up.sh leaves out Agent Sandbox and OpenShell, kind/substrate.sh
 #   builds the substrate overlay of the harness image and installs Substrate (`koinon-api substrate install --platform kind`,
 #   gvisor class only), the values are kind/substrate-values.yaml and the OpenShell client certificate block, the OpenShell
-#   escape cases and the OpenShell diagnostics are left out. `make test-e2e-kind-substrate` sets it. SUBSTRATE_SOURCE,
-#   SUBSTRATE_CACHE and GVISOR_MIRROR are described in kind/substrate.sh.
+#   escape cases and the OpenShell diagnostics are left out. OpenShell callers pass DRIVER=openshell (`make test-e2e-kind`,
+#   `make test-e2e-web`; UPGRADE_FROM needs it) until #1094 removes the driver. SUBSTRATE_SOURCE, SUBSTRATE_CACHE and
+#   GVISOR_MIRROR are described in kind/substrate.sh.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -86,7 +87,7 @@ FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
 SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
-DRIVER=${DRIVER:-openshell}
+DRIVER=${DRIVER:-substrate}
 case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 export DRIVER
 [[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }

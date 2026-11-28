@@ -250,7 +250,8 @@ Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canari
   the port-forwarded fake server; a skip is a failure there. No extra job and no model call, so
   `hack/ci-required.txt` is unchanged (the `e2e result` status covers it). `make test-escape-kind`
   alone still skips the case (`make dev-kind-up` installs OpenShell only). Locally:
-  `ESCAPE_MCP=1 test/e2e/run.sh`. With `DRIVER=substrate` the hook is not set: `run.sh` sets
+  `DRIVER=openshell ESCAPE_MCP=1 test/e2e/run.sh`. With `DRIVER=substrate` (the default since #1093) the hook is
+  not set: `run.sh` sets
   `KOINON_E2E_ESCAPE_SUBSTRATE=1`, and step 6b runs the same attack from a raw MCP client in the agent's own actor,
   inside a task (the fake model's `raw mcp exfil` turn). The gateway knows an actor only by the JWT that atenet-egress
   adds, so a probe sandbox is not the agent. Inside a task the guard holds the sends for approval; the case denies them
@@ -300,7 +301,8 @@ after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` 
 ### The Substrate leg of the kind e2e (issue #1091)
 
 `make test-e2e-kind-substrate` (`DRIVER=substrate test/e2e/run.sh`) runs the quickstart pass with `execution.driver:
-substrate` on kind, on the gVisor class (tier `dev`; a standard runner has no KVM, ADR 0119 D10). What differs from the
+substrate` on kind. `substrate` is the default of `run.sh` since #1093. The OpenShell callers (`make test-e2e-kind`,
+`make test-e2e-web`, `UPGRADE_FROM`) pass `DRIVER=openshell` until #1094. The leg runs on the gVisor class (tier `dev`; a standard runner has no KVM, ADR 0119 D10). What differs from the
 OpenShell run:
 
 - `kind/up.sh` leaves out Agent Sandbox, the `runc` RuntimeClass and OpenShell.

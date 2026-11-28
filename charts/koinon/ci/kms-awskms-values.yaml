@@ -37,21 +37,35 @@ secrets:
         # The Job runs with the recovery flag (#255); the Secret it just created has a working
         # active KEK, so it must add the KEK inactive and leave the active one alone.
         activateIfNoActive: true
-# The agentgateway MCP driver (the fallback, #1239). With the koinon driver the gateway recipient key needs an AWS
-# KMS key of its own (gateway.mcp.koinon.recipientKey.kms.awskms.keyId), and the smoke test makes none. This file
-# also keeps the fallback rendered and started in the standalone mode.
+# The v0.1.0 Substrate shape: koinon-gateway on the model and MCP paths, because only it checks the actor
+# JWT (issue #1489). The gateway recipient key is wrapped by an AWS KMS key of its own, not the KEK's
+# (ADR 0097 12.3); the smoke test creates it in LocalStack under this alias.
 gateway:
+  mode: standalone
+  model:
+    driver: koinon
   mcp:
-    driver: agentgateway
+    driver: koinon
+    koinon:
+      recipientKey:
+        kms:
+          awskms:
+            keyId: alias/koinon-gateway
+            roleArns:
+              gateway: arn:aws:iam::000000000000:role/koinon-gateway-decrypt
+              keyAdmin: arn:aws:iam::000000000000:role/koinon-gateway-key-admin
 
-# Substrate is the default driver (#1093), but it refuses the agentgateway fallback (issue #1489): only
-# koinon-gateway checks the actor JWT. So this file stays on OpenShell, with its three features on, until
-# #1094 removes the driver and the fallback with it.
+# Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
+# default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never
+# pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
 execution:
-  driver: openshell
-sandboxObserver:
-  enabled: true
-sandboxNetworkPolicy:
-  enabled: true
-sandboxLimitRange:
-  enabled: true
+  substrate:
+    allowUnhardened: true

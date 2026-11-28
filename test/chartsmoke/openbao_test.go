@@ -56,6 +56,8 @@ type kmsSettings struct {
 	roleKey map[string]string
 	// AWS KMS: the region, the key and the endpoints the pods call.
 	region, keyID, endpoint, stsEndpoint string
+	// keyIDs is every AWS KMS key the pods name: the KEK's and the gateway recipient key's.
+	keyIDs []string
 	// caConfigMap is the ConfigMap the pods mount the KMS's CA from ("" when none).
 	caConfigMap string
 }
@@ -100,7 +102,15 @@ func kmsOf(r *rendered) *kmsSettings {
 				k.admin[role] = k.admin[role] || slices.Contains(c.Args, "key-admin") || c.Name == "gateway-key-admin"
 			case "awskms":
 				caVolume = "awskms-ca"
-				k.region, k.keyID, k.endpoint, k.stsEndpoint = env["KOINON_AWSKMS_REGION"], env["KOINON_AWSKMS_KEY_ID"], env["KOINON_AWSKMS_ENDPOINT"], env["KOINON_AWSKMS_STS_ENDPOINT"]
+				k.region, k.endpoint, k.stsEndpoint = env["KOINON_AWSKMS_REGION"], env["KOINON_AWSKMS_ENDPOINT"], env["KOINON_AWSKMS_STS_ENDPOINT"]
+				// The gateway's recipient key is wrapped by a key of its own, not the KEK's (ADR 0097 12.3).
+				id := env["KOINON_AWSKMS_KEY_ID"]
+				if c.Name != "koinon-gateway" && c.Name != "gateway-key-admin" {
+					k.keyID = id
+				}
+				if id != "" && !slices.Contains(k.keyIDs, id) {
+					k.keyIDs = append(k.keyIDs, id)
+				}
 			default:
 				Fail(fmt.Sprintf("%s: the smoke test runs no KMS for backend %q", c.Name, backend))
 			}
