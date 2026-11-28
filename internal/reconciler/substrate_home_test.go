@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc/codes"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -210,21 +211,62 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(home()).To(Equal(markerBody))
 		})
 
-		It("loses the home when a new sandbox spec recreates the sandbox", func(ctx SpecContext) {
+		It("keeps the actor and the home when a new sandbox spec repoints a running sandbox (issue #1482)", func(ctx SpecContext) {
+			first, oldSpec := actor(), cl.TemplateOf(ws, actor())
 			By("a new harness image changes the spec")
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
+			build()
+			pass(ctx)
+			running()
+			// The actor keeps its name, its durable home and its snapshot lineage: UpdateActor, no delete.
+			Expect(cl.Calls("UpdateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(cl.Calls("CreateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActorTemplate")).To(BeZero())
+			Expect(actor()).To(Equal(first))
+			Expect(cl.TemplateOf(ws, first)).NotTo(Equal(oldSpec))
+			Expect(home()).To(Equal(markerBody))
+			Expect(row(ctx).LastSnapshotAt.Valid).To(BeTrue(), "the snapshot of the repoint has a time in Postgres")
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(Equal(1), "a later pass changes nothing")
+		})
+
+		It("keeps the home when a new sandbox spec repoints a suspended sandbox (issue #1482)", func(ctx SpecContext) {
+			idleStop(ctx)
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			first := actor()
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
+			build()
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(actor()).To(Equal(first))
+			Expect(home()).To(Equal(markerBody))
+		})
+
+		It("loses the home, with checkpoints off, when Substrate refuses the repoint and the sandbox is recreated", func(ctx SpecContext) {
+			cl.RefuseNextUpdateActor(ws, actor(), codes.FailedPrecondition)
 			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
 			build()
 			pass(ctx)
 			Expect(cl.Calls("DeleteActor")).To(Equal(1))
 			pass(ctx) // the pass after the deletion creates the new actor
 			running()
-			// HOME LOST: with checkpoints off, a recreation deletes the actor (and its snapshot prefix)
-			// and creates a new one from the image. Nothing restores the home. The marker came in by an
-			// upload, not by a run: even with checkpoints on, home_dirtied_at would not protect it.
+			// HOME LOST: the fallback is the delete and restore path. With checkpoints off nothing restores
+			// the home. The marker came in by an upload, not by a run: even with checkpoints on,
+			// home_dirtied_at would not protect it.
 			Expect(cl.Calls("DeleteActor")).To(Equal(1), "no second delete")
 			Expect(cl.Calls("CreateActor")).To(Equal(2))
 			Expect(row(ctx).RestoreCheckpointID.Valid).To(BeFalse(), "no checkpoint to restore from")
 			Expect(home()).To(BeNil(), "the new actor has a fresh root filesystem")
+		})
+
+		It("loses the home, with checkpoints off, when the isolation tier changes", func(ctx SpecContext) {
+			cfg.RuntimeClassName = "other"
+			build()
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(BeZero(), "a tier change never repoints")
+			Expect(cl.Calls("DeleteActor")).To(Equal(1))
 		})
 
 		It("keeps the actor and the home of the last snapshot when a crashed actor is reverted (issue #1481)", func(ctx SpecContext) {

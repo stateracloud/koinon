@@ -141,6 +141,19 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a sandbox revert as a note, with and without the snapshot time', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.sandbox_reverted', { revert: 1, snapshot_at: '2026-11-28T01:00:00Z' }),
+        runEvent(2, 'run.sandbox_reverted', { revert: 2 }),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456: the sandbox crashed and was reverted to its last snapshot; the writes after 2026-11-28T01:00:00Z are lost',
+      'Run r-123456: the sandbox crashed and was reverted to its last snapshot; the writes after its last snapshot are lost',
+    ])
+  })
+
   it('says why a task waits on its owner after a run hit its time limit', () => {
     const items = buildTimeline(
       [

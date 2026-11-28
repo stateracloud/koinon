@@ -363,6 +363,13 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
       const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is retrying after a temporary model fault${attempt}`, runId }
     }
+    case 'run.sandbox_reverted': {
+      // agentd tells the run that the reconciler reverted its crashed sandbox to its last snapshot
+      // (#1526): {revert, at, snapshot_at?, lost}. Without snapshot_at the time is not known.
+      const snap = str(p.snapshot_at)
+      const lost = snap ? `the writes after ${snap} are lost` : 'the writes after its last snapshot are lost'
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: the sandbox crashed and was reverted to its last snapshot; ${lost}`, runId }
+    }
     default:
       // The user's message chunks (already on the task), plans, usage and
       // mode updates, and agentd's bookkeeping are not shown.

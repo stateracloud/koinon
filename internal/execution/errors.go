@@ -45,6 +45,13 @@ var (
 	// ErrRevertResume means the revert itself worked and the resume after it failed. The sandbox holds
 	// its snapshot: the caller must not delete it. Read the sandbox to see its state.
 	ErrRevertResume = errors.New("resume after revert failed")
+	// ErrRepointRefused means a repoint did not change the sandbox, and nothing was lost: the template change
+	// breaks an invariant that keeps the home (container name, volumes, mounts, storage location, tier), or
+	// Substrate refused UpdateActor. The caller falls back to delete and restore (issue #1482).
+	ErrRepointRefused = errors.New("repoint refused")
+	// ErrRepointResume means the repoint itself worked and a step after it failed (the egress policy write or
+	// the resume). The sandbox names the new template and holds its home: the caller must not delete it.
+	ErrRepointResume = errors.New("resume after repoint failed")
 	// ErrFrontDown means the guest front of a running sandbox did not answer in time.
 	ErrFrontDown = errors.New("guest front does not answer")
 	// ErrStreamClosed: an exec stream ended without an exit status.

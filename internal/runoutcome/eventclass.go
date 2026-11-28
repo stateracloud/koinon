@@ -77,6 +77,7 @@ var eventClasses = map[string]EventClass{
 	// Notes about the run that nothing reads back to decide state.
 	"run.uncached":              ClassDiagnostic,
 	"run.sandbox_swept":         ClassDiagnostic,
+	"run.sandbox_reverted":      ClassDiagnostic,
 	"run.home_restored":         ClassDiagnostic,
 	"run.instructions_restored": ClassDiagnostic,
 	"run.mcp_server_missing":    ClassDiagnostic,

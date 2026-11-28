@@ -88,6 +88,16 @@ var _ = Describe("substrate-values.yaml", func() {
 		Expect(regexp.MustCompile(`digest: sha256:0{64}\n`).Match(raw)).To(BeTrue(), "the all-zero harness digest")
 	})
 
+	// A KIND_REGISTRY other than localhost:5001 moves the image repository. The cache upstream host moves with it, or the
+	// cache misses the harness image reference (issue #1530). The upstream url stays: it is the registry on the docker network.
+	It("moves the cache upstream host with the image repository", func() {
+		rewritten, err := exec.Command("bash", "values-rewrite.sh", "substrate-values.yaml", "registry.test:5002/koinon-e1").CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), string(rewritten))
+		Expect(string(rewritten)).To(ContainSubstring("registry: registry.test:5002/koinon-e1"))
+		Expect(string(rewritten)).To(ContainSubstring("{host: registry.test:5002, url: \"http://kind-registry:5000\""))
+		Expect(string(rewritten)).NotTo(ContainSubstring("host: localhost:5001"))
+	})
+
 	It("renders with the chart", func() {
 		if _, err := exec.LookPath("helm"); err != nil {
 			Skip("helm is not installed")

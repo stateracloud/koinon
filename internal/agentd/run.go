@@ -322,6 +322,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 	t := time.NewTicker(r.p.cfg.Heartbeat)
 	defer t.Stop()
 	last := time.Now()
+	var notice revertNotice
 	for {
 		select {
 		case <-ctx.Done():
@@ -336,6 +337,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 		switch {
 		case err == nil:
 			last = time.Now()
+			r.noteRevert(ctx, &notice)
 		case errors.Is(err, pgx.ErrNoRows):
 			r.own.FenceFromDB(ctx)
 			return
