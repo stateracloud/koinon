@@ -34,7 +34,11 @@
 #   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
 #   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
 #   changed, then the file restores both and the script checks the install is the one that was backed up
-#   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
+#   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not. With DRIVER=substrate it
+#   runs the home restore drill instead (test/e2e/home_restore_test.go, label home-restore; issue #1090 part 3): home
+#   checkpoints on, a marker in an agent's home, idle stop, archive (the actor and its durable directory are deleted),
+#   a restore refused with a wrong recorded digest, then a verified restore that reads the marker. The database and
+#   keys drill of backup-restore.sh is not wired for Substrate yet.
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
 #   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it. With DRIVER=substrate the
@@ -85,7 +89,6 @@ case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; e
 DRIVER=${DRIVER:-openshell}
 case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 export DRIVER
-[[ $DRIVER == openshell || ${BACKUP_RESTORE:-0} != 1 ]] || { echo "BACKUP_RESTORE=1 is not wired for DRIVER=substrate yet: the restore drill on the Substrate leg is a follow-up in #1090 part 3 (docs/dev/ci.md)" >&2; exit 2; }
 [[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
@@ -390,6 +393,8 @@ go)
   # Worst cases (the job limit in e2e-kind.yml is 75 minutes on the schedule and on stories=true): set-up and image
   # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 5 (with
   # its restore specs; the format gate's hold after the restore is about 3 of it), tear-down 5: 73 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
+  # The Substrate leg has no escape OpenShell step, and its BACKUP_RESTORE step is the home restore drill (an idle
+  # stop, an archive and two restores, about 15 minutes; spec limit 30, go test 35), which needs the 75-minute job limit too.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
@@ -397,6 +402,9 @@ go)
     KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
     KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
+    KOINON_E2E_HELM="$OUT/bin/helm" \
+    KOINON_E2E_CHART="$root/charts/koinon" \
+    KOINON_E2E_FAKES="$FAKES" \
     KOINON_E2E_PASSWORD="$password" \
     KOINON_E2E_NEW_PASSWORD="$new_password" \
     KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 && $DRIVER != substrate ]] && echo "$here/escape-mcp.sh" || true)" \
@@ -454,7 +462,15 @@ if [[ $SUITE == go && $DRIVER == openshell && ${ESCAPE_OPENSHELL:-1} == 1 ]]; th
   done_step "Escape suite (OpenShell cases)"
 fi
 
-if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
+if [[ ${BACKUP_RESTORE:-0} == 1 && $DRIVER == substrate ]]; then
+  [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
+  # The restore drill of the Substrate leg (#1090 part 3): the agent home, through Koinon's checkpoint path. It turns
+  # home checkpoints on with helm upgrade, so it runs last. The database and keys drill (backup-restore.sh) is not
+  # wired for Substrate yet.
+  step "home restore drill on Substrate (go test ./test/e2e, label home-restore)"
+  driver home-restore "$OUT/home-restore-junit.xml" "$OUT/home-restore-report.json" "$OUT/home-restore.log" 35m
+  done_step "Home restore drill (checkpoint, archive, refused wrong digest, verified restore)"
+elif [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
   step "backup and restore (commands/backup-restore.e1)"
   # The drill runs the restore specs of the Go driver (label restore, #1335): they sign in as the quickstart's admin

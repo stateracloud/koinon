@@ -22,3 +22,5 @@ stringData:
     # The run-1 story suite (test/e2e/stories_test.go): scripts test/fakemodel/scripts/stories-*.yaml.
     - name: stories-ask
     - name: stories-slow
+    # The home restore drill on the Substrate leg (test/e2e/home_restore_test.go): test/fakemodel/scripts/home-drill.yaml.
+    - name: home-drill
