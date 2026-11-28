@@ -41,6 +41,10 @@ type fproc struct {
 	exited  bool
 	code    int32
 	started time.Time
+	// lag, when set, delays the published exit: the stdin pipe closes at exit (pipeGone) and exited
+	// follows lag later, as in the real guest's reaper (LagNextExits).
+	lag      time.Duration
+	pipeGone bool
 }
 
 func (p *fproc) update(f func()) {
@@ -52,6 +56,21 @@ func (p *fproc) update(f func()) {
 }
 
 func (p *fproc) exit(code int32) {
+	if p.lag > 0 {
+		p.mu.Lock()
+		gone := p.pipeGone
+		p.pipeGone = true
+		p.mu.Unlock()
+		if gone {
+			return
+		}
+		time.AfterFunc(p.lag, func() { p.publishExit(code) })
+		return
+	}
+	p.publishExit(code)
+}
+
+func (p *fproc) publishExit(code int32) {
 	p.update(func() {
 		if !p.exited {
 			p.exited, p.code = true, code
@@ -157,6 +176,12 @@ func (g *guestServer) StartProcess(ctx context.Context, r *ateenvv1alpha.StartPr
 	p := &fproc{id: "p" + itoa(a.nextPID), argv: argv, changed: make(chan struct{}), started: time.Now()}
 	a.procs[p.id] = p
 	g.c.mu.Unlock()
+	a.smu.Lock()
+	if a.lagExits > 0 {
+		a.lagExits--
+		p.lag = a.exitLag
+	}
+	a.smu.Unlock()
 	if d := r.GetTimeout().AsDuration(); d > 0 {
 		time.AfterFunc(d, func() { p.exit(137) })
 	}
@@ -355,13 +380,20 @@ func (g *guestServer) WriteProcessInput(stream ateenvv1alpha.ProcessService_Writ
 			}
 		}
 		p.mu.Lock()
-		exited, closed := p.exited, p.inClose
+		exited, closed, gone := p.exited, p.inClose, p.pipeGone
 		p.mu.Unlock()
 		switch {
 		case exited:
 			return status.Errorf(codes.FailedPrecondition, "process %q has exited", p.id)
 		case closed:
 			return status.Errorf(codes.FailedPrecondition, "stdin of process %q is closed", p.id)
+		case gone && len(req.GetData()) > 0:
+			// The real guest between cmd.Wait and its mark of the exit: the pipe is closed already.
+			return status.Error(codes.Internal, "writing stdin: write |1: file already closed")
+		case gone && req.GetClose():
+			// Its CloseInput marks stdin closed first, then the close of the pipe fails.
+			p.update(func() { p.inClose = true })
+			return status.Error(codes.Internal, "closing stdin: close |1: file already closed")
 		}
 		if d := req.GetData(); len(d) > 0 {
 			p.update(func() { p.stdin = append(p.stdin, d...) })

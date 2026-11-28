@@ -76,10 +76,12 @@ type actor struct {
 	nextPID int
 
 	smu       sync.Mutex
-	failOut   int // the next output streams that fail at once with Unavailable
-	failWrite int // the next tar upload streams that end with Unavailable at their close message
-	failRes   int // the next ResumeActor calls that fail with Unavailable
-	failSkip  int // how many ResumeActor calls work before failRes starts
+	failOut   int           // the next output streams that fail at once with Unavailable
+	failWrite int           // the next tar upload streams that end with Unavailable at their close message
+	lagExits  int           // the next processes that publish their exit exitLag late (LagNextExits)
+	exitLag   time.Duration // how late they publish it; their stdin pipe closes at the exit
+	failRes   int           // the next ResumeActor calls that fail with Unavailable
+	failSkip  int           // how many ResumeActor calls work before failRes starts
 	// frontDead: pid 1 exited. The actor stays RUNNING and the guest answers nothing (KillFront).
 	frontDead bool
 	// frontHang: the dead front takes a call and never answers (HangFront).

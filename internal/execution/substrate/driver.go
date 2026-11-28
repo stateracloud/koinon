@@ -201,6 +201,9 @@ type Driver struct {
 	access map[key]execution.GatewayAccess
 
 	resuspends *prometheus.CounterVec
+	// exitGrace is how long stdin.Close waits for the exit of a command after the guest failed the
+	// close (stdinExitGrace; a spec makes it short).
+	exitGrace time.Duration
 }
 
 // The driver implements the compute half and both optional capabilities. It has no Egress half.
@@ -232,6 +235,7 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		access:     map[key]execution.GatewayAccess{},
 		lineage:    lineages{m: map[string]lineage{}},
 		resuspends: newResuspends(),
+		exitGrace:  stdinExitGrace,
 	}
 	d.router = signedConn{cc: router, d: d}
 	if cc, ok := router.(interface{ GetState() connectivity.State }); ok {

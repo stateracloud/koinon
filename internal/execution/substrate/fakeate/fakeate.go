@@ -362,6 +362,22 @@ func (c *Cluster) FailNextUploadStreams(atespace, name string, n int) {
 	}
 }
 
+// LagNextExits makes the next n processes of an actor publish their exit lag after they exit. In
+// that window their stdin pipe is closed already: a write fails with Internal "writing stdin: ...
+// file already closed" and a close with Internal "closing stdin: close |1: file already closed".
+// That is the real guest between cmd.Wait, which closes the pipe, and the reaper's mark of the exit
+// after it synced the output spool (upstream env guest/process/tracker.go, reap and CloseInput).
+func (c *Cluster) LagNextExits(atespace, name string, n int, lag time.Duration) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.lagExits, a.exitLag = n, lag
+		a.smu.Unlock()
+	}
+}
+
 // Running returns the commands of the processes of an actor that have not exited, as the guest runs
 // them (the launcher prefix is removed).
 func (c *Cluster) Running(atespace, name string) [][]string {

@@ -168,6 +168,29 @@ var _ = Describe("the Substrate driver", func() {
 			}
 		}, SpecTimeout(30*time.Second))
 
+		// The guest closes the stdin pipe of a command that exits before it records the exit; a close in
+		// that window fails with Internal (kind e2e run 46151688093, "prepare the session directory").
+		It("closes stdin without error when the guest fails the close because the command exited", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.LagNextExits(ws, "sb", 1, 200*time.Millisecond)
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(p.Stdin().Close()).To(Succeed(), "the command ended, so the failed close is no error")
+			code, err := p.Wait()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(BeZero())
+		}, SpecTimeout(15*time.Second))
+
+		It("keeps the error of a failed close when the command does not end in the grace", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			d.SetExitGrace(50 * time.Millisecond)
+			cl.LagNextExits(ws, "sb", 1, 2*time.Second)
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			Expect(p.Stdin().Close()).To(MatchError(ContainSubstring("closing stdin")))
+		}, SpecTimeout(15*time.Second))
+
 		It("does not resume a suspended sandbox to run a command", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			_, err := d.StopSandbox(ctx, ws, "sb")

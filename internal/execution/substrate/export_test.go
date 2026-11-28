@@ -3,6 +3,8 @@
 package substrate
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/grpc"
 )
@@ -28,6 +30,9 @@ func (d *Driver) RouterCallsStarted(workspace, name string) uint64 {
 	defer g.mu.Unlock()
 	return g.next
 }
+
+// SetExitGrace sets how long stdin.Close waits for the exit of a command whose close the guest failed.
+func (d *Driver) SetExitGrace(grace time.Duration) { d.exitGrace = grace }
 
 // Resuspends is the value of koinon_substrate_resuspends_total for one outcome.
 func (d *Driver) Resuspends(outcome string) float64 {
