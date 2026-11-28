@@ -25,7 +25,7 @@ sandboxPolicy.enabled and validationActions including Deny are required when thi
 (koinon.sandboxNetworkPolicy checks in _helpers.tpl): without Deny the ClusterRole grant
 is only Warn/Audit-fenced.
 */ -}}
-{{- if .Values.sandboxNetworkPolicy.enabled }}
+{{- if eq (include "koinon.featureOn" (list $ "sandboxNetworkPolicy")) "true" }}
 {{- $name := include "koinon.sandboxDefaultDeny" . }}
 {{- $writer := printf "%s-writer" $name }}
 {{- $policy := printf "%s-binding" $name }}

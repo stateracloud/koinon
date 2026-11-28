@@ -21,8 +21,8 @@ import (
 	"github.com/stateracloud/koinon/internal/substrateauthz"
 )
 
-// Execution drivers, the values of execution.driver (ADR 0119). OpenShell stays the default until
-// the epic flips it (#1082).
+// Execution drivers, the values of execution.driver (ADR 0119). Substrate is the default since #1093
+// (execution.DefaultDriver); OpenShell stays selectable until #1094 removes it.
 const (
 	DriverOpenShell = "openshell"
 	DriverSubstrate = "substrate"
@@ -238,7 +238,7 @@ type Execution struct {
 // Flags registers the flags that select the driver and reach Substrate. The OpenShell flags stay
 // with each binary, which has its own names for them.
 func (e *Execution) Flags(fs *pflag.FlagSet) {
-	fs.StringVar(&e.Driver, "execution-driver", DriverOpenShell, "execution.driver: openshell or substrate (ADR 0119)")
+	fs.StringVar(&e.Driver, "execution-driver", DriverSubstrate, "execution.driver: openshell or substrate (ADR 0119)")
 	fs.StringVar(&e.Substrate.ControlAddress, "substrate-control-address", "", "Agent Substrate's control API (ateapi) host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.RouterCAFile, "substrate-router-ca-file", "", "CA file of the atenet router's serving certificate (the servicedns signer's trust bundle); empty uses --substrate-ca-file. Read again when it changes")

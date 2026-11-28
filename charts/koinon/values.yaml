@@ -854,11 +854,13 @@ execution:
   # substrate (Agent Substrate, the default since v0.1.0, ADR 0119) or openshell (until #1094 removes it).
   # Install Substrate first with `koinon-api substrate install`, which also runs its preflight. With
   # substrate the openshell section, sandboxObserver, sandboxNetworkPolicy and sandboxLimitRange are not
-  # used (the chart refuses the last three when they are on, so they are off by default), and the install
-  # preflight Job runs the Substrate checks (Kubernetes 1.37, the CRDs, the pinned api server, the router)
-  # without the Substrate probe pods. With openshell, set openshell.address and the three OpenShell
-  # features (sandboxObserver, sandboxNetworkPolicy, sandboxLimitRange) to enabled=true.
-  driver: substrate
+  # used (the chart refuses the last three when they are on; unset, they are off with substrate), and the
+  # install preflight Job runs the Substrate checks (Kubernetes 1.37, the CRDs, the pinned api server, the
+  # router) without the Substrate probe pods. With openshell, set openshell.address; the three OpenShell
+  # features (sandboxObserver, sandboxNetworkPolicy, sandboxLimitRange) are then on unless you set them false.
+  # Empty means substrate. Upgrade from an OpenShell install: an empty driver with openshell.address set fails to
+  # render (before v0.1.0 empty meant openshell), so set execution.driver=openshell to keep the OpenShell driver.
+  driver: ""
   substrate:
     # ateapi's host:port: the in-cluster address of a default Substrate install. Required with substrate. Use that
     # exact name: the ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the
@@ -1573,7 +1575,8 @@ metrics:
 
 # The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
 # that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
-# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default.
+# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default with
+# execution.driver=openshell, off with substrate (the chart refuses it there).
 # Cluster-scoped objects it renders (templates/sandbox-observer.yaml): a ClusterRole with get on pods
 # and agents.x-k8s.io sandboxes, a ClusterRole that lets the reconciler create RoleBindings and bind
 # that one ClusterRole, and a ValidatingAdmissionPolicy that limits those bindings to OpenShell
@@ -1582,19 +1585,22 @@ metrics:
 # error stays an "unknown" wait cause (the preflight warns). Planned to go away once OpenShell
 # surfaces pod failures itself.
 sandboxObserver:
-  enabled: false
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
 # Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15, ADR 0045).
-# Off by default (the default driver is substrate; the chart refuses it with substrate). Set true with execution.driver=openshell. Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
+# On by default with execution.driver=openshell, off with substrate (the chart refuses it there). Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
 # renders a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-networkpolicy.yaml);
 # the reconciler applies a NetworkPolicy named <namespace>-<fullname>-sandbox-default-deny in each
 # workspace namespace of openshell.gatewayId: empty podSelector, policyTypes [Ingress, Egress], no
 # allow rules. OpenShell's own workload and supervisor policies are additive with it. Off, the
 # chart renders none of it and the reconciler applies nothing.
 sandboxNetworkPolicy:
-  enabled: false
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
-# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default. OpenShell
+# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default with execution.driver=openshell,
+# off with substrate (the chart refuses it there). OpenShell
 # cannot size the supervisor or its init containers; the reconciler applies a LimitRange named
 # <namespace>-<release>-sandbox-limitrange in each workspace namespace of openshell.gatewayId
 # (defaultRequest 50m/64Mi, default 250m/256Mi for type Container, covering init containers too). The chart renders
@@ -1603,7 +1609,8 @@ sandboxNetworkPolicy:
 # removed (`kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`). Needs
 # sandboxPolicy.enabled.
 sandboxLimitRange:
-  enabled: false
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and

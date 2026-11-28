@@ -23,8 +23,11 @@ import (
 	"github.com/stateracloud/koinon/templates"
 )
 
-// chartConfig is config.yaml as charts/koinon renders it (standalone gateway).
+// chartConfig is config.yaml as charts/koinon renders it for an OpenShell install (standalone gateway,
+// execution.driver=openshell: the default driver is substrate since #1093).
 const chartConfig = `
+execution:
+  driver: openshell
 gateway:
   mode: standalone
   configMap: koinon-gateway-config
@@ -229,6 +232,8 @@ gateway:
   accessLogOtlpTokenSecret: koinon-otlp-token
   providerKeysSecret: koinon-gateway-providers
   providerKeysDir: /secrets/providers
+execution:
+  driver: openshell
 openshell:
   address: openshell.openshell.svc:8080
 `
@@ -248,6 +253,7 @@ openshell:
 		delete(env, "KOINON_CONFIG")
 		env["KOINON_GATEWAY_MODE"], env["KOINON_GATEWAY_URL"] = "kubernetes", "http://g:4000"
 		env["KOINON_OPENSHELL_ADDRESS"], env["KOINON_PROVIDER_KEYS_SECRET"], env["KOINON_PROVIDER_KEYS_DIR"] = "o:1", "s", "/d"
+		env["KOINON_EXECUTION_DRIVER"] = "openshell"
 		_, err = parseConfig(nil, env)
 		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
 	})
@@ -290,7 +296,7 @@ openshell:
 		base := map[string]string{"DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"}
 		write := func(archiveAfter string) map[string]string {
 			path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
-			cfg := "gateway:\n  mode: kubernetes\n  name: g\n  url: http://g:8080\n  port: 8080\n  providerKeysSecret: s\n  providerKeysDir: /d\nopenshell:\n  address: o:1\n"
+			cfg := "gateway:\n  mode: kubernetes\n  name: g\n  url: http://g:8080\n  port: 8080\n  providerKeysSecret: s\n  providerKeysDir: /d\nexecution:\n  driver: openshell\nopenshell:\n  address: o:1\n"
 			if archiveAfter != "" {
 				cfg += "reconciler:\n  archiveAfter: " + archiveAfter + "\n"
 			}

@@ -309,9 +309,10 @@ OpenShell run:
 - `kind/substrate.sh harness` builds the substrate overlay of the harness image (guest front and launcher) and pushes it as
   `<registry>/<cluster>/sandbox-substrate:e2e`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
   digest, #1192).
-- `kind/substrate.sh install` runs `koinon-api substrate install --platform kind --sandbox-classes gvisor` from a clone
-  at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into `~/.cache/koinon/substrate`). `GVISOR_MIRROR`
-  is for a host that cannot reach `storage.googleapis.com`.
+- run.sh runs the quickstart's `substrate-install` block (`koinon-api substrate install --platform kind`).
+  `kind/substrate.sh tools` gives the block its variables and a `koinon-api` wrapper that adds `--sandbox-classes
+  gvisor`. The source is a clone at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into
+  `~/.cache/koinon/substrate`). `GVISOR_MIRROR` is for a host that cannot reach `storage.googleapis.com`.
 - The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
 
 What the leg proves: Substrate installs on kind, the provisioner creates the atespace of an org, an actor of the gVisor class

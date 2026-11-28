@@ -13,6 +13,12 @@
 # need both installs at once: test/drill runs them, in the order stop, hold, pipe-db, pipe-keys, start, compare-keys,
 # verify-keys, release (backup-restore.sh restores in place from files and cannot). With a gateway recipient key, run
 # verify-gateway-key after start too.
+# WARNING, Substrate driver (the default since #1093): a restore into a fresh namespace of the SAME cluster has no
+# execution isolation. The atespaces are named kw-<hash(org)>, cluster-wide, and the target has the source's org IDs,
+# so the release block lets the target's reconciler change or delete the live install's sandboxes. Restore into a
+# separate cluster, or do not run release while the live install runs on that cluster. Interim warning for
+# https://github.com/stateracloud/koinon/issues/1548: remove it when that issue is closed (each install marks the
+# atespaces and actors it owns and never touches another install's).
 # Not here and not checked by any test: a CloudNativePG backup restore. The chart configures no CNPG backup yet
 # (ADR 0076 decision 9), so there is nothing to restore from. Tracked in https://github.com/stateracloud/koinon/issues/910.
 # The gateway recipient key (docs/dev/gateway-recipient-key.md): with gateway.mcp.driver=koinon the stored MCP

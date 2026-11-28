@@ -28,6 +28,24 @@ hit 'sandboxNetworkPolicy.enabled=true' "$out/os.err" || fail "the openshell err
 # The OpenShell driver stays selectable until #1094: it needs its address, TLS choice and three features on.
 # The openshell ci values file (charts/koinon/ci/openshell-values.yaml) keeps the driver in the preflight and smoke renders.
 has "the openshell driver is still selectable" 'driver: openshell' --show-only templates/config.yaml
+# Upgrade from an OpenShell install (#1093): openshell.address set and execution.driver left empty fails, and the
+# error names the fix, so the upgrade never switches the driver to Substrate in silence.
+if render_default --set "$ADDRESS" --set openshell.insecure=true --set execution.substrate.allowUnhardened=true >/dev/null 2>"$out/up.err"; then
+	fail "openshell.address with an empty execution.driver must not render"
+fi
+hit 'Set execution.driver=openshell to keep the OpenShell driver' "$out/up.err" || fail "the upgrade error must say: set execution.driver=openshell to keep the OpenShell driver"
+# An OpenShell install that names only the driver keeps the observer, the NetworkPolicy writer and the LimitRange
+# writer, as before #1093: unset (null) they are on with openshell. An explicit false still turns one off.
+pinned=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true)
+hit 'name: koinon-koinon-sandbox-observer' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox observer"
+hit 'sandbox-limitrange' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox LimitRange writer"
+hit 'sandbox-default-deny' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox NetworkPolicy writer"
+pinned_cfg=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true --show-only templates/config.yaml)
+for k in sandboxObserver sandboxNetworkPolicy sandboxLimitRange; do
+	grep -A1 "^    $k:\$" <<<"$pinned_cfg" | hit 'enabled: true' || fail "execution.driver=openshell alone must tell the reconciler $k is on"
+done
+off_cfg=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true --set sandboxObserver.enabled=false --show-only templates/config.yaml)
+grep -A1 '^    sandboxObserver:$' <<<"$off_cfg" | hit 'enabled: false' || fail "an explicit sandboxObserver.enabled=false must win over the openshell default"
 lacks "no Substrate volume with the openshell driver" 'substrate-token' --show-only templates/deployments.yaml
 env_is KOINON_OPENSHELL_ADDRESS '"openshell.openshell.svc:8080"'
 

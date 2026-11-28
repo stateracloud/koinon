@@ -4,11 +4,18 @@
 # One block per '# e1=<name>' line; the lines up to the next marker are the block's commands.
 # Limits (hack/docs-e1.sh header): empty lines are dropped, so keep heredoc bodies free of them; a line that
 # is exactly a marker starts a block also inside a heredoc body, so never write one there.
+# The default path is the Substrate driver (the chart default since #1093), in this order: substrate-install,
+# namespace, install, password, open, model-provider. Variables of substrate-install (docs/dev/substrate-install.md):
+# SUBSTRATE_SOURCE is a clone of github.com/agent-substrate/substrate at the pinned commit, KUBECONFIG_FILE and
+# CONTEXT name the cluster, PROBE_IMAGE is the koinon-api image, BUCKET the snapshot bucket and PLATFORM the platform
+# (generic, or kind for a kind cluster).
+# client-cert is the OpenShell alternative only (execution.driver=openshell), so it is last: that path skips
+# substrate-install and runs client-cert after namespace. The Substrate driver reads no OpenShell certificate.
 # Fetch at a tag: https://raw.githubusercontent.com/stateracloud/koinon/<tag>/test/e2e/commands/quickstart.e1
+# e1=substrate-install
+koinon-api substrate install --substrate-source "$SUBSTRATE_SOURCE" --kubeconfig "$KUBECONFIG_FILE" --context "$CONTEXT" --probe-image "$PROBE_IMAGE" --storage-bucket "$BUCKET" --platform "$PLATFORM"
 # e1=namespace
 kubectl create namespace koinon --dry-run=client -o yaml | kubectl apply -f -
-# e1=client-cert
-kubectl -n openshell get secret openshell-client-tls -o json | jq --arg ns koinon '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' | kubectl apply -f -
 # e1=install
 helm install koinon charts/koinon --namespace koinon -f values.yaml --wait --timeout 10m
 # e1=password
@@ -17,3 +24,5 @@ kubectl -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password
 kubectl -n koinon port-forward svc/koinon-api 8080:8080
 # e1=model-provider
 kubectl apply -f model-provider.yaml
+# e1=client-cert
+kubectl -n openshell get secret openshell-client-tls -o json | jq --arg ns koinon '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' | kubectl apply -f -

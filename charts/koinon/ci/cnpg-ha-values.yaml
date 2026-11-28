@@ -31,5 +31,7 @@ harnesses:
 
 # Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
 execution:
+  # Named, not left empty: with openshell.address set an empty driver fails to render (#1093 upgrade guard).
+  driver: substrate
   substrate:
     allowUnhardened: true

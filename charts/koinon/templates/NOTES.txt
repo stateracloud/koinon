@@ -18,7 +18,7 @@ are test/e2e/commands/backup-restore.e1 in the Koinon repository):
   The objects are named after {{ include "koinon.fullname" . }}, not the release: the guide's blocks assume they are the same.
   Install with a release name that contains "koinon" and no fullnameOverride, or adapt the names.
 {{- end }}
-{{- if and (eq .Values.execution.driver "substrate") .Values.openshell.runtimeClassName (not (hasKey (.Values.execution.substrate.runtimeClassTiers | default dict) .Values.openshell.runtimeClassName)) }}
+{{- if and (eq (include "koinon.substrate" .) "true") .Values.openshell.runtimeClassName (not (hasKey (.Values.execution.substrate.runtimeClassTiers | default dict) .Values.openshell.runtimeClassName)) }}
 
 Substrate tier: runtimeClassTiers has no entry for runtime class {{ .Values.openshell.runtimeClassName | quote }}, so its sandboxes run at defaultTier ({{ .Values.execution.substrate.defaultTier | quote }}).
 {{- end }}

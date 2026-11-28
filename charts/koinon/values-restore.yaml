@@ -18,6 +18,14 @@
 #   - sandboxPolicy.identities and preflight.openshell when the new gateway's ServiceAccount, ConfigMap or
 #     workload is not named like the default `openshell` ones (the chart's defaults name the shared install).
 
+# WARNING, Substrate driver (the default since #1093): a held restore on the SAME cluster as the live install has
+# no execution isolation. The atespaces are named kw-<hash(org)>, cluster-wide, and the restored install has the
+# same org IDs, so after the release its reconciler changes or deletes the live install's sandboxes. Restore into
+# a separate cluster, or do not release the hold while the live install runs on that cluster. openshell.gatewayId
+# below isolates only the OpenShell driver. Interim warning for issue #1548
+# (https://github.com/stateracloud/koinon/issues/1548): remove it when that issue is closed (each install marks
+# the atespaces and actors it owns and never touches another install's).
+
 # All three binaries start held (ADR 0107): they serve health and reads and act on nothing, and the
 # standalone gateway is deny-all. Release it with `helm upgrade ... --set restoreHold=false` (or drop this
 # file) after the keys verify; the guide's `release` block does it in place with the same effect.

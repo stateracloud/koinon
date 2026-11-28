@@ -20,15 +20,15 @@ var _ = Describe("ParseDriver", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(Equal(want))
 		},
-		Entry("unset is OpenShell", "", execution.DriverOpenShell, true),
+		Entry("unset is Substrate (#1093)", "", execution.DriverSubstrate, true),
 		Entry("openshell", "openshell", execution.DriverOpenShell, true),
 		Entry("substrate", "substrate", execution.DriverSubstrate, true),
 		Entry("an unknown name is refused", "kata", execution.DriverName(""), false),
 		Entry("case matters", "Substrate", execution.DriverName(""), false),
 	)
 
-	It("keeps OpenShell as the default", func() {
-		Expect(execution.DefaultDriver).To(Equal(execution.DriverOpenShell))
+	It("has Substrate as the default since #1093", func() {
+		Expect(execution.DefaultDriver).To(Equal(execution.DriverSubstrate))
 		Expect(execution.DriverOpenShell.HasEgress()).To(BeTrue())
 		Expect(execution.DriverSubstrate.HasEgress()).To(BeFalse())
 	})

@@ -14,8 +14,9 @@ lacks "preset does not use the shared gateway ID" 'gatewayId: "openshell"' --sho
 # The caller's later values file wins over the preset.
 has "a later values file overrides the preset's gateway ID" 'gatewayId: "my-gw"' --show-only templates/config.yaml "${rp[@]}" --set openshell.gatewayId=my-gw
 # The preset leaves the OpenShell address to the caller: with the openshell driver and without it the chart
-# still refuses to render. (With the default driver, substrate, the preset renders: #1093 probe finding,
-# the preset's gateway ID has no meaning for Substrate yet.)
+# still refuses to render. (With the default driver, substrate, the preset renders, and its gateway ID has no
+# meaning for Substrate: a held restore on the same cluster has no isolation there, issue #1548. The preset and
+# backup-restore.e1 carry the interim warning until #1548 closes.)
 if "$HELM" template koinon "$CHART" --namespace koinon --set execution.driver=openshell --set sandboxObserver.enabled=true --set sandboxNetworkPolicy.enabled=true --set sandboxLimitRange.enabled=true --set openshell.insecure=true -f "$CHART/values-restore.yaml" >/dev/null 2>&1; then
 	fail "values-restore.yaml renders without openshell.address: the new gateway's address must stay the caller's"
 fi
@@ -42,3 +43,8 @@ n_ext=$(restore_notes --set postgres.mode=external --set postgres.external.secre
 grep -q 'Database:    CloudNativePG' <<<"$n_ext" && fail "NOTES name a CloudNativePG cluster for an external database"
 n_full=$(restore_notes --set fullnameOverride=other)
 grep -q 'named after other, not the release' <<<"$n_full" || fail "NOTES do not warn when the fullname differs from the release"
+# Issue #1548 interim: the preset and the backup guide warn that a held restore on the same cluster has no
+# isolation on Substrate. Remove these two checks with the warnings when #1548 closes.
+for w in "$CHART/values-restore.yaml" test/e2e/commands/backup-restore.e1; do
+	hit 'issues/1548' "$w" || fail "$w lost the #1548 warning (same-cluster restore on Substrate)"
+done

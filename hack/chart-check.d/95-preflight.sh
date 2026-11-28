@@ -52,6 +52,13 @@ for f in "${value_files[@]}"; do
 		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
 	fi
+	# The other side: values and openshell-values keep the OpenShell hook under test until #1094, so they must render it
+	# (an OpenShell address and no Substrate driver), never the Substrate one.
+	if [[ $name == values || $name == openshell-values ]]; then
+		grep -qF -- '--driver=substrate' <<<"$rendered" && { echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2; exit 1; }
+		grep -qF -- '--openshell-address' <<<"$rendered" || { echo "$name: the OpenShell preflight hook lacks --openshell-address" >&2; exit 1; }
+		openshell_hooks=$((${openshell_hooks:-0} + 1))
+	fi
 	# The ClusterRole is get-only, except that in cnpg mode the CNPG operator check lists
 	# exactly validatingwebhookconfigurations and endpointslices (neither can be narrowed by
 	# resourceNames).
@@ -89,4 +96,5 @@ for f in "${value_files[@]}"; do
 	fi
 	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off), NetworkPolicy probe: $([[ $netpol == 1 ]] && echo on || echo off))"
 done
+[[ ${openshell_hooks:-0} == 2 ]] || { echo "the OpenShell preflight hook rendered for ${openshell_hooks:-0} of values and openshell-values, want both" >&2; exit 1; }
 

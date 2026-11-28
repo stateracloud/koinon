@@ -22,8 +22,11 @@ var _ = Describe("preflight --driver substrate", func() {
 		return &c, c.validate()
 	}
 
-	It("keeps openshell as the default driver", func() {
-		c, err := parse("--seccomp-probe=false", "--netpol-probe=false")
+	It("runs the Substrate checks by default since #1093, and the OpenShell checks with --driver=openshell", func() {
+		c, err := parse("--substrate-probes=false", "--netpol-probe=false")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.check.Substrate).NotTo(BeNil())
+		c, err = parse("--driver=openshell", "--seccomp-probe=false", "--netpol-probe=false")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.check.Substrate).To(BeNil())
 	})

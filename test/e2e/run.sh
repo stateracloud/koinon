@@ -224,6 +224,8 @@ cleanup() {
   if [[ -n ${build_pid:-} ]]; then kill -- "-$build_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 ]]; then diagnostics; fi
   if [[ "$KEEP" != 1 ]]; then "$here/kind/down.sh" || true; fi
+  # The admin kubeconfig of the substrate-install block (Substrate leg only).
+  if [[ -n ${substrate_tools:-} ]]; then rm -rf "$substrate_tools"; fi
   echo "logs and timings in $OUT"
   exit "$status"
 }
@@ -288,7 +290,14 @@ if [[ $DRIVER == substrate ]]; then
   "$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
   sed -i.bak "s#sha256:0\{64\}#$digest#" "$OUT/quickstart/values.yaml"
   grep -q "$digest" "$OUT/quickstart/values.yaml" || { echo "the harness digest was not put into values.yaml" >&2; exit 1; }
-  OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" install 2>&1 | tee "$OUT/substrate-install.log"
+  # The quickstart's substrate-install block, with the kind values of its variables. The koinon-api build, its wrapper
+  # (gvisor class only) and the admin kubeconfig stay outside $OUT: CI uploads $OUT as an artifact (7 days).
+  substrate_tools=$(mktemp -d "${TMPDIR:-/tmp}/substrate-tools.XXXXXX")
+  substrate_vars=()
+  while IFS= read -r line; do substrate_vars+=("$line"); done < <(TOOLS="$substrate_tools" OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" tools)
+  ((${#substrate_vars[@]} == 7)) || { echo "run.sh: substrate.sh tools printed ${#substrate_vars[@]} variables, not 7" >&2; exit 1; }
+  step "quickstart: substrate-install (koinon-api substrate install --platform kind, gvisor class only)"
+  "${e1_env[@]}" "PATH=$substrate_tools:$OUT/bin:$PATH" "${substrate_vars[@]}" "$root/hack/docs-e1.sh" run substrate-install 2>&1 | tee "$OUT/substrate-install.log"
   done_step "Substrate: harness overlay pushed, koinon-api substrate install --platform kind (gvisor)"
 fi
 
@@ -317,7 +326,7 @@ done_step "Fakes deployed"
 # The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
 # provider with a labelled Secret (the docs' GitOps alternative): model-provider.yaml declares the
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
-step "quickstart: namespace, OpenShell client certificate, model provider"
+step "quickstart: namespace, OpenShell client certificate (openshell driver only), model provider"
 e1 namespace
 # Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
 [[ $DRIVER == substrate ]] || e1 client-cert

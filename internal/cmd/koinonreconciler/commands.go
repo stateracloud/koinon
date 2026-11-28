@@ -165,7 +165,7 @@ func (c *config) finish(v *viper.Viper) error {
 	// An empty value (the chart renders an unset one that way) takes the default.
 	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
 	// An empty value (the chart renders an unset one that way) takes the default driver.
-	orDefault(&c.execution.Driver, cli.DriverOpenShell)
+	orDefault(&c.execution.Driver, cli.DriverSubstrate)
 	c.execution.OpenShell = cli.OpenShell{Address: c.openshellAddress, TLSDir: c.openshellTLSDir}
 	c.execution.Owner = c.installMark
 	if err := c.execution.Validate(c.openshellAddress); err != nil {

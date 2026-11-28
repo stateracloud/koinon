@@ -235,6 +235,8 @@ spec:
             # checks only warn that they did not run.
             - --substrate-probes=false
             {{- else }}
+            # Named: koinon-api preflight defaults to substrate since #1093.
+            - --driver=openshell
             - --runtime-class={{ .Values.openshell.runtimeClassName }}
             - --openshell-address={{ include "koinon.openshellAddress" . }}
             {{- if .Values.openshell.clientTLSSecret }}
@@ -246,7 +248,7 @@ spec:
             {{- if and .Values.sandboxPolicy.enabled .Values.sandboxPolicy.scopeToGateway }}
             - --sandbox-policy-scoped-to-gateway
             {{- end }}
-            {{- if not .Values.sandboxObserver.enabled }}
+            {{- if ne (include "koinon.featureOn" (list $ "sandboxObserver")) "true" }}
             - --sandbox-observer-disabled
             {{- end }}
             {{- if include "koinon.expectSandboxPullSecrets" . }}

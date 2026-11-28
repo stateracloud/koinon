@@ -87,7 +87,7 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
 	fs.StringVar(&c.supervisorImages, "supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
 	fs.IntVar(&c.check.SupervisorTokenMaxSeconds, "supervisor-token-max-seconds", 0, "sandboxPolicy.supervisorTokenMaxSeconds: fail when the OpenShell gateway's supervisor token lifetime is above it")
-	fs.StringVar(&c.driver, "driver", "openshell", "execution.driver: openshell or substrate (substrate replaces the OpenShell and Agent Sandbox checks)")
+	fs.StringVar(&c.driver, "driver", cli.DriverSubstrate, "execution.driver: openshell or substrate (substrate replaces the OpenShell and Agent Sandbox checks)")
 	fs.StringVar(&c.substrateNamespace, "substrate-namespace", "ate-system", "namespace of Agent Substrate")
 	fs.StringVar(&c.substrateWorkerNamespace, "substrate-worker-namespace", "ate-workers", "namespace of the WorkerPools (execution.substrate.workerNamespace)")
 	fs.StringVar(&c.substrateProbeNamespace, "substrate-probe-namespace", preflight.DefaultSubstrateProbeNamespace,
