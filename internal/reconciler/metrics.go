@@ -66,6 +66,12 @@ type Metrics struct {
 	// keeps failing makes this grow every probe interval.
 	// No labels: no copy, org or revision is a label (ADR 0023).
 	MCPProbesSkipped prometheus.Counter
+	// FrontBreakerOpen is 1 while the fleet breaker of the front check is open (issue #1481): the guest
+	// fronts are silent on more than one worker, or on a large share of the fleet, so no sandbox is
+	// reverted for a silent front. FrontBreakerTrips counts the openings. No labels: no org, agent,
+	// sandbox or worker is a label (ADR 0023).
+	FrontBreakerOpen  prometheus.Gauge
+	FrontBreakerTrips prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered, for tests that
@@ -126,6 +132,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_openshell_gateway_id_mismatch",
 			Help: "1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId, so the sandbox admission policies match none of its namespaces and fail open, else 0.",
 		}),
+		FrontBreakerOpen: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_reconciler_front_breaker_open",
+			Help: "1 while the guest fronts of the sandboxes are silent on more than one worker, or on a large share of the fleet, in one window, so the reconciler reverts no sandbox for a silent front (a router or network failure is the likely cause), else 0.",
+		}),
+		FrontBreakerTrips: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_front_breaker_trips_total",
+			Help: "Times the fleet breaker of the front check opened because guest fronts were silent across the fleet.",
+		}),
 	}
 	for _, k := range []string{"ok", "error"} {
 		m.Passes.WithLabelValues(k)
@@ -146,7 +160,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
-			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped)
+			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped,
+			m.FrontBreakerOpen, m.FrontBreakerTrips)
 	}
 	return m
 }

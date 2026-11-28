@@ -365,8 +365,40 @@ UPDATE agent_sandboxes SET restore_claimed_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
 -- name: ClearSandboxRestore :exec
+-- The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+-- (issue #1481); the reconciler clears it after the stop that takes the snapshot. The checkpoint ID
+-- is a flag with a usable ID: a restore takes the newest complete checkpoint of the home.
+UPDATE agent_sandboxes
+SET restored_checkpoint_id = restore_checkpoint_id,
+    restored_sandbox_id = sandbox_id,
+    restored_at = now(),
+    restore_checkpoint_id = NULL, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: DropSandboxRestore :exec
+-- Nothing was restored (an ephemeral agent starts empty): no mark.
 UPDATE agent_sandboxes SET restore_checkpoint_id = NULL, restore_claimed_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: ClearSandboxRestoredMark :exec
+-- A stop of this sandbox took the snapshot that holds the restored home. The sandbox ID keeps a clear
+-- from touching the mark of another sandbox.
+UPDATE agent_sandboxes SET restored_sandbox_id = NULL, restored_checkpoint_id = NULL, restored_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id AND restored_sandbox_id = @sandbox_id;
+
+-- name: RestoreFromMark :one
+-- A crash may revert the sandbox to a snapshot that lacks the restored home. This points the next run
+-- at the restore again. It is written BEFORE the revert, in one statement that reads the row itself
+-- (not a cached copy): a leader change or a failed write after the revert then cannot leave a mark
+-- with no restore pending. It writes only for a sandbox with a mark and no restore pending. No row:
+-- nothing to do.
+UPDATE agent_sandboxes
+SET restore_checkpoint_id = restored_checkpoint_id, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id
+  AND restore_checkpoint_id IS NULL
+  AND restored_checkpoint_id IS NOT NULL
+  AND restored_sandbox_id = sandbox_id
+RETURNING *;
 
 -- name: FailStaleHomeCheckpoints :many
 -- Requests that never started because the sandbox was not ready for the configured wait.

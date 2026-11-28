@@ -60,3 +60,7 @@ func NewWithRouterRefusal(control, router grpc.ClientConnInterface, refusal func
 	d.routerRefusal = refusal
 	return d
 }
+
+// FrontUnreachable is frontUnreachable, for the specs of the router's two reports of a guest it could not
+// reach.
+var FrontUnreachable = frontUnreachable

@@ -78,6 +78,9 @@ type Config struct {
 	// GuestReadyTimeout is how long Exec and Upload retry a guest that is not reachable yet. An
 	// actor is running before its guest daemon listens. Default 30 s.
 	GuestReadyTimeout time.Duration
+	// FrontCheckTimeout is how long CheckFront waits for the guest front to answer. The front is a local
+	// process of the guest: a longer wait is a front that does not run. Default 5 s.
+	FrontCheckTimeout time.Duration
 	// SnapshotStorageLocation is the ActorTemplate's snapshot storage location, as Substrate's
 	// install names it. Empty leaves the template's field unset, which Substrate's default fills.
 	SnapshotStorageLocation string
@@ -147,6 +150,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.GuestReadyTimeout <= 0 {
 		c.GuestReadyTimeout = 30 * time.Second
+	}
+	if c.FrontCheckTimeout <= 0 {
+		c.FrontCheckTimeout = 5 * time.Second
 	}
 	if c.SnapshotFidelity == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED {
 		c.SnapshotFidelity = ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY
@@ -523,7 +529,9 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 		}
 		switch actor.GetStatus().GetState() {
 		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
-			return sandboxFrom(workspace, actor), sent, nil
+			sb := sandboxFrom(workspace, actor)
+			sb.NewSnapshot = true
+			return sb, sent, nil
 		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		default:
 			return execution.Sandbox{}, sent, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after suspend", k, phaseOf(actor))
@@ -545,7 +553,12 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 // DrainTimeout. It reads the control API only, which never resumes the actor. When the bound ends,
 // during a read or between two, it fails with ErrUnavailable.
 func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.cfg.DrainTimeout)
+	return d.settledWithin(ctx, op, k, d.cfg.DrainTimeout)
+}
+
+// settledWithin is settled with another bound.
+func (d *Driver) settledWithin(ctx context.Context, op string, k key, bound time.Duration) (*ateapiv1.Actor, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	for {
 		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
@@ -574,12 +587,68 @@ func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execut
 	if err := d.ensureEgressPolicy(ctx, op, key{workspace, name}); err != nil {
 		return execution.Sandbox{}, err
 	}
-	resp, err := d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+	k := key{workspace, name}
+	// An actor with no snapshot boots for the first time. A revert of it would give an empty home, so
+	// it gets one synchronous suspend as soon as it runs (issue #1481, decision 8).
+	first := false
+	if before, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)}); err != nil {
+		// Without this read the driver cannot tell a first boot. The actor then runs without the seal, and a
+		// revert of it would give an empty home: say so.
+		d.cfg.Logger.Warn("substrate: could not read the actor to detect a first boot; no seal is taken", "op", op, "sandbox", k.String(), "err", err)
+	} else {
+		first = before.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED && len(before.GetStatus().GetSnapshots()) == 0
+	}
+	resp, err := d.retryResume(ctx, workspace, name)
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
-	d.setOwed(key{workspace, name}, false)
+	d.setOwed(k, false)
+	if first && resp.GetResumed() {
+		if sb, ok := d.sealFirstBoot(ctx, op, k); ok {
+			return sb, nil
+		}
+	}
 	return sandboxFrom(workspace, resp.GetActor()), nil
+}
+
+// retryResume sends ResumeActor, again with a growing wait while Substrate answers ResourceExhausted.
+func (d *Driver) retryResume(ctx context.Context, workspace, name string) (resp *ateapiv1.ResumeActorResponse, err error) {
+	err = d.retryExhausted(ctx, func() error {
+		var rerr error
+		resp, rerr = d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+		return rerr
+	})
+	return resp, err
+}
+
+// sealFirstBoot waits for a first boot to finish, takes one synchronous suspend, and resumes the actor.
+// It is best effort. ok is false when nothing changed (the boot did not finish in GuestReadyTimeout, the
+// actor crashed, or the suspend failed): the caller then reports the actor as the first resume left it.
+// When ok is true, sb is the state the actor really has. That is the resumed actor, or the suspended one
+// when the second resume failed (it holds its snapshot, and the next resume starts it). An actor that is
+// not sealed reverts to an empty home, so every failure here is logged.
+func (d *Driver) sealFirstBoot(ctx context.Context, op string, k key) (sb execution.Sandbox, ok bool) {
+	actor, err := d.settledWithin(ctx, op, k, d.cfg.GuestReadyTimeout)
+	if err != nil || actor.GetStatus().GetState() != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
+		d.cfg.Logger.Warn("substrate: the first boot did not reach running; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	sealed, _, err := d.suspend(ctx, op, k.atespace, k.actor)
+	if err != nil {
+		d.cfg.Logger.Warn("substrate: the suspend after the first boot failed; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	resp, err := d.retryResume(ctx, k.atespace, k.actor)
+	if err != nil {
+		// The actor is suspended and holds its snapshot: report that, so the caller does not record a
+		// running sandbox. The next resume starts it.
+		d.cfg.Logger.Warn("substrate: the resume after the first suspend failed", "op", op, "sandbox", k.String(), "err", err)
+		d.setOwed(k, true)
+		return sealed, true
+	}
+	out := sandboxFrom(k.atespace, resp.GetActor())
+	out.NewSnapshot = sealed.NewSnapshot
+	return out, true
 }
 
 // requireRunning reads the actor from the control API, which never resumes it, and fails unless it

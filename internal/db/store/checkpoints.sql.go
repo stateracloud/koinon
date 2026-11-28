@@ -228,7 +228,7 @@ UPDATE agent_sandboxes
 SET restore_claimed_at = now()
 WHERE org_id = $1 AND agent_id = $2 AND restore_checkpoint_id IS NOT NULL
   AND (restore_claimed_at IS NULL OR restore_claimed_at < now() - make_interval(secs => $3::int))
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at
 `
 
 type ClaimSandboxRestoreParams struct {
@@ -274,12 +274,20 @@ func (q *Queries) ClaimSandboxRestore(ctx context.Context, arg ClaimSandboxResto
 		&i.Enforcement,
 		&i.ActorName,
 		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
 	)
 	return i, err
 }
 
 const clearSandboxRestore = `-- name: ClearSandboxRestore :exec
-UPDATE agent_sandboxes SET restore_checkpoint_id = NULL, restore_claimed_at = NULL
+UPDATE agent_sandboxes
+SET restored_checkpoint_id = restore_checkpoint_id,
+    restored_sandbox_id = sandbox_id,
+    restored_at = now(),
+    restore_checkpoint_id = NULL, restore_claimed_at = NULL
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -288,8 +296,29 @@ type ClearSandboxRestoreParams struct {
 	AgentID pgtype.UUID
 }
 
+// The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+// (issue #1481); the reconciler clears it after the stop that takes the snapshot. The checkpoint ID
+// is a flag with a usable ID: a restore takes the newest complete checkpoint of the home.
 func (q *Queries) ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error {
 	_, err := q.db.Exec(ctx, clearSandboxRestore, arg.OrgID, arg.AgentID)
+	return err
+}
+
+const clearSandboxRestoredMark = `-- name: ClearSandboxRestoredMark :exec
+UPDATE agent_sandboxes SET restored_sandbox_id = NULL, restored_checkpoint_id = NULL, restored_at = NULL
+WHERE org_id = $1 AND agent_id = $2 AND restored_sandbox_id = $3
+`
+
+type ClearSandboxRestoredMarkParams struct {
+	OrgID     pgtype.UUID
+	AgentID   pgtype.UUID
+	SandboxID pgtype.Text
+}
+
+// A stop of this sandbox took the snapshot that holds the restored home. The sandbox ID keeps a clear
+// from touching the mark of another sandbox.
+func (q *Queries) ClearSandboxRestoredMark(ctx context.Context, arg ClearSandboxRestoredMarkParams) error {
+	_, err := q.db.Exec(ctx, clearSandboxRestoredMark, arg.OrgID, arg.AgentID, arg.SandboxID)
 	return err
 }
 
@@ -495,6 +524,22 @@ func (q *Queries) DeleteOldHomeRepositoryProbes(ctx context.Context, arg DeleteO
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const dropSandboxRestore = `-- name: DropSandboxRestore :exec
+UPDATE agent_sandboxes SET restore_checkpoint_id = NULL, restore_claimed_at = NULL
+WHERE org_id = $1 AND agent_id = $2
+`
+
+type DropSandboxRestoreParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Nothing was restored (an ephemeral agent starts empty): no mark.
+func (q *Queries) DropSandboxRestore(ctx context.Context, arg DropSandboxRestoreParams) error {
+	_, err := q.db.Exec(ctx, dropSandboxRestore, arg.OrgID, arg.AgentID)
+	return err
 }
 
 const expireRetiredHomeRepository = `-- name: ExpireRetiredHomeRepository :execrows
@@ -2380,6 +2425,69 @@ func (q *Queries) RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestH
 	return items, nil
 }
 
+const restoreFromMark = `-- name: RestoreFromMark :one
+UPDATE agent_sandboxes
+SET restore_checkpoint_id = restored_checkpoint_id, restore_claimed_at = NULL
+WHERE org_id = $1 AND agent_id = $2
+  AND restore_checkpoint_id IS NULL
+  AND restored_checkpoint_id IS NOT NULL
+  AND restored_sandbox_id = sandbox_id
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at
+`
+
+type RestoreFromMarkParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// A crash may revert the sandbox to a snapshot that lacks the restored home. This points the next run
+// at the restore again. It is written BEFORE the revert, in one statement that reads the row itself
+// (not a cached copy): a leader change or a failed write after the revert then cannot leave a mark
+// with no restore pending. It writes only for a sandbox with a mark and no restore pending. No row:
+// nothing to do.
+func (q *Queries) RestoreFromMark(ctx context.Context, arg RestoreFromMarkParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, restoreFromMark, arg.OrgID, arg.AgentID)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+		&i.Reason,
+		&i.HomeDirtiedAt,
+		&i.Enforcement,
+		&i.ActorName,
+		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
+	)
+	return i, err
+}
+
 const retireHomeRepository = `-- name: RetireHomeRepository :execrows
 UPDATE home_repositories
 SET retired_at = now(), delete_after = $1
@@ -2431,7 +2539,7 @@ const setSandboxRestore = `-- name: SetSandboxRestore :one
 UPDATE agent_sandboxes
 SET restore_checkpoint_id = $1, restore_claimed_at = NULL
 WHERE org_id = $2 AND agent_id = $3
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at
 `
 
 type SetSandboxRestoreParams struct {
@@ -2477,6 +2585,10 @@ func (q *Queries) SetSandboxRestore(ctx context.Context, arg SetSandboxRestorePa
 		&i.Enforcement,
 		&i.ActorName,
 		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
 	)
 	return i, err
 }

@@ -1861,37 +1861,41 @@ type AgentRunLimit struct {
 }
 
 type AgentSandbox struct {
-	OrgID               pgtype.UUID
-	AgentID             pgtype.UUID
-	Workspace           string
-	SandboxName         string
-	ProviderName        string
-	KeySecretName       string
-	GatewayKeyID        pgtype.Text
-	GatewayKeyHash      pgtype.Text
-	State               SandboxState
-	Phase               string
-	Message             string
-	SpecHash            string
-	StartedAt           pgtype.Timestamptz
-	StoppedAt           pgtype.Timestamptz
-	ObservedAt          pgtype.Timestamptz
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
-	HomeGeneration      pgtype.Text
-	UnhealthyAt         pgtype.Timestamptz
-	UnhealthyReason     pgtype.Text
-	UnhealthyGeneration pgtype.Text
-	WokenAt             pgtype.Timestamptz
-	SandboxID           pgtype.Text
-	RestoreCheckpointID pgtype.UUID
-	RestoreClaimedAt    pgtype.Timestamptz
-	ArchivedAt          pgtype.Timestamptz
-	Reason              string
-	HomeDirtiedAt       pgtype.Timestamptz
-	Enforcement         string
-	ActorName           pgtype.Text
-	ActorUid            pgtype.Text
+	OrgID                pgtype.UUID
+	AgentID              pgtype.UUID
+	Workspace            string
+	SandboxName          string
+	ProviderName         string
+	KeySecretName        string
+	GatewayKeyID         pgtype.Text
+	GatewayKeyHash       pgtype.Text
+	State                SandboxState
+	Phase                string
+	Message              string
+	SpecHash             string
+	StartedAt            pgtype.Timestamptz
+	StoppedAt            pgtype.Timestamptz
+	ObservedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	HomeGeneration       pgtype.Text
+	UnhealthyAt          pgtype.Timestamptz
+	UnhealthyReason      pgtype.Text
+	UnhealthyGeneration  pgtype.Text
+	WokenAt              pgtype.Timestamptz
+	SandboxID            pgtype.Text
+	RestoreCheckpointID  pgtype.UUID
+	RestoreClaimedAt     pgtype.Timestamptz
+	ArchivedAt           pgtype.Timestamptz
+	Reason               string
+	HomeDirtiedAt        pgtype.Timestamptz
+	Enforcement          string
+	ActorName            pgtype.Text
+	ActorUid             pgtype.Text
+	RestoredSandboxID    pgtype.Text
+	RestoredCheckpointID pgtype.UUID
+	RestoredAt           pgtype.Timestamptz
+	LastSnapshotAt       pgtype.Timestamptz
 }
 
 type AgentVersion struct {

@@ -599,7 +599,7 @@ const markSandboxUnhealthy = `-- name: MarkSandboxUnhealthy :one
 UPDATE agent_sandboxes
 SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), sandbox_id, home_generation, '')
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at
 `
 
 type MarkSandboxUnhealthyParams struct {
@@ -657,6 +657,10 @@ func (q *Queries) MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhea
 		&i.Enforcement,
 		&i.ActorName,
 		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
 	)
 	return i, err
 }

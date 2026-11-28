@@ -92,7 +92,7 @@ func (q *Queries) GetRunEvidenceRun(ctx context.Context, arg GetRunEvidenceRunPa
 }
 
 const getRunEvidenceSandbox = `-- name: GetRunEvidenceSandbox :one
-SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid FROM agent_sandboxes WHERE org_id = $1 AND agent_id = $2
+SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at FROM agent_sandboxes WHERE org_id = $1 AND agent_id = $2
 `
 
 type GetRunEvidenceSandboxParams struct {
@@ -135,6 +135,10 @@ func (q *Queries) GetRunEvidenceSandbox(ctx context.Context, arg GetRunEvidenceS
 		&i.Enforcement,
 		&i.ActorName,
 		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
 	)
 	return i, err
 }

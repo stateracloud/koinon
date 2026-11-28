@@ -61,6 +61,13 @@ SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
+-- name: DatabaseClock :one
+-- The database clock now (issue #1481). The reconciler reads it just before a backend call that can take
+-- a snapshot and records it as the snapshot time (a lower bound: the snapshot holds every write before
+-- it). restored_at and the checkpoint times come from this clock too, so the crash path compares times
+-- of one clock only.
+SELECT clock_timestamp()::timestamptz AS now;
+
 -- name: RecordAgentSandbox :one
 -- Records the observed sandbox. started_at and stopped_at are stamped on the
 -- transition into ready and stopped. An empty home_generation (no sandbox
@@ -86,6 +93,12 @@ SET state = @state::sandbox_state,
     home_dirtied_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
                             AND @home_generation::text IS DISTINCT FROM sandbox_id
                            THEN NULL ELSE home_dirtied_at END,
+    -- The snapshot clock belongs to one sandbox too (issue #1481). A snapshot time never goes back; an
+    -- unknown one (NULL) keeps the recorded time.
+    last_snapshot_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                             AND @home_generation::text IS DISTINCT FROM sandbox_id
+                            THEN sqlc.narg('snapshot_at')::timestamptz
+                            ELSE GREATEST(last_snapshot_at, sqlc.narg('snapshot_at')::timestamptz) END,
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'

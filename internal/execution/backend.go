@@ -188,6 +188,41 @@ func ActorNamerOf(b Backend) (ActorNamer, bool) {
 	return nil, false
 }
 
+// Reverter is an optional capability of a driver: revert a crashed or dead sandbox to its last snapshot
+// and check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
+type Reverter interface {
+	// RevertSandbox reverts a sandbox that is CRASHED, or RUNNING with a dead front, to its last
+	// snapshot and resumes it. RevertActor accepts both states (Substrate cmd/ateapi/internal/controlapi/
+	// workflow_revert.go, revertableStates). It fails with ErrNoSnapshot when the sandbox never
+	// suspended: a revert would give an empty home. It fails with ErrRevertResume for every failure
+	// after the revert worked (the egress policy write and the resume): the sandbox then holds its
+	// snapshot, and the caller must not delete it.
+	RevertSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
+	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
+	// answers and ErrFrontDown when it does not. A slow answer of the control API in the same call is
+	// no verdict on the front and is returned as another error. It never resumes the sandbox. An
+	// ErrFrontDown carries the worker that hosts the sandbox ([FrontWorker]), so the caller can tell one
+	// dead front from silence across the fleet.
+	CheckFront(ctx context.Context, workspace, name string) error
+}
+
+// ReverterOf returns the [Reverter] of b, or false when b has none. It looks through wrappers like
+// [ActorNamerOf].
+func ReverterOf(b Backend) (Reverter, bool) {
+	var cur any = b
+	for range 8 {
+		if n, ok := cur.(Reverter); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
 // SnapshotKind says what a snapshot holds.
 type SnapshotKind string
 
@@ -375,6 +410,11 @@ type Sandbox struct {
 	// Reason and Message describe the latest condition that is not true, if any.
 	Reason  string
 	Message string
+	// NewSnapshot is true only on the sandbox that a suspend (or the first-boot seal) returns: the call
+	// took a new snapshot. The Substrate API gives no snapshot time, and the driver gives none either: the
+	// reconciler records the database clock that it read before the call (one clock for every time the
+	// crash path compares, issue #1481).
+	NewSnapshot bool
 }
 
 // SpecIdentifier is implemented by a backend whose sandboxes carry no labels (Agent Substrate has

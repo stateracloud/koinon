@@ -108,8 +108,22 @@ func (g *guestServer) target(ctx context.Context, method string) (*actor, error)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no actor %s", v[0])
 	}
+	if a.routerRefuse { // the router answers itself, as its ext_proc does for a failure of its own
+		return nil, status.Errorf(codes.Unavailable, "actor %s unavailable", v[0])
+	}
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		if a.frontDead && a.frontHang { // the guest accepts the call and never answers: the caller's deadline ends it
+			g.c.mu.Unlock()
+			<-ctx.Done()
+			g.c.mu.Lock()
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+		if a.frontDead { // pid 1 exited: the actor still runs and nothing answers
+			// The real router's dataplane (Envoy) answers a failed upstream CONNECT to the worker's atunnel
+			// with this local reply, and a gRPC request gets it as Unavailable.
+			return nil, status.Error(codes.Unavailable, FrontDownMessage)
+		}
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 		g.c.resumes[k]++
 		a.state = ateapiv1.ActorState_ACTOR_STATE_RUNNING

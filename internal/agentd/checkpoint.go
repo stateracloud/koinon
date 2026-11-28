@@ -496,7 +496,7 @@ func (r *runner) restoreHome(ctx context.Context, sb store.AgentSandbox) error {
 	if agentconfig.IsEphemeral(r.vcfg) {
 		// An ephemeral agent's task sandbox starts empty: nothing carries over between tasks (ADR 0065
 		// 13c), and the newest checkpoint of the agent may belong to another task.
-		return r.q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent})
+		return r.q.DropSandboxRestore(ctx, store.DropSandboxRestoreParams{OrgID: org, AgentID: agent})
 	}
 	// One restore can take Timeout for each try of each checkpoint; the claim lasts as long as the
 	// run is willing to wait for it, so a second run never takes it over while the first extracts.

@@ -180,7 +180,13 @@ type Querier interface {
 	// Clears the org's default model when no model of that name is left (it was deleted); the old value
 	// comes back for the audit event. No row: the default stays (or there was none).
 	ClearOrgDefaultModelIfGone(ctx context.Context, orgID pgtype.UUID) (string, error)
+	// The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+	// (issue #1481); the reconciler clears it after the stop that takes the snapshot. The checkpoint ID
+	// is a flag with a usable ID: a restore takes the newest complete checkpoint of the home.
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
+	// A stop of this sandbox took the snapshot that holds the restored home. The sandbox ID keeps a clear
+	// from touching the mark of another sandbox.
+	ClearSandboxRestoredMark(ctx context.Context, arg ClearSandboxRestoredMarkParams) error
 	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
 	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
 	// runs_sandbox_waiting. Locks the runs in id order (see CancelOpenRunsForAgent).
@@ -347,6 +353,11 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// The database clock now (issue #1481). The reconciler reads it just before a backend call that can take
+	// a snapshot and records it as the snapshot time (a lower bound: the snapshot holds every write before
+	// it). restored_at and the checkpoint times come from this clock too, so the crash path compares times
+	// of one clock only.
+	DatabaseClock(ctx context.Context) (pgtype.Timestamptz, error)
 	// pending -> approved | denied by a human. No row: already decided, or expires_at has passed
 	// (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
@@ -406,6 +417,8 @@ type Querier interface {
 	DeleteTraceDestination(ctx context.Context, arg DeleteTraceDestinationParams) (int64, error)
 	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
+	// Nothing was restored (an ephemeral agent starts empty): no mark.
+	DropSandboxRestore(ctx context.Context, arg DropSandboxRestoreParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
 	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
 	// Ends a task with its run's outcome (completed, or failed), only if it is in one of from_states and
@@ -1579,6 +1592,12 @@ type Querier interface {
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
+	// A crash may revert the sandbox to a snapshot that lacks the restored home. This points the next run
+	// at the restore again. It is written BEFORE the revert, in one statement that reads the row itself
+	// (not a cached copy): a leader change or a failed write after the revert then cannot leave a mark
+	// with no restore pending. It writes only for a sandbox with a mark and no restore pending. No row:
+	// nothing to do.
+	RestoreFromMark(ctx context.Context, arg RestoreFromMarkParams) (AgentSandbox, error)
 	// Clears the unhealthy mark and starts a new count of recreations. No row: not unhealthy.
 	ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent, error)
 	// Epoch 0 was superseded: its blobs may be deleted after @delete_after.

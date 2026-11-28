@@ -227,8 +227,43 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(home()).To(BeNil(), "the new actor has a fresh root filesystem")
 		})
 
-		It("loses the home when the repair recreates a crashed actor", func(ctx SpecContext) {
+		It("keeps the actor and the home of the last snapshot when a crashed actor is reverted (issue #1481)", func(ctx SpecContext) {
+			idleStop(ctx) // the suspend snapshot holds the marker
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			now.Store(nil)
+			queueRun(ctx, org, user, agent.ID)
+			pass(ctx)
+			running()
+			name := actor()
+			cl.Crash(ws, name, "guest kernel panic")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("RevertActor")
+			}).Should(Equal(1))
+			running()
+			Expect(actor()).To(Equal(name))
+			Expect(cl.Calls("CreateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(home()).To(Equal(markerBody))
+			Expect(row(ctx).LastSnapshotAt.Valid).To(BeTrue(), "the snapshot time of the idle stop is in Postgres")
+		})
+
+		It("loses the writes after the last snapshot when a crashed actor is reverted", func(ctx SpecContext) {
+			// HOME LOST (the part after the snapshot): the marker was written after the seal of the first
+			// boot, and no checkpoint holds it (checkpoints are off). The revert goes back to the seal.
+			cl.Crash(ws, actor(), "guest kernel panic")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("RevertActor")
+			}).Should(Equal(1))
+			running()
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(home()).To(BeNil())
+		})
+
+		It("loses the home when the repair recreates a crashed actor that has no snapshot", func(ctx SpecContext) {
 			dirtyHome(ctx, org, user, agent.ID)
+			cl.DropSnapshots(ws, actor()) // a revert would give an empty home
 			cl.Crash(ws, actor(), "guest kernel panic")
 			Expect(home()).To(Equal(markerBody), "the crashed actor still has its files")
 			Eventually(func(g Gomega) int {

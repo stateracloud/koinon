@@ -40,3 +40,8 @@ has "home filesystem alert threshold is a value" '< 20$' "${pr[@]}" "${wsub[@]}"
 has "home filesystem alert wait is a value" 'for: "5m"$' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.for=5m --show-only templates/prometheusrule.yaml
 lacks "no home filesystem alert when switched off" 'KoinonSandboxHomeFilesystemFilling' "${pr[@]}" "${wsub[@]}" --set metrics.prometheusRule.ateFilesystem.enabled=false --show-only templates/prometheusrule.yaml
 lacks "no home filesystem alert with the OpenShell driver" 'KoinonSandboxHomeFilesystemFilling' "${pr[@]}" --show-only templates/prometheusrule.yaml
+
+# The fleet breaker alert of the front check (#1481): only with the Substrate driver.
+has "fleet breaker alert with the Substrate driver" 'alert: KoinonSandboxFrontsSilentAcrossFleet$' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
+has "fleet breaker alert reads the leader's gauge with max" 'max\(koinon_reconciler_front_breaker_open\) > 0$' "${pr[@]}" "${wsub[@]}" --show-only templates/prometheusrule.yaml
+lacks "no fleet breaker alert with the OpenShell driver" 'KoinonSandboxFrontsSilentAcrossFleet' "${pr[@]}" --show-only templates/prometheusrule.yaml

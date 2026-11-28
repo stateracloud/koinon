@@ -4,6 +4,7 @@ package fakeate
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"sync"
 	"time"
@@ -39,6 +40,12 @@ func verifierOf(tmpl *ateapiv1.ActorTemplate) *guestauth.Verifier {
 	return nil
 }
 
+// snapState is the guest state a snapshot holds (issue #1481).
+type snapState struct {
+	files map[string][]byte
+	dead  bool
+}
+
 // actor is an actor and its guest.
 type actor struct {
 	meta      *ateapiv1.ResourceMetadata
@@ -47,6 +54,9 @@ type actor struct {
 	state     ateapiv1.ActorState
 	crash     string
 	snapshots []*ateapiv1.Snapshot
+	// snapState is what each snapshot holds, by snapshot UID: the guest files and whether the front was
+	// dead when it was taken. RevertActor brings it back, as Substrate does for a memory snapshot.
+	snapState map[string]snapState
 	// lateResumes is how many more suspends a late router request undoes (ResumeAfterSuspends).
 	lateResumes int
 	// failGetsAfterSuspend arms failGets at the next SuspendActor (FailGetActorsAfterSuspend).
@@ -67,8 +77,26 @@ type actor struct {
 	failOut   int // the next output streams that fail at once with Unavailable
 	failWrite int // the next tar upload streams that end with Unavailable at their close message
 	failRes   int // the next ResumeActor calls that fail with Unavailable
-	streams   map[int]context.CancelFunc
-	nextSID   int
+	failSkip  int // how many ResumeActor calls work before failRes starts
+	// frontDead: pid 1 exited. The actor stays RUNNING and the guest answers nothing (KillFront).
+	frontDead bool
+	// frontHang: the dead front takes a call and never answers (HangFront).
+	frontHang bool
+	// routerRefuse: the router answers every guest call of the actor with its own Unavailable (RouterRefuse).
+	routerRefuse bool
+	// worker is the worker pod of the actor's worker assignment (SetWorker); empty is "worker-0".
+	worker string
+	// failRevert is how many RevertActor calls fail with ResourceExhausted before one works.
+	failRevert int
+	// failProbe is how many resumes fail the wakeup probe: the actor ends CRASHED and the call fails
+	// with Internal, as Substrate does when the front does not answer.
+	failProbe int
+	// failPolicyGets is how many GetActorEgressPolicy calls fail with Unavailable.
+	failPolicyGets int
+	// failPolicyAfterRevert is how many GetActorEgressPolicy calls fail after the next RevertActor works.
+	failPolicyAfterRevert int
+	streams               map[int]context.CancelFunc
+	nextSID               int
 }
 
 func (a *actor) dropStreams() {
@@ -103,7 +131,11 @@ func cloneTemplate(t *ateapiv1.ActorTemplate) *ateapiv1.ActorTemplate {
 func (a *actor) pb() *ateapiv1.Actor {
 	st := &ateapiv1.ActorStatus{State: a.state, Snapshots: a.snapshots}
 	if a.state == ateapiv1.ActorState_ACTOR_STATE_RUNNING || a.state == ateapiv1.ActorState_ACTOR_STATE_RESUMING {
-		st.WorkerAssignment = &ateapiv1.WorkerAssignment{WorkerPod: "worker-0"}
+		worker := a.worker
+		if worker == "" {
+			worker = "worker-0"
+		}
+		st.WorkerAssignment = &ateapiv1.WorkerAssignment{WorkerPod: worker}
 	}
 	if a.state == ateapiv1.ActorState_ACTOR_STATE_CRASHED {
 		st.Crash = &ateapiv1.ActorCrash{Message: a.crash}
@@ -252,6 +284,10 @@ func (s *controlServer) CreateActor(_ context.Context, r *ateapiv1.CreateActorRe
 	if a.auth == nil {
 		a.auth = verifierOf(tmpl)
 	}
+	if arm, ok := c.armed[k]; ok { // FailNextResumesAfter was called before the actor existed
+		a.failSkip, a.failRes = arm[0], arm[1]
+		delete(c.armed, k)
+	}
 	c.actors[k] = a
 	return a.pb(), nil
 }
@@ -310,14 +346,21 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		// A dead front is suspended like any other: the snapshot holds the broken state and passes.
+		// Nobody may suspend before a revert (a spec checks the home and the front after it).
 		a.state = ateapiv1.ActorState_ACTOR_STATE_SUSPENDED
 		tmpl := c.templates[key{k.atespace, a.template}]
 		fid := tmpl.GetSnapshotConfig().GetPreferredFidelity()
 		if fid == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED {
 			fid = ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY
 		}
+		snapUID := c.newUID("snap")
+		if a.snapState == nil {
+			a.snapState = map[string]snapState{}
+		}
+		a.snapState[snapUID] = snapState{files: maps.Clone(a.files), dead: a.frontDead}
 		a.snapshots = append(a.snapshots, &ateapiv1.Snapshot{
-			Uuid: c.newUID("snap"), Generation: int32(len(a.snapshots) + 1), //nolint:gosec // a few snapshots in a test Owner: ateapiv1.SnapshotOwner_SNAPSHOT_OWNER_ACTOR,
+			Uuid: snapUID, Generation: int32(len(a.snapshots) + 1), //nolint:gosec // a few snapshots in a test Owner: ateapiv1.SnapshotOwner_SNAPSHOT_OWNER_ACTOR,
 			Fidelity: fid, ActorTemplateUid: tmpl.GetMetadata().GetUid(),
 			DurableSnapshot: &ateapiv1.SnapshotStorage{
 				State:  ateapiv1.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_COMPLETED,
@@ -351,6 +394,41 @@ func (s *controlServer) SuspendActor(_ context.Context, r *ateapiv1.SuspendActor
 	return &ateapiv1.SuspendActorResponse{Actor: out}, nil
 }
 
+func (s *controlServer) RevertActor(_ context.Context, r *ateapiv1.RevertActorRequest) (*ateapiv1.RevertActorResponse, error) {
+	c := s.c
+	c.count("RevertActor")
+	k := key{r.GetActor().GetAtespace(), r.GetActor().GetName()}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a, ok := c.actors[k]
+	if !ok {
+		return nil, notFound("actor", k.name)
+	}
+	if a.failRevert > 0 {
+		a.failRevert--
+		return nil, status.Errorf(codes.ResourceExhausted, "actor %q: no worker has room", k.name)
+	}
+	// RevertActor accepts a RUNNING or a CRASHED actor (Substrate workflow_revert.go, revertableStates).
+	if a.state != ateapiv1.ActorState_ACTOR_STATE_CRASHED && a.state != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
+		return nil, status.Errorf(codes.FailedPrecondition, "actor %q is %s", k.name, a.state)
+	}
+	if len(a.snapshots) == 0 {
+		return nil, status.Errorf(codes.FailedPrecondition, "actor %q has no snapshot", k.name)
+	}
+	// The actor goes back to its newest snapshot: the guest files and the front as they were then.
+	snap := a.snapState[a.snapshots[len(a.snapshots)-1].GetUuid()]
+	a.files, a.frontDead, a.frontHang = maps.Clone(snap.files), snap.dead, false
+	if a.files == nil {
+		a.files = map[string][]byte{}
+	}
+	a.state, a.crash = ateapiv1.ActorState_ACTOR_STATE_SUSPENDED, ""
+	if a.failPolicyAfterRevert > 0 {
+		a.failPolicyGets, a.failPolicyAfterRevert = a.failPolicyAfterRevert, 0
+	}
+	a.dropStreams()
+	return &ateapiv1.RevertActorResponse{Actor: a.pb()}, nil
+}
+
 func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRequest) (*ateapiv1.ResumeActorResponse, error) {
 	c := s.c
 	c.count("ResumeActor")
@@ -362,13 +440,23 @@ func (s *controlServer) ResumeActor(_ context.Context, r *ateapiv1.ResumeActorRe
 		return nil, notFound("actor", k.name)
 	}
 	a.smu.Lock()
-	failRes := a.failRes > 0
-	if failRes {
-		a.failRes--
+	failRes := false
+	if a.failRes > 0 {
+		if a.failSkip > 0 {
+			a.failSkip--
+		} else {
+			a.failRes--
+			failRes = true
+		}
 	}
 	a.smu.Unlock()
 	if failRes {
 		return nil, status.Errorf(codes.Unavailable, "actor %q: resume failed", k.name)
+	}
+	if a.failProbe > 0 && a.state == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		a.failProbe--
+		a.state, a.crash = ateapiv1.ActorState_ACTOR_STATE_CRASHED, "wakeup probe failed: GET /readyz:80"
+		return nil, status.Errorf(codes.Internal, "actor %q: wakeup probe failed", k.name)
 	}
 	resumed := false
 	switch a.state {
