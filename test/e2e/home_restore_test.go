@@ -37,6 +37,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/testing/racescale"
 	"github.com/stateracloud/koinon/test/drill"
 )
 
@@ -54,7 +55,7 @@ const (
 )
 
 var _ = Describe("the home restore drill on Substrate", Label("restore", "home-restore"), func() {
-	It("restores an archived agent's home from its checkpoint, only with the recorded digest", NodeTimeout(30*time.Minute), func(ctx SpecContext) {
+	It("restores an archived agent's home from its checkpoint, only with the recorded digest", NodeTimeout(racescale.D(30*time.Minute)), func(ctx SpecContext) {
 		kubectl, helm, chart := os.Getenv("KOINON_E2E_KUBECTL"), os.Getenv("KOINON_E2E_HELM"), os.Getenv("KOINON_E2E_CHART")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL (a kubectl bound to the e2e cluster's context)")
 		Expect(helm).NotTo(BeEmpty(), "KOINON_E2E_HELM (a helm bound to the e2e cluster's context)")
@@ -80,7 +81,7 @@ var _ = Describe("the home restore drill on Substrate", Label("restore", "home-r
 			GinkgoHelper()
 			var rows []string
 			Eventually(func(g Gomega) { rows = psqlPrimary(ctx, g, kubectl, query) }).
-				WithContext(ctx).WithTimeout(time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+				WithContext(ctx).WithTimeout(racescale.D(time.Minute)).WithPolling(5 * time.Second).Should(Succeed())
 			return rows
 		}
 		one := func(query string) string {
@@ -107,7 +108,7 @@ var _ = Describe("the home restore drill on Substrate", Label("restore", "home-r
 				return nil
 			}
 			return err
-		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+		}).WithContext(ctx).WithTimeout(racescale.D(2 * time.Minute)).WithPolling(5 * time.Second).Should(Succeed())
 
 		By("home checkpoints on, with a short idle timeout and archive delay (helm upgrade --reuse-values)")
 		apply(drill.CheckpointSecretManifest("koinon", homeDrillRun, fakes))
@@ -173,7 +174,7 @@ var _ = Describe("the home restore drill on Substrate", Label("restore", "home-r
 					StopTrying(fmt.Sprintf("run %s ended %s, not %s: %s", id, f[1], want, f[2])).Now()
 				}
 				g.Expect(f[1]).To(Equal(want), "run %s", id)
-			}).WithContext(ctx).WithTimeout(timeout).WithPolling(10 * time.Second).Should(Succeed())
+			}).WithContext(ctx).WithTimeout(racescale.D(timeout)).WithPolling(10 * time.Second).Should(Succeed())
 			return id
 		}
 		events := func(runID, like string) string {
@@ -194,7 +195,7 @@ var _ = Describe("the home restore drill on Substrate", Label("restore", "home-r
 		Eventually(func(g Gomega) {
 			g.Expect(psqlPrimary(ctx, g, kubectl, fmt.Sprintf("SELECT count(*) FROM agent_sandboxes WHERE agent_id = '%s' AND archived_at IS NOT NULL", agent))).
 				To(Equal([]string{"1"}), "agent_sandboxes.archived_at is set")
-		}).WithContext(ctx).WithTimeout(20 * time.Minute).WithPolling(15 * time.Second).Should(Succeed())
+		}).WithContext(ctx).WithTimeout(racescale.D(20 * time.Minute)).WithPolling(15 * time.Second).Should(Succeed())
 		Expect(one(fmt.Sprintf("SELECT count(*) FROM audit_events WHERE action = 'sandbox.archive' AND target_kind = 'agent' AND target_id = '%s'", agent))).
 			NotTo(Equal("0"), "the reconciler recorded the archive")
 		// Every complete checkpoint of the agent has a content digest: a fallback to an unverified one would hide a refusal.
