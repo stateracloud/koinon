@@ -69,7 +69,7 @@ on:
         options: [go, web, drill]
         default: go
       backup_restore:
-        description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does.'
+        description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does. With driver=substrate: the home restore drill (test/e2e/home_restore_test.go, issue 1090).'
         type: boolean
         default: false
       stories:
@@ -182,7 +182,8 @@ jobs:
     # (S4, the slow run, about 100 seconds); the stories pass has a 15 minute timeout (about 3 times that). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
     # worst case on the schedule and on a dispatch with stories=true; other runs keep 35. The worst case is about 69 minutes
     # (test/e2e/run.sh: set-up 10, quickstart pass 30, stories pass 15, escape 8, backup 1, tear-down 5), so the limit is 75.
-    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories) && 75 || 35 }}
+    # A dispatch with backup_restore=true gets it too: on driver=substrate that step is the home restore drill (#1090, about 15).
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories || inputs.backup_restore) && 75 || 35 }}
     outputs:
       stories_red: ${{ steps.storiesverdict.outputs.red }}
     defaults:
