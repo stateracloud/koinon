@@ -173,10 +173,9 @@ type Querier interface {
 	//
 	// The ledger of Substrate actor names (issue #1092), written by the Substrate driver in koinon-reconciler
 	// through package actornames.
-	// Claims a Substrate actor name before the driver creates the actor, for the org whose workspace is the
-	// atespace. known is false when no org has that workspace: nothing is claimed. claimed is true when the name
-	// is new, and false when a create claimed it before (the driver refuses it). A claim goes only with its org.
-	ClaimSubstrateActorName(ctx context.Context, arg ClaimSubstrateActorNameParams) (ClaimSubstrateActorNameRow, error)
+	// Claims a Substrate actor name before the driver creates the actor. One row: the name is new. No row: a
+	// create claimed it before, and the driver refuses it.
+	ClaimSubstrateActorName(ctx context.Context, arg ClaimSubstrateActorNameParams) (int64, error)
 	// Clears the agent's run-limit overrides and leaves its continuation overrides.
 	ClearAgentRunLimits(ctx context.Context, arg ClearAgentRunLimitsParams) error
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)

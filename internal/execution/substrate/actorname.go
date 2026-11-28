@@ -36,12 +36,14 @@ func (d *Driver) NewActorName(sandbox string) string {
 // #1092). Substrate v1.0.1 forgets a deleted actor, but atenet-egress does not: it caches an actor JWT by actor name
 // until a third of its lifetime is left (cmd/atenet/internal/router/egress/actorjwt/actorjwt.go:32-34,90-92), and
 // the egress gateway caches a policy by name for 10 s (upstream #3267). A new actor under a used name can so get
-// the token of the deleted actor (lab, rc.33: about 1.5 s after the delete). The driver therefore claims each name
-// here before CreateActor and refuses a name that was claimed before ([execution.ErrNameReused]).
+// the token of the deleted actor (lab, rc.33: about 1.5 s after the delete). The Koinon gateway refuses that token
+// by the actor UID (403 unknown_actor, internal/gateway/route/identity.go:94), so the harm is lost egress for the
+// new actor, not a leak of identity. The ledger is a second layer next to the random name of [Driver.NewActorName]:
+// the driver claims each name here before CreateActor and refuses a name that was claimed before
+// ([execution.ErrNameReused]).
 //
 // The record must outlive a restart of the driver and be shared by every driver replica: production uses the
-// Koinon database (package actornames, table substrate_actor_names). A record goes only with its org, whose ID
-// the atespace name derives from and which is never used again.
+// Koinon database (package actornames, table substrate_actor_names). A record is never removed.
 type ActorNameLedger interface {
 	// ClaimActorName records that the driver sends the actor name in atespace to CreateActor. It returns true
 	// when this call recorded the name, and false when the name was recorded before, by any driver, also before

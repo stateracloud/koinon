@@ -9,17 +9,11 @@ import (
 	"context"
 )
 
-const claimSubstrateActorName = `-- name: ClaimSubstrateActorName :one
+const claimSubstrateActorName = `-- name: ClaimSubstrateActorName :execrows
 
-WITH ws AS (
-    SELECT w.org_id FROM org_workspaces w WHERE w.workspace = $1::text
-), ins AS (
-    INSERT INTO substrate_actor_names (org_id, atespace, name)
-    SELECT ws.org_id, $1::text, $2::text FROM ws
-    ON CONFLICT DO NOTHING
-    RETURNING 1
-)
-SELECT EXISTS (SELECT 1 FROM ws) AS known, EXISTS (SELECT 1 FROM ins) AS claimed
+INSERT INTO substrate_actor_names (atespace, name)
+VALUES ($1::text, $2::text)
+ON CONFLICT DO NOTHING
 `
 
 type ClaimSubstrateActorNameParams struct {
@@ -27,21 +21,16 @@ type ClaimSubstrateActorNameParams struct {
 	Name     string
 }
 
-type ClaimSubstrateActorNameRow struct {
-	Known   bool
-	Claimed bool
-}
-
 // SPDX-License-Identifier: Apache-2.0
 //
 // The ledger of Substrate actor names (issue #1092), written by the Substrate driver in koinon-reconciler
 // through package actornames.
-// Claims a Substrate actor name before the driver creates the actor, for the org whose workspace is the
-// atespace. known is false when no org has that workspace: nothing is claimed. claimed is true when the name
-// is new, and false when a create claimed it before (the driver refuses it). A claim goes only with its org.
-func (q *Queries) ClaimSubstrateActorName(ctx context.Context, arg ClaimSubstrateActorNameParams) (ClaimSubstrateActorNameRow, error) {
-	row := q.db.QueryRow(ctx, claimSubstrateActorName, arg.Atespace, arg.Name)
-	var i ClaimSubstrateActorNameRow
-	err := row.Scan(&i.Known, &i.Claimed)
-	return i, err
+// Claims a Substrate actor name before the driver creates the actor. One row: the name is new. No row: a
+// create claimed it before, and the driver refuses it.
+func (q *Queries) ClaimSubstrateActorName(ctx context.Context, arg ClaimSubstrateActorNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimSubstrateActorName, arg.Atespace, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
