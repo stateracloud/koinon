@@ -407,6 +407,25 @@ func (c *Cluster) KillFront(atespace, name string) {
 	}
 }
 
+// ReviveFront ends KillFront and HangFront: the guest of the actor answers again, as when a router-side
+// failure that looked like a dead front ends.
+func (c *Cluster) ReviveFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontDead, a.frontHang = false, false
+	}
+}
+
+// SetWorker places the actor on the worker pod worker: its worker assignment names that pod.
+func (c *Cluster) SetWorker(atespace, name, worker string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.worker = worker
+	}
+}
+
 // FrontDownMessage is the message of the Unavailable that a guest call to a dead front gets. In the
 // default upstream CONNECT mode of the router (Substrate cmd/atenet/internal/router/cmd.go, flag
 // --upstream-connect), atunnel answers the CONNECT with 502 when it cannot dial the guest port

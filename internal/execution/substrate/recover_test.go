@@ -74,8 +74,10 @@ var _ = Describe("the crash and liveness path", func() {
 		It("reports ErrFrontDown for a running actor whose pid 1 exited", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			cl.KillFront(ws, "sb")
+			cl.SetWorker(ws, "sb", "worker-7")
 			err := d.CheckFront(ctx, ws, "sb")
 			Expect(errors.Is(err, execution.ErrFrontDown)).To(BeTrue(), "got %v", err)
+			Expect(execution.FrontWorker(err)).To(Equal("worker-7"), "the fleet breaker counts silent fronts by worker")
 		})
 		It("gives no verdict when the router answers the guest call itself", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
@@ -116,6 +118,7 @@ var _ = Describe("the crash and liveness path", func() {
 				cl.HangFront(ws, "sb")
 				err := d.CheckFront(ctx, ws, "sb")
 				Expect(errors.Is(err, execution.ErrFrontDown)).To(BeTrue(), "got %v", err)
+				Expect(execution.FrontWorker(err)).To(Equal("worker-0"), "the deadline verdict carries the worker too")
 			})
 			It("is no verdict when the control API was slow in the same call", func(ctx SpecContext) {
 				ready(ctx, d, "sb")

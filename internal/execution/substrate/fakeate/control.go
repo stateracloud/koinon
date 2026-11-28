@@ -84,6 +84,8 @@ type actor struct {
 	frontHang bool
 	// routerRefuse: the router answers every guest call of the actor with its own Unavailable (RouterRefuse).
 	routerRefuse bool
+	// worker is the worker pod of the actor's worker assignment (SetWorker); empty is "worker-0".
+	worker string
 	// failRevert is how many RevertActor calls fail with ResourceExhausted before one works.
 	failRevert int
 	// failProbe is how many resumes fail the wakeup probe: the actor ends CRASHED and the call fails
@@ -129,7 +131,11 @@ func cloneTemplate(t *ateapiv1.ActorTemplate) *ateapiv1.ActorTemplate {
 func (a *actor) pb() *ateapiv1.Actor {
 	st := &ateapiv1.ActorStatus{State: a.state, Snapshots: a.snapshots}
 	if a.state == ateapiv1.ActorState_ACTOR_STATE_RUNNING || a.state == ateapiv1.ActorState_ACTOR_STATE_RESUMING {
-		st.WorkerAssignment = &ateapiv1.WorkerAssignment{WorkerPod: "worker-0"}
+		worker := a.worker
+		if worker == "" {
+			worker = "worker-0"
+		}
+		st.WorkerAssignment = &ateapiv1.WorkerAssignment{WorkerPod: worker}
 	}
 	if a.state == ateapiv1.ActorState_ACTOR_STATE_CRASHED {
 		st.Crash = &ateapiv1.ActorCrash{Message: a.crash}

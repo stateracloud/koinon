@@ -200,7 +200,9 @@ type Reverter interface {
 	RevertSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
 	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
 	// answers and ErrFrontDown when it does not. A slow answer of the control API in the same call is
-	// no verdict on the front and is returned as another error. It never resumes the sandbox.
+	// no verdict on the front and is returned as another error. It never resumes the sandbox. An
+	// ErrFrontDown carries the worker that hosts the sandbox ([FrontWorker]), so the caller can tell one
+	// dead front from silence across the fleet.
 	CheckFront(ctx context.Context, workspace, name string) error
 }
 

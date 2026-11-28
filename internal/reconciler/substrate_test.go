@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"k8s.io/client-go/kubernetes/fake"
 
 	ateapiv1 "github.com/stateracloud/koinon/internal/gen/substrate/ateapi/v1"
@@ -60,6 +61,10 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		ctl  ateapiv1.ControlClient
 		// checkpoints turns home checkpoints on for the reconcilers that newR makes after it is set.
 		checkpoints bool
+		// metrics are the metrics of the reconcilers that newR makes.
+		metrics *reconciler.Metrics
+		// newDriver makes the driver on the fake with cfg added to the specs' common configuration.
+		newDriver func(front time.Duration) *substrate.Driver
 	)
 	pass := func(ctx context.Context) {
 		GinkgoHelper()
@@ -105,17 +110,21 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 		DeferCleanup(control.Close)
 		DeferCleanup(router.Close)
 		ctl = ateapiv1.NewControlClient(control)
-		d = substrate.New(control, router, substrate.Config{
-			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-			GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
-			CodeHostEgressRoute: func() *substrate.GatewayRoute {
-				r := substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort)
-				return &r
-			}(),
-			GuestSigner: fakeate.Signer(),
-			// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
-			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
-		})
+		newDriver = func(front time.Duration) *substrate.Driver {
+			return substrate.New(control, router, substrate.Config{
+				PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond, FrontCheckTimeout: front,
+				GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
+				CodeHostEgressRoute: func() *substrate.GatewayRoute {
+					r := substrate.EgressRoute(fakeate.GatewayHost, fakeate.EgressPort)
+					return &r
+				}(),
+				GuestSigner: fakeate.Signer(),
+				// The class the reconciler requests (reconciler.Config.RuntimeClassName) has a tier.
+				RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
+			})
+		}
+		d = newDriver(0)
+		metrics = reconciler.NewMetrics(nil)
 		now.Store(nil)
 		checkpoints = false
 		org, user = newOrg(ctx)
@@ -139,6 +148,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 					MCPAckWait:       300 * time.Millisecond, MCPAckPoll: 20 * time.Millisecond,
 					KeepWarmPerOrg: 2,
 					Checkpoints:    checkpoints,
+					Metrics:        metrics,
 					Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})),
 					Now: func() time.Time {
 						if t := now.Load(); t != nil {
@@ -407,6 +417,80 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				pass(ctx)
 			}
 			Expect(cl.Calls("RevertActor")).To(BeZero())
+		})
+
+		// The fleet breaker (maintainer decision on #1481, 2026-11-28): a router-side failure gives the same
+		// verdict as a dead front, so silence on more than one worker in one window reverts nothing.
+		Describe("the fleet breaker", func() {
+			breakerOpen := func() float64 { return testutil.ToFloat64(metrics.FrontBreakerOpen) }
+			trips := func() float64 { return testutil.ToFloat64(metrics.FrontBreakerTrips) }
+			// on places a ready actor on a worker.
+			on := func(ctx SpecContext, worker string) string {
+				GinkgoHelper()
+				_, actor := readyActor(ctx)
+				cl.SetWorker(ws, actor, worker)
+				return actor
+			}
+			// passes runs one pass at each offset: 20 s apart, inside the breaker window.
+			passes := func(ctx SpecContext, offs ...time.Duration) {
+				GinkgoHelper()
+				for _, off := range offs {
+					advance(off)
+					pass(ctx)
+				}
+			}
+			silence := []time.Duration{time.Minute, time.Minute + 20*time.Second, time.Minute + 40*time.Second, 2 * time.Minute, 2*time.Minute + 20*time.Second}
+
+			It("(a) still reverts one dead front while the other fronts answer", func(ctx SpecContext) {
+				// Two sandboxes: the org's creation rate holds back a third in one spec (issue #27). The share
+				// rule is in TestFleetBreaker.
+				dead := on(ctx, "worker-a")
+				on(ctx, "worker-b")
+				cl.KillFront(ws, dead)
+				passes(ctx, silence[:3]...)
+				Expect(cl.Calls("RevertActor")).To(Equal(1), "one dead front on one worker is a crash")
+				Expect(breakerOpen()).To(BeZero())
+				Expect(trips()).To(BeZero())
+			})
+
+			It("(b) reverts nothing while fronts on two workers are silent, raises the alert once, and (c) gives verdicts again after the outage", func(ctx SpecContext) {
+				a := on(ctx, "worker-a")
+				b := on(ctx, "worker-b")
+				cl.KillFront(ws, a) // the router's upstream failure: both look like a dead front
+				cl.KillFront(ws, b)
+				passes(ctx, silence...)
+				Expect(cl.Calls("RevertActor")).To(BeZero(), "silence on two workers in one window is not a guest crash")
+				Expect(cl.Calls("DeleteActor")).To(BeZero())
+				Expect(breakerOpen()).To(Equal(1.0))
+				Expect(trips()).To(Equal(1.0), "one opening, not one per pass or per sandbox")
+
+				By("the outage ends: the fronts answer and the breaker closes")
+				cl.ReviveFront(ws, a)
+				cl.ReviveFront(ws, b)
+				passes(ctx, 2*time.Minute+40*time.Second)
+				Expect(breakerOpen()).To(BeZero())
+
+				By("a front that dies after the outage gets its verdict as before")
+				cl.KillFront(ws, a)
+				passes(ctx, 3*time.Minute+40*time.Second, 4*time.Minute, 4*time.Minute+20*time.Second)
+				Expect(cl.Calls("RevertActor")).To(Equal(1))
+				Expect(breakerOpen()).To(BeZero())
+				Expect(trips()).To(Equal(1.0))
+			})
+
+			It("(d) holds back the deadline verdict too", func(ctx SpecContext) {
+				d = newDriver(300 * time.Millisecond)
+				r = newR()
+				a := on(ctx, "worker-a")
+				b := on(ctx, "worker-b")
+				for _, actor := range []string{a, b} {
+					cl.KillFront(ws, actor)
+					cl.HangFront(ws, actor) // the call runs into its deadline: the other verdict of the driver
+				}
+				passes(ctx, silence...)
+				Expect(cl.Calls("RevertActor")).To(BeZero())
+				Expect(breakerOpen()).To(Equal(1.0))
+			})
 		})
 
 		// restoreHome stands in for agentd: the row points at a checkpoint, then the restore ends.

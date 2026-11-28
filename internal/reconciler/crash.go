@@ -42,7 +42,8 @@ import (
 //
 // The front check needs frontProbes failed checks in a row over frontSilence, starts only frontGrace
 // after the sandbox was first seen ready, and counts a deadline as silence only when the control API
-// answered fast in the same call (the driver decides).
+// answered fast in the same call (the driver decides). Every silent front goes through the fleet breaker
+// (below): silence across the fleet gives no verdict.
 const (
 	maxReverts   = 3
 	revertWindow = time.Hour
@@ -60,6 +61,39 @@ const (
 	revertBackoffMax  = 2 * time.Minute
 )
 
+// The fleet breaker. In the router's default upstream CONNECT mode, a failure between the router and a
+// worker (a dial to the worker, a stale upstream mTLS leaf, a NetworkPolicy, an atunnel 421) gives the
+// same Envoy local reply as atunnel's 502 for a dead guest port, and a deadline can come from the same
+// path (Substrate internal/atunnel/ingress/ingress.go and the router's xds.go). A router-side outage
+// would then revert every RUNNING sandbox. So the front check counts the front-down verdicts of the
+// whole fleet in one window, as the Kubernetes node lifecycle controller counts not-ready nodes of a
+// zone (pkg/controller/nodelifecycle, ComputeZoneState: a zone is disrupted with more than two nodes not
+// ready and a share of at least --unhealthy-zone-threshold, default 0.55; it then stops evictions). The
+// breaker is open, and no front gets a verdict, when the silent fronts of the window are on more than
+// one worker, or when at least fleetMinDown of them are silent and they are at least fleetShare of the
+// fronts checked in the window. One silent front, or several on one worker below the share, still
+// reverts.
+//
+// The breaker state is in memory, like the revert cap (crashTracker, a v0.1 decision): a restart or a
+// leader change starts with no marks, and the next passes fill the window again before any front can
+// get its verdict (frontProbes over frontSilence).
+const (
+	// fleetShare is the share of the checked fronts that may be silent at once before the breaker
+	// opens: the Kubernetes default --unhealthy-zone-threshold. A real crash is one guest; more than
+	// half of the fleet at once is a shared cause.
+	fleetShare = 0.55
+	// fleetMinDown is the least number of silent fronts for the share rule, as Kubernetes asks for more
+	// than two nodes: one or two dead guests in a small fleet are not a shared cause.
+	fleetMinDown = 3
+)
+
+// frontWindow is how far back the breaker counts front checks: two silence windows, and at least two
+// passes, so that every ready sandbox of the fleet has a mark in it when the first one would get its
+// verdict.
+func (r *Reconciler) frontWindow() time.Duration {
+	return 2 * max(frontSilence, r.cfg.ResyncInterval)
+}
+
 // crashTracker holds the counters of the crash path in memory: they restart with the process, which
 // only gives an agent more reverts and a silent front a fresh silence window. An admin resume resets the
 // revert cap: only what happened after the agent's ResumedAt counts.
@@ -69,6 +103,23 @@ type crashTracker struct {
 	silent     map[pgtype.UUID]silence
 	readySince map[pgtype.UUID]time.Time
 	failures   map[pgtype.UUID]failures
+	// fronts is the last front check verdict of each ready sandbox, for the fleet breaker.
+	fronts map[pgtype.UUID]frontMark
+	// breakerOpen is the breaker state of the last evaluation.
+	breakerOpen bool
+}
+
+// frontMark is one front check verdict.
+type frontMark struct {
+	at     time.Time
+	down   bool
+	worker string // the worker of a silent front; empty when the driver did not know it
+}
+
+// fleetState is the breaker's count over the window.
+type fleetState struct {
+	open                   bool
+	down, workers, checked int
 }
 
 type silence struct {
@@ -181,7 +232,56 @@ func (t *crashTracker) notReady(id pgtype.UUID) {
 	t.mu.Lock()
 	delete(t.readySince, id)
 	delete(t.silent, id)
+	delete(t.fronts, id)
 	t.mu.Unlock()
+}
+
+// noteFront records the verdict of a front check for the fleet breaker.
+func (t *crashTracker) noteFront(id pgtype.UUID, now time.Time, down bool, worker string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.fronts == nil {
+		t.fronts = map[pgtype.UUID]frontMark{}
+	}
+	t.fronts[id] = frontMark{at: now, down: down, worker: worker}
+}
+
+// forgetFront drops the mark of a sandbox whose check gave no verdict, or that was just reverted.
+func (t *crashTracker) forgetFront(id pgtype.UUID) {
+	t.mu.Lock()
+	delete(t.fronts, id)
+	t.mu.Unlock()
+}
+
+// fleet counts the marks of the window, drops the older ones, and returns the breaker state and whether
+// it changed since the last evaluation. A silent front with no known worker counts as a worker of its
+// own: an unknown placement must not hide a shared cause.
+func (t *crashTracker) fleet(now time.Time, window time.Duration) (fleetState, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var st fleetState
+	workers := map[string]struct{}{}
+	for id, m := range t.fronts {
+		if now.Sub(m.at) >= window {
+			delete(t.fronts, id)
+			continue
+		}
+		st.checked++
+		if !m.down {
+			continue
+		}
+		st.down++
+		w := m.worker
+		if w == "" {
+			w = fmt.Sprintf("\x00%x", id.Bytes)
+		}
+		workers[w] = struct{}{}
+	}
+	st.workers = len(workers)
+	st.open = st.workers > 1 || (st.down >= fleetMinDown && float64(st.down) >= fleetShare*float64(st.checked))
+	changed := st.open != t.breakerOpen
+	t.breakerOpen = st.open
+	return st, changed
 }
 
 // noteSilent counts a failed front check and returns the count and when the silence began.
@@ -234,20 +334,53 @@ func (r *Reconciler) checkFront(ctx context.Context, w *work, ws, name string, s
 	switch {
 	case err == nil:
 		r.crash.answered(id)
+		r.crash.noteFront(id, now, false, "")
+		r.fleetBreaker(now)
 		return false, nil
 	case !errors.Is(err, execution.ErrFrontDown):
 		// Not a verdict on the front (the router is down, the control API is slow, the sandbox is not
 		// running any more): the silence so far is not proof.
 		r.crash.answered(id)
+		r.crash.forgetFront(id)
+		r.fleetBreaker(now)
 		return false, nil
 	}
+	// Both verdicts of the driver (the router's report and the deadline) come here, with the worker.
 	probes, since := r.crash.noteSilent(id, now)
+	r.crash.noteFront(id, now, true, execution.FrontWorker(err))
+	if r.fleetBreaker(now) {
+		// Silence across the fleet: no verdict. The silence keeps counting, so a front that stays dead
+		// after the breaker closes reverts at its next check.
+		return false, nil
+	}
 	if probes < frontProbes || now.Sub(since) < frontSilence {
 		return false, nil
 	}
 	r.log.Warn("the guest front does not answer; reverting the sandbox to its last snapshot",
 		append(w.logAttrs(), "silent_for", now.Sub(since).String(), "probes", probes)...)
-	return r.recoverSandbox(ctx, w, ws, name, sb, hash, causeFront)
+	handled, err := r.recoverSandbox(ctx, w, ws, name, sb, hash, causeFront)
+	r.crash.forgetFront(id) // the next check of the reverted sandbox gives it a new mark
+	return handled, err
+}
+
+// fleetBreaker evaluates the fleet breaker and returns whether it is open. It logs and counts only a
+// change, so an outage gives one line when it starts and one when it ends.
+func (r *Reconciler) fleetBreaker(now time.Time) bool {
+	st, changed := r.crash.fleet(now, r.frontWindow())
+	if !changed {
+		return st.open
+	}
+	if st.open {
+		r.m.FrontBreakerOpen.Set(1)
+		r.m.FrontBreakerTrips.Inc()
+		r.log.Error("guest fronts are silent across the fleet; no sandbox is reverted for a silent front until they answer again (a router or network failure, not a guest crash, is the likely cause)",
+			"silent_fronts", st.down, "workers", st.workers, "checked_fronts", st.checked, "window", r.frontWindow().String())
+		return true
+	}
+	r.m.FrontBreakerOpen.Set(0)
+	r.log.Info("the fleet breaker of the front check is closed: silent fronts get their verdict again",
+		"silent_fronts", st.down, "workers", st.workers, "checked_fronts", st.checked)
+	return false
 }
 
 // restoredMark reports whether the sandbox got a home restore that no snapshot holds yet. The mark is in

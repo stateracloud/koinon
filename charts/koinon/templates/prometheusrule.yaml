@@ -23,6 +23,11 @@ alert (issue #1058, koinon_api_mcp_guard_byte_threshold_runs_total) counts the b
 not fire on a full home. The rule reads node-exporter's series of the /var/lib/ate mount point, so it needs a mount of
 its own for that path (the preflight warns when there is none) and node-exporter on the worker nodes.
 
+Fleet breaker (issue #1481): with execution.driver=substrate, the koinon-sandbox group holds
+KoinonSandboxFrontsSilentAcrossFleet. It fires while the reconciler's front check holds back every revert of a
+silent front because the fronts are silent across the fleet (koinon_reconciler_front_breaker_open). Only the leader
+sets the gauge, so the rule takes the max over the replicas.
+
 Provider key echo (ADR 0097 section 15, issue #1332): with gateway.model.driver=koinon, the koinon-gateway group
 holds KoinonModelKeyEcho. It fires when the model path saw a provider key in a response (header or body) that
 went back to an agent (koinon_gateway_model_key_echo_total). The body is not changed in v0.2, so the key must be rotated.
@@ -101,6 +106,22 @@ spec:
               /var/lib/ate/actors, then stop or clean those sandboxes, or increase the size of the filesystem. A node whose
               /var/lib/ate shares the root filesystem has no series for this mount point, so this alert stays silent
               there: the preflight warns about that case.
+    {{- end }}
+    {{- if include "koinon.substrate" . | eq "true" }}
+        - alert: KoinonSandboxFrontsSilentAcrossFleet
+          expr: max(koinon_reconciler_front_breaker_open) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Guest fronts are silent on more than one worker, so the reconciler reverts no sandbox for a silent front
+            description: >-
+              The front check of the reconciler found silent guest fronts on more than one worker, or on a large share of the
+              fleet, in one window (issue #1481). The likely cause is the Substrate router or the network between the router and
+              the workers, not the guests. The reconciler does not revert these sandboxes until the fronts answer again. Check
+              the router (atenet), its upstream certificates and the NetworkPolicies of the worker namespace, then the
+              reconciler log ("guest fronts are silent across the fleet"). A real crash of guests on two workers at the same
+              time also holds back their reverts until this alert clears.
     {{- end }}
     {{- if include "koinon.modelKoinon" . }}
     - name: koinon-gateway

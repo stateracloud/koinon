@@ -87,7 +87,7 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 			if !frontUnreachable(err) {
 				return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s did not reach the guest (%v): no verdict on the front", k, err)
 			}
-			return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer: %v", k, err)
+			return frontDown(actor, fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer: %v", k, err))
 		}
 		if !controlFast {
 			return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s ran into its deadline and the control API is slow too: no verdict on the front", k)
@@ -96,9 +96,22 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 			// A call on a connection that is still connecting waits for it and ends at the deadline.
 			return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s ran into its deadline and the router connection is %s: no verdict on the front", k, d.routerState())
 		}
-		return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer in %s", k, d.cfg.FrontCheckTimeout)
+		return frontDown(actor, fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer in %s", k, d.cfg.FrontCheckTimeout))
 	}
 	return execution.GRPCError(op, err)
+}
+
+// frontDown adds the worker of the actor to an ErrFrontDown: both verdicts of CheckFront (the router's
+// report and the deadline) carry it, so the reconciler's fleet breaker sees every one. The worker is the
+// actor's worker assignment of the control API read in the same call: worker.name, else worker_pod
+// (Substrate api/ateapi/v1/ateapi.proto:906, WorkerAssignment :987 and :1008).
+func frontDown(actor *ateapiv1.Actor, err error) error {
+	wa := actor.GetStatus().GetWorkerAssignment()
+	worker := wa.GetWorker().GetName()
+	if worker == "" {
+		worker = wa.GetWorkerPod()
+	}
+	return &execution.FrontDownError{Worker: worker, Err: err}
 }
 
 // The two forms in which the router reports that it could not reach the guest. Every other Unavailable

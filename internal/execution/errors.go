@@ -51,6 +51,30 @@ var (
 	ErrStreamClosed = errors.New("exec stream ended without exit status")
 )
 
+// FrontDownError is the ErrFrontDown of CheckFront with the worker that hosts the sandbox. The
+// reconciler counts dead fronts by worker: silence on more than one worker at once is more likely the
+// router than the guests (issue #1481, the fleet breaker).
+type FrontDownError struct {
+	// Worker names the worker that hosts the sandbox. Empty when the driver does not know it.
+	Worker string
+	// Err is the error that matches ErrFrontDown.
+	Err error
+}
+
+func (e *FrontDownError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the error that matches ErrFrontDown.
+func (e *FrontDownError) Unwrap() error { return e.Err }
+
+// FrontWorker returns the worker of the FrontDownError in err, or "" when err has none.
+func FrontWorker(err error) string {
+	var fd *FrontDownError
+	if errors.As(err, &fd) {
+		return fd.Worker
+	}
+	return ""
+}
+
 // Error is an error from a backend operation.
 type Error struct {
 	// Op is the backend operation, for example "CreateSandbox".
