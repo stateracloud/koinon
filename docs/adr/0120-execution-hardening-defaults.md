@@ -1105,9 +1105,11 @@ that is now the fallback. The first choice keeps the home where it is.
 - **Repoint.** A spec change on the same tier gives a new template. The driver suspends the actor with synchronous
   durability, calls UpdateActor with the new template, and resumes the actor. The actor name, the home and the
   snapshot stay. The driver then takes one more synchronous suspend, so a revert does not go back to a snapshot of
-  the old template.
+  the old template. The seal is best effort. When it or the resume fails, the driver keeps a mark in memory and takes
+  the seal at the next resume. A restart of the driver loses the mark. A repoint resumes an idle sandbox too. The
+  recreate cap limits how many repoints one pass makes.
 - **Invariants.** A repoint is legal only when these stay equal: the container names, the volumes, the volume
-  mounts of every container, the snapshot storage location and the isolation tier. On gVisor the home checkpoint
+  mounts of every container, the snapshot storage location, the isolation tier and the runtime class. On gVisor the home checkpoint
   is keyed by the container name. A rename leaves the home empty, and Substrate gives no error. Golden tests in
   `internal/execution/substrate` fail when one of these changes in a rendered template.
 - **Fallback.** A tier change, a Substrate refusal (FailedPrecondition or InvalidArgument) or a lost old template

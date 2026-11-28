@@ -59,6 +59,9 @@ func (d *Driver) RepointSandbox(ctx context.Context, workspace, name string, spe
 	}
 	switch actor.GetStatus().GetState() {
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED, ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDING, ateapiv1.ActorState_ACTOR_STATE_RESUMING:
+		// A transient state: the next pass tries again.
+		return execution.Sandbox{}, fail(op, execution.ErrUnavailable, "sandbox %s is %s: try again", k, phaseOf(actor))
 	default:
 		return execution.Sandbox{}, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s, not suspended or running", k, phaseOf(actor))
 	}
@@ -105,6 +108,8 @@ func (d *Driver) RepointSandbox(ctx context.Context, workspace, name string, spe
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
 	// From here the actor names the new template. Whatever fails next must not make the caller delete it.
+	// Its snapshot belongs to the old template until a seal replaces it: the next resume takes the seal.
+	d.setSealOwed(k, true)
 	if err := d.ensureEgressPolicy(ctx, op, k); err != nil {
 		return execution.Sandbox{}, fail(op, execution.ErrRepointResume, "sandbox %s was repointed and its egress policy was not written: %v", k, err)
 	}
@@ -114,6 +119,7 @@ func (d *Driver) RepointSandbox(ctx context.Context, workspace, name string, spe
 	}
 	d.setOwed(k, false)
 	if sb, ok := d.sealFirstBoot(ctx, op, k); ok {
+		d.setSealOwed(k, false)
 		return sb, nil
 	}
 	return sandboxFrom(workspace, resp.GetActor()), nil
@@ -129,7 +135,8 @@ var _ execution.Repointer = (*Driver)(nil)
 //   - the container names, in order;
 //   - the volumes, and the mounts of every container;
 //   - the snapshot storage location;
-//   - the isolation tier (ADR 0075): a tier change changes the runtime and the snapshot format.
+//   - the isolation tier (ADR 0075) and the runtime class: a change of either changes the runtime and the
+//     snapshot format.
 //
 // A change of any of them is a delete and a restore from kopia.
 func repointInvariants(prev, next *ateapiv1.ActorTemplate, cfg Config) error {
@@ -153,6 +160,17 @@ func repointInvariants(prev, next *ateapiv1.ActorTemplate, cfg Config) error {
 	}
 	if p, n := tierOfTemplate(prev, cfg), tierOfTemplate(next, cfg); p != n {
 		return fmt.Errorf("the isolation tier changes from %q to %q", p, n)
+	}
+	// A snapshot belongs to a runtime: two classes of one tier (kata-qemu and kata-clh) are not equal either.
+	pc2, pok := prev.GetWorkerSelector().GetMatchLabels()[RuntimeClassSelector]
+	nc2, nok := next.GetWorkerSelector().GetMatchLabels()[RuntimeClassSelector]
+	if pok != nok || pc2 != nc2 {
+		return fmt.Errorf("the runtime class changes from %q to %q", pc2, nc2)
+	}
+	if pok {
+		if _, known := cfg.RuntimeClassTiers[nc2]; !known {
+			return fmt.Errorf("the runtime class %q has no tier", nc2)
+		}
 	}
 	return nil
 }

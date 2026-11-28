@@ -27,7 +27,7 @@ var _ = Describe("the template invariants that keep the home (issue #1482)", fun
 		GuestSigner:             fakeate.Signer(),
 		SnapshotStorageLocation: "snapshots",
 		DefaultTier:             harness.TierDev,
-		RuntimeClassTiers:       map[string]harness.Tier{"kata": harness.TierVM, "gvisor": harness.TierHardened},
+		RuntimeClassTiers:       map[string]harness.Tier{"kata": harness.TierVM, "kata2": harness.TierVM, "gvisor": harness.TierHardened},
 	}
 	render := func(class string) *ateapiv1.ActorTemplate {
 		t, err := substrate.RenderTemplateForTest(ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "1", MemoryLimit: "1Gi", RuntimeClassName: class}, cfg)
@@ -77,6 +77,10 @@ var _ = Describe("the template invariants that keep the home (issue #1482)", fun
 		Expect(substrate.RepointInvariants(render(""), render("kata"), cfg)).To(MatchError(ContainSubstring("tier")))
 		Expect(substrate.RepointInvariants(render("gvisor"), render("kata"), cfg)).To(MatchError(ContainSubstring("tier")))
 		Expect(substrate.RepointInvariants(render("kata"), render("kata"), cfg)).To(Succeed())
+	})
+
+	It("refuses a change of the runtime class inside one tier", func() {
+		Expect(substrate.RepointInvariants(render("kata"), render("kata2"), cfg)).To(MatchError(ContainSubstring("runtime class")))
 	})
 })
 
@@ -130,6 +134,18 @@ var _ = Describe("Substrate repoint of a sandbox (issue #1482)", func() {
 		Expect(cl.TemplateOf(ws, "a")).NotTo(BeEmpty())
 		body, _ := cl.File(ws, "a", home)
 		Expect(string(body)).To(Equal("kept"))
+	})
+
+	It("takes the seal at the next resume when the first resume after the repoint failed", func(ctx SpecContext) {
+		d, cl := started(ctx)
+		cl.FailNextResumes(ws, "a", 1000)
+		_, err := d.RepointSandbox(ctx, ws, "a", changed())
+		Expect(errors.Is(err, execution.ErrRepointResume)).To(BeTrue(), "%v", err)
+		cl.FailNextResumes(ws, "a", 0)
+		before := cl.Calls("SuspendActor")
+		_, err = d.ResumeSandbox(ctx, ws, "a")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cl.Calls("SuspendActor")).To(Equal(before+1), "the owed seal")
 	})
 
 	It("takes a new snapshot after the repoint, so a revert does not go back to the old template", func(ctx SpecContext) {

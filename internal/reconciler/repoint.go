@@ -57,6 +57,7 @@ func (r *Reconciler) repoint(ctx context.Context, w *work, ws string, spec execu
 		r.recreateStarted(key)
 		r.m.SandboxRepoints.WithLabelValues(repointResumeFailed).Inc()
 		r.log.Warn("the sandbox was repointed and did not resume", append(w.logAttrs(), "err", err)...)
+		sb.NewSnapshot = sb.Phase == execution.PhaseReady // a running sandbox was suspended (sync) before the repoint
 		return true, r.record(ctx, w, sb, hash, "repointed to the new spec; the resume did not work yet")
 	default:
 		return true, err
