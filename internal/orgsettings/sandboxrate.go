@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 )
@@ -26,7 +26,7 @@ const (
 // frees. The caller leaves the run queued or starting and retries on its next pass, so a burst waits
 // and no run fails because of it. Reserve before the backend call and Release the reservation if the call
 // fails, so an agent whose creation keeps failing cannot starve the org's healthy agents.
-func ReserveSandboxCreation(ctx context.Context, pool *pgxpool.Pool, org, agent pgtype.UUID, kind string, limit int) (res Reservation, ok bool, retryAfter time.Duration, err error) {
+func ReserveSandboxCreation(ctx context.Context, pool DB, org, agent pgtype.UUID, kind string, limit int) (res Reservation, ok bool, retryAfter time.Duration, err error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return res, false, 0, err
@@ -57,10 +57,17 @@ func ReserveSandboxCreation(ctx context.Context, pool *pgxpool.Pool, org, agent 
 	return Reservation{org: org, id: id}, true, 0, tx.Commit(ctx)
 }
 
+// DB is what ReserveSandboxCreation needs: a transaction and plain statements. *pgxpool.Pool
+// satisfies it, and so does the reconciler's leader-term DB (issue 635).
+type DB interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	store.DBTX
+}
+
 // Reservation is one taken sandbox creation slot.
 type Reservation struct{ org, id pgtype.UUID }
 
 // Release gives the slot back, for a backend call that failed.
-func (r Reservation) Release(ctx context.Context, pool *pgxpool.Pool) error {
+func (r Reservation) Release(ctx context.Context, pool store.DBTX) error {
 	return store.New(pool).ReleaseSandboxCreation(ctx, store.ReleaseSandboxCreationParams{OrgID: r.org, ID: r.id})
 }

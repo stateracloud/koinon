@@ -15,11 +15,11 @@
 # (hack/ci-required-test.sh, also with --ruleset).
 #
 # Required checks that other workflows produce:
-#   dco              .github/workflows/dco.yml
 #   gitleaks         .github/workflows/secrets.yml
-#   claim            .github/workflows/claims.yml
 #   e2e result       .github/workflows/e2e-kind.yml
 # They are listed under `external` and are not compared with ci.yml.
+# Not required since #682: `claim` (.github/workflows/claims.yml) still runs and reports, but it only
+# informs; the sign-off check that was `dco` is now part of `quick checks` (hack/git-identity-check.sh range).
 
 # ci.yml jobs. `aggregator` is a required job that reads needs.*.result of its parts (go, web); only
 # the jobs an aggregator needs are exempt from being listed.
@@ -38,9 +38,7 @@ scripts
 harnesses
 
 # produced by other workflows
-external dco
 external gitleaks
-external claim
 external e2e result
 
 # Advisory on purpose: reported, never blocks. Keep this list as short as it is. A job that only
@@ -62,3 +60,10 @@ advisory ci-red
 # final, and on dispatch), so it can never be required here (a required name must report on every PR, push and
 # merge_group build). hack/release-gate.sh demands its result for every tag instead. It is `continue-on-error`, so a red
 # drill never changes the conclusion of an e2e-kind.yml run, which hack/e2e-bisect.sh reads.
+
+# The Substrate leg of the kind e2e (`make test-e2e-kind-substrate`, the `driver: substrate` dispatch input of
+# .github/workflows/e2e-kind.yml, #1091) is advisory. It is a driver of the `quickstart` job, not a job of its own, so it has
+# no name to list above and can never be required here: a required name must report on every PR, push and merge_group
+# build, and this leg runs on dispatch only. A red leg never changes the `e2e result` check. It becomes a required leg at
+# the switch (#1093), which makes it a job of its own. The leg runs the harness contract suite itself
+# (test/e2e/run.sh) against the Substrate overlay image; the required `harnesses` job above runs it against the plain harness image.

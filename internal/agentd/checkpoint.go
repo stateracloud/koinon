@@ -42,7 +42,10 @@ import (
 // HomeStore is the checkpoint writer as agentd uses it (checkpoint.Writer).
 type HomeStore interface {
 	Backup(ctx context.Context, prefix, password string, tarStream io.Reader, m checkpoint.Meta) (checkpoint.Result, error)
-	Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error
+	// Restore refuses a snapshot whose files do not match wantDigest (checkpoint.ErrDigestMismatch),
+	// before it writes a byte to dst. An empty wantDigest skips the check (a checkpoint made before
+	// digests were recorded).
+	Restore(ctx context.Context, prefix, password, snapshotID, wantDigest string, dst io.Writer) error
 	Verify(ctx context.Context, prefix, password, snapshotID string) error
 	// DeleteRepository deletes the blobs of a retired repository, never a later epoch's under it.
 	DeleteRepository(ctx context.Context, prefix string) (int, error)
@@ -353,6 +356,7 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 		_, cerr := p.q.CompleteHomeCheckpoint(octx, store.CompleteHomeCheckpointParams{
 			OrgID: cp.OrgID, ID: cp.ID, SnapshotID: pgtype.Text{String: res.SnapshotID, Valid: true}, SizeBytes: pgtype.Int8{Int64: res.Bytes, Valid: true},
 			Epoch: res.epoch, Generation: res.generation, RepositoryEpoch: res.repositoryEpoch,
+			ContentDigest: pgtype.Text{String: res.Digest, Valid: res.Digest != ""},
 		})
 		if cerr == nil {
 			return
@@ -428,7 +432,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	generation := sb.HomeGeneration.String
 
 	var stderr tail
-	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
+	proc, err := p.backend.Exec(ctx, sb.Workspace, sb.ActorRef(), execution.ExecRequest{
 		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "--hard-dereference", "-cf", "-", ".")...)...),
 		Stderr:  &stderr, Timeout: c.Timeout,
 	})
@@ -492,7 +496,7 @@ func (r *runner) restoreHome(ctx context.Context, sb store.AgentSandbox) error {
 	if agentconfig.IsEphemeral(r.vcfg) {
 		// An ephemeral agent's task sandbox starts empty: nothing carries over between tasks (ADR 0065
 		// 13c), and the newest checkpoint of the agent may belong to another task.
-		return r.q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent})
+		return r.q.DropSandboxRestore(ctx, store.DropSandboxRestoreParams{OrgID: org, AgentID: agent})
 	}
 	// One restore can take Timeout for each try of each checkpoint; the claim lasts as long as the
 	// run is willing to wait for it, so a second run never takes it over while the first extracts.
@@ -545,6 +549,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 	// does not hold the checkpoints written before it started.
 	repos := map[int32]checkpoint.Repository{}
 	var errs []error
+	var skipped []skippedCheckpoint
 	for i, cp := range cps {
 		repo, ok := repos[cp.RepositoryEpoch]
 		if !ok {
@@ -554,6 +559,7 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 				// Nothing to open it with: an older checkpoint, in another epoch, may still restore.
 				r.log.Warn("restoring the home: the checkpoint's repository cannot be opened", "checkpoint", cp.ID.String(), "repository_epoch", cp.RepositoryEpoch, "err", err)
 				errs = append(errs, fmt.Errorf("checkpoint %s (repository epoch %d): %w", cp.ID, cp.RepositoryEpoch, err))
+				skipped = append(skipped, newSkippedCheckpoint(cp, skipRepository))
 				continue
 			}
 			if err != nil {
@@ -561,15 +567,21 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			}
 			repos[cp.RepositoryEpoch] = repo
 		}
+		reason := skipRestore
 		for try := 1; try <= c.RestoreTries; try++ {
 			err := r.restoreOne(ctx, sb, repo, cp)
 			if err == nil {
+				if cp.ContentDigest.String == "" {
+					r.log.Warn("restored a home checkpoint that has no content digest (made before digests, or resynced): the home is not verified", "checkpoint", cp.ID.String())
+				}
 				if recErr := r.own.Record(ctx, "run.home_restored", map[string]any{
 					"checkpoint": cp.ID.String(), "snapshot": cp.SnapshotID.String, "newer_failed": i,
 					"taken_at": cp.FinishedAt.Time.UTC().Format(time.RFC3339),
+					"verified": cp.ContentDigest.String != "",
 				}); recErr != nil {
 					r.log.Warn("recording the home restore failed", "err", recErr)
 				}
+				r.noteHomeFallback(ctx, cp, skipped)
 				return nil
 			}
 			if ctx.Err() != nil {
@@ -582,18 +594,24 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			}
 			r.log.Warn("restoring the home failed", "checkpoint", cp.ID.String(), "try", try, "err", err)
 			errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
+			if errors.Is(err, checkpoint.ErrDigestMismatch) {
+				// Another try reads the same snapshot: go to the next older checkpoint.
+				reason = skipDigest
+				break
+			}
 			if try < c.RestoreTries && !sleep(ctx, time.Second<<try) {
 				return ctx.Err()
 			}
 		}
+		skipped = append(skipped, newSkippedCheckpoint(cp, reason))
 	}
 	return &failure{reason: "restoring the home failed: " + truncateText(errors.Join(errs...).Error(), 600), class: classTransient}
 }
 
 // restoreOne streams one checkpoint into the sandbox's home through the execution layer's upload
-// channel. Exec stdin is not used: it has no flow control, and the supervisor kills a command
-// whose unread stdin passes 4 MiB (ADR 0032, 2026-10-27, issue 169). The archive is shaped by
-// checkpoint.WriteTar for the upload's fixed `tar xf - -C /sandbox`.
+// channel. The Substrate driver sends the archive as a tar stream on exec stdin (#1478): tar reads
+// every byte, so the 4 MiB stdin cap of the supervisor does not apply. The archive is shaped by
+// checkpoint.WriteTar for `tar -x -f - -C /sandbox`.
 func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo checkpoint.Repository, cp store.HomeCheckpoint) error {
 	c := r.p.cfg.Checkpoints
 	// The restore stages the snapshot on the scratch disk: only so many at once.
@@ -612,11 +630,11 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 	pr, pw := io.Pipe()
 	restored := make(chan error, 1)
 	go func() {
-		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, pw)
+		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, cp.ContentDigest.String, pw)
 		_ = pw.CloseWithError(err) // nil closes with io.EOF
 		restored <- err
 	}()
-	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.SandboxName, checkpoint.HomeDir, pr)
+	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.ActorRef(), checkpoint.HomeDir, pr)
 	if uerr == nil {
 		// The upload read an end-of-file, so the writer is done.
 		return <-restored

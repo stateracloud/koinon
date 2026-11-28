@@ -1,0 +1,4 @@
+{
+  "jsPlugins": ["../koinon-plugin.js"],
+  "rules": { "koinon/no-raw-message": "error" }
+}

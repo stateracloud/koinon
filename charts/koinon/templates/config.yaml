@@ -36,9 +36,18 @@ data:
       {{- if include "koinon.mcpKoinon" . }}
       # koinon-gateway opens sealed MCP credentials; with agentgateway the reconciler refuses them.
       mcpSealed: true
+      {{- if include "koinon.egressListener" . }}
+      # koinon-gateway's egress listener: the reconciler adds an enforced L7 sandbox rule for it (#1086 part C2).
+      egressUrl: {{ include "koinon.egressURL" . }}
+      {{- end }}
       # koinon-gateway's MCP listener as sandboxes reach it: the sandbox profile allows /mcp there, and not on
       # agentgateway (ADR 0097 decision 5, #1239).
       mcpUrl: http://{{ include "koinon.mcpGatewayHost" . }}:{{ int .Values.gateway.mcp.koinon.port }}
+      {{- end }}
+      {{- if eq (include "koinon.substrate" .) "true" }}
+      # koinon-gateway's model listener as sandboxes reach it. On Substrate (which needs gateway.model.driver=koinon) the
+      # agents' model calls go there, and the driver adds the actor JWT for the model audience on that host and port (issue #1489).
+      modelUrl: {{ include "koinon.modelGatewayURL" . }}
       {{- end }}
       {{- else }}
       # Koinon's own Gateway; the controller names the proxy's Service after it.
@@ -60,6 +69,7 @@ data:
         controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
         routerAddress: {{ .Values.execution.substrate.routerAddress | quote }}
         allowUnhardened: {{ .Values.execution.substrate.allowUnhardened | default false }}
+        goldenSnapshots: {{ .Values.execution.substrate.goldenSnapshots | default false }}
         {{- with .Values.execution.substrate.defaultTier }}
         defaultTier: {{ . | quote }}
         {{- end }}
@@ -79,6 +89,12 @@ data:
         {{- end }}
         tokenFile: {{ printf "%s/token" (include "koinon.substrateTokenDir" .) | quote }}
         guestKeyFile: {{ include "koinon.substrateGuestKeyFile" . | quote }}
+        {{- if include "koinon.provisioner" . }}
+        # The provisioner creates the org atespace (ADR 0128): the reconciler holds no global role in Substrate.
+        provisioner:
+          url: {{ printf "http://%s.%s.svc:%d" (include "koinon.componentName" (list . "provisioner")) .Release.Namespace (int .Values.execution.substrate.provisioner.port) | quote }}
+          tokenFile: {{ printf "%s/token" (include "koinon.provisionerTokenDir" .) | quote }}
+        {{- end }}
         {{- if .Values.execution.substrate.caSecret }}
         caFile: /etc/koinon/substrate-ca/ca.crt
         {{- end }}

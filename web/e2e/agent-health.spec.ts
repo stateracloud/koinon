@@ -2,7 +2,7 @@
 
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockApi, type Handlers, type Stream } from './mock-api.ts'
+import { agentSummaries, mockApi, type Handlers, type Stream } from './mock-api.ts'
 
 const org = 'org-1'
 const sha = 'c'.repeat(64)
@@ -69,14 +69,15 @@ function api(role = 'ORG_ROLE_OWNER') {
       expiresAt: at(6 * 86_400_000),
     },
   })
-  const ev = (seq: number, kind: string, payload: Json, actorKind = 'ACTOR_KIND_SYSTEM') => ({ seq: String(seq), kind, actorKind, payload, createdAt: at(-60_000 + seq * 100), runId: 'r-1' })
+  // A task event as the API sends it: its kind and its typed event (protojson).
+  const ev = (seq: number, kind: string, event: Json, actorKind = 'ACTOR_KIND_SYSTEM') => ({ seq: String(seq), kind, actorKind, event, createdAt: at(-60_000 + seq * 100), runId: 'r-1' })
   const events = [
-    ev(1, 'task.created', { title: 'Fix the README typo' }),
-    ev(2, 'sandbox.recreated', { message: 'Sandbox recreated: its process could not be stopped' }),
-    ev(3, 'sandbox.work_lost', { message: 'Unsaved work in the old sandbox could not be saved' }),
-    ev(4, 'approval.requested', { system: true, approval_id: 'ap-1', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: sha }),
-    ev(5, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
-    ev(6, 'agent.unhealthy', { message: 'Agent marked unhealthy: its sandbox kept getting stuck' }),
+    ev(1, 'task.created', { taskCreated: { title: 'Fix the README typo' } }),
+    ev(2, 'sandbox.recreated', { sandboxRecreated: { message: 'Sandbox recreated: its process could not be stopped' } }),
+    ev(3, 'sandbox.work_lost', { sandboxWorkLost: { message: 'Unsaved work in the old sandbox could not be saved' } }),
+    ev(4, 'approval.requested', { approvalRequested: { system: true, approvalId: 'ap-1', tool: 'push_saved_work', target: 'github:acme/widgets', argsSha256: sha } }),
+    ev(5, 'run.session_restarted', { runSessionRestarted: { message: 'Session restarted: new instructions.' } }),
+    ev(6, 'agent.unhealthy', { agentUnhealthy: { message: 'Agent marked unhealthy: its sandbox kept getting stuck' } }),
   ]
   const handlers: Handlers = {
     unary: {
@@ -87,6 +88,7 @@ function api(role = 'ORG_ROLE_OWNER') {
       'koinon.connection.v1alpha1.ConnectionService/ListConnections': () => ({ connections: [] }),
       'koinon.agent.v1alpha1.AgentService/GetAgent': () => ({ agent: agent() }),
       'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [agent()] }),
+      'koinon.agent.v1alpha1.AgentService/ListAgentSummaries': () => agentSummaries([agent()])(),
       'koinon.agent.v1alpha1.AgentService/ResumeAgent': (req) => {
         seen.resume.push(req)
         unhealthy = false
@@ -197,15 +199,15 @@ for (const vp of viewports) {
       await expectAccessible(page)
     })
 
-    test('agent page: unhealthy notice, Resume agent, and the agents list badge', async ({ page }) => {
+    test('agent page: unhealthy notice, Resume agent, and the agent card badge', async ({ page }) => {
       const { handlers, seen } = api()
       await mockApi(page, handlers)
-      await page.goto('/agents')
-      await expect(page.getByText('Unhealthy', { exact: true })).toBeVisible()
+      await page.goto('/')
+      await expect(page.getByRole('article', { name: 'Repo helper' }).getByText('Unhealthy', { exact: true })).toBeVisible()
       await expectNoHorizontalScroll(page)
       await expectAccessible(page)
 
-      await page.getByRole('link', { name: 'Repo helper' }).click()
+      await page.getByRole('link', { name: 'Repo helper', exact: true }).click()
       const health = page.getByRole('region', { name: 'Agent health' })
       await expect(health.getByRole('alert')).toContainText('its sandbox was recreated three times in a row')
       await expectNoHorizontalScroll(page)
@@ -222,7 +224,7 @@ for (const vp of viewports) {
       handlers.unary['koinon.approval.v1alpha1.ApprovalService/ListApprovals'] = () => ({ approvals: [] })
       handlers.unary['koinon.question.v1alpha1.QuestionService/ListQuestions'] = () => ({ questions: [] })
       await mockApi(page, handlers)
-      await page.goto('/')
+      await page.goto('/inbox')
       const item = page.getByRole('list', { name: 'Waiting on you' }).getByTestId('inbox-item')
       await expect(item).toContainText('Repo helper is unhealthy and takes no runs.')
       await expect(item).toContainText('its sandbox was recreated three times in a row')

@@ -10,6 +10,7 @@ import (
 	"io"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,8 +71,8 @@ func (p *fproc) pb() *ateenvv1alpha.Process {
 
 type guestServer struct {
 	ateenvv1alpha.UnimplementedProcessServiceServer
-	ateenvv1alpha.UnimplementedFileSystemServiceServer
-	c *Cluster
+	ateenvv1alpha.UnimplementedFileSystemServiceServer // the real guest has none either (#1478)
+	c                                                  *Cluster
 }
 
 // target resolves the router header to a running actor. A suspended actor is resumed, as the real
@@ -107,8 +108,22 @@ func (g *guestServer) target(ctx context.Context, method string) (*actor, error)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no actor %s", v[0])
 	}
+	if a.routerRefuse { // the router answers itself, as its ext_proc does for a failure of its own
+		return nil, status.Errorf(codes.Unavailable, "actor %s unavailable", v[0])
+	}
 	switch a.state {
 	case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
+		if a.frontDead && a.frontHang { // the guest accepts the call and never answers: the caller's deadline ends it
+			g.c.mu.Unlock()
+			<-ctx.Done()
+			g.c.mu.Lock()
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+		if a.frontDead { // pid 1 exited: the actor still runs and nothing answers
+			// The real router's dataplane (Envoy) answers a failed upstream CONNECT to the worker's atunnel
+			// with this local reply, and a gRPC request gets it as Unavailable.
+			return nil, status.Error(codes.Unavailable, FrontDownMessage)
+		}
 	case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 		g.c.resumes[k]++
 		a.state = ateapiv1.ActorState_ACTOR_STATE_RUNNING
@@ -183,6 +198,10 @@ func (g *guestServer) run(a *actor, p *fproc) {
 		g.c.mu.Unlock()
 		p.exit(0)
 	case "tar":
+		if slices.Contains(args, "-cf") {
+			g.tarc(a, p, args)
+			return
+		}
 		g.untar(a, p, args)
 	default:
 		p.update(func() { p.stderr = append(p.stderr, []byte(p.argv[0]+": not found\n")...) })
@@ -190,7 +209,37 @@ func (g *guestServer) run(a *actor, p *fproc) {
 	}
 }
 
-// untar is `tar -x -f FILE -C DIR`.
+// tarc is `tar -C DIR [--exclude=...] -cf - .`: every file below DIR, as "./name" entries, on stdout.
+// It leaves out nothing: the fake home holds no cache, and Koinon's writer applies its own list.
+func (g *guestServer) tarc(a *actor, p *fproc, args []string) {
+	dir := "/"
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-C" {
+			dir = args[i+1]
+		}
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	g.c.mu.Lock()
+	names := make([]string, 0, len(a.files))
+	for name := range a.files {
+		if rel, ok := strings.CutPrefix(name, strings.TrimSuffix(dir, "/")+"/"); ok {
+			names = append(names, rel)
+		}
+	}
+	sort.Strings(names)
+	for _, rel := range names {
+		body := a.files[path.Join(dir, rel)]
+		_ = tw.WriteHeader(&tar.Header{Name: "./" + rel, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})
+		_, _ = tw.Write(body)
+	}
+	g.c.mu.Unlock()
+	_ = tw.Close()
+	p.update(func() { p.stdout = append(p.stdout, buf.Bytes()...) })
+	p.exit(0)
+}
+
+// untar is `tar -x -f - -C DIR`: the archive is the standard input, and tar waits for its end.
 func (g *guestServer) untar(a *actor, p *fproc, args []string) {
 	var file, dir string
 	for i := 0; i+1 < len(args); i++ {
@@ -201,16 +250,27 @@ func (g *guestServer) untar(a *actor, p *fproc, args []string) {
 			dir = args[i+1]
 		}
 	}
-	g.c.mu.Lock()
-	data, ok := a.files[file]
-	g.c.mu.Unlock()
 	fail := func(msg string) {
 		p.update(func() { p.stderr = append(p.stderr, []byte("tar: "+msg+"\n")...) })
 		p.exit(2)
 	}
-	if !ok {
-		fail(file + ": no such file")
+	if file != "-" {
+		fail(file + ": only standard input is supported")
 		return
+	}
+	var data []byte
+	for {
+		p.mu.Lock()
+		closed, exited, ch := p.inClose, p.exited, p.changed
+		data = append([]byte(nil), p.stdin...)
+		p.mu.Unlock()
+		if exited {
+			return // killed
+		}
+		if closed {
+			break
+		}
+		<-ch
 	}
 	tr := tar.NewReader(bytes.NewReader(data))
 	for {
@@ -308,6 +368,15 @@ func (g *guestServer) WriteProcessInput(stream ateenvv1alpha.ProcessService_Writ
 			total += int64(len(d))
 		}
 		if req.GetClose() {
+			a.smu.Lock()
+			fail := a.failWrite > 0 && p.argv[0] == "tar"
+			if fail {
+				a.failWrite--
+			}
+			a.smu.Unlock()
+			if fail {
+				return status.Error(codes.Unavailable, "the stream broke before close")
+			}
 			p.update(func() { p.inClose = true })
 		}
 	}
@@ -377,67 +446,4 @@ func (g *guestServer) StreamProcessOutput(r *ateenvv1alpha.StreamProcessOutputRe
 			}
 		}
 	}
-}
-
-func (g *guestServer) WriteFile(stream ateenvv1alpha.FileSystemService_WriteFileServer) error {
-	a, err := g.target(stream.Context(), "WriteFile")
-	if err != nil {
-		return err
-	}
-	var (
-		name string
-		buf  []byte
-	)
-	for {
-		req, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err // a cancelled stream stores nothing
-		}
-		if name == "" {
-			if name = req.GetPath(); name == "" {
-				return status.Error(codes.InvalidArgument, "file path cannot be empty")
-			}
-		}
-		buf = append(buf, req.GetChunk()...)
-	}
-	if name == "" {
-		return status.Error(codes.InvalidArgument, "no file data received")
-	}
-	a.smu.Lock()
-	fail := a.failWrite > 0
-	if fail {
-		a.failWrite--
-	}
-	a.smu.Unlock()
-	if fail {
-		return status.Error(codes.Unavailable, "the guest daemon is not listening yet")
-	}
-	g.c.mu.Lock()
-	a.files[path.Clean(name)] = buf
-	g.c.mu.Unlock()
-	return stream.SendAndClose(&ateenvv1alpha.WriteFileResponse{BytesWritten: int64(len(buf))})
-}
-
-func (g *guestServer) ReadFile(r *ateenvv1alpha.ReadFileRequest, stream ateenvv1alpha.FileSystemService_ReadFileServer) error {
-	a, err := g.target(stream.Context(), "ReadFile")
-	if err != nil {
-		return err
-	}
-	g.c.mu.Lock()
-	b, ok := a.files[path.Clean(r.GetPath())]
-	g.c.mu.Unlock()
-	if !ok {
-		return status.Errorf(codes.NotFound, "file %q not found", r.GetPath())
-	}
-	for len(b) > 0 {
-		n := min(len(b), outputChunk)
-		if err := stream.Send(&ateenvv1alpha.ReadFileResponse{Chunk: b[:n]}); err != nil {
-			return err
-		}
-		b = b[n:]
-	}
-	return nil
 }

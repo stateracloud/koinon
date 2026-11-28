@@ -36,40 +36,52 @@ while [ "$p" -gt 1 ]; do
   p=$pp
 done
 
-# The sandbox's main process stays. Under OpenShell, PID 1 is the supervisor
-# (openshell-sandbox, as the sandbox user too) and the main process is its first child: the
-# command the sandbox was created with, launched once before the sandbox is ready, so before
-# any exec. Ending it ends the sandbox (ReportMainProcessExit) and OpenShell refuses every
-# exec after. Children of PID 1 started later are execs, or processes an exec left behind.
+# The sandbox's main process stays. Three PID 1s are known; for any other, the sweep refuses
+# rather than guess.
+#
+# OpenShell: PID 1 is the supervisor (openshell-sandbox, as the sandbox user too) and the main
+# process is its first child: the command the sandbox was created with, launched once before
+# the sandbox is ready, so before any exec. Ending it ends the sandbox (ReportMainProcessExit)
+# and OpenShell refuses every exec after. Children of PID 1 started later are execs, or
+# processes an exec left behind.
+#
+# Substrate: PID 1 is koinon-guest-front (comm koinon-guest-fr: the kernel cuts comm at 15
+# characters). The Substrate template has no command (internal/execution/substrate/template.go
+# refuses one, issue #1092), so the front is the sandbox's main process. The upstream guest
+# server in it starts a process only on a StartProcess call, so every child of PID 1 is an
+# exec or a process an exec left behind. Ending PID 1 would end the sandbox, so it stays.
+#
 # The contract suite's Docker stand-in says so in PID 1's environment
-# (KOINON_SANDBOX_STANDIN=1); its PID 1 is the main process. Any other PID 1 is not known, and
-# the sweep refuses rather than guess.
+# (KOINON_SANDBOX_STANDIN=1); its PID 1 is the main process.
 main=
 { read -r comm </proc/1/comm; } 2>/dev/null || comm=
-if [ "$comm" != openshell-sandb ]; then
-  if grep -qaz '^KOINON_SANDBOX_STANDIN=1$' /proc/1/environ 2>/dev/null; then
-    main=1
-  else
-    echo "sweep: unknown PID 1 (${comm:-unreadable}), neither the OpenShell supervisor nor the stand-in; cannot tell the sandbox's main process" >&2
-    exit 2
-  fi
-else
-  main=
-  main_start=
-  for d in /proc/[0-9]*; do
-    { read -r line <"$d/stat"; } 2>/dev/null || continue
-    # Fields after "pid (comm) ": state, ppid, ..., start time the 20th.
-    # shellcheck disable=SC2086 # splitting the stat fields is the point
-    set -- ${line##*") "}
-    [ $# -ge 20 ] && [ "$2" = 1 ] || continue
-    shift 19
-    if [ -z "$main_start" ] || [ "$1" -lt "$main_start" ]; then
-      main=${d#/proc/}
-      main_start=$1
+case $comm in
+  koinon-guest-fr) main=1 ;;
+  openshell-sandb)
+    main_start=
+    for d in /proc/[0-9]*; do
+      { read -r line <"$d/stat"; } 2>/dev/null || continue
+      # Fields after "pid (comm) ": state, ppid, ..., start time the 20th.
+      # shellcheck disable=SC2086 # splitting the stat fields is the point
+      set -- ${line##*") "}
+      [ $# -ge 20 ] && [ "$2" = 1 ] || continue
+      shift 19
+      if [ -z "$main_start" ] || [ "$1" -lt "$main_start" ]; then
+        main=${d#/proc/}
+        main_start=$1
+      fi
+    done
+    [ -n "$main" ] || { echo "sweep: the supervisor has no main process" >&2; exit 2; }
+    ;;
+  *)
+    if grep -qaz '^KOINON_SANDBOX_STANDIN=1$' /proc/1/environ 2>/dev/null; then
+      main=1
+    else
+      echo "sweep: unknown PID 1 (${comm:-unreadable}), not the OpenShell supervisor, the Substrate guest front or the stand-in; cannot tell the sandbox's main process" >&2
+      exit 2
     fi
-  done
-  [ -n "$main" ] || { echo "sweep: the supervisor has no main process" >&2; exit 2; }
-fi
+    ;;
+esac
 keep="$keep$main "
 echo "main: $main"
 

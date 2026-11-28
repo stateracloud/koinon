@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
-import { useState, type FormEvent } from 'react'
+import { createContext, useContext, useId, useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,9 +8,13 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { PriceVersion } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import type { usePriceActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
 import { emptyPriceForm, emptyRates, formFromVersion, providerChoices, toSetPrice, tokenizers, validatePrice, type PriceFormValues, type RateFields } from '@/lib/prices'
 
 type Actions = ReturnType<typeof usePriceActions>
+
+// IdPrefix makes every element id of one form unique, so two open forms never share an id.
+const IdPrefix = createContext('')
 
 const rateFields: { key: keyof RateFields; label: string }[] = [
   { key: 'input', label: 'Input' },
@@ -28,6 +31,8 @@ const rateFields: { key: keyof RateFields; label: string }[] = [
 export function PriceForm({
   orgId,
   existing,
+  initial,
+  title: givenTitle,
   actions,
   onDone,
   onSaved,
@@ -35,12 +40,17 @@ export function PriceForm({
   orgId: string
   /** The current version, when adding a new version of a price. */
   existing?: PriceVersion
+  /** Values to start a new price from, such as the price an override replaces. */
+  initial?: PriceFormValues
+  /** The form's heading and accessible name, for a new price. */
+  title?: string
   actions: Actions
   onDone: () => void
   onSaved: (name: string, warnings: string[]) => void
 }) {
+  const u = useId()
   const editing = !!existing
-  const [f, setF] = useState<PriceFormValues>(() => (existing ? formFromVersion(existing) : emptyPriceForm()))
+  const [f, setF] = useState<PriceFormValues>(() => (existing ? formFromVersion(existing) : (initial ?? emptyPriceForm())))
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -60,24 +70,25 @@ export function PriceForm({
       onSaved(f.name, res.warnings)
       onDone()
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
     } finally {
       setPending(false)
     }
   }
 
-  const title = editing ? `New version of ${f.name}` : 'Add a price'
+  const title = editing ? `New version of ${f.name}` : (givenTitle ?? 'Add a price')
   return (
+    <IdPrefix.Provider value={u}>
     <form onSubmit={(e) => void submit(e)} aria-label={title} className="bg-background grid gap-4 rounded-md border p-4" noValidate>
       <h3 className="text-base font-semibold">{title}</h3>
       {editing && <p className="text-muted-foreground text-xs">Saving adds a version that applies from the start date below. Earlier requests keep the price they were charged at.</p>}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="price-name" label="Name" error={show('name')} help="Names the price. Adding the same name again adds a version.">
-          <Input id="price-name" value={f.name} onChange={(e) => set({ name: e.target.value })} disabled={editing} autoComplete="off" aria-invalid={!!show('name')} aria-describedby={describe('price-name', show('name'))} />
+          <Input id={`${u}price-name`} value={f.name} onChange={(e) => set({ name: e.target.value })} disabled={editing} autoComplete="off" aria-invalid={!!show('name')} aria-describedby={describe(u, 'price-name', show('name'))} />
         </Field>
         <Field id="price-provider" label="Provider type" error={show('provider')} help="The provider type it applies to, such as openrouter, or * for any.">
-          <Input id="price-provider" list="price-providers" value={f.provider} onChange={(e) => set({ provider: e.target.value })} autoComplete="off" aria-invalid={!!show('provider')} aria-describedby={describe('price-provider', show('provider'))} />
-          <datalist id="price-providers">
+          <Input id={`${u}price-provider`} list={`${u}price-providers`} value={f.provider} onChange={(e) => set({ provider: e.target.value })} autoComplete="off" aria-invalid={!!show('provider')} aria-describedby={describe(u, 'price-provider', show('provider'))} />
+          <datalist id={`${u}price-providers`}>
             {providerChoices.map((p) => (
               <option key={p} value={p} />
             ))}
@@ -88,16 +99,16 @@ export function PriceForm({
         <legend className="text-sm font-medium">Which models</legend>
         <div className="flex flex-wrap gap-4 text-sm">
           <label className="flex items-center gap-2">
-            <input type="radio" name="price-match" checked={f.matchKind === 'glob'} onChange={() => set({ matchKind: 'glob' })} />
+            <input type="radio" name={`${u}price-match`} checked={f.matchKind === 'glob'} onChange={() => set({ matchKind: 'glob' })} />
             Name pattern (* and ?)
           </label>
           <label className="flex items-center gap-2">
-            <input type="radio" name="price-match" checked={f.matchKind === 'regex'} onChange={() => set({ matchKind: 'regex' })} />
+            <input type="radio" name={`${u}price-match`} checked={f.matchKind === 'regex'} onChange={() => set({ matchKind: 'regex' })} />
             Regular expression
           </label>
         </div>
         <Field id="price-pattern" label="Model pattern" error={show('pattern')} help="Matches the whole model name, ignoring case, such as anthropic/claude-sonnet-*.">
-          <Input id="price-pattern" value={f.pattern} onChange={(e) => set({ pattern: e.target.value })} autoComplete="off" aria-invalid={!!show('pattern')} aria-describedby={describe('price-pattern', show('pattern'))} />
+          <Input id={`${u}price-pattern`} value={f.pattern} onChange={(e) => set({ pattern: e.target.value })} autoComplete="off" aria-invalid={!!show('pattern')} aria-describedby={describe(u, 'price-pattern', show('pattern'))} />
         </Field>
       </fieldset>
       <fieldset className="grid gap-3">
@@ -112,7 +123,7 @@ export function PriceForm({
           <div key={i} className="grid gap-3 rounded-md border p-3" role="group" aria-label={`Tier ${i + 1}`}>
             <div className="flex items-end gap-2">
               <Field id={`tier-${i}-over`} label={`Tier ${i + 1} applies above (input tokens)`} error={show(`tier${i}contextOver`)}>
-                <Input id={`tier-${i}-over`} inputMode="numeric" value={t.contextOver} onChange={(e) => set({ tiers: f.tiers.map((x, j) => (j === i ? { ...x, contextOver: e.target.value } : x)) })} autoComplete="off" aria-invalid={!!show(`tier${i}contextOver`)} aria-describedby={describe(`tier-${i}-over`, show(`tier${i}contextOver`))} />
+                <Input id={`${u}tier-${i}-over`} inputMode="numeric" value={t.contextOver} onChange={(e) => set({ tiers: f.tiers.map((x, j) => (j === i ? { ...x, contextOver: e.target.value } : x)) })} autoComplete="off" aria-invalid={!!show(`tier${i}contextOver`)} aria-describedby={describe(u, `tier-${i}-over`, show(`tier${i}contextOver`))} />
               </Field>
               <Button type="button" variant="outline" size="sm" aria-label={`Remove tier ${i + 1}`} onClick={() => set({ tiers: f.tiers.filter((_, j) => j !== i) })}>
                 Remove
@@ -130,10 +141,10 @@ export function PriceForm({
       <fieldset className="grid gap-4 sm:grid-cols-2">
         <legend className="mb-2 text-sm font-medium">Estimates when a provider reports no usage</legend>
         <Field id="price-max-output" label="Largest output (tokens)" error={show('maxOutput')} help="Required when any price is not 0. An aborted response without usage is charged up to it.">
-          <Input id="price-max-output" inputMode="numeric" value={f.maxOutput} onChange={(e) => set({ maxOutput: e.target.value })} autoComplete="off" aria-invalid={!!show('maxOutput')} aria-describedby={describe('price-max-output', show('maxOutput'), true)} />
+          <Input id={`${u}price-max-output`} inputMode="numeric" value={f.maxOutput} onChange={(e) => set({ maxOutput: e.target.value })} autoComplete="off" aria-invalid={!!show('maxOutput')} aria-describedby={describe(u, 'price-max-output', show('maxOutput'), true)} />
         </Field>
         <Field id="price-tokenizer" label="Tokenizer" error={show('tokenizer')}>
-          <NativeSelect id="price-tokenizer" value={f.tokenizer} onChange={(e) => set({ tokenizer: e.target.value })}>
+          <NativeSelect id={`${u}price-tokenizer`} value={f.tokenizer} onChange={(e) => set({ tokenizer: e.target.value })}>
             {tokenizers.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
@@ -142,10 +153,10 @@ export function PriceForm({
           </NativeSelect>
         </Field>
         <Field id="price-ratio" label="Bytes per token" error={show('ratio')} help="Between 0.5 and 16. Claude: 3.0 (2.3 from Opus 4.7).">
-          <Input id="price-ratio" inputMode="decimal" value={f.ratio} onChange={(e) => set({ ratio: e.target.value })} autoComplete="off" aria-invalid={!!show('ratio')} aria-describedby={describe('price-ratio', show('ratio'), true)} />
+          <Input id={`${u}price-ratio`} inputMode="decimal" value={f.ratio} onChange={(e) => set({ ratio: e.target.value })} autoComplete="off" aria-invalid={!!show('ratio')} aria-describedby={describe(u, 'price-ratio', show('ratio'), true)} />
         </Field>
         <Field id="price-overhead" label="Tool overhead (tokens)" error={show('toolOverhead')} help="Fixed input a provider adds when a request defines tools.">
-          <Input id="price-overhead" inputMode="numeric" value={f.toolOverhead} onChange={(e) => set({ toolOverhead: e.target.value })} autoComplete="off" aria-invalid={!!show('toolOverhead')} aria-describedby={describe('price-overhead', show('toolOverhead'), true)} />
+          <Input id={`${u}price-overhead`} inputMode="numeric" value={f.toolOverhead} onChange={(e) => set({ toolOverhead: e.target.value })} autoComplete="off" aria-invalid={!!show('toolOverhead')} aria-describedby={describe(u, 'price-overhead', show('toolOverhead'), true)} />
         </Field>
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <input type="checkbox" checked={f.hiddenThinking} onChange={(e) => set({ hiddenThinking: e.target.checked })} />
@@ -153,7 +164,7 @@ export function PriceForm({
         </label>
       </fieldset>
       <Field id="price-from" label="Applies from (optional)" error={show('validFrom')} help="A date in UTC. Empty means now.">
-        <Input id="price-from" type="date" value={f.validFrom} onChange={(e) => set({ validFrom: e.target.value })} aria-invalid={!!show('validFrom')} aria-describedby={describe('price-from', show('validFrom'), true)} />
+        <Input id={`${u}price-from`} type="date" value={f.validFrom} onChange={(e) => set({ validFrom: e.target.value })} aria-invalid={!!show('validFrom')} aria-describedby={describe(u, 'price-from', show('validFrom'), true)} />
       </Field>
       {error && (
         <Alert variant="destructive" role="alert">
@@ -169,26 +180,28 @@ export function PriceForm({
         </Button>
       </div>
     </form>
+    </IdPrefix.Provider>
   )
 }
 
-function describe(id: string, error: string | undefined, help = false): string | undefined {
-  const ids = [help ? `${id}-help` : undefined, error ? `${id}-error` : undefined].filter(Boolean)
+function describe(u: string, id: string, error: string | undefined, help = false): string | undefined {
+  const ids = [help ? `${u}${id}-help` : undefined, error ? `${u}${id}-error` : undefined].filter(Boolean)
   return ids.length ? ids.join(' ') : undefined
 }
 
 function Field({ id, label, error, help, children }: { id: string; label: string; error?: string; help?: string; children: React.ReactNode }) {
+  const u = useContext(IdPrefix)
   return (
     <div className="grid min-w-0 gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={`${u}${id}`}>{label}</Label>
       {children}
       {help && (
-        <p id={`${id}-help`} className="text-muted-foreground text-xs">
+        <p id={`${u}${id}-help`} className="text-muted-foreground text-xs">
           {help}
         </p>
       )}
       {error && (
-        <p id={`${id}-error`} className="text-destructive text-xs">
+        <p id={`${u}${id}-error`} className="text-destructive text-xs">
           {error}
         </p>
       )}
@@ -211,6 +224,7 @@ function RateInputs({
   onChange: (k: keyof RateFields, v: string) => void
   error: (k: string) => string | undefined
 }) {
+  const u = useContext(IdPrefix)
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {rateFields.map(({ key, label }) => {
@@ -218,7 +232,7 @@ function RateInputs({
         const err = error(`${errKey}${key}`)
         return (
           <Field key={key} id={id} label={labelPrefix ? `${labelPrefix}${label.toLowerCase()}` : label} error={err}>
-            <Input id={id} inputMode="decimal" value={rates[key]} onChange={(e) => onChange(key, e.target.value)} placeholder="0.30" autoComplete="off" aria-invalid={!!err} aria-describedby={describe(id, err)} />
+            <Input id={`${u}${id}`} inputMode="decimal" value={rates[key]} onChange={(e) => onChange(key, e.target.value)} placeholder="0.30" autoComplete="off" aria-invalid={!!err} aria-describedby={describe(u, id, err)} />
           </Field>
         )
       })}

@@ -81,21 +81,6 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 	if err := b.check(op, "provider", p.Name, existing.GetMetadata().GetLabels()); err != nil {
 		return err
 	}
-	legacy := b.unlabeled(existing.GetMetadata().GetLabels())
-	if p.ClaimLegacy && legacy {
-		// Made before the install label existed (issue 461). Labels are immutable, so claim it by
-		// recreating it with the label and the credentials of this pass. The caller sets ClaimLegacy
-		// only while no sandbox attaches it; until then the record is taken as this install's.
-		if _, err := b.c.DeleteProvider(ctx, &openshellv1.DeleteProviderRequest{
-			WorkspaceScope: scope(workspace), Name: p.Name, AllowMissing: true,
-		}); err != nil {
-			return wrap(op, err)
-		}
-		if err := create(); err != nil {
-			return err
-		}
-		return nil
-	}
 	if existing.GetType() != p.Profile.ID || existing.GetProfileWorkspace() != workspace {
 		return &execution.Error{Op: op, Kind: execution.ErrConflict, Err: fmt.Errorf(
 			"provider %q has type %q in profile workspace %q; OpenShell cannot change either, delete and recreate it",

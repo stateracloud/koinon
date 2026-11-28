@@ -11,11 +11,14 @@
 # image. The OpenShell driver (the default) keeps the plain harness image and its exec path.
 #
 # Build: make harness-substrate-opencode. Both binaries come from the named build context "launcher"
-# (build/guest-launcher/linux-<arch>/, `make guest-launcher`); the harness image is FLAVOR_IMAGE. The
-# release builds the same image with hack/release-harness-substrate.sh. There is no RUN step, so a
-# multi-platform build needs no emulation.
-ARG FLAVOR_IMAGE
-FROM ${FLAVOR_IMAGE}
+# (build/guest-launcher/linux-<arch>/, `make guest-launcher`); the harness image is the named build context
+# "flavor". A local build passes it as an OCI layout (hack/harness-flavor-context.sh), so a docker-container builder
+# needs no registry; the release passes docker-image://<digest reference> (hack/release-harness-substrate.sh). There
+# is no RUN step, so a multi-platform build needs no emulation.
+# "flavor" is a named build context, not a stage
+# hadolint ignore=DL3006
+# dockerfile-lint: allow=digest flavor is a named build context; the caller passes the harness image pinned by digest (OCI layout or docker-image://<digest>)
+FROM flavor
 ARG TARGETARCH
 # "launcher" is a named build context, not a stage
 # hadolint ignore=DL3022
@@ -24,7 +27,7 @@ COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-launcher /usr
 COPY --from=launcher --chmod=0755 linux-${TARGETARCH}/koinon-guest-front /usr/local/bin/koinon-guest-front
 # Two policies, one per tier family (ADR 0120 section 4.2 and 4.3): the vm tier fails closed without
 # Landlock, the gVisor tiers (hardened, dev) run it best effort (their root is writable by decision, issue #1150).
-COPY --chmod=0644 policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
+COPY --chmod=u=rwX,go=rX policy-vm.json policy-gvisor.json /etc/koinon/guest-launcher/
 # The guest front listens on port 80 (its default, which the Substrate router expects) and runs the payload as
 # its own user, so it runs as root: a non-root user has neither the port nor the right to start a process as
 # another user. The payload is hardened by the launcher (no_new_privs, capability drop, seccomp, Landlock), and

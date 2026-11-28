@@ -179,12 +179,9 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 // because another install issued it is re-enabled here (ADR 0110 decision 3), and an org owner or
 // org admin cannot do it, whatever the token's org.
 func (s *Server) RebindToken(ctx context.Context, req *tokenv1alpha1.RebindTokenRequest) (*tokenv1alpha1.RebindTokenResponse, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, "only a platform admin re-enables a token of a restored copy")
+	p, err := requirePlatformAdmin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	org, err := parseID("org", req.GetOrgId())
 	if err != nil {

@@ -198,11 +198,22 @@ func (g *Gateway) connect(ctx context.Context, key poolKey, t gateway.MCPTarget)
 	if err != nil {
 		return nil, err
 	}
+	// One bound on every upstream reply (issue 1347): the SDK reads a JSON reply without a limit.
+	maxResp := g.o.MaxResponseBytes
+	if maxResp > 0 {
+		hc.Transport = &limitTransport{base: hc.Transport, max: maxResp, onLimit: func() {
+			g.o.Logger.Warn("an upstream MCP reply went over the size limit and its call failed", "target", t.Name, "limit", maxResp)
+		}}
+	}
+	maxEvent := int(min(maxResp, int64(mcp.DefaultMaxEventSize)))
+	if maxResp < 0 {
+		maxEvent = -1 // the SDK reads a negative value as no cap; zero is its 16 MiB default
+	}
 	var inner mcp.Transport = &mcp.StreamableClientTransport{
-		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1,
+		Endpoint: t.URL, HTTPClient: hc, DisableStandaloneSSE: true, MaxRetries: -1, MaxEventSize: maxEvent,
 	}
 	if t.SSE {
-		inner = &mcp.SSEClientTransport{Endpoint: t.URL, HTTPClient: hc}
+		inner = &mcp.SSEClientTransport{Endpoint: t.URL, HTTPClient: hc, MaxEventSize: maxEvent}
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "koinon-gateway", Version: "0"}, &mcp.ClientOptions{
 		// An empty set of capabilities: no sampling, no elicitation. AddRoots below adds roots.

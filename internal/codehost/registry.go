@@ -3,6 +3,7 @@
 package codehost
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/stateracloud/koinon/connectors"
@@ -74,6 +75,44 @@ func (r *Registry) Binding(cfg agentconfig.Config) (connector string, b agentcon
 		}
 	}
 	return "", agentconfig.Binding{}, false
+}
+
+// ReadGrant is the agent's forge read grant: a grant on a code host with at least one scope that has
+// network rules, on a binding with at least one bound repository. ok is false when cfg has none. It is
+// the one rule for "this agent expects a forge credential" (#1086 part C2): koinon-reconciler renders the
+// forge routes and the credential from it (reconciler.GitHubReadAccessAt), and koinon-agentd waits for
+// the credential when it holds. err is set when the grant names a connector type that is not embedded.
+func (r *Registry) ReadGrant(cfg agentconfig.Config) (rg ReadGrant, ok bool, err error) {
+	connector, g, found := r.Grant(cfg)
+	if !found {
+		return ReadGrant{}, false, nil
+	}
+	ct, found := connectors.Get(connector)
+	if !found {
+		return ReadGrant{}, false, fmt.Errorf("the %s connector type is not embedded", connector)
+	}
+	var scopes []string
+	for _, s := range g.Scopes {
+		if ct.HasNetwork(g.Preset, []string{s}) {
+			scopes = append(scopes, s)
+		}
+	}
+	b, bound := cfg.Binding(connector)
+	if len(scopes) == 0 || !bound || len(b.Targets) == 0 {
+		return ReadGrant{}, false, nil
+	}
+	return ReadGrant{Connector: connector, Type: ct, Preset: g.Preset, Scopes: scopes, Binding: b}, true, nil
+}
+
+// ReadGrant is what Registry.ReadGrant found.
+type ReadGrant struct {
+	// Connector is the connector type ID.
+	Connector string
+	Type      *connectors.Type
+	Preset    templates.Preset
+	// Scopes are the grant's scopes that have network rules.
+	Scopes  []string
+	Binding agentconfig.Binding
 }
 
 // MustGet is Get for a provider the caller registered; it panics when there is none.

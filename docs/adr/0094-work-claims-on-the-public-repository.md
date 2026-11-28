@@ -27,7 +27,9 @@ relates: ["0046", "0079", "0082"]
   [0104](0104-work-claims-reduced-to-the-lock.md) (2026-11-09: decisions 1, 2, 3, 5, 6 and 7; no comment
   claims, outsider classes, leases or sweeper);
   amendment of 2026-11-10 below (the updater is retired; decision 4's exit condition is replaced);
-  [0105](0105-merge-queue-route.md) (decision 4: the way in, admin merges and the e2e evidence; the queue is the only route)
+  [0105](0105-merge-queue-route.md) (decision 4: the way in, admin merges and the e2e evidence; the queue is the only route);
+  #682 (2026-11-26, recorded in [0104](0104-work-claims-reduced-to-the-lock.md) and [0026](0026-home-lab-and-license.md)):
+  `claim` is not required, so the decision 4 fence is information only; `dco.yml` is removed and the sign-off is checked in `quick checks`
 - Amends: ADR 0082 (work claims and the ready queue): decisions 2, 3, 4, 6, 7, 8 and 10, and its Context
 - Relates to: [0082](0082-work-claims-and-ready-queue.md), [0046](0046-adr-conventions.md), [0079](0079-dependency-cooldown.md)
 - Issue: #159 (draft PR #160)

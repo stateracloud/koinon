@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConnectionService, type GitHubLink } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 import { type GitHubLinkResult, githubLinkResultText } from '@/lib/github-link'
 
 function hostName(host: string) {
@@ -59,7 +60,7 @@ export function GitHubLinks({ orgId, admin, result }: { orgId: string; admin: bo
         Link your GitHub login once from the page of a GitHub connection. Koinon then asks you to review the pull requests that agents open for you.
         Koinon keeps only your login and never stores a GitHub token for you.
       </p>
-      {mine.isError && <p className="text-destructive text-sm">{ConnectError.from(mine.error).rawMessage}</p>}
+      {mine.isError && <p className="text-destructive text-sm">{describeError(mine.error).message}</p>}
       {mine.data && mine.data.links.length === 0 && <p className="text-sm">No GitHub login is linked.</p>}
       {mine.data && mine.data.links.length > 0 && (
         <ul className="grid gap-2">
@@ -92,7 +93,7 @@ export function GitHubLinks({ orgId, admin, result }: { orgId: string; admin: bo
           )}
         </>
       )}
-      {remove.error && <p className="text-destructive text-sm">Could not remove the link: {ConnectError.from(remove.error).rawMessage}</p>}
+      {remove.error && <p className="text-destructive text-sm">Could not remove the link: {describeError(remove.error).message}</p>}
     </section>
   )
 }
@@ -110,7 +111,7 @@ export function LinkGitHubLoginButton({ orgId, connectionId }: { orgId: string; 
       const res = await createClient(ConnectionService, transport).startGitHubLink({ orgId, connectionId })
       window.location.assign(res.authorizeUrl)
     } catch (err) {
-      setState({ pending: false, error: ConnectError.from(err).rawMessage })
+      setState({ pending: false, error: describeError(err).message })
     }
   }
   return (

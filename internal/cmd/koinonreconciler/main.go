@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -85,6 +86,10 @@ func serve(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	egressEndpoint, err := cfg.egressEndpoint()
+	if err != nil {
+		return err
+	}
 	mcpEndpoint, err := cfg.mcpGatewayEndpoint()
 	if err != nil {
 		return err
@@ -111,6 +116,14 @@ func serve(ctx context.Context, cfg config) error {
 	// value the chart keeps in a Secret, not in Postgres, so a restored database does not share it.
 	if cfg.installMark == "" && !cfg.execution.IsSubstrate() {
 		log.Warn("no install mark: OpenShell objects are not marked with this install and a second install on the gateway can adopt them (set --install-mark)")
+	}
+	if cfg.execution.IsSubstrate() {
+		// Every actor's egress policy allows these gateway listeners and nothing else (issue #1444); the
+		// egress listener only for an agent with a code-host grant.
+		sub := &cfg.execution.Substrate
+		if sub.GatewayRoutes, sub.CodeHostEgressRoute, err = cfg.substrateGatewayRoutes(); err != nil {
+			return err
+		}
 	}
 	conn, err := cfg.execution.Dial()
 	if err != nil {
@@ -224,11 +237,11 @@ func serve(ctx context.Context, cfg config) error {
 		log.Info("stopping koinon-reconciler")
 		return err
 	}
-	// One price list for the reconciler and the settler.
-	priceResolver := prices.NewResolver(pricing.Embedded())
 	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
 		return err
 	}
+	// One price list for the reconciler and the settler.
+	priceResolver := prices.NewResolver(pricing.Embedded())
 	var supervisor reconciler.SupervisorSource
 	if cfg.openshellConfigMap != "" {
 		supervisor = reconciler.KubeSupervisorImage{Client: kube, Namespace: cfg.openshellConfigNS, ConfigMap: cfg.openshellConfigMap}
@@ -246,18 +259,19 @@ func serve(ctx context.Context, cfg config) error {
 	// The forge credential (#1086 part C) is sealed to the gateway key, as koinon-api seals MCP
 	// credentials: only with koinon-gateway, which holds that key. A gateway that does not read the
 	// credential refuses the forge routes (503 credential_unavailable), so no format gate is needed.
-	var forgeRecipient reconciler.RecipientKeys
+	var (
+		forgeRecipient reconciler.RecipientKeys
+		gatewayKeys    *gatewaykeys.PublicKeys
+	)
 	if cfg.mcpSealed {
-		gatewayKeys := &gatewaykeys.PublicKeys{}
-		safego.Go(ctx, log, "gateway-public-key", func(ctx context.Context) {
-			gatewayKeys.Run(ctx, pool, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
-		})
+		gatewayKeys = &gatewaykeys.PublicKeys{}
 		forgeRecipient = gatewayKeys
 	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:             endpoint,
+			Egress:              egressEndpoint,
 			MCPGateway:          mcpEndpoint,
 			Prices:              priceResolver,
 			Keys:                keyring,
@@ -308,7 +322,6 @@ func serve(ctx context.Context, cfg config) error {
 	if err := settler.Validate(); err != nil {
 		return err
 	}
-	safego.Go(ctx, log, "spend-settler", settler.Run)
 	// Direct provider keys with a cost API key are reconciled against the provider's cost API once
 	// a day (ADR 0056, amendment 2026-11-06); one replica at a time (an advisory lock).
 	costSources := providerusage.DefaultCosts(nil)
@@ -316,8 +329,27 @@ func serve(ctx context.Context, cfg config) error {
 		DB: pool, Keys: keyring, Sources: costSources, Log: log,
 		Metrics: ledger.NewCostMetrics(reg, costSources.Types()),
 	}
-	safego.Go(ctx, log, "cost-reconciliation", costs.Run)
-	err = r.Run(ctx)
+	// Everything that converges (passes, the spend settler, the cost reconciliation, the gateway public
+	// key reader) starts only while the schema is supported (issue 680); what is built above does no
+	// database work, so a configuration error still fails at once. The recovery handler and the
+	// restore-hold wait above do not wait for the gate. The loops are awaited, so none of them still
+	// runs when the pool closes.
+	err = holdWork(ctx, gate, func(ctx context.Context) error {
+		// The loops end with r.Run, also when it returns before ctx ends.
+		ctx, cancel := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		defer func() { cancel(); wg.Wait() }()
+		if gatewayKeys != nil {
+			wg.Go(func() {
+				safego.Do(log, "gateway-public-key", func() {
+					gatewayKeys.Run(ctx, pool, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
+				})
+			})
+		}
+		wg.Go(func() { safego.Do(log, "spend-settler", func() { settler.Run(ctx) }) })
+		wg.Go(func() { safego.Do(log, "cost-reconciliation", func() { costs.Run(ctx) }) })
+		return r.Run(ctx)
+	}, log)
 	log.Info("stopping koinon-reconciler")
 	return err
 }

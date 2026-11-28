@@ -51,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd/loopguard"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runlimits"
@@ -110,6 +111,10 @@ type Config struct {
 	// whose model is not served in time fails with a reason that names the provider. Default
 	// DefaultModelServeTimeout.
 	ModelServeTimeout time.Duration
+	// ForgeServeTimeout bounds the wait, before a run that clones through koinon-gateway starts its
+	// harness, for the gateway to serve the agent's forge credential (#1086 part C2). Default
+	// DefaultForgeServeTimeout.
+	ForgeServeTimeout time.Duration
 	// MCPRetryDelay is how long a run waits, before it starts its harness, between finding an MCP
 	// server it may use not serving tools and looking again; a second miss fails the run (issue
 	// old issue 326). A miss is what Koinon's health record of the server says (probed every 60 s) or, with
@@ -186,6 +191,26 @@ type Config struct {
 	// http://koinon-gateway.koinon.svc:8080. Harnesses get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools, unless MCPURL is set. Required; it must not carry credentials.
 	GatewayURL string
+	// ActorTokens, when set, sends git of every run whose agent has a code-host connection through
+	// the gateway's egress prefix at EgressURL (ADR 0097, #1086 part C2): agentd mints each run's
+	// actor identity token with it, outside the guest (actortoken.go). Nil keeps git on the
+	// execution driver's own egress.
+	ActorTokens *actortoken.Minter
+	// ActorIdentityOutside says the execution driver adds the actor identity outside the guest
+	// (Agent Substrate, issue #1386, ADR 0120 amendment of 2026-11-26): atenet-egress replaces the
+	// placeholder in the actor token header with the actor's own token. With an EgressURL, git of a
+	// run whose agent has a code-host connection then goes through the gateway's egress prefix, and
+	// agentd writes no token into the guest and needs no ActorTokens: the guest's git configuration
+	// sends only actortoken.Placeholder (codehost.EgressPlaceholderGitConfig). It excludes
+	// ActorTokens, and EgressURL must be http: the header is replaced only on the clear-text rule.
+	ActorIdentityOutside bool
+	// EgressURL is the gateway's egress listener as sandboxes reach it, for example
+	// http://koinon-mcp-gateway.koinon.svc:8081. Required with ActorTokens; it must not carry
+	// credentials, a path, a query or a fragment.
+	EgressURL string
+	// ActorTokenRefresh is how often a live run writes a new actor token. Default
+	// DefaultActorTokenRefresh; it must be under a third of the token's lifetime.
+	ActorTokenRefresh time.Duration
 	// MCPURL is the MCP URL harnesses get, as sandboxes reach it, for example
 	// http://koinon-mcp-gateway.koinon.svc:8080/mcp when koinon-gateway serves the agents' MCP path
 	// (gateway.mcp.driver=koinon, ADR 0097 decision 5). Empty: <GatewayURL>/mcp. It must not carry
@@ -250,6 +275,9 @@ func (c *Config) defaults() error {
 	} else if err := CheckSandboxURL("MCPURL", c.MCPURL); err != nil {
 		return err
 	}
+	if err := c.checkEgress(); err != nil {
+		return err
+	}
 	setDefault(&c.Workers, 8)
 	setDefault(&c.Lease, 30*time.Second)
 	setDefault(&c.DrainDeadline, DefaultDrainDeadline)
@@ -268,6 +296,7 @@ func (c *Config) defaults() error {
 	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.ModelServeTimeout, DefaultModelServeTimeout)
+	setDefault(&c.ForgeServeTimeout, DefaultForgeServeTimeout)
 	setDefault(&c.MCPRetryDelay, DefaultMCPRetryDelay)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
@@ -336,7 +365,9 @@ type Pool struct {
 	log     *slog.Logger
 	// saveSem lets one save run at a time: a bundle is up to 50 MB.
 	saveSem chan struct{}
-	http    *http.Client
+	// sweeps serialises the sweeps of an agent and caps the connections they hold (sweeplock.go).
+	sweeps *sweepLocks
+	http   *http.Client
 	// sink exports run spans; nil when tracing is off.
 	sink *traceSink
 	// stopping is closed when Run's context ends: the pool drains. Nil (never closed) before Run.
@@ -365,7 +396,7 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	}
 	p := &Pool{
 		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
-		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
+		saveSem: make(chan struct{}, 1), sweeps: newSweepLocks(db), http: &http.Client{Timeout: cfg.SaveTimeout},
 	}
 	if cfg.Tracing != nil {
 		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics, cfg.Logger)

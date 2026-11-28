@@ -5,7 +5,7 @@ import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AuthService, OrgRole, WhoAmIResponseSchema } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import {
   AgentBudgetSchema,
@@ -17,7 +17,20 @@ import {
   type SetMonthlyCapRequest,
   type SetPlatformCeilingRequest,
 } from '@/gen/koinon/budget/v1alpha1/budget_pb'
+import { OrgUsageRowSchema, RunCountsSchema, UsageService, UsageTotalsSchema, type ExportOrgUsageRequest, type GetOrgUsageRequest } from '@/gen/koinon/usage/v1alpha1/usage_pb'
 import { renderApp, whoAmI } from '@/test-utils'
+
+const orgRow = (day: string, agentId: string, agentName: string, model: string, providerName: string, costUsd: string) =>
+  create(OrgUsageRowSchema, {
+    day,
+    principal: agentId ? 'agent' : 'system',
+    agentId,
+    agentName,
+    model,
+    providerId: providerName ? `p-${providerName}` : '',
+    providerName,
+    usage: create(UsageTotalsSchema, { requests: 1n, costUsd, inputTokens: 10n }),
+  })
 
 const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1))
 const notice = (id: string, threshold: number, level = 'org_monthly', read = false) =>
@@ -28,8 +41,7 @@ const notice = (id: string, threshold: number, level = 'org_monthly', read = fal
   })
 
 function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string; path?: string; notices?: ReturnType<typeof notice>[] } = {}) {
-  const calls = { contSets: [] as { taskSpendUsd: string }[], caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0, gate: undefined as Promise<void> | undefined }
-  let contSpend = ''
+  const calls = { usage: [] as GetOrgUsageRequest[], exports: [] as ExportOrgUsageRequest[], caps: [] as SetMonthlyCapRequest[], limits: [] as SetAgentBudgetRequest[], ceilings: [] as SetPlatformCeilingRequest[], read: [] as string[], listed: 0, noticeCalls: 0, gate: undefined as Promise<void> | undefined }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => create(WhoAmIResponseSchema, { ...whoAmI({ role: opts.role }), platformAdmin: !!opts.platformAdmin }) })
     service(BudgetService, {
@@ -47,12 +59,6 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
           create(AgentBudgetSchema, { agentId: 'a-2', agentName: 'Docs bot', dailyLimitUsd: '10.00', templateDefaultUsd: '10.00', spentTodayUsd: '0.00' }),
         ],
         }
-      },
-      getOrgContinuationLimits: () => ({ limits: { taskSpendUsd: contSpend || '20.00', platformDefaultTaskSpendUsd: '20.00', overridden: contSpend !== '' } }),
-      setOrgContinuationTaskSpend: (req) => {
-        calls.contSets.push(req)
-        contSpend = req.taskSpendUsd
-        return { limits: { taskSpendUsd: contSpend || '20.00', platformDefaultTaskSpendUsd: '20.00', overridden: contSpend !== '' } }
       },
       listNotifications: () => {
         calls.noticeCalls++
@@ -81,12 +87,68 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
         return {}
       },
     })
+    service(UsageService, usageService(calls))
   })
   renderApp(transport, opts.path ?? '/settings/budgets')
   return calls
 }
 
+function usageService(calls: { usage: GetOrgUsageRequest[]; exports: ExportOrgUsageRequest[] }) {
+  return {
+    getOrgUsage: (req: GetOrgUsageRequest) => {
+      calls.usage.push(req)
+      return {
+        orgId: req.orgId,
+        rows: [
+          orgRow('2026-11-01', 'a-1', 'Repo helper', 'claude-sonnet', 'Anthropic', '30.00'),
+          orgRow('2026-11-02', 'a-1', 'Repo helper', 'gpt-mini', 'OpenAI', '9.70'),
+          orgRow('2026-11-02', '', '', 'claude-haiku', '', '0.30'),
+        ],
+        totals: create(UsageTotalsSchema, { requests: 3n, costUsd: '40.00', inputTokens: 30n }),
+        runs: create(RunCountsSchema, {}),
+      }
+    },
+    exportOrgUsage: (req: ExportOrgUsageRequest) => {
+      calls.exports.push(req)
+      return { filename: 'usage.csv', csv: 'day\n' }
+    },
+  }
+}
+
 describe('Budgets page', () => {
+  it('shows the org\'s own usage this month by agent, model, provider and day', async () => {
+    const calls = setup()
+    const usage = await screen.findByRole('region', { name: 'Usage this month' })
+    expect(await within(usage).findByText(/\$40\.00 in 3 requests/)).toBeInTheDocument()
+    const byAgent = within(usage).getByRole('table', { name: 'Usage by agent' })
+    expect(within(byAgent).getAllByRole('rowheader').map((h) => h.querySelector('.font-medium')?.textContent)).toEqual(['Repo helper', 'System checks'])
+    expect(within(byAgent).getByRole('rowheader', { name: 'Repo helper' }).closest('tr')).toHaveTextContent('$39.70')
+    await userEvent.click(within(usage).getByRole('tab', { name: 'By provider' }))
+    const byProvider = await within(usage).findByRole('table', { name: 'Usage by provider' })
+    expect(within(byProvider).getAllByRole('rowheader').map((h) => h.querySelector('.font-medium')?.textContent)).toEqual(['Anthropic', 'OpenAI', 'Not recorded'])
+    // The month to date, for this org only.
+    expect(calls.usage[0].orgId).toBe('org-1')
+    expect(calls.usage[0].range).toBeUndefined()
+    const saved: Blob[] = []
+    URL.createObjectURL = vi.fn((b: Blob) => {
+      saved.push(b)
+      return 'blob:usage'
+    })
+    URL.revokeObjectURL = vi.fn()
+    let file = ''
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      file = this.download
+    })
+    await userEvent.click(within(usage).getByRole('button', { name: 'Export CSV' }))
+    await waitFor(() => expect(click).toHaveBeenCalledOnce())
+    click.mockRestore()
+    // The saved file is the server's CSV, under the server's file name.
+    expect(file).toBe('usage.csv')
+    expect(await saved[0].text()).toBe('day\n')
+    expect(calls.exports[0].orgId).toBe('org-1')
+    expect(calls.exports[0].range).toBeUndefined()
+  })
+
   it('shows spent, remaining, the estimated share and the read-only platform ceiling', async () => {
     setup({ ceiling: '500.00' })
     const cap = await screen.findByRole('region', { name: 'Monthly cap' })
@@ -114,27 +176,6 @@ describe('Budgets page', () => {
     await userEvent.type(input, '250')
     await userEvent.click(within(cap).getByRole('button', { name: 'Save cap' }))
     await waitFor(() => expect(calls.caps).toEqual([expect.objectContaining({ orgId: 'org-1', monthlyCapUsd: '250' })]))
-  })
-
-  it('sets and clears the org default task spend cap for continuations', async () => {
-    const calls = setup()
-    const cap = await screen.findByRole('region', { name: 'Task spend cap for continuations' })
-    expect(await within(cap).findByText(/This is the platform default/)).toBeInTheDocument()
-    await userEvent.click(within(cap).getByRole('button', { name: 'Change task spend cap' }))
-    const input = within(cap).getByLabelText('Task spend cap in US dollars')
-    await userEvent.type(input, 'lots')
-    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
-    expect(await within(cap).findByText(/must be a dollar amount/)).toBeInTheDocument()
-    expect(calls.contSets).toHaveLength(0)
-    await userEvent.clear(input)
-    await userEvent.type(input, '35')
-    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
-    await waitFor(() => expect(calls.contSets).toEqual([expect.objectContaining({ orgId: 'org-1', taskSpendUsd: '35' })]))
-    expect(await within(cap).findByText(/The platform default is/)).toBeInTheDocument()
-    await userEvent.click(within(cap).getByRole('button', { name: 'Change task spend cap' }))
-    await userEvent.clear(within(cap).getByLabelText('Task spend cap in US dollars'))
-    await userEvent.click(within(cap).getByRole('button', { name: 'Save task spend cap' }))
-    await waitFor(() => expect(calls.contSets.at(-1)).toEqual(expect.objectContaining({ taskSpendUsd: '' })))
   })
 
   it('lists the agents with their template default and spend, and changes one limit', async () => {
@@ -247,7 +288,7 @@ describe('Agent unhealthy notifications', () => {
 
 describe('Platform ceilings', () => {
   it('lists every org with its ceiling, cap and spend and sets a ceiling in place', async () => {
-    const calls = setup({ platformAdmin: true, path: '/platform/budgets' })
+    const calls = setup({ platformAdmin: true, path: '/platform/usage/budgets' })
     expect(await screen.findByRole('heading', { name: 'Platform budget ceilings' })).toBeInTheDocument()
     const list = await screen.findByRole('list', { name: 'Orgs' })
     const acme = within(list).getByRole('heading', { name: 'Acme' }).closest('li')!
@@ -260,10 +301,12 @@ describe('Platform ceilings', () => {
     await waitFor(() => expect(calls.ceilings).toEqual([expect.objectContaining({ orgId: 'org-1', platformCeilingUsd: '1000' })]))
   })
 
-  it('is refused to org admins who are not platform admins, without a flash while loading', async () => {
-    const calls = setup({ path: '/platform/budgets' })
-    expect(screen.queryByText('Only platform admins can set the platform ceiling.')).not.toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Only platform admins can set the platform ceiling.')
+  it('is refused to org admins who are not platform admins: they go to the org area', async () => {
+    const calls = setup({ path: '/platform/usage/budgets' })
+    expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Platform console' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Platform budget ceilings' })).not.toBeInTheDocument()
     expect(calls.listed).toBe(0)
     expect(screen.queryByRole('navigation', { name: 'Platform' })).not.toBeInTheDocument()
   })

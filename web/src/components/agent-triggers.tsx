@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -16,6 +15,8 @@ import { AgentService, AgentStatus, type Agent } from '@/gen/koinon/agent/v1alph
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionService, type AskableMember } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { NotifyTargetKind, NotifyTargetSchema, TriggerSchema, TriggerType, type Trigger } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { describeError } from '@/lib/api-error'
+import { triggerProblem } from '@/lib/triggers'
 
 /** triggerTypeLabel names the trigger types that can be set in v0.1. */
 function triggerTypeLabel(t: TriggerType): string {
@@ -27,18 +28,6 @@ function triggerTypeLabel(t: TriggerType): string {
     default:
       return 'Reserved'
   }
-}
-
-/** triggerProblem returns what is wrong with a trigger the server would refuse, if anything. */
-function triggerProblem(t: Trigger): string | undefined {
-  if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(t.id) || t.id.length > 63) return 'The name must be lowercase letters, digits and dashes.'
-  if (t.instruction.trim() === '') return 'The instruction is required.'
-  if (t.type === TriggerType.SCHEDULE) {
-    if (t.cron.trim().split(/\s+/).length !== 5) return 'The schedule needs five cron fields.'
-    if (t.timezone.trim() === '') return 'The schedule needs a time zone.'
-  }
-  if (t.notify?.kind === NotifyTargetKind.USER && t.notify.userId === '') return 'Pick the person who is asked.'
-  return undefined
 }
 
 /** Who is asked, in plain words: the org's default (admins) when nothing is set. */
@@ -107,7 +96,7 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
       </div>
       {run.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not run the trigger: {ConnectError.from(run.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not run the trigger: {describeError(run.error).message}</AlertDescription>
         </Alert>
       )}
       {pending && <p className="text-muted-foreground">These take effect when version {agent.latestVersion} is activated.</p>}
@@ -178,7 +167,7 @@ function Editor({
 }: {
   agent: Agent
   initial: Trigger[]
-  members: { data?: { members: AskableMember[] }; error: Error | null; isPending: boolean }
+  members: Members
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
@@ -189,12 +178,44 @@ function Editor({
       onDone()
     },
   })
-  const change = (i: number, p: Partial<Trigger>) => setRows((cur) => cur.map((t, j) => (j === i ? create(TriggerSchema, { ...t, ...p }) : t)))
+  const problem = rows.map(triggerProblem).find(Boolean)
+
+  return (
+    <div className="grid gap-3">
+      <TriggerRows rows={rows} onChange={setRows} members={members} />
+      {save.error && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
+        </Alert>
+      )}
+      <div className="flex gap-2">
+        <Button
+          disabled={save.isPending || !!problem}
+          onClick={() => save.mutate({ orgId: agent.orgId, agentId: agent.id, baseVersion: agent.latestVersion, triggers: rows })}
+        >
+          Propose new version
+        </Button>
+        <Button variant="outline" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+type Members = { data?: { members: AskableMember[] }; error: Error | null; isPending: boolean }
+
+/**
+ * TriggerRows edits a list of triggers: the agent page's editor and the blank-agent form use it. It
+ * shows the first problem the server would refuse; the caller decides what to do with it.
+ */
+export function TriggerRows({ rows, onChange, members }: { rows: Trigger[]; onChange: (rows: Trigger[]) => void; members: Members }) {
+  const change = (i: number, p: Partial<Trigger>) => onChange(rows.map((t, j) => (j === i ? create(TriggerSchema, { ...t, ...p }) : t)))
   const problem = rows.map(triggerProblem).find(Boolean)
   const hasDirect = rows.some((t) => t.type === TriggerType.DIRECT_MESSAGE)
 
   return (
-    <div className="grid gap-3">
+    <>
       {rows.map((t, i) => (
         <fieldset key={i} className="grid gap-2 rounded-md border p-3">
           <legend className="px-1 font-medium">Trigger {i + 1}</legend>
@@ -244,48 +265,33 @@ function Editor({
                       </option>
                     ))}
                   </NativeSelect>
-                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {ConnectError.from(members.error).rawMessage}</p>}
+                  {members.error && <p role="alert" className="text-destructive">Could not load the members: {describeError(members.error).message}</p>}
                 </>
               )}
             </>
           )}
           <div>
-            <Button variant="outline" size="sm" onClick={() => setRows((cur) => cur.filter((_, j) => j !== i))}>
+            <Button type="button" variant="outline" size="sm" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
               Remove trigger {i + 1}
             </Button>
           </div>
         </fieldset>
       ))}
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={() => setRows((cur) => [...cur, create(TriggerSchema, { type: TriggerType.SCHEDULE, timezone: 'UTC' })])}>
+        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rows, create(TriggerSchema, { type: TriggerType.SCHEDULE, timezone: 'UTC' })])}>
           Add schedule
         </Button>
         <Button
+          type="button"
           variant="outline"
           size="sm"
           disabled={hasDirect}
-          onClick={() => setRows((cur) => [...cur, create(TriggerSchema, { type: TriggerType.DIRECT_MESSAGE })])}
+          onClick={() => onChange([...rows, create(TriggerSchema, { type: TriggerType.DIRECT_MESSAGE })])}
         >
           Add direct message
         </Button>
       </div>
       {problem && <p className="text-muted-foreground">{problem}</p>}
-      {save.error && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
-        </Alert>
-      )}
-      <div className="flex gap-2">
-        <Button
-          disabled={save.isPending || !!problem}
-          onClick={() => save.mutate({ orgId: agent.orgId, agentId: agent.id, baseVersion: agent.latestVersion, triggers: rows })}
-        >
-          Propose new version
-        </Button>
-        <Button variant="outline" onClick={onDone}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    </>
   )
 }

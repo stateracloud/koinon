@@ -67,8 +67,8 @@ build_ko() {
       --platform "linux/$arch" "${pair#*:}"
   done
   KO_DOCKER_REPO=$REPO push_retry "${KO:-ko}" build --base-import-paths --tags e2e \
-    --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
-  echo "-- images: ko build and push (7 binaries): $(( $(date +%s) - ts ))s"
+    --platform "linux/$arch" ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp ./cmd/koinon-fakegitea
+  echo "-- images: ko build and push (8 binaries): $(( $(date +%s) - ts ))s"
 }
 
 build_harness() {

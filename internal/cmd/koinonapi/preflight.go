@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +51,10 @@ type preflightConfig struct {
 	substrateWorkerNamespace string
 	substrateProbeNamespace  string
 	substrateIssuer          string
+	substrateRouterAddress   string
+	substrateRouterService   string
+	substrateAgentdNS        string
+	substrateAgentdSA        string
 
 	netpolProbe      bool
 	netpolTimeout    time.Duration
@@ -90,8 +96,12 @@ func (c *preflightConfig) flags(fs *pflag.FlagSet) {
 	fs.StringArrayVar(&c.substrateNodeSelector, "substrate-node-selector", nil, "<key>=<value> limiting the device probe to the worker nodes (repeatable)")
 	fs.BoolVar(&c.substrateVMTier, "substrate-vm-tier", true, "the vm tier is in use: probe a node for /dev/kvm, /dev/net/tun, /dev/vhost-vsock and /dev/vhost-net")
 	fs.BoolVar(&c.substrateGVisor, "substrate-gvisor", true, "the gVisor sandbox class is in use: probe each worker node for user.max_user_namespaces above 0 (gVisor starts its sentry in a user namespace)")
+	fs.StringVar(&c.substrateRouterAddress, "substrate-router-address", "", "execution.substrate.routerAddress: the router Service must serve its port (empty skips)")
+	fs.StringVar(&c.substrateRouterService, "substrate-router-service", "", "the router Service (default atenet-router)")
+	fs.StringVar(&c.substrateAgentdNS, "substrate-agentd-namespace", "", "namespace of Koinon's agentd: the router allow-list must hold its identity (with --substrate-agentd-service-account)")
+	fs.StringVar(&c.substrateAgentdSA, "substrate-agentd-service-account", "", "ServiceAccount of Koinon's agentd, whose pod certificate the router must allow (empty skips the check)")
 	fs.StringVar(&c.substrateIssuer, "substrate-expected-issuer", "", "the service-account issuer Substrate trusts (ate-setup --ateapi-expected-jwt-issuer); empty is the issuer in the API server's discovery document")
-	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod and the user-namespace probe pods in --substrate-probe-namespace")
+	fs.BoolVar(&c.substrateProbes, "substrate-probes", true, "run the issuer probe pod, the device probe pod, the user-namespace probe pods and the /var/lib/ate filesystem probe pods in --substrate-probe-namespace")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
@@ -112,7 +122,20 @@ func (c *preflightConfig) validate() error {
 	case "substrate":
 		sub := preflight.SubstrateConfig{
 			Namespace: c.substrateNamespace, WorkerNamespace: c.substrateWorkerNamespace, ProbeNamespace: c.substrateProbeNamespace,
+			RouterService: c.substrateRouterService, AgentdNamespace: c.substrateAgentdNS, AgentdServiceAccount: c.substrateAgentdSA,
 			ExpectedIssuer: c.substrateIssuer, VMTier: c.substrateVMTier, GVisor: c.substrateGVisor, WorkerPools: map[string]string{},
+		}
+		if c.substrateRouterAddress != "" {
+			_, port, err := net.SplitHostPort(c.substrateRouterAddress)
+			if err != nil {
+				return fmt.Errorf("--substrate-router-address %q: %w", c.substrateRouterAddress, err)
+			}
+			if sub.RouterPort, err = strconv.Atoi(port); err != nil || sub.RouterPort < 1 || sub.RouterPort > 65535 {
+				return fmt.Errorf("--substrate-router-address %q: port %q is not a port number", c.substrateRouterAddress, port)
+			}
+		}
+		if (c.substrateAgentdSA == "") != (c.substrateAgentdNS == "") {
+			return errors.New("--substrate-agentd-namespace and --substrate-agentd-service-account go together")
 		}
 		if err := sub.CheckProbeNamespace(); err != nil {
 			return fmt.Errorf("--substrate-probe-namespace: %w", err)
@@ -193,6 +216,18 @@ func newPreflightCommand() *cobra.Command {
 				return err
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), preflight.UserNamespacesLine(n))
+			return err
+		},
+	}, &cobra.Command{
+		Use:   "atefs-probe",
+		Short: "Run inside the Substrate /var/lib/ate probe pod: report whether /var/lib/ate shares the filesystem of the node root or of kubelet",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			shared, missing, err := preflight.SharedFilesystems()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), preflight.AteFSLine(shared, missing))
 			return err
 		},
 	}, &cobra.Command{
@@ -295,6 +330,7 @@ func buildChecker(cfg preflightConfig) (*preflight.Checker, kubernetes.Interface
 	if sub := cfg.check.Substrate; sub != nil && cfg.substrateProbes {
 		prober := substrateProber(cfg, kube, *sub)
 		checker.Issuer, checker.IssuerProbe, checker.Devices, checker.UserNS = preflight.NewIssuerResolver(kube), prober, prober, prober
+		checker.AteFS = prober
 	}
 	if cfg.check.OpenShellAddress != "" && cfg.check.Substrate == nil {
 		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()

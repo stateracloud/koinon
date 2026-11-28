@@ -251,6 +251,9 @@ spec:
       ports:
         - port: 5432
     {{- end }}
+    {{- with include "koinon.substrateIdPEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -265,15 +268,38 @@ spec:
     - ports:
         - port: mcp
       from:
+        {{- if include "koinon.substrateActorJWT" . }}
+        # Agents' MCP calls on Substrate (ADR 0120 amendment of 2026-11-27, issue #1489): only atenet-egress, which
+        # adds the actor JWT. The second fence; the first is the actor's EgressPolicy.
+        {{- include "koinon.atenetEgressPeer" . | nindent 8 }}
+        {{- else }}
         # Agents' MCP calls (#1239), as for agentgateway's llm port: sandboxes reach it through their OpenShell
-        # supervisor pods; with execution.driver=substrate the actors' traffic arrives through atenet from
-        # Substrate's namespace (execution.substrate.gatewayClientNamespaceSelector).
+        # supervisor pods.
         - namespaceSelector:
             {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+        {{- end }}
         # Koinon's own pods: koinon-api sends its approved calls and its live tool check here.
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
+    {{- if include "koinon.egressListener" . }}
+    # The egress listener (#1086 part C2): sandboxes send git here, as they reach agentgateway's llm port.
+    # The actor token and the routes gate each request; the reconciler's L7 rule limits the paths.
+    {{- if include "koinon.substrateActorJWT" . }}
+    # Substrate (ADR 0120, amendment of issue #1386, item 8): only atenet-egress, which adds the actor token. A pod that
+    # skips that hop, a sandbox pod included, gets no answer. The second fence; the first is the actor's EgressPolicy.
+    - ports:
+        - port: egress
+      from:
+        {{- include "koinon.atenetEgressPeer" . | nindent 8 }}
+    {{- else }}
+    - ports:
+        - port: egress
+      from:
+        - namespaceSelector:
+            {{- include "koinon.sandboxClientNamespaceSelector" . | nindent 12 }}
+    {{- end }}
+    {{- end }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats
@@ -306,6 +332,9 @@ spec:
               {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
       ports:
         - port: {{ .Values.api.otlpPort }}
+    {{- with include "koinon.substrateIdPEgress" . | trim }}
+    {{- . | nindent 4 }}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -320,10 +349,15 @@ spec:
     - ports:
         - port: model
       from:
-        # Only koinon-api calls this gateway until agents move to it.
+        # koinon-api calls this gateway. With execution.driver=openshell no agent does yet.
         - podSelector:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
+        {{- if include "koinon.substrateActorJWT" . }}
+        # Agents' model calls on Substrate (ADR 0120 amendment of 2026-11-27, issue #1489): only atenet-egress, which
+        # adds the actor JWT for the model audience. A sandbox pod that skips that hop gets no answer.
+        {{- include "koinon.atenetEgressPeer" . | nindent 8 }}
+        {{- end }}
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats

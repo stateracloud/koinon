@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
@@ -9,8 +8,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { OutwardService, OutwardTargetKind, type AdminDisabled } from '@/gen/koinon/outward/v1alpha1/outward_pb'
+import { describeError } from '@/lib/api-error'
 import { formatTime } from '@/lib/providers'
-import { useOrg } from '@/lib/org-context'
+import { useOptionalOrg } from '@/lib/org-context'
 
 export type OutwardSwitchProps = {
   kind: OutwardTargetKind
@@ -20,6 +20,8 @@ export type OutwardSwitchProps = {
   subject: string
   /** The target's adminDisabled from Get or List; unset when it is enabled. */
   disabled?: AdminDisabled
+  /** A table row: the state is one short line (badge, who, reason) instead of the full notice. */
+  compact?: boolean
 }
 
 /**
@@ -27,8 +29,10 @@ export type OutwardSwitchProps = {
  * Disabling is always offered; enabling is refused by the server while the install is held for a restore,
  * and for a target whose declaring Secret says disabled: true. The server's message is shown as it is.
  */
-export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwitchProps) {
-  const { org } = useOrg()
+export function OutwardSwitch({ kind, targetId, subject, disabled, compact = false }: OutwardSwitchProps) {
+  // A platform target (the platform trace destination) is in the platform console, which has no org; the server
+  // ignores org_id for it.
+  const orgId = useOptionalOrg()?.org.orgId ?? ''
   const transport = useTransport()
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
@@ -39,11 +43,11 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
     setPending(true)
     setRefused('')
     try {
-      await createClient(OutwardService, transport).setOutwardTargetDisabled({ orgId: org.orgId, kind, targetId, disabled: off, note: off ? note.trim() : '' })
+      await createClient(OutwardService, transport).setOutwardTargetDisabled({ orgId, kind, targetId, disabled: off, note: off ? note.trim() : '' })
       setNote('')
       await queryClient.invalidateQueries()
     } catch (e) {
-      setRefused(ConnectError.from(e).rawMessage)
+      setRefused(describeError(e).message)
     } finally {
       setPending(false)
     }
@@ -51,7 +55,14 @@ export function OutwardSwitch({ kind, targetId, subject, disabled }: OutwardSwit
 
   return (
     <div className="grid gap-2">
-      {disabled && (
+      {disabled && compact && (
+        <p role="note" className="text-sm">
+          <Badge variant="destructive">Switched off</Badge> by {disabled.by}
+          {disabled.note ? `: ${disabled.note}` : '.'}
+          {disabled.declared && ' Its declaring Secret says disabled: true; remove that field from the Secret to enable it.'}
+        </p>
+      )}
+      {disabled && !compact && (
         <Alert variant="destructive" role="note">
           <AlertDescription>
             <Badge variant="destructive">Switched off by an admin</Badge> Koinon does not call it, probe it or offer it to runs. Its settings and credential are kept. Since {formatTime(disabled.at, '')} by {disabled.by}

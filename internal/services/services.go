@@ -15,7 +15,8 @@
 //	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
-// PlatformService (ListOrgs, GetOrg) is for platform admins only: an org role does not count.
+// PlatformService (ListOrgs, GetOrg) and PlatformResourceService are for platform admins only: an org role does not count.
+// Every platform-scope RPC calls requirePlatformAdmin first and is listed in platformAdminRPCs (platformadmin.go).
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
 // probed; a member without the required role gets PermissionDenied.
@@ -64,6 +65,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1/usagev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/githublink"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelcheck"
@@ -283,6 +285,8 @@ func (s *Server) Register(server *connect.Server) {
 	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 	tracev1alpha1connect.RegisterTraceDestinationServiceHandler(server, traceAPI{s})
 	platformv1alpha1connect.RegisterPlatformServiceHandler(server, s)
+	platformv1alpha1connect.RegisterPlatformResourceServiceHandler(server, platformResourcesAPI{s})
+	usagev1alpha1connect.RegisterUsageServiceHandler(server, s)
 	orgv1alpha1connect.RegisterOrgServiceHandler(server, s)
 }
 
@@ -295,6 +299,7 @@ var (
 	_ tokenv1alpha1connect.TokenServiceHandler             = (*Server)(nil)
 	_ budgetv1alpha1connect.BudgetServiceHandler           = (*Server)(nil)
 	_ budgetv1alpha1connect.PriceServiceHandler            = (*Server)(nil)
+	_ usagev1alpha1connect.UsageServiceHandler             = (*Server)(nil)
 	_ providerv1alpha1connect.ProviderServiceHandler       = (*Server)(nil)
 	_ mcpserverv1alpha1connect.McpServerServiceHandler     = (*Server)(nil)
 	_ remoteagentv1alpha1connect.RemoteAgentServiceHandler = (*Server)(nil)

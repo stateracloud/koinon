@@ -11,11 +11,60 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createOrgTemplate = `-- name: CreateOrgTemplate :one
+INSERT INTO templates (org_id, slug, content_hash, display_name, description, spec, source_agent_id, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (org_id, slug) WHERE org_id IS NOT NULL DO NOTHING
+RETURNING id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by
+`
+
+type CreateOrgTemplateParams struct {
+	OrgID         pgtype.UUID
+	Slug          string
+	ContentHash   string
+	DisplayName   string
+	Description   string
+	Spec          []byte
+	SourceAgentID pgtype.UUID
+	CreatedBy     pgtype.UUID
+}
+
+// Saves an org template. No row comes back when the org already has a template with the slug.
+func (q *Queries) CreateOrgTemplate(ctx context.Context, arg CreateOrgTemplateParams) (Template, error) {
+	row := q.db.QueryRow(ctx, createOrgTemplate,
+		arg.OrgID,
+		arg.Slug,
+		arg.ContentHash,
+		arg.DisplayName,
+		arg.Description,
+		arg.Spec,
+		arg.SourceAgentID,
+		arg.CreatedBy,
+	)
+	var i Template
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.ContentHash,
+		&i.DisplayName,
+		&i.Description,
+		&i.Spec,
+		&i.CreatedAt,
+		&i.LastSyncedAt,
+		&i.OrgID,
+		&i.SourceAgentID,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const getTemplate = `-- name: GetTemplate :one
-SELECT id, slug, content_hash, display_name, description, spec, created_at, last_synced_at FROM templates
+SELECT id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by FROM templates
 WHERE id = $1
 `
 
+// By ID, for any org: the caller has the ID from an agent it can read. A caller that takes the ID from
+// a request uses GetTemplateForOrg.
 func (q *Queries) GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error) {
 	row := q.db.QueryRow(ctx, getTemplate, id)
 	var i Template
@@ -28,16 +77,50 @@ func (q *Queries) GetTemplate(ctx context.Context, id pgtype.UUID) (Template, er
 		&i.Spec,
 		&i.CreatedAt,
 		&i.LastSyncedAt,
+		&i.OrgID,
+		&i.SourceAgentID,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
+const getTemplateForOrg = `-- name: GetTemplateForOrg :one
+SELECT id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by FROM templates
+WHERE id = $1 AND (org_id IS NULL OR org_id = $2)
+`
+
+type GetTemplateForOrgParams struct {
+	ID    pgtype.UUID
+	OrgID pgtype.UUID
+}
+
+// A platform template or a template of the org; any other org's template is not found.
+func (q *Queries) GetTemplateForOrg(ctx context.Context, arg GetTemplateForOrgParams) (Template, error) {
+	row := q.db.QueryRow(ctx, getTemplateForOrg, arg.ID, arg.OrgID)
+	var i Template
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.ContentHash,
+		&i.DisplayName,
+		&i.Description,
+		&i.Spec,
+		&i.CreatedAt,
+		&i.LastSyncedAt,
+		&i.OrgID,
+		&i.SourceAgentID,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const listCurrentTemplates = `-- name: ListCurrentTemplates :many
-SELECT DISTINCT ON (slug) id, slug, content_hash, display_name, description, spec, created_at, last_synced_at FROM templates
+SELECT DISTINCT ON (slug) id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by FROM templates
+WHERE org_id IS NULL
 ORDER BY slug, last_synced_at DESC, id DESC
 `
 
-// The most recently synced content of each template.
+// The most recently synced content of each platform template.
 func (q *Queries) ListCurrentTemplates(ctx context.Context) ([]Template, error) {
 	rows, err := q.db.Query(ctx, listCurrentTemplates)
 	if err != nil {
@@ -56,6 +139,47 @@ func (q *Queries) ListCurrentTemplates(ctx context.Context) ([]Template, error) 
 			&i.Spec,
 			&i.CreatedAt,
 			&i.LastSyncedAt,
+			&i.OrgID,
+			&i.SourceAgentID,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgTemplates = `-- name: ListOrgTemplates :many
+SELECT id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by FROM templates
+WHERE org_id = $1
+ORDER BY slug, id
+`
+
+func (q *Queries) ListOrgTemplates(ctx context.Context, orgID pgtype.UUID) ([]Template, error) {
+	rows, err := q.db.Query(ctx, listOrgTemplates, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Template
+	for rows.Next() {
+		var i Template
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.ContentHash,
+			&i.DisplayName,
+			&i.Description,
+			&i.Spec,
+			&i.CreatedAt,
+			&i.LastSyncedAt,
+			&i.OrgID,
+			&i.SourceAgentID,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -71,8 +195,8 @@ const upsertTemplate = `-- name: UpsertTemplate :one
 
 INSERT INTO templates (slug, content_hash, display_name, description, spec)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (slug, content_hash) DO UPDATE SET last_synced_at = now()
-RETURNING id, slug, content_hash, display_name, description, spec, created_at, last_synced_at
+ON CONFLICT (slug, content_hash) WHERE org_id IS NULL DO UPDATE SET last_synced_at = now()
+RETURNING id, slug, content_hash, display_name, description, spec, created_at, last_synced_at, org_id, source_agent_id, created_by
 `
 
 type UpsertTemplateParams struct {
@@ -85,8 +209,9 @@ type UpsertTemplateParams struct {
 
 // SPDX-License-Identifier: Apache-2.0
 //
-// Templates are platform data (not org-owned); see 00002_agents.sql.
-// Records a template synced from the binary. Re-syncing known content only
+// A template with a NULL org_id is platform data (synced from templates/*.yaml, read-only through the
+// API); a template with an org_id belongs to that org and no other org may read it (00110_org_templates.sql).
+// Records a platform template synced from the binary. Re-syncing known content only
 // bumps last_synced_at.
 func (q *Queries) UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error) {
 	row := q.db.QueryRow(ctx, upsertTemplate,
@@ -106,6 +231,9 @@ func (q *Queries) UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) 
 		&i.Spec,
 		&i.CreatedAt,
 		&i.LastSyncedAt,
+		&i.OrgID,
+		&i.SourceAgentID,
+		&i.CreatedBy,
 	)
 	return i, err
 }

@@ -48,7 +48,7 @@ make guest-launcher >&2
 meta=$(mktemp "${TMPDIR:-/tmp}/release-harness-substrate.XXXXXX")
 trap 'rm -f "$meta"' EXIT
 docker buildx build --output "type=registry,rewrite-timestamp=true" --platform "linux/amd64,linux/arm64" "${tags[@]}" \
-	--build-arg "FLAVOR_IMAGE=$base" \
+	--build-context "flavor=docker-image://$base" \
 	--build-arg "SOURCE_DATE_EPOCH=$epoch" \
 	--build-context launcher=build/guest-launcher \
 	--label org.opencontainers.image.source="https://github.com/$source_repo" \

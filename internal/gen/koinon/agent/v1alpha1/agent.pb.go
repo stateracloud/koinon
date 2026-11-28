@@ -204,7 +204,10 @@ type Agent struct {
 	Team string `protobuf:"bytes,29,opt,name=team,proto3" json:"team,omitempty"`
 	// Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also
 	// of a person who left the org since; AgentSummary gives the name and leaves out such a person.
-	ReportsTo     *AgentReportsTo `protobuf:"bytes,30,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
+	ReportsTo *AgentReportsTo `protobuf:"bytes,30,opt,name=reports_to,json=reportsTo,proto3" json:"reports_to,omitempty"`
+	// The user ID of the person who created the agent; empty when no user did. While the agent is a
+	// draft that was never activated, this person may change it with the member role (UpdateAgent).
+	CreatedBy     string `protobuf:"bytes,31,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -448,6 +451,13 @@ func (x *Agent) GetReportsTo() *AgentReportsTo {
 		return x.ReportsTo
 	}
 	return nil
+}
+
+func (x *Agent) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
 }
 
 // AgentReportsTo is whom an agent reports to: one agent of the same org or one org member.
@@ -3411,7 +3421,7 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\x1a'koinon/template/v1alpha1/template.proto\"\xd4\v\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\x1a'koinon/template/v1alpha1/template.proto\"\xf3\v\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -3448,7 +3458,9 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\aharness\x18\x1c \x01(\tR\aharness\x12\x12\n" +
 	"\x04team\x18\x1d \x01(\tR\x04team\x12D\n" +
 	"\n" +
-	"reports_to\x18\x1e \x01(\v2%.koinon.agent.v1alpha1.AgentReportsToR\treportsTo\"u\n" +
+	"reports_to\x18\x1e \x01(\v2%.koinon.agent.v1alpha1.AgentReportsToR\treportsTo\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\x1f \x01(\tR\tcreatedBy\"u\n" +
 	"\x0eAgentReportsTo\x12\x1b\n" +
 	"\bagent_id\x18\x01 \x01(\tH\x00R\aagentId\x12\x19\n" +
 	"\auser_id\x18\x02 \x01(\tH\x00R\x06userId\x12!\n" +

@@ -1,35 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { TraceDestinationCard } from '@/components/trace-destination-card'
 import { TraceDestinationForm } from '@/components/trace-destination-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { usePlatformTraceActions, type PlatformTraceActions } from '@/hooks/use-trace-actions'
+import { describeError } from '@/lib/api-error'
 import { describeTraceError } from '@/lib/trace-errors'
 import { levelLabel, levelRank, levels, normalLevel, savedNotice, testNotice } from '@/lib/trace'
 
 /**
- * PlatformObservabilityPage is where a platform admin sets the platform's trace destination and the
- * highest content level an org may pick (ADR 0074). Others get a notice.
+ * PlatformObservabilityPage is where a platform admin sets the platform's trace destination and the highest content
+ * level an org may pick (ADR 0074). The platform console lets in only platform admins (PlatformLayout).
  */
 export function PlatformObservabilityPage() {
-  const who = useQuery(AuthService.method.whoAmI, {})
   return (
     <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-4">
-      {who.isPending ? (
-        <p role="status">Loading…</p>
-      ) : who.data?.platformAdmin ? (
-        <PlatformObservability />
-      ) : (
-        <Alert role="alert">
-          <AlertDescription>Only platform admins can manage platform observability.</AlertDescription>
-        </Alert>
-      )}
+      <PlatformObservability />
     </div>
   )
 }
@@ -72,7 +62,7 @@ function PlatformObservability() {
       </p>
       {platform.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(platform.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(platform.error).message}</AlertDescription>
         </Alert>
       )}
       {refused && (

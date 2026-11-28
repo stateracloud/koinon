@@ -10,8 +10,6 @@
 # `quick-checks` and `changes` always run.
 #
 #   hack/ci-skip-heavy.sh decide   prints skip=true|false and reason=<text> (lines for $GITHUB_OUTPUT)
-#   hack/ci-skip-heavy.sh lab      prints go_test_lab=true|false and go_test_lab_reason=<text>: whether the
-#                                  job go-test is satisfied by an external run (old issue 610), see below
 #   hack/ci-skip-heavy.sh apply    reads the name=value lines of hack/ci-changes.sh on stdin and
 #                                  prints them back: the heavy names become false when SKIP=true.
 #                                  Always adds harnesses_publish=<the harnesses value before the switch>,
@@ -41,11 +39,6 @@
 #                     builds from changed between the first parent and SHA (hack/ci-changes.sh).
 #                 Only read rights are used (contents, checks, actions). Any doubt (an API error, no
 #                 queue run, a shallow clone, an unknown event) is skip=false.
-# lab (old issue 610): go_test_lab=true only for a pull_request event, not a draft (SKIP != true), whose head
-#   (HEAD_SHA: github.event.pull_request.head.sha, not the merge ref github.sha) has the commit status
-#   `go-test-lab` = success (hack/go-test-lab.sh; an external go-test run that passed on exactly this head). ci.yml then skips the go-test job and the `go` gate accepts that skip.
-#   Anything else, an API error included, is false: go-test runs on the hosted runner as before. There is no
-#   waiting for a status that arrives later; a status posted before the pull request is marked ready counts.
 # Needs bash 5, git, gh, jq.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -134,24 +127,6 @@ decide_push() {
 	emit true "a successful merge_group ci run (commit $qhead) tested the tree of $SHA"
 }
 
-# lab: is go-test satisfied by a green go-test-lab status on the pull request head (old issue 610)?
-lab() {
-	local state
-	if [[ ${EVENT_NAME:-} != pull_request ]]; then
-		echo "go_test_lab=false"; echo "go_test_lab_reason=not a pull request: go-test runs"
-	elif [[ ${SKIP:-} == true ]]; then
-		echo "go_test_lab=false"; echo "go_test_lab_reason=the heavy jobs are off: nothing to satisfy"
-	elif [[ -z ${HEAD_SHA:-} ]]; then
-		echo "go_test_lab=false"; echo "go_test_lab_reason=no head commit given: go-test runs"
-	elif ! state=$("$root/hack/go-test-lab.sh" state "$HEAD_SHA" 2>/dev/null); then
-		echo "go_test_lab=false"; echo "go_test_lab_reason=cannot read the statuses of ${HEAD_SHA:0:12}: go-test runs"
-	elif [[ $state == success ]]; then
-		echo "go_test_lab=true"; echo "go_test_lab_reason=go-test-lab is success on ${HEAD_SHA:0:12}: go-test passed in an external run"
-	else
-		echo "go_test_lab=false"; echo "go_test_lab_reason=no green go-test-lab on ${HEAD_SHA:0:12} (${state:-none}): go-test runs"
-	fi
-}
-
 decide() {
 	case ${EVENT_NAME:-} in
 	pull_request) decide_pull_request ;;
@@ -182,9 +157,8 @@ apply() {
 case ${1:-} in
 decide) decide ;;
 apply) apply ;;
-lab) lab ;;
 *)
-	echo "usage: hack/ci-skip-heavy.sh decide|apply|lab" >&2
+	echo "usage: hack/ci-skip-heavy.sh decide|apply" >&2
 	exit 2
 	;;
 esac

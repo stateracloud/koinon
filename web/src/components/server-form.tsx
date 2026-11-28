@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Server } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { buildCreateRequest, buildUpdateRequest, dataLegs, formErrors, initialForm, initialMode, maxServerNameLength, serverErrorField, serverKinds, toggleLeg, transports, type CredentialMode } from '@/lib/mcp-servers'
 
 export type ServerFormProps = {
@@ -16,7 +16,8 @@ export type ServerFormProps = {
   server?: Server
   actions: Pick<McpActions, 'createServer' | 'updateServer'>
   onDone: () => void
-  onSaved?: (name: string) => void
+  /** Called with the server's name, and its id (the new id for a new server). */
+  onSaved?: (name: string, serverId: string) => void
 }
 
 /**
@@ -46,12 +47,13 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
     const typed = f.value
     set({ value: '' }) // the secret leaves this page with the request
     try {
+      let id = server?.id ?? ''
       if (server) await actions.updateServer(server.id, buildUpdateRequest(server, f))
-      else await actions.createServer(buildCreateRequest(f))
-      onSaved?.(server?.name ?? f.name)
+      else id = (await actions.createServer(buildCreateRequest(f))).server?.id ?? ''
+      onSaved?.(server?.name ?? f.name, id)
       onDone()
     } catch (e2) {
-      const message = ConnectError.from(e2).rawMessage
+      const message = describeError(e2).message
       setRefusal({ message: typed ? `${message} The secret was cleared from this page. Type it again.` : message, field: serverErrorField(message) })
     } finally {
       setPending(false)
@@ -63,8 +65,8 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
   const describe = (id: string, ...extra: (string | undefined | false)[]) => [`${id}-help`, ...extra.filter(Boolean)].join(' ')
 
   return (
-    <form onSubmit={(e) => void submit(e)} aria-label={editing ? `Edit server ${server.name}` : 'Add server'} className="bg-card grid gap-4 rounded-md border p-4" noValidate>
-      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Add a remote MCP server'}</h2>
+    <form onSubmit={(e) => void submit(e)} aria-label={editing ? `Edit server ${server.name}` : 'Connect a remote server'} className="bg-card grid gap-4 rounded-md border p-4" noValidate>
+      <h2 className="text-base font-semibold">{editing ? `Edit ${server.name}` : 'Server details'}</h2>
       <div className="grid gap-1.5">
         <Label htmlFor="server-name">Name</Label>
         <Input
@@ -283,7 +285,7 @@ export function ServerForm({ server, actions, onDone, onSaved }: ServerFormProps
           Cancel
         </Button>
         <Button type="submit" disabled={pending}>
-          {editing ? 'Save server' : 'Add server'}
+          {editing ? 'Save server' : 'Connect server'}
         </Button>
       </div>
     </form>

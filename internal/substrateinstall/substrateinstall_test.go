@@ -54,7 +54,7 @@ type runner struct {
 	existed bool
 	// built is the binary path "go build" wrote.
 	built string
-	// cloneErr is what "git clone" returns.
+	// cloneErr is what "git fetch" of the pinned commit returns.
 	cloneErr error
 }
 
@@ -64,13 +64,20 @@ func (r *runner) Run(_ context.Context, dir, name string, args, env []string, _ 
 	r.dirs = append(r.dirs, dir)
 	switch {
 	case name == "git":
-		if slices.Contains(args, "clone") {
+		if slices.Contains(args, "init") {
+			return nil
+		}
+		if slices.Contains(args, "fetch") {
 			return r.cloneErr
 		}
 		for _, a := range args {
 			if out, ok := strings.CutPrefix(a, "--output="); ok {
 				if r.tarFiles != nil {
 					return writeFilesTar(out, r.tarFiles)
+				}
+				if r.tarEntries == nil {
+					// The default export is one source file and the egress manifest the installer edits on every platform.
+					return writeFilesTar(out, map[string]string{"cmd/ate-setup/main.go": "main", egressPath: egressFixture})
 				}
 				return writeTar(out, r.tarEntries)
 			}
@@ -203,6 +210,8 @@ func setup(minor string, reachable bool, kube []runtime.Object, crds ...runtime.
 		Profile:      substrateinstall.Profile{StorageBucket: "snapshots", Platform: substrateinstall.PlatformGKE},
 		Out:          io.Discard,
 		PollInterval: time.Millisecond, WaitTimeout: 50 * time.Millisecond,
+		ProvisionerNamespace: "koinon", ProvisionerServiceAccount: "koinon-provisioner",
+		Control: grantCluster(nil).dial,
 	}, r, client
 }
 
@@ -307,12 +316,14 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 	b, err := i.BuildSetup(t.Context())
 	g.Expect(err).NotTo(HaveOccurred())
 	defer b.Cleanup()
-	// The source repository is only cloned: its config, attributes and replace refs never reach the export.
-	g.Expect(r.calls[0][:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet"}))
-	g.Expect(r.calls[0]).To(ContainElements("--bare", "/src/substrate"))
+	// The source repository only supplies the commit, fetched by its id into a fresh bare repository: its
+	// config, attributes and replace refs never reach the export.
+	g.Expect(r.calls[0][:6]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "init", "--quiet"}))
+	g.Expect(r.calls[0]).To(ContainElement("--bare"))
 	clone := r.calls[0][len(r.calls[0])-1]
 	g.Expect(filepath.Base(clone)).To(Equal("repo.git"))
-	g.Expect(r.calls[1]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
+	g.Expect(r.calls[1]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", "/src/substrate", substrateinstall.PinnedCommit}))
+	g.Expect(r.calls[2]).To(Equal([]string{"git", "--no-replace-objects", "-c", "core.fsmonitor=", "-C", clone, "rev-parse", "--verify", substrateinstall.PinnedCommit + "^{commit}"}))
 	var archive, build []string
 	for _, c := range r.calls {
 		switch {
@@ -333,7 +344,7 @@ func TestBuildsAteSetupFromTheExportOfThePinnedCommit(t *testing.T) {
 func TestRefusesAnUnpinnedBuildOrRepository(t *testing.T) {
 	g := NewWithT(t)
 	for name, mutate := range map[string]func(*runner){
-		"other version": func(r *runner) { r.version = strings.Replace(r.version, substrateinstall.PinnedVersion, "v1.0.1", 1) },
+		"other version": func(r *runner) { r.version = strings.Replace(r.version, substrateinstall.PinnedVersion, "v1.0.2", 1) },
 		"other commit": func(r *runner) {
 			r.version = strings.Replace(r.version, "commit="+substrateinstall.PinnedCommit, "commit=deadbeef", 1)
 		},
@@ -398,6 +409,27 @@ func TestSPIFFEIDFollowsTheNamespace(t *testing.T) {
 	args := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("substrate-prod")
 	g.Expect(args).To(ContainElements("--namespace=substrate-prod",
 		"--ingress-allowed-spiffe-ids=spiffe://cluster.local/ns/substrate-prod/sa/atenet-client"))
+}
+
+// agentd's pod certificate is the only Koinon identity on the router allow-list (issue #1446).
+func TestAgentdIdentityIsOnTheAllowList(t *testing.T) {
+	g := NewWithT(t)
+	id := preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")
+	g.Expect(id).To(Equal("spiffe://cluster.local/ns/koinon/sa/koinon-agentd"))
+	args := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("ate-system", id)
+	g.Expect(args).To(ContainElement("--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system") + "," + id))
+
+	i, _, client := setup("37", true, nil)
+	i.Checker.Config.Substrate.AgentdNamespace, i.Checker.Config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+	_, err := client.AppsV1().Deployments("ate-system").Create(t.Context(), router(), metav1.CreateOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed())
+	g.Expect(i.EnsureRouterSPIFFE(t.Context())).To(Succeed(), "idempotent")
+	d, err := client.AppsV1().Deployments("ate-system").Get(t.Context(), "atenet-router", metav1.GetOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	got := strings.Join(d.Spec.Template.Spec.Containers[1].Args, " ")
+	g.Expect(got).To(And(ContainSubstring(id), ContainSubstring("sa/atenet-client")))
+	g.Expect(strings.Count(got, id)).To(Equal(1))
 }
 
 func TestEnsureRouterSPIFFEUsesTheConfiguredNamespace(t *testing.T) {
@@ -516,7 +548,7 @@ func TestEnsureRouterSPIFFEIsIdempotent(t *testing.T) {
 }
 
 // The options a real cluster needs reach ate-setup under the names the pinned ate-setup defines
-// (cmd/ate-setup/internal/config/setting.go and cmd/ate-setup/internal/cmd/deploy.go at v1.0.0).
+// (cmd/ate-setup/internal/config/setting.go and cmd/ate-setup/internal/cmd/deploy.go at v1.0.1).
 func TestProfilePassesTheClusterOptions(t *testing.T) {
 	g := NewWithT(t)
 	plain := substrateinstall.Profile{StorageBucket: "b"}.SetupArgs("ate-system")

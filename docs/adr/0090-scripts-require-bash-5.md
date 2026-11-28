@@ -96,4 +96,4 @@ configuration and the document that described the setup are no longer tracked. T
 is kind (`make dev-kind-up`, `make test-e2e-kind`, the PR's own `quickstart` run). What the text above
 says about the lab's scripts, `--argo`, `--gate` or `hack/lab/` describes the history. The repository
 still reads two commit statuses, `e2e-lab` and `go-test-lab`, as evidence that an external run passed
-on a commit. _(Changed by [0105](0105-merge-queue-route.md): `e2e-lab` is information only and no longer counts toward a merge.)_
+on a commit. _(Changed by [0105](0105-merge-queue-route.md): `e2e-lab` is information only and no longer counts toward a merge. Changed by #682: `go-test-lab` is no longer read.)_

@@ -27,7 +27,7 @@ var _ = Describe("Execution", func() {
 	It("needs both Substrate addresses and no OpenShell address for substrate", func() {
 		e := cli.Execution{Driver: cli.DriverSubstrate}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-control-address")))
-		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80"}
+		e.Substrate = cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:443"}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-guest-key-file is required")))
 		e.Substrate.GuestKeyFile = guestKeyFile()
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-allow-unhardened")))
@@ -41,7 +41,7 @@ var _ = Describe("Execution", func() {
 		Expect(e.Validate("")).To(Succeed())
 	})
 	It("refuses a tier it does not know, a malformed entry and a class listed twice", func() {
-		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:80", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
+		ok := cli.Substrate{ControlAddress: "api:443", RouterAddress: "router:443", AllowUnhardened: true, GuestKeyFile: guestKeyFile()}
 		for _, c := range []struct {
 			s    func(*cli.Substrate)
 			want string
@@ -68,6 +68,14 @@ var _ = Describe("Execution", func() {
 		Expect(cfg.ImageRegistry).To(Equal("mirror.example.com/all"))
 		Expect(cfg.ImageMirrors).To(Equal(map[string]string{"ghcr.io": "cache.koinon.svc/ghcr.io", "docker.io": "cache.koinon.svc/docker.io"}))
 	})
+	It("leaves golden snapshots off unless the setting is on (#1492)", func() {
+		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeFalse())
+		cfg, err = cli.Substrate{DefaultTier: "dev", GoldenSnapshots: true}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GoldenSnapshots).To(BeTrue())
+	})
 	It("builds the content digest from the snapshot store flags, or fails closed without them", func() {
 		cfg, err := cli.Substrate{DefaultTier: "dev"}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -85,6 +93,17 @@ var _ = Describe("Execution", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(cfg.ContentDigest).NotTo(BeNil())
 	})
+	It("copies valid gateway routes into the driver config, and refuses invalid ones (#1444)", func() {
+		cfg, err := cli.Substrate{}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GatewayRoutes).To(BeEmpty(), "agentd sets none: it creates no sandbox")
+		routes := []substrate.GatewayRoute{substrate.ModelRoute("koinon-gateway.koinon.svc", 8080)}
+		cfg, err = cli.Substrate{GatewayRoutes: routes}.DriverConfig(nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.GatewayRoutes).To(Equal(routes))
+		_, err = cli.Substrate{GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute("10.0.0.1", 8080)}}.DriverConfig(nil)
+		Expect(err).To(MatchError(ContainSubstring("IP address")))
+	})
 	It("reads the guest API signing key, or refuses a malformed one", func() {
 		cfg, err := cli.Substrate{GuestKeyFile: guestKeyFile()}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
@@ -101,6 +120,7 @@ var _ = Describe("Execution", func() {
 		cfg, err := cli.Substrate{
 			GuestKeyFile:      guestKeyFile(),
 			RuntimeClassTiers: []string{"kata=vm", "gvisor=hardened"}, DefaultTier: "dev",
+			GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 		}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
 		cfg.PollInterval, cfg.GuestReadyTimeout = 5*time.Millisecond, 2*time.Second
@@ -115,7 +135,13 @@ var _ = Describe("Execution", func() {
 		Expect(err).NotTo(HaveOccurred())
 		for class, policy := range map[string]string{"kata": "policy-vm.json", "gvisor": "policy-gvisor.json", "": "policy-gvisor.json"} {
 			name := "sb-" + class
-			_, err = d.CreateSandbox(ctx, "ws", execution.SandboxSpec{Name: name, Image: "img@sha256:" + strings.Repeat("0", 64), RuntimeClassName: class})
+			if class == "" {
+				name = "sb-default" // the fake control plane needs a DNS-1123 label
+			}
+			_, err = d.CreateSandbox(ctx, "ws", execution.SandboxSpec{
+				Name: name, Image: "img@sha256:" + strings.Repeat("0", 64), RuntimeClassName: class,
+				CPULimit: "500m", MemoryLimit: "512Mi",
+			})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() execution.Phase {
 				sb, _ := d.GetSandbox(ctx, "ws", name)

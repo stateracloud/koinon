@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -440,6 +441,27 @@ var _ = Describe("koinon-reconciler's settings", func() {
 		Expect(err).To(MatchError(And(ContainSubstring("database-url"), ContainSubstring("kek-dir"), ContainSubstring("gateway-url"))))
 	})
 
+	It("takes the gateway's egress URL with sealed MCP credentials, and refuses it alone or malformed (#1086 part C2)", func() {
+		env := base(write(chartConfig))
+		c, err := parseConfig(nil, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err := c.egressEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep).To(BeNil(), "off by default")
+
+		c, err = parseConfig([]string{"--gateway-mcp-sealed", "--gateway-egress-url=http://koinon-mcp-gateway.koinon.svc:8081"}, env)
+		Expect(err).NotTo(HaveOccurred())
+		ep, err = c.egressEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep.Host).To(Equal("koinon-mcp-gateway.koinon.svc"))
+		Expect(ep.Port).To(BeEquivalentTo(8081))
+
+		_, err = parseConfig([]string{"--gateway-egress-url=http://koinon-mcp-gateway.koinon.svc:8081"}, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-mcp-sealed")))
+		_, err = parseConfig([]string{"--gateway-mcp-sealed", "--gateway-egress-url=::not a url"}, env)
+		Expect(err).To(MatchError(ContainSubstring("--gateway-egress-url")))
+	})
+
 	It("refuses an unknown flag and an environment variable nothing reads", func() {
 		_, err := parseConfig([]string{"--no-such-flag"}, base(write(chartConfig)))
 		Expect(err).To(MatchError(ContainSubstring("unknown flag")))
@@ -467,8 +489,9 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 		}
 		return parseConfig([]string{
 			"--execution-driver=" + driver,
-			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:80",
+			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:443",
 			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
+			"--gateway-model-url=http://koinon-model-gateway.koinon.svc:8080", "--gateway-mcp-url=http://koinon-mcp-gateway.koinon.svc:8080",
 		}, env)
 	}
 
@@ -494,4 +517,56 @@ var _ = Describe("parseConfig with the substrate driver (#1192)", func() {
 		_, err := parse(chartConfig, cli.DriverOpenShell)
 		Expect(err).NotTo(HaveOccurred())
 	})
+
+	It("allows koinon-gateway's listeners in the actor egress policy, each with its audience, keeps the egress listener apart, and refuses a URL it cannot carry (#1444, #1489)", func() {
+		c, err := parse(substrateConfig(pinned), cli.DriverSubstrate)
+		Expect(err).NotTo(HaveOccurred())
+		routes, egress, err := c.substrateGatewayRoutes()
+		Expect(err).NotTo(HaveOccurred())
+		// agentgateway (--gateway-url) is not a route: the guest calls only koinon-gateway, which checks the actor JWT.
+		Expect(routes).To(Equal([]substrate.GatewayRoute{
+			substrate.ModelRoute("koinon-model-gateway.koinon.svc", 8080),
+			substrate.MCPRoute("koinon-mcp-gateway.koinon.svc", 8080),
+		}))
+		Expect(egress).To(BeNil())
+
+		c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8081"
+		_, egress, err = c.substrateGatewayRoutes()
+		Expect(err).NotTo(HaveOccurred())
+		// The egress listener is not a route of every actor: only an agent with a code-host grant gets it.
+		Expect(egress).To(Equal(ptrTo(substrate.EgressRoute("koinon-mcp-gateway.koinon.svc", 8081))))
+
+		// An egress listener on the port of a route of every actor cannot be gated, so it is refused.
+		c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8080"
+		_, _, err = c.substrateGatewayRoutes()
+		Expect(err).To(MatchError(ContainSubstring("cannot gate it")))
+
+		for _, bad := range []string{"https://koinon-model-gateway.koinon.svc:8443", "http://10.96.0.10:8080", "http://Gateway.koinon.svc:8080", ""} {
+			c.gatewayModelURL, c.egressURL = bad, ""
+			_, _, err = c.substrateGatewayRoutes()
+			Expect(err).To(MatchError(ContainSubstring("--gateway-model-url")), bad)
+		}
+		c.gatewayModelURL, c.gatewayMCPURL = "http://koinon-model-gateway.koinon.svc:8080", ""
+		_, _, err = c.substrateGatewayRoutes()
+		Expect(err).To(MatchError(ContainSubstring("--gateway-mcp-url is required")))
+		c.gatewayMCPURL, c.egressURL = "http://koinon-mcp-gateway.koinon.svc:8080", "https://koinon-mcp-gateway.koinon.svc:8443"
+		_, _, err = c.substrateGatewayRoutes()
+		Expect(err).To(MatchError(ContainSubstring("--gateway-egress-url")))
+	})
+
+	It("refuses to start without koinon-gateway's model listener (#1489)", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(substrateConfig(pinned)), 0o600)).To(Succeed())
+		key := filepath.Join(GinkgoT().TempDir(), "guest-key")
+		Expect(os.WriteFile(key, []byte(strings.Repeat("11", 32)), 0o600)).To(Succeed())
+		_, err := parseConfig([]string{
+			"--execution-driver=" + cli.DriverSubstrate,
+			"--substrate-control-address=api.ate-system.svc:443", "--substrate-router-address=atenet-router.ate-system.svc:443",
+			"--substrate-allow-unhardened", "--substrate-default-tier=dev", "--substrate-guest-key-file=" + key,
+			"--gateway-mcp-url=http://koinon-mcp-gateway.koinon.svc:8080",
+		}, map[string]string{"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"})
+		Expect(err).To(MatchError(ContainSubstring("--gateway-model-url is required with --execution-driver=substrate")))
+	})
 })
+
+func ptrTo[T any](v T) *T { return &v }

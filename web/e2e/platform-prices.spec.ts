@@ -40,6 +40,18 @@ function api() {
           { version: '1', actor: 'cli prices import', reason: 'first', createdAt: new Date().toISOString() },
         ],
       }),
+      'koinon.budget.v1alpha1.PriceService/GetPlatformPriceVersion': (req: Json) => ({
+        version: {
+          version: req.version ?? '2',
+          actor: 'system koinon-api:price-refresh',
+          reason: 'auto',
+          createdAt: new Date().toISOString(),
+          entries: [
+            { priceRef: 'platform@2#gpt-x', entry: { ...entry('gpt-x', '3', '15'), provider: '*' }, provenance: prov },
+            { priceRef: 'platform@2#claude', entry: { ...entry('anthropic/claude-*', '3', '15'), provider: 'openrouter' }, provenance: prov },
+          ],
+        },
+      }),
       'koinon.budget.v1alpha1.PriceService/RollbackPlatformPrices': (req: Json) => {
         seen.rollbacks.push(req)
         return { version: '3' }
@@ -55,9 +67,18 @@ function api() {
 test('platform admin accepts, confirms by typing and rolls back; the page passes axe', async ({ page }) => {
   const { handlers, seen } = api()
   await mockApi(page, handlers)
-  await page.goto('/platform/prices')
+  await page.goto('/platform/usage/prices')
   await expect(page.getByRole('heading', { name: 'Platform prices', level: 1 })).toBeVisible()
   await expect(page.getByText('input $3 → $4')).toBeVisible()
+
+  const table = page.getByRole('table', { name: 'Platform prices in use' })
+  await expect(table.getByRole('rowheader', { name: 'gpt-x' })).toBeVisible()
+  await expect(table.getByRole('rowheader', { name: 'anthropic/claude-*' })).toBeVisible()
+  await expect(table.getByRole('row', { name: /gpt-x/ }).getByText('Platform', { exact: true })).toBeVisible()
+  await page.getByLabel('Search models').fill('claude')
+  await expect(table.getByRole('rowheader', { name: 'gpt-x' })).toHaveCount(0)
+  await expect(table.getByRole('rowheader', { name: 'anthropic/claude-*' })).toBeVisible()
+  await page.getByLabel('Search models').fill('')
   await expectAccessible(page)
 
   await page.getByRole('button', { name: 'Accept gpt-x' }).click()

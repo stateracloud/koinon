@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# charts/koinon values for the kind e2e with execution.driver: substrate (issue #1091): the gVisor class (tier dev, ADR 0119 D3
+# and D10) on a standard runner, the fake model server and the fake GitHub, Substrate installed by test/e2e/kind/substrate.sh
+# before `helm install`. test/e2e/run.sh with DRIVER=substrate installs this file as the quickstart's values.yaml, in place of
+# koinon-values.yaml, and replaces the two placeholders below: localhost:5001 (the image repository of the cluster) and the
+# all-zero digest (the digest of the pushed substrate overlay of the harness image).
+# When #1094 removes OpenShell, this file replaces koinon-values.yaml.
+image:
+  registry: localhost:5001
+  tag: e2e
+  # Always: a reused cluster (KEEP=1, SKIP_UP=1) must not run an older image under the same tag.
+  pullPolicy: Always
+
+postgres:
+  mode: cnpg
+  cnpg:
+    storage:
+      size: 1Gi
+
+gateway:
+  mode: standalone
+  # koinon-gateway (the default gateway.mcp.driver, #1239) also serves its egress listener (ADR 0097, #1086 part
+  # C2): an agent with a code-host connection sends git to <gateway>/egress/<host>/, and the gateway attaches the
+  # forge credential.
+  mcp:
+    koinon:
+      egress:
+        enabled: true
+        # The run CA of the fake Gitea: test/e2e/run.sh replaces this line with a block that holds it.
+        caBundle: "@E2E_EGRESS_CA@"
+
+# The fake model server, the fake MCP server and the fake Gitea are Services in another namespace (a ClusterIP,
+# which the default URL policy and the gateway's egress policy deny).
+egress:
+  allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080", "fakemcp.koinon-e2e-fakes.svc:8080", "fakemcp.koinon-e2e-fakes.svc:8081",
+    "fakegitea.koinon-e2e-fakes.svc.cluster.local:443"]
+
+networkPolicy:
+  gatewayEgressTo:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon-e2e-fakes
+      ports:
+        - port: 8080
+
+github:
+  apiUrl: http://fakegithub.koinon-e2e-fakes.svc:8080
+
+# Agent Substrate as the execution layer. The addresses are those of the kind route of ate-setup (ate-system).
+execution:
+  driver: substrate
+  substrate:
+    # The ateapi certificate names api.ate-system.svc only: a name with .cluster.local fails the TLS handshake.
+    controlAddress: api.ate-system.svc:443
+    # The router serves TLS on 443 only (#1446); its certificate names atenet-router.ate-system.svc.
+    routerAddress: atenet-router.ate-system.svc:443
+    # ate-setup makes ateapi accept tokens with this audience only (the authentication config it writes).
+    tokenAudience: api.ate-system.svc
+    # The Secret that kind/substrate.sh ca makes: the roots of the pod certificate controller's service-DNS signer.
+    caSecret: ate-ca
+    # The substrate overlay of the harness image has not run in a real actor with recorded probe results yet (#1087).
+    allowUnhardened: true
+    # The image cache is the one image source of atelet. The overlay is in the registry of the kind cluster (the local
+    # registry on the docker network, kind-registry:5000); the cache pulls it from there: an upstream for the host that
+    # the image reference names, and an egress rule for that range and port.
+    imageCache:
+      upstreams:
+        - {host: localhost:5001, url: "http://kind-registry:5000", allowHTTP: true}
+        - {host: ghcr.io, url: "https://ghcr.io"}
+        - {host: docker.io, url: "https://registry-1.docker.io"}
+        - {host: quay.io, url: "https://quay.io"}
+      egress:
+        extra:
+          - {cidr: 172.18.0.0/16, port: 5000}
+    workerPolicy:
+      installerIdentities: [system:admin]
+    # The class the reconciler puts on every sandbox (openshell.runtimeClassName) runs at the dev tier: gVisor, Landlock best
+    # effort (ADR 0075). A standard runner has no KVM, so there is no vm tier here.
+    defaultTier: dev
+
+# The OpenShell-only features (the chart refuses these three with substrate when they are on).
+sandboxObserver:
+  enabled: false
+sandboxNetworkPolicy:
+  enabled: false
+sandboxLimitRange:
+  enabled: false
+
+# Substrate runs a harness image only when it is pinned by digest (#1192). run.sh puts the digest of the pushed overlay
+# <image repository>/sandbox-substrate:e2e here.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# The guest seccomp probe is for the vm tier.
+preflight:
+  seccompProbe:
+    enabled: false

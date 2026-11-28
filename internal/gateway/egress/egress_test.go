@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/credkind"
 	"github.com/stateracloud/koinon/internal/gateway/egress"
 	"github.com/stateracloud/koinon/internal/gateway/route"
+	"github.com/stateracloud/koinon/internal/restorehold"
 )
 
 // seen is what the fake upstream received.
@@ -153,7 +154,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 		logs = &bytes.Buffer{}
 		addr := upstream.Listener.Addr().String()
 		gw, err = egress.New(egress.Options{
-			Verifier: ver,
+			Identifier: ver,
 			// Every route host resolves to the fake upstream.
 			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{}).DialContext(ctx, network, addr)
@@ -385,6 +386,59 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			Expect(resp.Header.Get(egress.RefusalHeader)).To(Equal("draining"))
 		})
 
+		It("refuses every request while the install is held, before the token check, and logs no body or path (#1390)", func() {
+			held, err := egress.New(egress.Options{
+				Identifier: ver, Metrics: metrics, Log: slog.New(slog.NewJSONHandler(logs, nil)), Held: true,
+				Dial: func(context.Context, string, string) (net.Conn, error) {
+					defer GinkgoRecover()
+					Fail("a held gateway dials no upstream")
+					return nil, errors.New("held")
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			table, err := route.Compile(routes())
+			Expect(err).NotTo(HaveOccurred())
+			held.Apply(table)
+			srv := httptest.NewServer(held.Handler())
+			DeferCleanup(srv.Close)
+
+			send := func(method, path, tok, body string) (int, string, string) {
+				req, err := http.NewRequestWithContext(context.Background(), method, srv.URL+path, strings.NewReader(body))
+				Expect(err).NotTo(HaveOccurred())
+				if tok != "" {
+					req.Header.Set(route.TokenHeader, tok)
+				}
+				resp, err := srv.Client().Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				defer func() { _ = resp.Body.Close() }()
+				b, err := io.ReadAll(resp.Body)
+				Expect(err).NotTo(HaveOccurred())
+				return resp.StatusCode, resp.Header.Get(egress.RefusalHeader), string(b)
+			}
+			// An allowed request with a valid token, a request with no token and one with no route: all held.
+			for _, c := range []struct{ method, path, tok string }{
+				{"POST", "/egress/" + authority(forgeHost) + "/acme/app.git/git-upload-pack?service=git-upload-pack", token(minter, acme)},
+				{"GET", "/egress/" + authority(regHost) + "/held-path-marker", ""},
+				{"GET", "/egress/evil.example.test/x", token(minter, acme)},
+			} {
+				code, reason, body := send(c.method, c.path, c.tok, "held-body-marker")
+				Expect(code).To(Equal(http.StatusServiceUnavailable), c.path)
+				Expect(reason).To(Equal("held"), c.path)
+				Expect(body).To(ContainSubstring(restorehold.Message), c.path)
+			}
+			Expect(upstreamCalls()).To(BeEmpty())
+			Expect(count("none", "held")).To(Equal(3.0))
+			Expect(logs.String()).To(ContainSubstring(`"result":"held"`))
+			Expect(logs.String()).NotTo(ContainSubstring("held-body-marker"))
+			Expect(logs.String()).NotTo(ContainSubstring("held-path-marker"))
+			Expect(logs.String()).NotTo(ContainSubstring(forgeHost))
+
+			// The suite's gateway, which is not held, serves the same allowed request with the same table.
+			resp := do("GET", "/egress/"+authority(regHost)+"/pkg", token(minter, acme), nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(upstreamCalls()).To(HaveLen(1))
+		})
+
 		It("does not reach an internal address through an allowed host name", func() {
 			policy := catalog.URLPolicy{
 				Namespace: "koinon",
@@ -393,7 +447,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 				},
 			}
 			strict, err := egress.New(egress.Options{
-				Verifier: ver, Dial: policy.GatewayDialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
+				Identifier: ver, Dial: policy.GatewayDialContext(&net.Dialer{Timeout: time.Second}), Metrics: egress.NewMetrics(nil),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			table, err := route.Compile(routes())
@@ -522,7 +576,7 @@ var _ = Describe("egress routes (behaviour: allow, deny, token)", func() {
 			kinds = nil
 			var err error
 			gw, err = egress.New(egress.Options{
-				Verifier: ver,
+				Identifier: ver,
 				Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 					return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
 				},

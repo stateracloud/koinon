@@ -53,19 +53,16 @@ jobs:
     name: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Read rights: the pull request's head (hack/ci-supersede.sh), the check runs of its head and, for
-    # go-test-lab (old issue 610), its commit statuses. Write on actions only to cancel older heads' runs (old issue 675).
+    # Read rights: the pull request's head (hack/ci-supersede.sh) and the check runs of its head. Write on actions
+    # only to cancel older heads' runs (old issue 675).
     permissions:
       contents: read
       pull-requests: read # hack/ci-supersede.sh reads pulls/<n> for the current head
       checks: read
-      statuses: read
       actions: write # hack/ci-supersede.sh cancels the runs of older heads (old issue 675)
     outputs:
       skip: ${{ steps.skip.outputs.skip }}
       reason: ${{ steps.skip.outputs.reason }}
-      go_test_lab: ${{ steps.lab.outputs.go_test_lab }}
-      go_test_lab_reason: ${{ steps.lab.outputs.go_test_lab_reason }}
       harnesses_publish: ${{ steps.paths.outputs.harnesses_publish }}
       go: ${{ steps.paths.outputs.go }}
       web: ${{ steps.paths.outputs.web }}
@@ -80,6 +77,7 @@ jobs:
       fuzz: ${{ steps.paths.outputs.fuzz }}
       shell: ${{ steps.paths.outputs.shell }}
       scripts: ${{ steps.paths.outputs.scripts }}
+      playwright_image: ${{ steps.pin.outputs.playwright_image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,21 +119,11 @@ jobs:
           # No pipe: a failing step must fail the job, not leave outputs empty (empty reads as "nothing to gate").
           hack/ci-skip-heavy.sh apply <"$RUNNER_TEMP/changes.txt" >"$RUNNER_TEMP/outputs.txt"
           tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/outputs.txt"
-      # go-test satisfied by an external run (old issue 610): a ready pull request whose head has the commit status
-      # go-test-lab = success (an external go-test run that passed on exactly this head) does not run go-test on the runner; the
-      # `go` gate accepts that skip. No status, a draft, a push or an API error: go-test runs as before.
-      # Trust limit as for e2e-lab (old issue 568): anyone with write access can post the status, and this job
-      # runs from the pull request's own ci.yml; the guard is the required review on .github/**.
-      - id: lab
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SKIP: ${{ steps.skip.outputs.skip }}
+      # The Playwright image of web-e2e lives in hack/playwright-image.env, so a bump touches no .github path.
+      - id: pin
         run: |
-          hack/ci-skip-heavy.sh lab >"$RUNNER_TEMP/lab.txt"
-          tee -a "$GITHUB_OUTPUT" <"$RUNNER_TEMP/lab.txt"
+          image=$(hack/playwright-image.sh)
+          echo "playwright_image=$image" >>"$GITHUB_OUTPUT"
 
   # The Go checks run as parallel jobs (old issue 217). They share one module and build cache
   # (`go-ci-...`), keyed on the Go version and go.sum. No Go job saves it: `warm-caches` does, on every
@@ -235,10 +223,9 @@ jobs:
           version: v2.15.0
           skip-save-cache: true # warm-caches on main saves it
 
-  # Skipped (and accepted by `go`) when the pull request head has a green go-test-lab status (old issue 610).
   go-test:
     needs: changes
-    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.go_test_lab != 'true'
+    if: needs.changes.outputs.go == 'true'
     name: go-test
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -250,10 +237,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
-      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
-      - name: Stamp file mtimes from content
-        run: hack/ci-stamp-mtime.sh
       # The Go toolchain and the one Go cache (go-ci, weekly key), saved by warm-caches on main; restore only here.
       - id: go
         uses: ./.github/actions/setup-go-cache
@@ -261,15 +244,6 @@ jobs:
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
-      # Test results of the cacheable packages (issue 43), saved by warm-caches on every push to main
-      # under a per-commit key; the newest entry for this Go version is restored by prefix.
-      - if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-none
-          restore-keys: |
-            go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
       # The agentgateway suites start the chart's digest from this repository owner's GHCR copy
       # (internal/testing/agentgatewayimage, #238). Pulled once here; the tests then find it locally.
       # A fork's own CI, which cannot read the copy, warns and leaves the tests on the chart's repository.
@@ -281,8 +255,6 @@ jobs:
       # test/harnesses needs the harness images, which the harnesses job builds and tests.
       - run: hack/go-test.sh
         env:
-          # Pull requests reuse the results of packages with no Docker, database or cluster input (hack/go-test-cacheable.sh); main and the merge queue run everything with -count=1 (issue 43).
-          KOINON_GO_TEST_CACHE: ${{ github.event_name == 'pull_request' && '1' || '' }}
           KOINON_REQUIRE: docker,git,helm # a missing prerequisite must fail, not skip (old issue 507): Postgres suites need Docker, agentd and codehost git, gateway/standalone helm (installed by this job)
       - name: Upload test reports
         if: always()
@@ -387,9 +359,6 @@ jobs:
           REASON: ${{ needs.changes.outputs.reason }}
           EVENT: ${{ github.event_name }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
-          GO_TEST: ${{ needs.go-test.result }}
-          LAB: ${{ needs.changes.outputs.go_test_lab }}
-          LAB_REASON: ${{ needs.changes.outputs.go_test_lab_reason }}
         run: |
           [[ $CHANGES == success ]] || { echo "::error::changes job: $CHANGES"; exit 1; }
           # A draft runs nothing: report success with a visible note. A skipped required check is green
@@ -402,14 +371,10 @@ jobs:
           # go-vuln also runs when only its own inputs changed (hack/govulncheck.sh, versions.env: go=false, vuln=true), so a failure counts before the no-Go exit.
           [[ $VULN_RESULT == success || $VULN_RESULT == skipped ]] || { echo "::error::go-vuln finished $VULN_RESULT"; exit 1; }
           [[ $GO == true ]] || { echo "no Go changes, or the heavy jobs are off (skip=$SKIP: $REASON): nothing to gate"; exit 0; }
-          # A skip counts as success only when its reason is known: go-test skipped because an external run proved it
-          # (old issue 610), go-tidy or go-lint skipped because no Go file, go.mod, go.sum or lint config changed (#572,
-          # the `tidy` output), go-vuln skipped because go.mod and go.sum did not change (the `vuln` output). Any other skipped part stays a failure, and so does a skip with no such reason.
+          # A skip counts as success only when its reason is known: go-tidy or go-lint skipped because no Go file, go.mod,
+          # go.sum or lint config changed (#572, the `tidy` output), go-vuln skipped because go.mod and go.sum did not change
+          # (the `vuln` output). Any other skipped part stays a failure, and so does a skip with no such reason.
           excused=0
-          if [[ $GO_TEST == skipped && $LAB == true ]]; then
-            echo "go-test passed in an external run: $LAB_REASON"
-            excused=$((excused + 1))
-          fi
           if [[ $TIDY != true ]]; then
             [[ $TIDY_RESULT != skipped ]] || excused=$((excused + 1))
             [[ $LINT_RESULT != skipped ]] || excused=$((excused + 1))
@@ -526,7 +491,8 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: hack/commit-subject-check.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
       # Author and committer of every commit, merge commits included, must be in
-      # hack/git-identities.allowed (koinon#320).
+      # hack/git-identities.allowed (koinon#320), and every non-merge commit carries
+      # `Signed-off-by: <author>` (DCO, ADR 0026; #682 moved it here from the dco workflow).
       - name: commit identities (tests)
         if: ${{ !cancelled() }}
         run: hack/git-identity-check-test.sh
@@ -623,7 +589,8 @@ jobs:
   # are in the image, so no run installs OS packages from a live apt mirror or downloads a browser
   # (#569; run 43041438017 failed on `playwright install --with-deps` when security.ubuntu.com did not
   # resolve). The image tag must carry the exact @playwright/test version of web/package.json
-  # (hack/ci-playwright-image-test.sh checks it); a Playwright bump changes both in one change.
+  # (hack/ci-playwright-image-test.sh checks it); the image comes from hack/playwright-image.env through the
+  # `changes` job, and a Playwright bump changes web/, web.Dockerfile and that file, with no .github path.
   # --ipc=host and --init are what the Playwright CI docs ask of a Chromium container.
   web-e2e:
     needs: changes
@@ -632,7 +599,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      image: ${{ needs.changes.outputs.playwright_image }} # zizmor: ignore[unpinned-images] the value is the digest pin of hack/playwright-image.env; hack/ci-playwright-image-test.sh requires the digest
       options: --init --ipc=host
     defaults:
       run:
@@ -949,6 +916,7 @@ jobs:
       - run: hack/hooks/prose-question-stop-check_test.sh
       - run: hack/hooks/question-checklist-check_test.sh
       - run: hack/agent-state-test.sh
+      - run: hack/backup-restore-mode-test.sh
       - run: hack/release-gate-test.sh
       - run: hack/board-test.sh
       - run: hack/release-drill-wait-test.sh
@@ -989,15 +957,10 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
-      actions: write # prunes older go-testres- cache entries
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Go's test cache hashes an opened file by size, mode and mtime; a fresh checkout stamps every file
-      # with the checkout time. Content-derived mtimes keep file-reading packages cacheable (issue 43).
-      - name: Stamp file mtimes from content
-        run: hack/ci-stamp-mtime.sh
       # The weekly go-ci key (.github/actions/setup-go-cache): looked up only, work and save on a miss.
       - id: go
         uses: ./.github/actions/setup-go-cache
@@ -1020,41 +983,6 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
           key: ${{ steps.go.outputs.key }}
-      # The results pull requests reuse (issue 43): the cacheable packages, run the way go-test runs them
-      # (same script, same flags: they are part of Go's test cache key), without -count=1. Their own
-      # cache entry, saved on every push to main under a per-commit key; pull requests restore it by the
-      # `go-testres-` prefix. Separate from go-ci so a failing test never costs the build cache. Go
-      # caches only passing packages, so a failure only loses hits.
-      - id: testres
-        continue-on-error: true
-        env:
-          KOINON_GO_TEST_CACHE: '1'
-        run: |
-          pkgs=$(hack/go-test-cacheable.sh)
-          [ -n "$pkgs" ] || { echo "no cacheable packages listed" >&2; exit 1; }
-          # shellcheck disable=SC2086 # pkgs is a word list
-          hack/go-test.sh $pkgs
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/go-build
-          key: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
-      # Each entry holds the whole build cache, so keep only the newest one: older entries would crowd
-      # go-ci, envtest and the pnpm stores out of the repository's cache quota (10 GB, LRU).
-      # Only entries created before this run's entry go: pushes to main do not cancel each other. createdAt
-      # follows the save order, not the commit order, so a prune keeps the entries saved at or after its own;
-      # the worst case is a lost cache hit, never a stale pass. Fractional seconds are cut
-      # before the string compare (RFC 3339 drops trailing zeros, so they do not sort).
-      - name: Prune older test-result caches
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEEP_KEY: go-testres-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ github.sha }}
-        run: |
-          MINE=$(gh cache list --repo "$GITHUB_REPOSITORY" --key "$KEEP_KEY" --limit 100 --json key,createdAt --jq '.[] | select(.key == env.KEEP_KEY) | .createdAt | sub("\\.[0-9]+"; "")')
-          [ -n "$MINE" ] || { echo "no $KEEP_KEY entry; nothing pruned"; exit 0; }
-          export MINE
-          gh cache list --repo "$GITHUB_REPOSITORY" --key go-testres- --limit 100 --json id,createdAt --jq '.[] | select((.createdAt | sub("\\.[0-9]+"; "")) < env.MINE) | .id' |
-            while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY"; done
       # The golangci-lint cache is keyed on a time interval (cache-invalidation-interval, 7 days) as well as
       # go.mod. The go-ci key carries the same 7-day interval (setup-go-cache), so a go-ci miss is also the
       # first push of a new interval: run the full lint (it fills the new lint cache) only then, and not

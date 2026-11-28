@@ -17,7 +17,8 @@
 # tree) or, for the pull-request-only contexts (pr_only below), the successful merge_group `ci` run on a
 # commit with the same tree (the queue build); and only when there is no queue run (an admin merge) the
 # head commit of the pull request that merged the tagged commit, for the pull-request-only contexts and
-# the dependency-age half of `quick checks`. A `go`/`web`/other ci job is never read from a PR head: a
+# the dependency-age half of `quick checks` (for a merge commit, the PR whose head is its second parent: a
+# merge queue group puts one merge commit per PR on main, #1373). A `go`/`web`/other ci job is never read from a PR head: a
 # draft's green is vacuous. The queue build's result is read from the queue head's merge_group runs by
 # run id (conclusion_in_run), not as the newest check run on the sha. Needs gh, git and awk, and a clone
 # with origin/main.
@@ -36,9 +37,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 # Required contexts that are not reported by a push to main, read instead from the queue build (the
 # merge_group run on the same tree), else from the head commit of the pull request that merged the
 # tagged commit (the newest run that started before the merge; an admin merge has no queue build):
-#   dco                  its workflow runs on pull_request only.
+#   dco                  its workflow ran on pull_request only; #682 removed it (the sign-off is now in
+#                        `quick checks`). Listed for a tag whose own ci-required.txt still requires it.
 #   claim                runs on pull_request (hack/claim.sh check-pr, about the PR and its
-#                        claim); on a push to main it is skipped.
+#                        claim); on a push to main it is skipped. Not required since #682; listed for
+#                        a tag whose own ci-required.txt still requires it.
 #   e2e result           succeeds on main pushes too, but it is a composite that passes when the
 #                        batched e2e was skipped; the real subject is the `quickstart` rule below,
 #                        which demands success on the very commit.
@@ -63,6 +66,10 @@ fail() { echo "release gate: $*" >&2; exit 1; }
 QUEUE_RUN_LIMIT=${QUEUE_RUN_LIMIT:-30}
 [[ $QUEUE_RUN_LIMIT =~ ^([1-9][0-9]?|100)$ ]] ||
 	fail "QUEUE_RUN_LIMIT '$QUEUE_RUN_LIMIT' is not an integer from 1 to 100"
+# How many merge commits a merge queue group may hold before SHA (in_merge_group): bounds the first-parent walk.
+MERGE_GROUP_LIMIT=${MERGE_GROUP_LIMIT:-10}
+[[ $MERGE_GROUP_LIMIT =~ ^([1-9][0-9]?|100)$ ]] ||
+	fail "MERGE_GROUP_LIMIT '$MERGE_GROUP_LIMIT' is not an integer from 1 to 100"
 
 git fetch --no-tags --quiet origin main
 git merge-base --is-ancestor "$SHA" origin/main ||
@@ -121,17 +128,94 @@ mapfile -t required <<<"$contexts"
 is_both() { local p; for p in "${both[@]}"; do [[ $p == "$1" ]] && return 0; done; return 1; }
 is_pr_only() { local p; for p in "${pr_only[@]}"; do [[ $p == "$1" ]] && return 0; done; return 1; }
 
+# commit_parents <sha>: the parents of a commit, one per line.
+commit_parents() {
+	gh api "repos/$GITHUB_REPOSITORY/git/commits/$1" --jq '.parents[]?.sha'
+}
+# merged_prs <sha>: "head<TAB>merged_at<TAB>merge_commit_sha" of each merged pull request that
+# commits/<sha>/pulls lists.
+merged_prs() {
+	gh api "repos/$GITHUB_REPOSITORY/commits/$1/pulls" \
+		--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at, (.merge_commit_sha // "")] | @tsv'
+}
+# brings_new <first parent> <second parent>: true when the merge brings the second parent onto main for the first
+# time (it is not yet an ancestor of the first parent), as every queue or merge-button merge does. A re-merge of a
+# head that is already on main (an admin push of `git merge --no-ff <old PR head>`) is false: no PR merged it.
+# Read from the clone (origin/main is fetched with history); an error fails the gate.
+brings_new() {
+	local rc=0
+	git merge-base --is-ancestor "$2" "$1" || rc=$?
+	case $rc in
+	0) return 1 ;;
+	1) return 0 ;;
+	*) fail "cannot tell whether $2 is an ancestor of $1" ;;
+	esac
+}
+# in_merge_group <mcs>: true when SHA is the merge commit <mcs>, or a later merge commit of the same merge queue
+# group (#1373). GitHub gives every PR of a group the group's first merge commit as merge_commit_sha. So SHA's
+# first-parent walk must reach <mcs> within MERGE_GROUP_LIMIT steps, every commit on the way (<mcs> included)
+# must have two parents, and the second parent of each commit between SHA and <mcs> must be the head of a
+# merged PR whose merge_commit_sha is also <mcs>, and that commit must bring its second parent onto main for the
+# first time (brings_new). Any other shape (a squash commit, a direct push, another
+# group) is false.
+in_merge_group() {
+	local mcs=$1 cur=$SHA i ps rows
+	[[ $mcs == "$SHA" ]] && return 0
+	for ((i = 0; i <= MERGE_GROUP_LIMIT; i++)); do
+		ps=$(commit_parents "$cur") || fail "cannot read the parents of $cur"
+		mapfile -t ps <<<"$ps"
+		((${#ps[@]} == 2)) || return 1
+		if [[ $cur != "$SHA" ]]; then
+			[[ $cur == "$mcs" ]] && return 0
+			brings_new "${ps[0]}" "${ps[1]}" || return 1
+			rows=$(merged_prs "${ps[1]}") || fail "cannot list the pull requests of ${ps[1]}"
+			awk -F'\t' -v h="${ps[1]}" -v m="$mcs" '$1 == h && $3 == m { f = 1 } END { exit !f }' <<<"$rows" || return 1
+		fi
+		cur=${ps[0]}
+	done
+	return 1
+}
 pr_heads=
 pr_heads_read=0
-# from_pr_heads <name>: the conclusion of the check on the head of the pull request that merged SHA.
+# load_pr_heads: sets pr_heads to "head<TAB>merged_at" of each pull request that merged SHA, one per line, or
+# empty when none did (a direct push: then the PR-only contexts have no evidence). Called directly (not in
+# $(...)) so the answer is cached.
+#   - SHA is a merge commit (a queue or merge-button merge: first parent main, second parent the PR head): the
+#     merged PRs whose head is SHA's second parent, listed from that commit (`commits/<parent 2>/pulls`), and
+#     whose merge_commit_sha is SHA or the first merge commit of SHA's queue group (in_merge_group). A queue
+#     group of N PRs puts N merge commits on main, but every PR of the group gets the first one as its
+#     merge_commit_sha, so `commits/<SHA>/pulls` is empty for the 2nd..Nth commit (#1373). A merge whose second
+#     parent was already on main (brings_new) has no PR.
+#   - Any other commit (a squash or rebase merge, which has one parent): the merged PRs of
+#     `commits/<SHA>/pulls` whose merge_commit_sha is SHA.
+load_pr_heads() {
+	((pr_heads_read == 0)) || return 0
+	pr_heads_read=1
+	local parents p2 rows h merged mcs
+	parents=$(commit_parents "$SHA") || fail "cannot read the parents of $SHA"
+	mapfile -t parents <<<"$parents"
+	if ((${#parents[@]} == 2)); then
+		p2=${parents[1]}
+		[[ $p2 =~ ^[0-9a-f]{7,64}$ ]] || fail "cannot read the parents of $SHA"
+		brings_new "${parents[0]}" "$p2" || return 0
+		rows=$(merged_prs "$p2") || fail "cannot list the pull requests of $p2 (the second parent of $SHA)"
+		while IFS=$'\t' read -r h merged mcs; do
+			[[ $h == "$p2" && -n $mcs ]] || continue
+			in_merge_group "$mcs" || continue
+			pr_heads+=$h$'\t'$merged$'\n'
+		done <<<"$rows"
+	else
+		rows=$(merged_prs "$SHA") || fail "cannot list the pull requests of $SHA"
+		while IFS=$'\t' read -r h merged mcs; do
+			[[ -n $h && $mcs == "$SHA" ]] || continue
+			pr_heads+=$h$'\t'$merged$'\n'
+		done <<<"$rows"
+	fi
+}
+# from_pr_heads <name>: the conclusion of the check on the head of the pull request that merged SHA. Call
+# load_pr_heads first.
 from_pr_heads() {
 	local h merged got=
-	if ((pr_heads_read == 0)); then
-		pr_heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-			--jq '.[] | select(.merged_at != null) | [.head.sha, .merged_at] | @tsv') ||
-			fail "cannot list the pull requests of $SHA"
-		pr_heads_read=1
-	fi
 	while IFS=$'\t' read -r h merged; do
 		[[ -n $h ]] || continue
 		got=$(conclusion_of "$h" "$1" "$merged")
@@ -181,6 +265,7 @@ for name in "${required[@]}"; do
 		[[ -z $qci_head ]] || got=$(conclusion_in_run "$qci_head" "$name" "$qci_runs")
 		where="in the merge queue run on this tree ($qci_head)"
 		if [[ -z $got ]]; then
+			load_pr_heads
 			got=$(from_pr_heads "$name")
 			where="on the merged pull request's head (no merge queue run reported it: an admin merge)"
 		fi
@@ -199,6 +284,7 @@ for name in "${required[@]}"; do
 		fi
 	fi
 	if [[ $got == success ]] && is_both "$name"; then
+		load_pr_heads
 		got=$(from_pr_heads "$name")
 		where="on the merged pull request's head (it also passed on $SHA)"
 	fi
@@ -209,10 +295,23 @@ for name in "${required[@]}"; do
 		failed=1
 	fi
 done
-# go-test: skipped on the tagged commit means the merge queue ran it (a merge_group run never skips it for a
-# lab status, only for a change with no Go in it). It is checked once more: on the queue build it must have
-# succeeded, or the change must touch nothing the go-* jobs run for. A go-test with no run at all is the
-# business of `go` above.
+# go-test: skipped on the tagged commit means the merge queue ran it (a merge_group run skips it only for a
+# change with no Go in it). It is checked once more: on the queue build it must have succeeded, or the change
+# must touch nothing the go-* jobs run for. A go-test with no run at all is the business of `go` above.
+# touches_go <base> <head>: exit 0 when base..head is a change the go-* jobs run for (hack/ci-changes.sh
+# go=true), 1 when it is not (documentation, web), 2 when that cannot be told.
+touches_go() {
+	local changed line
+	changed=$(git diff --name-only --no-renames "$1" "$2" 2>/dev/null) || return 2
+	[[ -n $changed ]] || return 2
+	# Only go= is read: the directories of the harnesses suite (a `go list`) are not needed.
+	line=$(CI_CHANGES_HARNESSES_DIRS=${CI_CHANGES_HARNESSES_DIRS:-none} "$here/ci-changes.sh" --stdin <<<"$changed" 2>/dev/null | grep -x 'go=.*') || return 2
+	case $line in
+	go=true) return 0 ;;
+	go=false) return 1 ;;
+	*) return 2 ;;
+	esac
+}
 got=$(conclusion_of "$SHA" go-test)
 if [[ $got == skipped ]]; then
 	queue_ci_head
@@ -222,7 +321,7 @@ if [[ $got == skipped ]]; then
 	case $got in
 	success) echo "ok: go-test (in the merge queue run $qci_head)" ;;
 	skipped | "")
-		"$here/go-test-lab.sh" touches-go "$SHA^1" "$SHA" || tg=$?
+		touches_go "$SHA^1" "$SHA" || tg=$?
 		if [[ $tg == 1 ]]; then
 			echo "ok: go-test (skipped: the change touches no Go)"
 		else

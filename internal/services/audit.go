@@ -13,7 +13,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
 	auditv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1"
 )
@@ -62,12 +61,8 @@ func (s *Server) List(ctx context.Context, req *auditv1alpha1.ListRequest) (*aud
 		f.Until = req.GetUntil().AsTime()
 	}
 	if req.GetScope() == auditv1alpha1.AuditScope_AUDIT_SCOPE_INSTALL {
-		p, ok := auth.PrincipalFrom(ctx)
-		if !ok {
-			return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-		}
-		if !p.PlatformAdmin {
-			return nil, connect.NewError(connect.CodePermissionDenied, "only a platform admin reads the install audit log")
+		if _, err := requirePlatformAdmin(ctx); err != nil {
+			return nil, err
 		}
 		if req.GetOrgId() != "" {
 			return nil, connect.NewError(connect.CodeInvalidArgument, "org_id must be empty for the install scope")
@@ -86,12 +81,9 @@ func (s *Server) List(ctx context.Context, req *auditv1alpha1.ListRequest) (*aud
 		return res, nil
 	}
 	if req.GetOrgId() == "" {
-		p, ok := auth.PrincipalFrom(ctx)
-		if !ok {
-			return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-		}
-		if !p.PlatformAdmin {
-			return nil, connect.NewError(connect.CodePermissionDenied, "org_id is required; only a platform admin reads every org")
+		// An empty org_id reads every org: platform-scope.
+		if _, err := requirePlatformAdmin(ctx); err != nil {
+			return nil, err
 		}
 		f.AllOrgs = true
 	} else {

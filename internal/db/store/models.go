@@ -1531,9 +1531,10 @@ func AllSandboxStateValues() []SandboxState {
 type TaskActorKind string
 
 const (
-	TaskActorKindUser   TaskActorKind = "user"
-	TaskActorKindAgent  TaskActorKind = "agent"
-	TaskActorKindSystem TaskActorKind = "system"
+	TaskActorKindUser     TaskActorKind = "user"
+	TaskActorKindAgent    TaskActorKind = "agent"
+	TaskActorKindSystem   TaskActorKind = "system"
+	TaskActorKindExternal TaskActorKind = "external"
 )
 
 func (e *TaskActorKind) Scan(src interface{}) error {
@@ -1576,6 +1577,7 @@ func AllTaskActorKindValues() []TaskActorKind {
 		TaskActorKindUser,
 		TaskActorKindAgent,
 		TaskActorKindSystem,
+		TaskActorKindExternal,
 	}
 }
 
@@ -1859,35 +1861,44 @@ type AgentRunLimit struct {
 }
 
 type AgentSandbox struct {
-	OrgID               pgtype.UUID
-	AgentID             pgtype.UUID
-	Workspace           string
-	SandboxName         string
-	ProviderName        string
-	KeySecretName       string
-	GatewayKeyID        pgtype.Text
-	GatewayKeyHash      pgtype.Text
-	State               SandboxState
-	Phase               string
-	Message             string
-	SpecHash            string
-	StartedAt           pgtype.Timestamptz
-	StoppedAt           pgtype.Timestamptz
-	ObservedAt          pgtype.Timestamptz
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
-	HomeGeneration      pgtype.Text
-	UnhealthyAt         pgtype.Timestamptz
-	UnhealthyReason     pgtype.Text
-	UnhealthyGeneration pgtype.Text
-	WokenAt             pgtype.Timestamptz
-	SandboxID           pgtype.Text
-	RestoreCheckpointID pgtype.UUID
-	RestoreClaimedAt    pgtype.Timestamptz
-	ArchivedAt          pgtype.Timestamptz
-	Reason              string
-	HomeDirtiedAt       pgtype.Timestamptz
-	Enforcement         string
+	OrgID                pgtype.UUID
+	AgentID              pgtype.UUID
+	Workspace            string
+	SandboxName          string
+	ProviderName         string
+	KeySecretName        string
+	GatewayKeyID         pgtype.Text
+	GatewayKeyHash       pgtype.Text
+	State                SandboxState
+	Phase                string
+	Message              string
+	SpecHash             string
+	StartedAt            pgtype.Timestamptz
+	StoppedAt            pgtype.Timestamptz
+	ObservedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	HomeGeneration       pgtype.Text
+	UnhealthyAt          pgtype.Timestamptz
+	UnhealthyReason      pgtype.Text
+	UnhealthyGeneration  pgtype.Text
+	WokenAt              pgtype.Timestamptz
+	SandboxID            pgtype.Text
+	RestoreCheckpointID  pgtype.UUID
+	RestoreClaimedAt     pgtype.Timestamptz
+	ArchivedAt           pgtype.Timestamptz
+	Reason               string
+	HomeDirtiedAt        pgtype.Timestamptz
+	Enforcement          string
+	ActorName            pgtype.Text
+	ActorUid             pgtype.Text
+	RestoredSandboxID    pgtype.Text
+	RestoredCheckpointID pgtype.UUID
+	RestoredAt           pgtype.Timestamptz
+	LastSnapshotAt       pgtype.Timestamptz
+	RevertCount          int32
+	RevertedAt           pgtype.Timestamptz
+	RevertSnapshotAt     pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -2060,6 +2071,24 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type ExternalActor struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	Platform       string
+	Team           string
+	PlatformUserID string
+	CreatedAt      pgtype.Timestamptz
+}
+
+type GatewayAgentForge struct {
+	OrgID         pgtype.UUID
+	AgentID       pgtype.UUID
+	StateRevision pgtype.Int8
+	ServedAt      pgtype.Timestamptz
+	Failure       string
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type GatewayProviderFailure struct {
 	OrgID      pgtype.UUID
 	ProviderID pgtype.UUID
@@ -2169,6 +2198,7 @@ type HomeCheckpoint struct {
 	FinishedAt        pgtype.Timestamptz
 	RepositoryEpoch   int32
 	SnapshotMissingAt pgtype.Timestamptz
+	ContentDigest     pgtype.Text
 }
 
 type HomeCheckpointResync struct {
@@ -2876,6 +2906,11 @@ type QuestionRecipient struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type ReconcilerLeader struct {
+	ID   int16
+	Term int64
+}
+
 type RecoveryRequest struct {
 	Nonce        string
 	CrUid        string
@@ -3151,28 +3186,34 @@ type Task struct {
 }
 
 type TaskEvent struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	TaskID       pgtype.UUID
-	Seq          int64
-	Kind         string
-	ActorKind    TaskActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	CreatedAt    pgtype.Timestamptz
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	TaskID          pgtype.UUID
+	Seq             int64
+	Kind            string
+	ActorKind       TaskActorKind
+	ActorUserID     pgtype.UUID
+	ActorAgentID    pgtype.UUID
+	RunID           pgtype.UUID
+	Payload         []byte
+	CreatedAt       pgtype.Timestamptz
+	PayloadVersion  int16
+	Prompt          bool
+	ActorExternalID pgtype.UUID
 }
 
 type Template struct {
-	ID           pgtype.UUID
-	Slug         string
-	ContentHash  string
-	DisplayName  string
-	Description  string
-	Spec         []byte
-	CreatedAt    pgtype.Timestamptz
-	LastSyncedAt pgtype.Timestamptz
+	ID            pgtype.UUID
+	Slug          string
+	ContentHash   string
+	DisplayName   string
+	Description   string
+	Spec          []byte
+	CreatedAt     pgtype.Timestamptz
+	LastSyncedAt  pgtype.Timestamptz
+	OrgID         pgtype.UUID
+	SourceAgentID pgtype.UUID
+	CreatedBy     pgtype.UUID
 }
 
 type TraceDestination struct {

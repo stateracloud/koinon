@@ -17,6 +17,8 @@ type Common = {
   key: string
   taskId: string
   taskTitle: string
+  /** The agent the item is about, for its avatar; empty when unknown. */
+  agentId: string
   agentName?: string
   /** When the item appeared, in ms; 0 when unknown. Newest first. */
   at: number
@@ -49,7 +51,6 @@ export type QuestionItem = Common & {
  */
 export type AgentHealthItem = Common & {
   kind: 'agent-unhealthy'
-  agentId: string
   reason: string
 }
 
@@ -86,6 +87,7 @@ export function buildInbox({ tasks, approvals, questions = [], agents = [], isAd
       key: `approval:${a.id}`,
       taskId: a.ticketId,
       taskTitle: task?.title ?? 'Unknown task',
+      agentId: a.agentId || (task?.agentId ?? ''),
       agentName: agentNames.get(a.agentId) ?? agentNames.get(task?.agentId ?? ''),
       at: ms(a.createdAt),
       approval: a,
@@ -102,6 +104,7 @@ export function buildInbox({ tasks, approvals, questions = [], agents = [], isAd
       key: `question:${qn.id}`,
       taskId: qn.taskId,
       taskTitle: task?.title ?? 'Unknown task',
+      agentId: qn.agentId || (task?.agentId ?? ''),
       agentName: agentNames.get(qn.agentId) ?? agentNames.get(task?.agentId ?? ''),
       // The age counts from when the question started waiting on the viewer; a reminder does not reset it.
       at: ms(qn.waitingSince) || ms(qn.openedAt),
@@ -113,7 +116,7 @@ export function buildInbox({ tasks, approvals, questions = [], agents = [], isAd
     if (t.createdBy?.userId !== userId) continue
     // Waiting on someone else's question: the creator cannot act, so it is not their item.
     if (t.waitingOnUserIds.length > 0 && !t.waitingOnUserIds.includes(userId)) continue
-    items.push({ kind: 'task-input', key: `task-input:${t.id}`, taskId: t.id, taskTitle: t.title, agentName: agentNames.get(t.agentId), at: ms(t.updatedAt) })
+    items.push({ kind: 'task-input', key: `task-input:${t.id}`, taskId: t.id, taskTitle: t.title, agentId: t.agentId, agentName: agentNames.get(t.agentId), at: ms(t.updatedAt) })
   }
   if (isAdmin) {
     for (const a of agents) {
@@ -144,4 +147,41 @@ export function stableOrder(items: readonly InboxItem[], shown: readonly string[
   const kept = shown.flatMap((k) => byKey.get(k) ?? [])
   const known = new Set(shown)
   return [...kept, ...items.filter((i) => !known.has(i.key))]
+}
+
+/**
+ * InboxTab is a tab of the inbox (ADR 0126 section 3; issue #1276). "Blocked on you" lists the items above (what the
+ * viewer must act on); Open, Done and All list the org's tasks by state. The URL carries it as ?tab= (Blocked on
+ * you, the default, has none).
+ */
+export type InboxTab = 'blocked' | 'open' | 'done' | 'all'
+
+export const inboxTabs: readonly { value: InboxTab; label: string }[] = [
+  { value: 'blocked', label: 'Blocked on you' },
+  { value: 'open', label: 'Open' },
+  { value: 'done', label: 'Done' },
+  { value: 'all', label: 'All' },
+]
+
+export function parseInboxTab(v: unknown): InboxTab | undefined {
+  return inboxTabs.some((t) => t.value === v) ? (v as InboxTab) : undefined
+}
+
+/** A task that can still change: it waits to start, runs, or waits for a person. */
+const openStates: ReadonlySet<TaskState> = new Set([TaskState.SUBMITTED, TaskState.WORKING, TaskState.INPUT_REQUIRED])
+/** A task that has ended: it cannot change again. */
+const doneStates: ReadonlySet<TaskState> = new Set([TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED])
+
+/** taskAt is the time a task row shows its age from: when it ended, or else its last change; in ms, 0 when unknown. */
+export function taskAt(t: Task): number {
+  return (doneStates.has(t.state) && ms(t.finishedAt)) || ms(t.updatedAt)
+}
+
+/**
+ * tasksForTab lists the tasks of a task tab, newest first. Open and Done split the known states; All also has a
+ * task in a state this UI does not know (a newer server), so no task is lost.
+ */
+export function tasksForTab(tasks: readonly Task[], tab: Exclude<InboxTab, 'blocked'>): Task[] {
+  const keep = tab === 'open' ? (t: Task) => openStates.has(t.state) : tab === 'done' ? (t: Task) => doneStates.has(t.state) : () => true
+  return tasks.filter(keep).sort((a, b) => taskAt(b) - taskAt(a))
 }

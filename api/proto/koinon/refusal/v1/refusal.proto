@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.refusal.v1;
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1;refusalv1";
+
+// Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a
+// value as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the
+// same string in `error.reason`. The value names are the wire strings, so they have no enum prefix.
+// A spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.
+//
+// Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
+// rename or remove one. A client that does not know a reason shows the message of the error.
+//
+// buf:lint:ignore ENUM_VALUE_PREFIX
+enum Reason {
+  // The error has no reason. A server never sends this value.
+  REASON_UNSPECIFIED = 0;
+
+  // Kind reasons: the error has no other reason, so the reason names its kind.
+
+  // The request is not valid. The message says why.
+  INVALID = 1;
+  // The thing does not exist, or the caller may not see it.
+  NOT_FOUND = 2;
+  // The install is held (ADR 0107) and the call reaches outward.
+  INSTALL_HELD = 3;
+
+  // Roles.
+
+  // The caller's Role is too low for the field rule of the call (ADR 0116 decision 4).
+  ROLE_TOO_LOW = 4;
+  // Only an org admin or owner may do this.
+  ADMIN_REQUIRED = 5;
+  // Only a platform admin may do this.
+  PLATFORM_ADMIN_REQUIRED = 6;
+
+  // Run-trace destinations (ADR 0074).
+
+  // The destination changed since the caller loaded it.
+  CHANGED = 7;
+  // Only an org owner may choose content level full.
+  OWNER_ONLY = 8;
+  // The org sends full content, so only an owner may add a destination or change its connection.
+  OWNER_AT_FULL = 9;
+  // The caller is not a member of the org, so may only lower its settings.
+  NOT_MEMBER = 10;
+  // The level is above the platform ceiling.
+  ABOVE_CEILING = 11;
+  // The test trace was not accepted, so nothing was saved.
+  TEST_FAILED = 12;
+
+  // Other.
+
+  // The price refresh is off on this install.
+  PRICE_REFRESH_OFF = 13;
+  // The credential of an MCP server is too short.
+  CREDENTIAL_TOO_SHORT = 14;
+}

@@ -138,7 +138,7 @@ func CheckHomeBackup(ctx context.Context, dir string, repo checkpoint.Repository
 	w := &checkpoint.Writer{Storage: checkpoint.Dir(repoDir), Scratch: scratch}
 	for _, id := range []string{meta.SnapshotID, ""} { // the named snapshot, and "newest"
 		var buf bytes.Buffer
-		if err := w.Restore(ctx, repo.Prefix, repo.Password, id, &buf); err != nil {
+		if err := w.Restore(ctx, repo.Prefix, repo.Password, id, "", &buf); err != nil {
 			return fmt.Errorf("restoring snapshot %q: %w", id, err)
 		}
 		got, err := regularFiles(&buf)

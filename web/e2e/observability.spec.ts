@@ -92,7 +92,7 @@ test('both pages pass axe in the dark theme, with destructive buttons and badges
   await settings.getByRole('radio', { name: /Full/ }).check()
   await page.getByRole('button', { name: 'Delete destination langfuse' }).click()
   await expectAccessible(page)
-  await page.goto('/platform/observability')
+  await page.goto('/platform/settings/observability')
   const ceiling = page.getByRole('form', { name: 'Content ceiling' })
   await ceiling.getByRole('radio', { name: /Redacted/ }).check()
   await expect(ceiling.getByRole('button', { name: 'Lower the ceiling' })).toBeVisible()
@@ -116,7 +116,8 @@ test('platform admin sets the ceiling and sees how many orgs were lowered', asyn
   const { handlers, seen } = api({ platformAdmin: true })
   await mockApi(page, handlers)
   await page.goto('/')
-  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Observability' }).click()
+  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' }).click()
+  await page.getByRole('navigation', { name: 'Platform settings' }).getByRole('link', { name: 'Observability' }).click()
   await expect(page.getByRole('heading', { name: 'Platform observability', level: 1 })).toBeVisible()
   await expectAccessible(page)
   const form = page.getByRole('form', { name: 'Content ceiling' })
@@ -129,7 +130,7 @@ test('platform admin sets the ceiling and sees how many orgs were lowered', asyn
 })
 
 // WCAG 1.4.10 Reflow (AA): at 320 CSS px wide there is no horizontal scrolling and axe still passes.
-for (const path of ['/settings/observability', '/platform/observability']) {
+for (const path of ['/settings/observability', '/platform/settings/observability']) {
   test(`${path} reflows at 320px`, async ({ page }) => {
     const { handlers } = api({ platformAdmin: true })
     await mockApi(page, handlers)

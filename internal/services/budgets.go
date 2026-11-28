@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
-	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
@@ -103,12 +102,13 @@ func (s *Server) SetMonthlyCap(ctx context.Context, req *budgetv1alpha1.SetMonth
 
 // SetPlatformCeiling implements BudgetService. Platform admins only.
 func (s *Server) SetPlatformCeiling(ctx context.Context, req *budgetv1alpha1.SetPlatformCeilingRequest) (*budgetv1alpha1.SetPlatformCeilingResponse, error) {
+	// The platform-admin check comes first, so a refusal does not show whether the org exists.
+	if _, err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
+	}
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
 		return nil, err
-	}
-	if !c.p.PlatformAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, budget.ErrForbidden.Error())
 	}
 	ceiling, err := optionalAmount(req.GetPlatformCeilingUsd())
 	if err != nil {
@@ -243,12 +243,8 @@ func (s *Server) ListAgentBudgets(ctx context.Context, req *budgetv1alpha1.ListA
 
 // ListOrgBudgets implements BudgetService. Platform admins only.
 func (s *Server) ListOrgBudgets(ctx context.Context, _ *budgetv1alpha1.ListOrgBudgetsRequest) (*budgetv1alpha1.ListOrgBudgetsResponse, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, connect.NewError(connect.CodePermissionDenied, budget.ErrForbidden.Error())
+	if _, err := requirePlatformAdmin(ctx); err != nil {
+		return nil, err
 	}
 	since := budget.MonthStart(time.Now())
 	rows, err := s.q.ListOrgBudgetSummaries(ctx, pgtype.Timestamptz{Time: since, Valid: true})
@@ -544,6 +540,36 @@ func (s *Server) ListPrices(ctx context.Context, req *budgetv1alpha1.ListPricesR
 	res := &budgetv1alpha1.ListPricesResponse{}
 	for _, o := range list {
 		res.Prices = append(res.Prices, versionProto(o))
+	}
+	return res, nil
+}
+
+// ExplainOrgPrices implements PriceService. Admins and owners.
+func (s *Server) ExplainOrgPrices(ctx context.Context, req *budgetv1alpha1.ExplainOrgPricesRequest) (*budgetv1alpha1.ExplainOrgPricesResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	list, err := s.prices.ExplainOrg(ctx, c.org)
+	if err != nil {
+		return nil, s.budgetError(err)
+	}
+	res := &budgetv1alpha1.ExplainOrgPricesResponse{}
+	for _, mp := range list {
+		row := &budgetv1alpha1.ModelPriceSource{
+			ProviderName: mp.ProviderName, ProviderType: mp.ProviderType, Model: mp.Model, UnpricedReason: string(mp.UnpricedReason),
+		}
+		if mp.UnpricedReason == "" {
+			r := mp.Resolution
+			row.Source, row.PriceRef, row.Entry = r.Source, r.Ref, entryProto(r.Entry)
+			row.PlatformVersion, row.ListVersion = r.PlatformVersion, r.ListVersion
+		}
+		if b := mp.Replaces; b != nil {
+			row.Replaces = &budgetv1alpha1.ReplacedPrice{
+				Source: b.Source, PriceRef: b.Ref, Entry: entryProto(b.Entry), PlatformVersion: b.PlatformVersion, ListVersion: b.ListVersion,
+			}
+		}
+		res.Models = append(res.Models, row)
 	}
 	return res, nil
 }

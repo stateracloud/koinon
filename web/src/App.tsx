@@ -6,6 +6,7 @@ import { createConnectTransport } from '@connectrpc/connect-web'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { RouterProvider, type RouterHistory } from '@tanstack/react-router'
 import { useState } from 'react'
+import { Toaster } from '@/components/ui/toast'
 import { createQueryClient } from '@/lib/query'
 import { createAppRouter } from '@/router'
 
@@ -30,6 +31,7 @@ export default function App(props: AppProps) {
     <TransportProvider transport={transport}>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
+        <Toaster />
       </QueryClientProvider>
     </TransportProvider>
   )

@@ -58,9 +58,10 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   let approvalStatus = 'STATUS_PENDING'
   let runState = 'RUN_STATE_PARKED'
 
-  const addEvent = (kind: string, payload: Record<string, unknown>, actorKind = 'ACTOR_KIND_SYSTEM') =>
-    events.push({ seq: String(events.length + 1), kind, actorKind, payload, createdAt: now(), runId: kind === 'message' ? '' : 'r-1' })
-  const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:acme/widgets', args_sha256: sha }
+  // A task event as the API sends it: its kind and its typed event (protojson).
+  const addEvent = (kind: string, event: Record<string, unknown>, actorKind = 'ACTOR_KIND_SYSTEM') =>
+    events.push({ seq: String(events.length + 1), kind, actorKind, event, createdAt: now(), runId: kind === 'message' ? '' : 'r-1' })
+  const base = { approvalId: 'ap-1', tool: 'create_pull_request', target: 'github:acme/widgets', argsSha256: sha }
   const task = () => ({ id: 't-1', orgId: org, title: 'Fix the README typo', state: taskState, agentId: 'a-1' })
   const run = () => ({ id: 'r-1', orgId: org, ticketId: 't-1', agentId: 'a-1', state: runState })
   const approval = () => ({
@@ -148,11 +149,11 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
       },
       'koinon.task.v1alpha1.TaskService/CreateTask': (req) => {
         expect(req).toMatchObject({ agentId: 'a-1', title: 'Fix the README typo' })
-        addEvent('task.created', { title: req.title })
-        addEvent('run.queued', {})
+        addEvent('task.created', { taskCreated: { title: req.title } })
+        addEvent('run.queued', { runQueued: {} })
         // The agent asks for a pull request and its run parks (P1).
-        addEvent('approval.requested', { ...base, decision: 'ask' }, 'ACTOR_KIND_AGENT')
-        addEvent('run.parked', { reason: 'approval', approvals: ['ap-1'] })
+        addEvent('approval.requested', { approvalRequested: { ...base, decision: 'ask' } }, 'ACTOR_KIND_AGENT')
+        addEvent('run.parked', { runParked: { reason: 'approval', approvalIds: ['ap-1'] } })
         taskState = 'TASK_STATE_INPUT_REQUIRED'
         return { task: task(), run: run() }
       },
@@ -175,8 +176,8 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
         approved.push(req)
         if (req.argsSha256 !== sha) return { error: { code: 'failed_precondition', message: 'arguments changed' } }
         approvalStatus = 'STATUS_EXECUTED'
-        addEvent('approval.approved', { ...base, note: req.note }, 'ACTOR_KIND_USER')
-        addEvent('approval.executed', { ...base, result: { url: 'https://github.com/acme/widgets/pull/7' } })
+        addEvent('approval.approved', { approvalApproved: { ...base, note: req.note } }, 'ACTOR_KIND_USER')
+        addEvent('approval.executed', { approvalExecuted: { ...base, result: { url: 'https://github.com/acme/widgets/pull/7' } } })
         taskState = 'TASK_STATE_WORKING'
         runState = 'RUN_STATE_SUCCEEDED'
         return { approval: approval() }
@@ -203,9 +204,9 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText('acme/gadgets')
 
   // 2. Create an agent from the template and activate it.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('region', { name: 'Platform templates' }).getByRole('link', { name: /^Repo helper(?! \(Gitea\))/ }).click()
   await expect(page.getByRole('radio', { name: /OpenCode/ })).toBeChecked()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('combobox', { name: 'Repository 1' }).fill('widg')

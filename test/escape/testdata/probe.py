@@ -44,6 +44,126 @@ def tcp(c):
         s.close()
 
 
+def client_hello(sni):
+    """A TLS 1.2 ClientHello, with the server name when `sni` is a name (not an IP address). Any TLS server
+    answers it with a ServerHello or an alert (bytes); the egress gateway answers with nothing."""
+    import struct
+    import os as _os
+    ext = b""
+    if sni and not re.fullmatch(r"[0-9.]+|[0-9a-fA-F]*:[0-9a-fA-F:.]*", sni):
+        name = sni.encode()
+        entry = b"\x00" + struct.pack(">H", len(name)) + name
+        lst = struct.pack(">H", len(entry)) + entry
+        ext += struct.pack(">HH", 0, len(lst)) + lst
+    ext += struct.pack(">HHHH", 10, 4, 2, 23)  # supported_groups: secp256r1 (a list of length 2)
+    ext += b"\x00\x0b\x00\x02\x01\x00"  # ec_point_formats: uncompressed
+    ext += b"\x00\x0d\x00\x04\x00\x02\x04\x01"  # signature_algorithms: rsa_pkcs1_sha256
+    suites = b"\xc0\x2f\xc0\x2b\x00\x9c\x00\x2f"
+    body = b"\x03\x03" + _os.urandom(32) + b"\x00" + struct.pack(">H", len(suites)) + suites + b"\x01\x00"
+    body += struct.pack(">H", len(ext)) + ext
+    hs = b"\x01" + struct.pack(">I", len(body))[1:] + body
+    return b"\x16\x03\x01" + struct.pack(">H", len(hs)) + hs
+
+
+def payload(c):
+    """Connects to host:port, sends bytes and reads the answer. A connect() alone proves nothing on
+    Substrate: the actor's tunnel accepts every TCP connection and decides after it reads the Host or the
+    SNI (ADR 0120 section 2.1, amendment of 2026-11-27, issue #1515). So the result is what came back:
+      an errno name or "gaierror"   the connect or the send failed
+      "closed"                      the peer closed with no byte (the gateway's refusal of a CONNECT)
+      "timeout"                     no byte in 8 seconds
+      "bytes N"                     N bytes arrived (kind "tls"): the destination, or something that
+                                    pretends to be it, answered
+      "status NNN server=... envoy=0|1 upstream=0|1"   (kind "http", as http_status)
+    "kind" is "tls" (a ClientHello with `sni`, default: host) or "http" (GET / with `Host: host:port`).
+    A byte answers "tls" only when it is the start of a TLS record."""
+    try:
+        infos = socket.getaddrinfo(c["host"], c["port"], type=socket.SOCK_STREAM)
+    except OSError as e:
+        return err_name(e)
+    family, kind, proto, _, addr = infos[0]
+    s = socket.socket(family, kind, proto)
+    s.settimeout(8)
+    try:
+        s.connect(addr)
+    except OSError as e:
+        s.close()
+        return err_name(e)
+    data = b""
+    try:
+        if c.get("kind", "tls") == "http":
+            host = "[%s]" % c["host"] if ":" in c["host"] else c["host"]
+            s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nConnection: close\r\n\r\n" % (host, c["port"])).encode())
+        else:
+            s.sendall(client_hello(c.get("sni", c["host"])))
+        while len(data) < 8192 and (c.get("kind", "tls") != "http" or b"\r\n\r\n" not in data):
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            data += chunk
+            if c.get("kind", "tls") != "http":
+                break
+        if not data:
+            return "closed"
+        if c.get("kind", "tls") != "http":
+            return "bytes %d" % len(data)
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "bytes %d" % len(data)
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
+        upstream = int("x-envoy-upstream-service-time" in headers)
+        return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
+    except OSError as e:
+        if data:
+            return "bytes %d" % len(data)  # a byte came before the error: the destination was reached
+        return err_name(e)
+    finally:
+        s.close()
+
+
+def http_status(c):
+    """GET / with `Host: host:port` through the egress gateway. The TCP connection goes to the address
+    of "via" (a name the `*` rule lets through, resolved here), so it leaves the guest and the gateway
+    resolves "host" itself; a name that the guest resolves to its own loopback is never connected to.
+    Returns "status NNN server=<Server header or ->  envoy=<0|1> upstream=<0|1>", or the error name. A via address
+    that is loopback or unspecified is reported as "badvia". The request carries the headers that the GCE
+    (Metadata-Flavor) and Azure (Metadata) metadata servers require, so a server that is reached answers 200, so a check cannot pass without a gateway."""
+    try:
+        infos = socket.getaddrinfo(c["via"], c["port"], type=socket.SOCK_STREAM)
+    except OSError as e:
+        return err_name(e)
+    family, kind, proto, _, addr = infos[0]
+    if addr[0].startswith("127.") or addr[0] in ("0.0.0.0", "::1", "::"):
+        return "badvia"
+    s = socket.socket(family, kind, proto)
+    s.settimeout(8)
+    try:
+        s.connect(addr)
+        s.sendall(("GET / HTTP/1.1\r\nHost: %s:%d\r\nMetadata-Flavor: Google\r\nMetadata: true\r\nConnection: close\r\n\r\n" % (c["host"], c["port"])).encode())
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 8192:
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "noresponse"
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        envoy = int("envoy" in headers.get("server", "").lower() or any(k.startswith("x-envoy") for k in headers))
+        # x-envoy-upstream-service-time is set only on an answer that Envoy proxied from an upstream: the
+        # gateway's own refusal never has it, so it marks a destination that was reached.
+        upstream = int("x-envoy-upstream-service-time" in headers)
+        return "status %s server=%s envoy=%d upstream=%d" % (parts[1], headers.get("server", "-"), envoy, upstream)
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def unix(c):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(5)
@@ -170,6 +290,23 @@ def status(_):
     with open("/proc/self/status") as f:
         fields = dict(l.split(":", 1) for l in f if ":" in l)
     return {k: fields[k].strip() for k in ("CapEff", "CapPrm", "CapBnd", "NoNewPrivs", "Seccomp") if k in fields}
+
+
+def ids(_):
+    """The real, effective and saved uid and gid, and the supplementary groups, from the system calls.
+    The spec does not read them from /proc/self/status: the line format of that file can differ in
+    gVisor."""
+    return {"uid": list(os.getresuid()), "gid": list(os.getresgid()), "groups": os.getgroups()}
+
+
+def open_write(c):
+    """Opens an existing file for writing, with no create and no truncate, and closes it: "ok", or the
+    errno name. The file is not changed, so the probe can test a platform file without harm."""
+    try:
+        os.close(os.open(c["path"], os.O_WRONLY))
+        return "ok"
+    except OSError as e:
+        return err_name(e)
 
 
 def write(c):
@@ -385,13 +522,52 @@ def listeners(_):
     return sorted(ports)
 
 
+def egress_http(c):
+    """One HTTP/1.1 GET of c["path"] to c["host"]:c["port"], with the headers of c["headers"] in their
+    order ([name, value] pairs; a name can repeat). With c["tls"] the request goes through TLS, and the
+    probe does not check the certificate: the spec asks what reaches the gateway, not whom it trusts.
+    Returns {"status": NNN, "refusal": <Koinon-Egress-Refusal header or "">}, or the error name."""
+    try:
+        s = socket.create_connection((c["host"], c["port"]), timeout=10)
+    except OSError as e:
+        return err_name(e)
+    try:
+        if c.get("tls"):
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            s = ctx.wrap_socket(s, server_hostname=c["host"])
+        lines = ["GET %s HTTP/1.1" % c["path"], "Host: %s:%d" % (c["host"], c["port"]), "Connection: close"]
+        lines += ["%s: %s" % (k, v) for k, v in c.get("headers", [])]
+        s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+        data = b""
+        while b"\r\n\r\n" not in data and len(data) < 16384:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        parts = head[0].split(" ")
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            return "noresponse"
+        headers = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip() for h in head[1:] if ":" in h}
+        return {"status": int(parts[1]), "refusal": headers.get("koinon-egress-refusal", "")}
+    except OSError as e:
+        return err_name(e)
+    finally:
+        s.close()
+
+
 def kernel(_):
     with open("/proc/cpuinfo") as f:
         hypervisor = any(l.startswith("flags") and " hypervisor" in l for l in f)
     return {"release": os.uname().release, "hypervisor": hypervisor}
 
 
-OPS = {"tcp": tcp, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
-       "find": find, "mounts": mounts, "status": status, "write": write, "mode": mode, "syscall": syscall, "kernel": kernel,
-       "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners}
+OPS = {"tcp": tcp, "payload": payload, "http_status": http_status, "unix": unix, "udp_dns": udp_dns, "resolve": resolve, "read": read, "env": env, "scan": scan,
+       "find": find, "mounts": mounts, "status": status, "ids": ids, "write": write, "open_write": open_write, "mode": mode,
+       "syscall": syscall, "kernel": kernel, "grpc_h2c": grpc_h2c, "grpc_http1": grpc_http1, "sleep": sleep, "listeners": listeners,
+       "egress_http": egress_http}
 json.dump({c["id"]: OPS[c["op"]](c) for c in CHECKS}, sys.stdout)  # noqa: F821

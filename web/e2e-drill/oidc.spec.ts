@@ -24,7 +24,7 @@ const need = (name: string): string => {
   return v
 }
 
-const inboxHeading = (page: Page) => page.getByRole('heading', { name: 'Inbox', level: 1 })
+const homeHeading = (page: Page) => page.getByRole('heading', { name: 'Overview', level: 1 })
 
 // signInThroughDex clicks "Sign in with SSO" and drives the Dex form until the browser is back at Koinon. It
 // polls the page every 250 ms, so each known state shows up within a poll and an unknown one at the deadline.
@@ -52,7 +52,7 @@ async function signInThroughDex(page: Page, login: string, password: string): Pr
       if (err) throw err
     }
     const url = new URL(page.url())
-    if (url.origin === web && (await inboxHeading(page).isVisible().catch(() => false))) return
+    if (url.origin === web && (await homeHeading(page).isVisible().catch(() => false))) return
     if (url.host === idp) {
       // A navigation can destroy the page between the check and the read: try again at the next poll.
       const html = await page.content().catch(() => undefined)
@@ -78,9 +78,9 @@ async function signInThroughDex(page: Page, login: string, password: string): Pr
 
 test('the admin signs in through the Dex form on the restored copy', async ({ page }) => {
   await signInThroughDex(page, need('KOINON_DRILL_OIDC_USER'), need('KOINON_DRILL_OIDC_PASSWORD'))
-  await expect(inboxHeading(page)).toBeVisible()
+  await expect(homeHeading(page)).toBeVisible()
   await page.reload() // the session holds
-  await expect(inboxHeading(page)).toBeVisible()
+  await expect(homeHeading(page)).toBeVisible()
 
   // Who the session is: the restored user, with the role the source recorded.
   const res = await page.request.post('/koinon.auth.v1alpha1.AuthService/WhoAmI', {

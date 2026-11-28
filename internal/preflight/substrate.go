@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,13 +65,20 @@ const (
 )
 
 // SubstrateRouterSPIFFEID is the identity the router flag must allow: the atenet client service account
-// in Substrate's namespace (Substrate v1.0.0 docs/get-started/quickstart.md).
+// in Substrate's namespace (Substrate v1.0.1 docs/get-started/quickstart.md).
 func SubstrateRouterSPIFFEID(namespace string) string {
 	return "spiffe://cluster.local/ns/" + namespace + "/sa/atenet-client"
 }
 
+// SubstrateAgentdSPIFFEID is the identity of agentd's pod certificate: the router allow-list must hold it, or
+// every Exec of a run fails at the router handshake (issue #1446, ADR 0120 amendment). The pod identity signer
+// issues spiffe://cluster.local/ns/<namespace>/sa/<service account>.
+func SubstrateAgentdSPIFFEID(namespace, serviceAccount string) string {
+	return "spiffe://cluster.local/ns/" + namespace + "/sa/" + serviceAccount
+}
+
 // SubstrateCRDs are the CRDs the preflight requires (plural.group), verified against the Substrate
-// v1.0.0 manifests and the koinon-lab install.
+// v1.0.1 manifests and the koinon-lab install.
 var SubstrateCRDs = []string{
 	"sandboxconfigs." + SubstrateCRDGroup,
 	"workerpools." + SubstrateCRDGroup,
@@ -98,6 +106,16 @@ type SubstrateConfig struct {
 	APIServerDeployment string
 	// RouterDeployment runs the router whose SPIFFE allow-list is checked.
 	RouterDeployment string
+	// RouterService is the Service of the router (default atenet-router). With RouterPort it is checked.
+	RouterService string
+	// RouterPort is the port of execution.substrate.routerAddress. When set, the router Service must serve it:
+	// a wrong port fails every Exec, and this check finds it in seconds. 0 skips the check.
+	RouterPort int
+	// AgentdNamespace and AgentdServiceAccount name the ServiceAccount of Koinon's agentd, the only Koinon
+	// component with a router identity. When the service account is set, the router allow-list must hold its
+	// SPIFFE ID. Empty skips the check.
+	AgentdNamespace      string
+	AgentdServiceAccount string
 	// WorkerPools maps a tier ("vm", "hardened") to the WorkerPool that must be ready. Empty skips.
 	WorkerPools map[string]string
 	// NodeSelector limits the device probe to the nodes that run workers.
@@ -112,7 +130,7 @@ type SubstrateConfig struct {
 	ExpectedIssuer string
 }
 
-// WithDefaults fills the fixed names of Substrate v1.0.0.
+// WithDefaults fills the fixed names of Substrate v1.0.1.
 func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	if s.Namespace == "" {
 		s.Namespace = "ate-system"
@@ -128,6 +146,9 @@ func (s SubstrateConfig) WithDefaults() SubstrateConfig {
 	}
 	if s.RouterDeployment == "" {
 		s.RouterDeployment = "atenet-router"
+	}
+	if s.RouterService == "" {
+		s.RouterService = "atenet-router"
 	}
 	return s
 }
@@ -281,7 +302,7 @@ func (c *Checker) SubstrateProbePrerequisites(ctx context.Context) []Result {
 	if c.Config.Substrate.VMTier {
 		results = append(results, c.checkSubstrateDevices(ctx))
 	}
-	results = append(results, c.checkUserNamespaces(ctx))
+	results = append(results, c.checkUserNamespaces(ctx), c.checkAteFS(ctx))
 	return append(results, c.checkIssuer(ctx))
 }
 
@@ -408,18 +429,66 @@ func (c *Checker) checkSubstrateRouter(ctx context.Context) Result {
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("Deployment %s/%s", sub.Namespace, sub.RouterDeployment), err)
 	}
-	id := SubstrateRouterSPIFFEID(sub.Namespace)
+	want := []string{SubstrateRouterSPIFFEID(sub.Namespace)}
+	if sub.AgentdServiceAccount != "" {
+		want = append(want, SubstrateAgentdSPIFFEID(sub.AgentdNamespace, sub.AgentdServiceAccount))
+	}
+	allowed := routerAllowedIDs(deploy)
+	for _, id := range want {
+		if slices.Contains(allowed, id) {
+			continue
+		}
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B), or agentd cannot reach the actors (every Exec fails)", id),
+			Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, strings.Join(want, ",")),
+		}
+	}
+	if sub.RouterPort > 0 {
+		if r := c.checkRouterPort(ctx, check, *sub); r.Status != Pass {
+			return r
+		}
+	}
+	return Result{Check: check, Status: Pass, Message: "router allows " + strings.Join(want, ", ")}
+}
+
+// routerAllowedIDs are the SPIFFE IDs of the router's allow-list flag, in its command and arguments.
+func routerAllowedIDs(deploy *appsv1.Deployment) []string {
+	var ids []string
 	for _, ctr := range deploy.Spec.Template.Spec.Containers {
 		for _, arg := range slices.Concat(ctr.Command, ctr.Args) {
-			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok && slices.Contains(strings.Split(v, ","), id) {
-				return Result{Check: check, Status: Pass, Message: "router allows " + id}
+			if v, ok := strings.CutPrefix(arg, SubstrateRouterSPIFFEFlag+"="); ok {
+				ids = append(ids, strings.Split(v, ",")...)
 			}
 		}
 	}
+	return ids
+}
+
+// checkRouterPort checks that the router Service serves the port of routerAddress. The router has no plain port:
+// Substrate v1.0.1 serves TLS on Service port 443 (container port 8443), so a leftover :80 fails here and not at
+// the first Exec.
+func (c *Checker) checkRouterPort(ctx context.Context, check string, sub SubstrateConfig) Result {
+	dctx, cancel := c.callCtx(ctx)
+	defer cancel()
+	svc, err := c.Kube.CoreV1().Services(sub.Namespace).Get(dctx, sub.RouterService, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return Result{Check: check, Status: Fail, Message: fmt.Sprintf("Service %s/%s not found", sub.Namespace, sub.RouterService), Fix: substrateInstallDoc}
+	case err != nil:
+		return apiFailure(check, fmt.Sprintf("Service %s/%s", sub.Namespace, sub.RouterService), err)
+	}
+	ports := make([]string, 0, len(svc.Spec.Ports))
+	for _, p := range svc.Spec.Ports {
+		if int(p.Port) == sub.RouterPort {
+			return Result{Check: check, Status: Pass}
+		}
+		ports = append(ports, strconv.Itoa(int(p.Port)))
+	}
 	return Result{
 		Check: check, Status: Fail,
-		Message: fmt.Sprintf("router does not allow %s: actors cannot reach the gateway through atenet (proof P-B)", id),
-		Fix:     fmt.Sprintf("start the router with %s=%s (the Koinon installer step sets it)", SubstrateRouterSPIFFEFlag, id),
+		Message: fmt.Sprintf("Service %s/%s has no port %d (it has %s): every Exec would fail to connect", sub.Namespace, sub.RouterService, sub.RouterPort, strings.Join(ports, ", ")),
+		Fix:     fmt.Sprintf("set execution.substrate.routerAddress to the router Service port (%s)", strings.Join(ports, " or ")),
 	}
 }
 
@@ -467,7 +536,7 @@ func (c *Checker) checkWorkerPool(ctx context.Context, check, namespace, name st
 	case err != nil:
 		return apiFailure(check, fmt.Sprintf("WorkerPool %s/%s", namespace, name), err)
 	}
-	// Substrate v1.0.0 has no top-level conditions on a WorkerPool: status carries replicas and
+	// Substrate v1.0.1 has no top-level conditions on a WorkerPool: status carries replicas and
 	// readyReplicas, and each sandbox class a Resolved condition (api/infra/k8s/ate/v1).
 	want, _, _ := unstructured.NestedInt64(pool.Object, "spec", "replicas")
 	have, found, _ := unstructured.NestedInt64(pool.Object, "status", "readyReplicas")
@@ -593,7 +662,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		}
 		return Result{
 			Check: check, Status: Fail, Message: msg + info + tokenInfo,
-			Fix: "pods in " + ns + " must reach the issuer Substrate trusts, and Substrate v1.0.0 has no separate discovery URL. " +
+			Fix: "pods in " + ns + " must reach the issuer Substrate trusts, and Substrate v1.0.1 has no separate discovery URL. " +
 				"Set the API server's first --service-account-issuer to https://kubernetes.default.svc (Substrate then reads discovery from the in-cluster API server with the pod's token), " +
 				"or to a URL that pods reach with a certificate from the system roots (on Talos: cluster.apiServer.extraArgs service-account-issuer). " +
 				"Keep the old value as a second --service-account-issuer so tokens already issued stay valid, and when the discovery document's jwks_uri is not reachable from pods, " +
@@ -614,7 +683,7 @@ func (c *Checker) checkIssuer(ctx context.Context) Result {
 		return Result{
 			Check: check, Status: Fail,
 			Message: fmt.Sprintf("Substrate would trust issuer %s%s, but the service-account tokens of pods in %s carry iss %s: its api server rejects every token with \"unexpected issuer\"", issuer, info, probeNS, res.TokenIssuer),
-			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.0 fetches discovery from the issuer itself. " +
+			Fix: "Substrate must trust the iss the tokens carry (" + res.TokenIssuer + "), and pods in " + ns + " must reach that URL: Substrate v1.0.1 fetches discovery from the issuer itself. " +
 				"Drop --expected-jwt-issuer (or set it to " + res.TokenIssuer + ") and run the check again: it then probes that URL. " +
 				"If pods cannot reach it, set the API server's first --service-account-issuer to https://kubernetes.default.svc or another URL pods reach " +
 				"(Kubernetes signs tokens with the first value; later ones are only accepted for validation)" +
@@ -683,9 +752,9 @@ const (
 // token (kubernetesJWTProvider in cmd/ate-setup/internal/steps/create.go).
 var inClusterIssuers = []string{"https://kubernetes.default.svc", "https://kubernetes.default.svc.cluster.local"}
 
-// ProbeIssuerFromPod is what the issuer probe pod runs. It repeats what Substrate v1.0.0's api server does
+// ProbeIssuerFromPod is what the issuer probe pod runs. It repeats what Substrate v1.0.1's api server does
 // to validate a service-account token, and nothing else (permalinks at the pinned commit
-// b34fbee742906494b5eb4f1f36987176bf8770a4):
+// 20778a6dbb01f13024642851bb592bf67c9fec05):
 //   - internal/oidcjwt/oidcjwt.go discoverKeysForIssuer: GET <issuer>/.well-known/openid-configuration, require
 //     its "issuer" to equal the configured issuer, then GET its jwks_uri. The issuer string itself is not
 //     dialled for anything else; the JWKS comes from wherever jwks_uri points.

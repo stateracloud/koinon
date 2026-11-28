@@ -105,6 +105,8 @@ flowchart LR
   n0119["0119: Agent Substrate is Koinon's execution layer"]
   n0120["0120: Execution hardening defaults"]
   n0126["0126: Web UI v2: brand look, org home, platform console and new-agent flow"]
+  n0127["0127: Slack and Teams adapter as a pure event-to-actions core"]
+  n0130["0130: The external actor kind: people without a Koinon account on the task timeline"]
   n0013 --> n0040
   n0014 --> n0040
   n0016 --> n0040
@@ -261,4 +263,5 @@ flowchart LR
   n0048 ==>|supersedes| n0120
   n0018 ==>|supersedes| n0126
   n0057 ==>|supersedes| n0126
+  n0127 --> n0130
 ```

@@ -31,6 +31,8 @@ type anthropicBlock struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	ToolUseID string `json:"tool_use_id"`
+	// Content is a tool_result's content: a string or text blocks.
+	Content json.RawMessage `json:"content"`
 }
 
 // blocks returns the message content as blocks; a plain string becomes one text block.
@@ -69,20 +71,21 @@ func (req anthropicRequest) conversation() conversation {
 			}
 		case "user":
 			var text strings.Builder
-			var results []string
+			var results, texts []string
 			for _, b := range blocks {
 				switch b.Type {
 				case "text":
 					text.WriteString(b.Text)
 				case "tool_result":
 					results = append(results, names[b.ToolUseID])
+					texts = append(texts, contentText(b.Content))
 				}
 			}
 			if text.Len() > 0 {
 				c.lastUserText = text.String()
 			}
 			if i == len(req.Messages)-1 {
-				c.toolResults = results
+				c.toolResults, c.toolResultTexts = results, texts
 			}
 		}
 	}

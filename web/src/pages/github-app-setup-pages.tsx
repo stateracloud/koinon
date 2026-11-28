@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError, createClient } from '@connectrpc/connect'
+import { createClient } from '@connectrpc/connect'
 import { createConnectQueryKey, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 
 // The pages GitHub sends the browser to during the guided App setup (issue #1175). The state names
 // the org before its first dot; the server checks the rest.
 
-const createdRoute = getRouteApi('/app/connections/new/github/app-created')
-const installedRoute = getRouteApi('/app/connections/new/github/app-installed')
+const createdRoute = getRouteApi('/app/org/connections/new/github/app-created')
+const installedRoute = getRouteApi('/app/org/connections/new/github/app-installed')
 
 function setupOrg(state: string) {
   return state.split('.')[0] ?? ''
@@ -62,7 +63,7 @@ export function GitHubAppCreatedPage() {
       const res = await createClient(ConnectionService, transport).continueGitHubAppSetup({ orgId: setupOrg(state), state, code })
       window.location.assign(res.installUrl)
     } catch (err) {
-      setError(`Could not get the App from GitHub: ${ConnectError.from(err).rawMessage}`)
+      setError(`Could not get the App from GitHub: ${describeError(err).message}`)
     }
   })
   return <Shell status="GitHub created the App. Koinon stores its key and opens the install page…" error={error} />
@@ -93,7 +94,7 @@ export function GitHubAppInstalledPage() {
       await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
       if (res.connection) await navigate({ to: '/connections/$connectionId', params: { connectionId: res.connection.id } })
     } catch (err) {
-      setError(`Could not make the connection: ${ConnectError.from(err).rawMessage}`)
+      setError(`Could not make the connection: ${describeError(err).message}`)
     }
   })
   return <Shell status="Koinon checks the installation and makes the connection…" error={error} />

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomBytes } from 'node:crypto'
-
 import { expect, test } from '@playwright/test'
+
+import { signIn } from './session.ts'
 
 // W1 acceptance (old issue 50): create a task and watch the run in the browser, against the real
 // koinon-api, reconciler, agentd, Postgres, OpenShell (runc on kind) and the fake model server.
@@ -10,8 +10,6 @@ import { expect, test } from '@playwright/test'
 // test/fakemodel/scripts/repo-helper.yaml) and the fake GitHub App API.
 
 const fakeGitHub = process.env.KOINON_E2E_FAKEGITHUB_URL
-const bootstrapPassword = process.env.KOINON_E2E_PASSWORD
-const newPassword = 'e2e-browser-' + randomBytes(8).toString('hex')
 // The fake model server in the cluster (test/e2e/run.sh passes the address the gateway reaches it by).
 const fakeModelURL = process.env.KOINON_E2E_FAKEMODEL_URL
 const repository = 'koinon-demo/hello'
@@ -19,22 +17,16 @@ const title = 'Add hello.md'
 
 test('sign in, create an agent and a task, watch the reply stream, approve, run succeeds', async ({ page, request }) => {
   expect(fakeGitHub, 'KOINON_E2E_FAKEGITHUB_URL').toBeTruthy()
-  expect(bootstrapPassword, 'KOINON_E2E_PASSWORD').toBeTruthy()
   expect(fakeModelURL, 'KOINON_E2E_FAKEMODEL_URL').toBeTruthy()
 
-  // 1. Bootstrap admin: sign in, replace the one-time password.
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Sign in to Koinon' })).toBeVisible()
-  await page.getByLabel('Password').fill(bootstrapPassword!)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible()
-  await page.getByLabel('Current password').fill(bootstrapPassword!)
-  await page.getByLabel('New password', { exact: true }).fill(newPassword)
-  await page.getByLabel('Repeat new password').fill(newPassword)
-  await page.getByRole('button', { name: 'Change password' }).click()
-  // The home screen is the inbox; the board is its secondary view, at /board.
+  // 1. Bootstrap admin: sign in (the first sign-in of the install replaces the one-time password).
+  await signIn(page)
+  // The home screen is the overview (ADR 0126 section 4); the inbox is at /inbox.
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
+  // The link name has the waiting count when it is not zero.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Inbox/ }).click()
   await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
-  await expect(page.getByRole('heading', { level: 2, name: 'Waiting on you' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /^Blocked on you/ })).toBeVisible()
 
   // 2. Model provider: added in the UI (the fake model server as an OpenAI-compatible provider), with
   // one model. The key is write-only: it is not on the page afterwards.
@@ -43,9 +35,9 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await page.getByRole('button', { name: 'Add provider' }).click()
   const providerForm = page.getByRole('form', { name: 'Add provider' })
   await providerForm.getByLabel('Name', { exact: true }).fill('fake')
-  await providerForm.getByLabel('Provider type').selectOption('openai')
+  await providerForm.getByLabel('Provider type', { exact: true }).selectOption('openai')
   await providerForm.getByLabel('URL').fill(fakeModelURL!)
-  await providerForm.getByLabel('API key').fill('e2e-dummy-key')
+  await providerForm.getByLabel('API key', { exact: true }).fill('e2e-dummy-key')
   await providerForm.getByRole('button', { name: 'Add provider' }).click()
   const provider = page.getByRole('region', { name: 'fake' })
   await expect(provider).toBeVisible()
@@ -109,11 +101,11 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
   await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText(repository)
 
   // 4. Agent from the repo-helper template, bound to the repository, activated.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
+  // The overview has the "New agent" link; the Main navigation has no Agents link (#1385).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   // Anchored: "Repo helper (Gitea)" is a template too (old issue 370).
-  await page.getByRole('radio', { name: /^Repo helper v/ }).check()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('region', { name: 'Platform templates' }).getByRole('link', { name: /^Repo helper(?! \(Gitea\))/ }).click()
   await page.getByRole('radio', { name: /OpenCode/ }).check()
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('combobox', { name: 'Repository 1' }).fill('hello')
@@ -150,4 +142,26 @@ test('sign in, create an agent and a task, watch the reply stream, approve, run 
     timeout: 5 * 60_000,
   })
   await expect(page.getByRole('region', { name: 'Run costs' })).toContainText('succeeded')
+
+  // 8. The other path (ADR 0126 section 5): a blank agent from the form, saved as an org template,
+  // then activated by the admin. It comes last so that the task above has one agent to pick.
+  // The overview has the "New agent" link; the Main navigation has no Agents link (#1385).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click()
+  await page.getByRole('link', { name: 'New agent' }).click()
+  await page.getByRole('link', { name: /Blank agent/ }).click()
+  await page.getByLabel('Name', { exact: true }).fill('Docs helper')
+  await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Answer questions about the docs of the repository.')
+  const github = page.getByRole('group', { name: 'GitHub access', exact: true })
+  await github.getByRole('checkbox', { name: 'Give GitHub access' }).check()
+  await github.getByRole('combobox', { name: 'GitHub repository 1' }).fill('hello')
+  await page.getByRole('option', { name: new RegExp(repository) }).click()
+  await page.getByRole('checkbox', { name: 'Save as template' }).check()
+  await page.getByLabel('Template name', { exact: true }).fill('Docs helper')
+  await page.getByRole('button', { name: 'Create draft' }).click()
+  await expect(page.getByRole('heading', { name: 'Docs helper', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Activate' }).click()
+  await expect(page.getByText('Activated.')).toBeVisible()
+  await page.getByRole('link', { name: '← Agents' }).click()
+  await page.getByRole('link', { name: 'New agent' }).click()
+  await expect(page.getByRole('region', { name: 'Org templates' }).getByRole('link', { name: /Docs helper/ })).toBeVisible()
 })

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc/codes"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -34,8 +35,8 @@ const substrateImage2 = "registry.example.com/koinon/sandbox@sha256:111111111111
 // The agent home through the sandbox lifecycle on the Substrate driver (issue #1090, slice S1).
 //
 // These specs record the behaviour on main as it is; they choose no home model. Facts they rest on:
-// the Substrate driver mounts no volume, so the home (checkpoint.HomeDir) is in the actor's root
-// filesystem, and a suspend keeps it in the actor's memory and root filesystem snapshot. The only
+// the Substrate driver mounts one durable directory at the home (substrate.HomeMountPath, slice S5),
+// and a suspend keeps it with the actor's memory and root filesystem snapshot. The only
 // copy outside Substrate is the kopia home checkpoint, which is off by default
 // (reconciler.Config.Checkpoints). The fake Substrate keeps an actor's files across a suspend and
 // drops them with DeleteActor, as Substrate does with the snapshot prefix (lab, 2026-11-24).
@@ -55,7 +56,6 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		org   pgtype.UUID
 		user  pgtype.UUID
 		agent store.Agent
-		names execution.AgentNames
 		ws    string
 		now   atomic.Pointer[time.Time]
 	)
@@ -80,14 +80,16 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		Expect(err).NotTo(HaveOccurred())
 		return sb
 	}
-	state := func() ateapiv1.ActorState { return cl.State(ws, names.Sandbox) }
+	// actor is the name of the agent's current Substrate actor: each new actor gets a new one (issue #1386).
+	actor := func() string { return row(context.Background()).ActorRef() }
+	state := func() ateapiv1.ActorState { return cl.State(ws, actor()) }
 	running := func() {
 		GinkgoHelper()
 		Eventually(state).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 	}
 	// home is the marker file in the actor's guest, or nil when the actor or the file is not there.
 	home := func() []byte {
-		b, ok := cl.File(ws, names.Sandbox, markerPath)
+		b, ok := cl.File(ws, actor(), markerPath)
 		if !ok {
 			return nil
 		}
@@ -103,7 +105,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		_, err := tw.Write(markerBody)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tw.Close()).To(Succeed())
-		Expect(d.Upload(ctx, ws, names.Sandbox, checkpoint.HomeDir, &buf)).To(Succeed())
+		Expect(d.Upload(ctx, ws, actor(), checkpoint.HomeDir, &buf)).To(Succeed())
 		Expect(home()).To(Equal(markerBody))
 	}
 	// idleStop plays a harness run that wrote the home and ended, then moves the clock past the
@@ -125,6 +127,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		DeferCleanup(router.Close)
 		d = substrate.New(control, router, substrate.Config{
 			PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
+			GatewayRoutes:     []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
 			GuestSigner:       fakeate.Signer(),
 			RuntimeClassTiers: map[string]harness.Tier{"kata": harness.TierVM},
 		})
@@ -163,7 +166,6 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 		GinkgoHelper()
 		build()
 		agent = newAgent(ctx, org, user)
-		names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 		pass(ctx)
 		running()
 		Expect(cl.Calls("CreateActor")).To(Equal(1))
@@ -190,7 +192,7 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(cl.Calls("CreateActor")).To(Equal(1), "resumed, not re-created")
 			Expect(cl.Calls("DeleteActor")).To(BeZero())
 			Expect(home()).To(Equal(markerBody))
-			Expect(cl.RouterResumes(ws, names.Sandbox)).To(BeZero(), "the reconciler resumed it, not a guest request")
+			Expect(cl.RouterResumes(ws, actor())).To(BeZero(), "the reconciler resumed it, not a guest request")
 		})
 
 		It("never archives: the suspended actor, and the home in its snapshot, stay without a time limit", func(ctx SpecContext) {
@@ -209,26 +211,102 @@ var _ = Describe("The agent home on the Substrate driver", func() {
 			Expect(home()).To(Equal(markerBody))
 		})
 
-		It("loses the home when a new sandbox spec recreates the sandbox", func(ctx SpecContext) {
+		It("keeps the actor and the home when a new sandbox spec repoints a running sandbox (issue #1482)", func(ctx SpecContext) {
+			first, oldSpec := actor(), cl.TemplateOf(ws, actor())
 			By("a new harness image changes the spec")
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
+			build()
+			pass(ctx)
+			running()
+			// The actor keeps its name, its durable home and its snapshot lineage: UpdateActor, no delete.
+			Expect(cl.Calls("UpdateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(cl.Calls("CreateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActorTemplate")).To(BeZero())
+			Expect(actor()).To(Equal(first))
+			Expect(cl.TemplateOf(ws, first)).NotTo(Equal(oldSpec))
+			Expect(home()).To(Equal(markerBody))
+			Expect(row(ctx).LastSnapshotAt.Valid).To(BeTrue(), "the snapshot of the repoint has a time in Postgres")
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(Equal(1), "a later pass changes nothing")
+		})
+
+		It("keeps the home when a new sandbox spec repoints a suspended sandbox (issue #1482)", func(ctx SpecContext) {
+			idleStop(ctx)
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			first := actor()
+			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
+			build()
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(actor()).To(Equal(first))
+			Expect(home()).To(Equal(markerBody))
+		})
+
+		It("loses the home, with checkpoints off, when Substrate refuses the repoint and the sandbox is recreated", func(ctx SpecContext) {
+			cl.RefuseNextUpdateActor(ws, actor(), codes.FailedPrecondition)
 			cfg.Harnesses[harness.OpenCode] = reconciler.Harness{Image: substrateImage2, Binaries: reconciler.DefaultBinaries[harness.OpenCode]}
 			build()
 			pass(ctx)
 			Expect(cl.Calls("DeleteActor")).To(Equal(1))
 			pass(ctx) // the pass after the deletion creates the new actor
 			running()
-			// HOME LOST: with checkpoints off, a recreation deletes the actor (and its snapshot prefix)
-			// and creates a new one from the image. Nothing restores the home. The marker came in by an
-			// upload, not by a run: even with checkpoints on, home_dirtied_at would not protect it.
+			// HOME LOST: the fallback is the delete and restore path. With checkpoints off nothing restores
+			// the home. The marker came in by an upload, not by a run: even with checkpoints on,
+			// home_dirtied_at would not protect it.
 			Expect(cl.Calls("DeleteActor")).To(Equal(1), "no second delete")
 			Expect(cl.Calls("CreateActor")).To(Equal(2))
 			Expect(row(ctx).RestoreCheckpointID.Valid).To(BeFalse(), "no checkpoint to restore from")
 			Expect(home()).To(BeNil(), "the new actor has a fresh root filesystem")
 		})
 
-		It("loses the home when the repair recreates a crashed actor", func(ctx SpecContext) {
+		It("loses the home, with checkpoints off, when the isolation tier changes", func(ctx SpecContext) {
+			cfg.RuntimeClassName = "other"
+			build()
+			pass(ctx)
+			Expect(cl.Calls("UpdateActor")).To(BeZero(), "a tier change never repoints")
+			Expect(cl.Calls("DeleteActor")).To(Equal(1))
+		})
+
+		It("keeps the actor and the home of the last snapshot when a crashed actor is reverted (issue #1481)", func(ctx SpecContext) {
+			idleStop(ctx) // the suspend snapshot holds the marker
+			Expect(state()).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
+			now.Store(nil)
+			queueRun(ctx, org, user, agent.ID)
+			pass(ctx)
+			running()
+			name := actor()
+			cl.Crash(ws, name, "guest kernel panic")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("RevertActor")
+			}).Should(Equal(1))
+			running()
+			Expect(actor()).To(Equal(name))
+			Expect(cl.Calls("CreateActor")).To(Equal(1))
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(home()).To(Equal(markerBody))
+			Expect(row(ctx).LastSnapshotAt.Valid).To(BeTrue(), "the snapshot time of the idle stop is in Postgres")
+		})
+
+		It("loses the writes after the last snapshot when a crashed actor is reverted", func(ctx SpecContext) {
+			// HOME LOST (the part after the snapshot): the marker was written after the seal of the first
+			// boot, and no checkpoint holds it (checkpoints are off). The revert goes back to the seal.
+			cl.Crash(ws, actor(), "guest kernel panic")
+			Eventually(func(g Gomega) int {
+				g.Expect(r.ReconcileAll(ctx)).To(Succeed())
+				return cl.Calls("RevertActor")
+			}).Should(Equal(1))
+			running()
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(home()).To(BeNil())
+		})
+
+		It("loses the home when the repair recreates a crashed actor that has no snapshot", func(ctx SpecContext) {
 			dirtyHome(ctx, org, user, agent.ID)
-			cl.Crash(ws, names.Sandbox, "guest kernel panic")
+			cl.DropSnapshots(ws, actor()) // a revert would give an empty home
+			cl.Crash(ws, actor(), "guest kernel panic")
 			Expect(home()).To(Equal(markerBody), "the crashed actor still has its files")
 			Eventually(func(g Gomega) int {
 				g.Expect(r.ReconcileAll(ctx)).To(Succeed())

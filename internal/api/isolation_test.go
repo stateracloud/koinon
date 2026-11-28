@@ -60,18 +60,22 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
+	_ "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1" // linked so the registry spec finds the file; it has no RPCs
 	remoteagentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/remoteagent/v1alpha1/remoteagentv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
+	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
+	usagev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/usage/v1alpha1/usagev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
@@ -118,6 +122,20 @@ func serveIsolationAgent() *httptest.Server {
 }
 
 var isolationCases = map[string]isolationCase{
+	// The platform templates are shared by every org; the org's own are not (templates_org_test.go).
+	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{OrgId: org})
+		},
+		ownOrgOK: true,
+	},
+	templatev1alpha1connect.TemplateServiceCreateTemplateFromAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.templates.CreateTemplateFromAgent(ctx, &templatev1alpha1.CreateTemplateFromAgentRequest{
+				OrgId: org, AgentId: f.agent.GetId(), DisplayName: "Isolation probe",
+			})
+		},
+	},
 	agentv1alpha1connect.AgentServiceCreateAgentFromTemplateProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
@@ -241,6 +259,48 @@ var isolationCases = map[string]isolationCase{
 	platformv1alpha1connect.PlatformServiceGetOrgProcedure: {
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return c.platform.GetOrg(ctx, &platformv1alpha1.GetOrgRequest{OrgId: org})
+		},
+	},
+	// The platform console's lists of org resources (issue #1412): platform admins only, also with the
+	// caller's own org as the filter.
+	platformv1alpha1connect.PlatformResourceServiceListProvidersProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListProviders(ctx, &platformv1alpha1.ListProvidersRequest{OrgId: org})
+		},
+	},
+	platformv1alpha1connect.PlatformResourceServiceListTemplatesProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListTemplates(ctx, &platformv1alpha1.ListTemplatesRequest{OrgId: org})
+		},
+	},
+	platformv1alpha1connect.PlatformResourceServiceListMcpServersProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.platformResources.ListMcpServers(ctx, &platformv1alpha1.ListMcpServersRequest{OrgId: org})
+		},
+	},
+
+	// The usage and cost read model (issue #1268): an org call names the org only, so a member of
+	// another org gets NotFound; the platform calls refuse every org role.
+	usagev1alpha1connect.UsageServiceGetOrgUsageProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).GetOrgUsage(ctx, &usagev1alpha1.GetOrgUsageRequest{OrgId: org})
+		},
+	},
+	usagev1alpha1connect.UsageServiceExportOrgUsageProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).ExportOrgUsage(ctx, &usagev1alpha1.ExportOrgUsageRequest{OrgId: org})
+		},
+	},
+	usagev1alpha1connect.UsageServiceGetPlatformUsageProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).GetPlatformUsage(ctx, &usagev1alpha1.GetPlatformUsageRequest{})
+		},
+	},
+	usagev1alpha1connect.UsageServiceExportPlatformUsageProcedure: {
+		call: func(ctx context.Context, c *client, _ string, _ orgFixture) (proto.Message, error) {
+			return usageClient(c).ExportPlatformUsage(ctx, &usagev1alpha1.ExportPlatformUsageRequest{})
 		},
 	},
 
@@ -578,6 +638,12 @@ var isolationCases = map[string]isolationCase{
 			return priceClient(c).ListPrices(ctx, &budgetv1alpha1.ListPricesRequest{OrgId: org})
 		},
 	},
+	budgetv1alpha1connect.PriceServiceExplainOrgPricesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).ExplainOrgPrices(ctx, &budgetv1alpha1.ExplainOrgPricesRequest{OrgId: org})
+		},
+	},
 	budgetv1alpha1connect.PriceServiceSetPriceProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
@@ -785,6 +851,18 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return c.orgsettings.SetRunContentRetention(ctx, &orgsettingsv1alpha1.SetRunContentRetentionRequest{OrgId: org, Days: 7})
+		},
+	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceGetRunLimitsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.GetRunLimits(ctx, &orgsettingsv1alpha1.GetRunLimitsRequest{OrgId: org})
+		},
+	},
+	orgsettingsv1alpha1connect.OrgSettingsServiceSetRunLimitsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.orgsettings.SetRunLimits(ctx, &orgsettingsv1alpha1.SetRunLimitsRequest{OrgId: org, MaxConcurrentRuns: proto.Int32(12)})
 		},
 	},
 	orgsettingsv1alpha1connect.OrgSettingsServiceGetHomeBackupRetentionProcedure: {
@@ -1029,8 +1107,6 @@ var isolationExempt = map[string]string{
 	authv1alpha1connect.AuthServiceChangePasswordProcedure:               "changes the caller's own password; takes no IDs",
 	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
 		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
-	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
-		"takes no IDs",
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
 		"every org; takes no IDs",
 	gatewayv1alpha1connect.GatewayStateServiceStreamStateProcedure: "the install-wide gateway State stream (ADR 0097); " +
@@ -1105,7 +1181,7 @@ func foreignIDs(f orgFixture) []string {
 		f.org, f.owner.userID, f.viewer.userID, f.agent.GetId(), f.draft.GetId(), f.task.GetId(), f.run.GetId(), f.connection,
 		f.approval.ID.String(), f.question.ID.String(), f.token, f.provider, f.model, f.modelName,
 		f.mcpServer, f.remoteAgent, f.remoteAgentCardHash, f.traceDest, f.trustedHost, f.githubLogin,
-		f.appSetupState,
+		f.appSetupState, f.template, f.templateSlug,
 	}
 }
 
@@ -1116,6 +1192,13 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	f.draft = f.owner.draftAgent(ctx, f.org)
 	f.viewer = e.userIn(ctx, f.org, store.OrgRoleViewer)
 	f.appKey = appKey
+	// An org template of the org: org B must never see it.
+	f.templateSlug = "tpl-" + f.org
+	tpl, err := f.owner.templates.CreateTemplateFromAgent(ctx, &templatev1alpha1.CreateTemplateFromAgentRequest{
+		OrgId: f.org, AgentId: f.agent.GetId(), DisplayName: f.templateSlug, Slug: f.templateSlug,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.template = tpl.GetTemplate().GetId()
 	res, err := f.owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 		OrgId: f.org, AppId: 1, InstallationId: 2, PrivateKey: string(appKey),
 	})
@@ -1189,6 +1272,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 	org := f.org
 	return []int{
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM templates WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1 AND status = 'active'`, org),
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1 AND status = 'draft'`, org),
 		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1`, org),

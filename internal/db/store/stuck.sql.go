@@ -434,7 +434,7 @@ func (q *Queries) InsertUploadNonce(ctx context.Context, arg InsertUploadNoncePa
 }
 
 const listRecentAgentReplies = `-- name: ListRecentAgentReplies :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt, actor_external_id FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND kind = 'message' AND actor_kind = 'agent'
 ORDER BY seq DESC
 LIMIT $3
@@ -468,6 +468,9 @@ func (q *Queries) ListRecentAgentReplies(ctx context.Context, arg ListRecentAgen
 			&i.RunID,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.PayloadVersion,
+			&i.Prompt,
+			&i.ActorExternalID,
 		); err != nil {
 			return nil, err
 		}
@@ -596,7 +599,7 @@ const markSandboxUnhealthy = `-- name: MarkSandboxUnhealthy :one
 UPDATE agent_sandboxes
 SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), sandbox_id, home_generation, '')
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at, reason, home_dirtied_at, enforcement, actor_name, actor_uid, restored_sandbox_id, restored_checkpoint_id, restored_at, last_snapshot_at, revert_count, reverted_at, revert_snapshot_at
 `
 
 type MarkSandboxUnhealthyParams struct {
@@ -652,6 +655,15 @@ func (q *Queries) MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhea
 		&i.Reason,
 		&i.HomeDirtiedAt,
 		&i.Enforcement,
+		&i.ActorName,
+		&i.ActorUid,
+		&i.RestoredSandboxID,
+		&i.RestoredCheckpointID,
+		&i.RestoredAt,
+		&i.LastSnapshotAt,
+		&i.RevertCount,
+		&i.RevertedAt,
+		&i.RevertSnapshotAt,
 	)
 	return i, err
 }

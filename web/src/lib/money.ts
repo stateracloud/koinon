@@ -13,9 +13,17 @@ export const maxAmountUSD = '1000000'
 /** parsePico reads "12.50" as pico-USD, or undefined when it is not an amount the server accepts. */
 export function parsePico(s: string): bigint | undefined {
   const v = s.trim()
-  if (!amountPattern.test(v)) return undefined
-  const [whole, frac = ''] = v.split('.')
-  return BigInt(whole) * unit + BigInt(frac.padEnd(scale, '0'))
+  return amountPattern.test(v) ? parseLedgerPico(v) : undefined
+}
+
+/**
+ * parseLedgerPico reads a ledger amount the server sends ("12.5", a sum of many orgs) as pico-USD. Unlike parsePico,
+ * it has no limit on the whole part. Undefined when it is not a non-negative decimal with at most 12 fraction digits.
+ */
+export function parseLedgerPico(s: string): bigint | undefined {
+  const m = /^(\d+)(?:\.(\d{1,12}))?$/.exec(s.trim())
+  if (!m) return undefined
+  return BigInt(m[1]) * unit + BigInt((m[2] ?? '').padEnd(scale, '0'))
 }
 
 /** formatPico writes pico-USD as a decimal with at least two fraction digits and no trailing zeros beyond that. */

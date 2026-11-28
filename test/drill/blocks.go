@@ -71,6 +71,16 @@ var secretNameRE = regexp.MustCompile(`(?m)^(  name: )(\S+)$`)
 // namespace uses the same release name, so the guide has no such step; the drill needs it only
 // because source and target share a cluster (and so its cluster-scoped chart objects).
 func RenameKEKSecret(manifest, from, to string) (string, error) {
+	return renameSecret(manifest, from, to, "the KEK export")
+}
+
+// RenameGatewayKeySecret does the same for the gateway recipient key backup of `backup-gateway-key`
+// (<release>-gateway-recipient-key). restore-gateway-key refuses a file whose Secret is not the target's.
+func RenameGatewayKeySecret(manifest, from, to string) (string, error) {
+	return renameSecret(manifest, from, to, "the gateway key backup")
+}
+
+func renameSecret(manifest, from, to, what string) (string, error) {
 	found := 0
 	out := secretNameRE.ReplaceAllStringFunc(manifest, func(line string) string {
 		m := secretNameRE.FindStringSubmatch(line)
@@ -81,7 +91,7 @@ func RenameKEKSecret(manifest, from, to string) (string, error) {
 		return line
 	})
 	if found != 1 {
-		return "", fmt.Errorf("the KEK export names the Secret %q %d times, want exactly once", from, found)
+		return "", fmt.Errorf("%s names the Secret %q %d times, want exactly once", what, from, found)
 	}
 	return out, nil
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError, createClient } from '@connectrpc/connect'
+import { createClient } from '@connectrpc/connect'
 import { useTransport } from '@connectrpc/connect-query'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 import { caBundleError } from '@/lib/ca-bundle'
 
 /** GitHub's limit for an App's name. */
@@ -60,7 +61,7 @@ export function GitHubAppSetup({ orgId }: { orgId: string }) {
       })
       setState(res.state)
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
       setPending(false)
     }
   }

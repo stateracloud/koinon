@@ -14,7 +14,7 @@ cd "$tmp"
 git init -q -b main .
 g() { git -c user.name=t -c user.email=t@example.invalid "$@"; }
 printf 'module example.invalid/m\n\ngo 1.21\n' >go.mod
-for b in koinon-api koinon-reconciler koinon-agentd koinon-gateway koinon-fakemodel koinon-fakegithub koinon-fakemcp koinon-faketls; do
+for b in koinon-api koinon-reconciler koinon-agentd koinon-gateway koinon-fakemodel koinon-fakegithub koinon-fakegitea koinon-fakemcp koinon-faketls; do
   mkdir -p "cmd/$b"
   printf 'package main\n\nfunc main() {}\n' >"cmd/$b/main.go"
 done
@@ -35,12 +35,14 @@ chart1=$(git rev-parse HEAD~3)
 fail=0
 check() { if grep -q -- "$2" <<<"$1"; then echo "ok: $3"; else echo "FAIL: $3 (missing '$2')" >&2; fail=1; fi; }
 nocheck() { if grep -q -- "$2" <<<"$1"; then echo "FAIL: $3 (found '$2')" >&2; fail=1; else echo "ok: $3"; fi; }
+# The dispatch tool runs from the real checkout (go tool needs its module).
+export E2E_DISPATCH="$repo/hack/e2e-dispatch.sh"
 b() { hack/e2e-bisect.sh --dry-run "$@" 2>&1; }
 
 # Two relevant merges; the second fails.
 out=$(b --green "$green" --head HEAD --results "${chart2:0:7}=fail")
 check "$out" "e2e-relevant candidates: 2" "finds the two chart merges among five"
-check "$out" "would dispatch: gh workflow run e2e-kind.yml -f commit=$chart2 -f bisect_id=" "dispatches the second with the bisect id"
+check "$out" "would dispatch: gh workflow run e2e-kind.yml --ref main -f suite=go -f backup_restore=true -f commit=$chart2 -f bisect_id=" "dispatches the second with the bisect id"
 nocheck "$out" "feat(web)" "the web-only merge is not a candidate"
 check "$out" "Culprit: .* fix(chart): the culprit" "names the culprit"
 check "$out" "fix forward within 2 hours" "states the policy"
@@ -108,7 +110,7 @@ check "$out" "feat(chart): the real PR title" "uses the PR title for a merge com
 nocheck "$out" "Merge pull request" "never the merge subject"
 
 # Non-dry-run against a stub gh: the dispatched run is matched exactly (commit and bisect id).
-export GITHUB_RUN_ID=999 POLL_SECONDS=1 CANDIDATE_TIMEOUT=2
+export GITHUB_RUN_ID=999 POLL_SECONDS=1 CANDIDATE_TIMEOUT=2 DISPATCH_TIMEOUT=1s
 head=$(git rev-parse HEAD)
 fx="$tmp-gh"
 mkdir -p "$fx"
@@ -116,10 +118,17 @@ trap 'rm -rf "$tmp" "$fx"' EXIT
 cat >"$fx/runs.json" <<JSON
 [{"databaseId":50,"headSha":"$green","event":"push","conclusion":"success"}]
 JSON
+# The list before the dispatch holds a run of an earlier attempt with the same name (100). After the
+# dispatch of a commit, the list also holds the new runs. The fake gh switches per dispatched commit.
+cat >"$fx/dispatched-before.json" <<JSON
+[{"databaseId":100,"displayTitle":"e2e-kind ($head) bisect 999"}]
+JSON
 cat >"$fx/dispatched.json" <<JSON
-[{"databaseId":111,"displayTitle":"e2e-kind ($head) bisect 555"},
+[{"databaseId":100,"displayTitle":"e2e-kind ($head) bisect 999"},
+ {"databaseId":111,"displayTitle":"e2e-kind ($head) bisect 555"},
  {"databaseId":222,"displayTitle":"e2e-kind ($head) bisect 999"}]
 JSON
+echo '{"status":"completed","conclusion":"success"}' >"$fx/view-100.json"
 echo '{"status":"completed","conclusion":"success"}' >"$fx/view-111.json"
 echo '{"status":"completed","conclusion":"failure"}' >"$fx/view-222.json"
 cat >"$fx/gh" <<'SH'
@@ -128,7 +137,8 @@ echo "gh $*" >>"$FX/calls"
 jqexpr="" ; args=("$@")
 for i in "${!args[@]}"; do [[ ${args[$i]} == --jq ]] && jqexpr=${args[$((i + 1))]}; done
 case "$1 $2" in
-"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
+"workflow run") [[ $* == *"commit=$HEAD_SHA"* ]] && touch "$FX/dispatched-flag" ;;
+"run list") if [[ $* == *workflow_dispatch* ]]; then f=dispatched-before.json; [[ -e $FX/dispatched-flag ]] && f=dispatched.json; else f=${RUNS:-runs.json}; fi; jq -r "${jqexpr:-.}" "$FX/$f" ;;
 "run view") jq -r "${jqexpr:-.}" "$FX/view-$3.json" ;;
 "api repos/x/y/actions/runs/60/artifacts") echo "HTTP 502" >&2; exit 1 ;; # the artifacts call fails for run 60
 "api repos/x/y/actions/runs/40/artifacts") echo 1 ;; # only run 40 left a stories-green artifact
@@ -138,7 +148,7 @@ case "$1 $2" in
 esac
 SH
 chmod +x "$fx/gh"
-export FX="$fx" GH="$fx/gh"
+export FX="$fx" GH="$fx/gh" HEAD_SHA="$head"
 out=$(hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "candidate .*: fail" "the run named for this bisect id decides (222 fail), not the other one (111 pass)"
 nocheck "$out" "candidate .*: pass" "the run of another bisect is ignored"
@@ -155,6 +165,7 @@ cat >"$fx/runs2.json" <<JSON
  {"databaseId":40,"headSha":"$green","event":"schedule","conclusion":"success"}]
 JSON
 : >"$fx/calls"
+rm -f "$fx/dispatched-flag"
 out=$(RUNS=runs2.json STORIES_RED=1 GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $green" "stories-red: the baseline is the newest nightly with the stories-green artifact"
 check "$out" "cannot list the artifacts of run 60" "stories-red: an artifacts API error warns and the search moves to an older run"
@@ -177,6 +188,7 @@ nocheck "$out" "^e2e regression on main: " "stories-red: the final title is not 
 out=$(b --green "$green" --head HEAD --open-issue 42)
 check "$out" "main is red again" "quickstart failure: the comment still says main is red"
 : >"$fx/calls"
+rm -f "$fx/dispatched-flag"
 out=$(RUNS=runs2.json GH_REPO=x/y hack/e2e-bisect.sh --head HEAD 2>&1)
 check "$out" "baseline $head" "quickstart failure: the baseline is the newest green run"
 nocheck "$(cat "$fx/calls")" "stories=true" "quickstart failure: no stories input"

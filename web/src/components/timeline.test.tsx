@@ -6,7 +6,7 @@ import { Timeline } from '@/components/timeline'
 import { ActorKind } from '@/gen/koinon/task/v1alpha1/task_pb'
 import type { TimelineItem } from '@/lib/timeline'
 
-const msg = (key: string, actorUserId: string, actor = ActorKind.USER): TimelineItem => ({ key, at: 1000, type: 'message', actor, actorUserId, text: `text ${key}` })
+const msg = (key: string, actorUserId: string, actor = ActorKind.USER, actorName = ''): TimelineItem => ({ key, at: 1000, type: 'message', actor, actorUserId, actorName, text: `text ${key}` })
 
 describe('Timeline message authors', () => {
   it('says You only for the viewer and names the other member', () => {
@@ -20,16 +20,40 @@ describe('Timeline message authors', () => {
     expect(agent).toHaveTextContent('Agent')
   })
 
-  it('names other members from the member map, and falls back when the id is unknown', () => {
-    const names = new Map([['u-2', 'Sam Example']])
-    render(<Timeline meUserId="u-1" memberNames={names} items={[msg('b', 'u-2'), msg('c', 'u-3')]} />)
-    const [sam, unknown] = screen.getAllByRole('article')
-    expect(sam).toHaveTextContent('Sam Example')
-    expect(unknown).toHaveTextContent('Another member')
+  it('names another member from the name on the event', () => {
+    render(<Timeline meUserId="u-1" items={[msg('b', 'u-2', ActorKind.USER, 'Sam Example')]} />)
+    expect(screen.getByRole('article')).toHaveTextContent('Sam Example')
   })
 
   it('does not say You before the viewer is known', () => {
     render(<Timeline items={[msg('a', 'u-1')]} />)
     expect(screen.getByRole('article')).not.toHaveTextContent('You')
+  })
+})
+
+const ext = (key: string, platform: string, platformUserId: string): TimelineItem => ({
+  key,
+  at: 1000,
+  type: 'message',
+  actor: ActorKind.EXTERNAL,
+  actorUserId: '',
+  actorName: '',
+  external: { platform, platformUserId },
+  text: `text ${key}`,
+})
+
+describe('Timeline messages from a person without a Koinon account (ADR 0130)', () => {
+  it('names the platform and the platform user ID, says there is no account, and never says You', () => {
+    render(<Timeline meUserId="u-1" items={[ext('x', 'slack', 'U0TEST')]} />)
+    const article = screen.getByRole('article')
+    expect(article).toHaveTextContent('Slack user U0TEST')
+    expect(article).toHaveTextContent('No Koinon account')
+    expect(article).not.toHaveTextContent('You')
+    expect(article.className).not.toContain('ml-auto')
+  })
+
+  it('says Teams for a Teams person', () => {
+    render(<Timeline items={[ext('t', 'teams', '29:abc')]} />)
+    expect(screen.getByRole('article')).toHaveTextContent('Teams user 29:abc')
   })
 })

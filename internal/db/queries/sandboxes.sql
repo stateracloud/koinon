@@ -12,28 +12,6 @@ SELECT id, slug FROM orgs
 WHERE deleted_at IS NULL
 ORDER BY id;
 
--- name: ListOrgWorkspacesForUnmarked :many
--- The live orgs and the workspace each has recorded (NULL before its first reconcile), for the
--- unmarked list command (issue 511). An org that is deleted counts as not in the database: the
--- reconciler does not walk it.
-SELECT o.id AS org_id, w.workspace
-FROM orgs o
-LEFT JOIN org_workspaces w ON w.org_id = o.id
-WHERE o.deleted_at IS NULL
-ORDER BY o.id;
-
--- name: ListAgentsForUnmarked :many
--- Every agent of the live orgs, archived ones included, for the unmarked list command (issue 511),
--- with the state of its sandbox row (NULL when it has none): the list tells a sandbox that waits for
--- the agent to change status from one the reconciler claims. The row's own sandbox and provider names
--- are the ones the reconciler acts on (an ephemeral agent's row can name a kt- task sandbox).
-SELECT a.org_id, a.id, a.status, a.harness, s.state AS sandbox_state, s.sandbox_name, s.provider_name
-FROM agents a
-JOIN orgs o ON o.id = a.org_id
-LEFT JOIN agent_sandboxes s ON s.org_id = a.org_id AND s.agent_id = a.id
-WHERE o.deleted_at IS NULL
-ORDER BY a.org_id, a.id;
-
 -- name: GetOrgWorkspace :one
 SELECT * FROM org_workspaces
 WHERE org_id = @org_id;
@@ -83,6 +61,13 @@ SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
+-- name: DatabaseClock :one
+-- The database clock now (issue #1481). The reconciler reads it just before a backend call that can take
+-- a snapshot and records it as the snapshot time (a lower bound: the snapshot holds every write before
+-- it). restored_at and the checkpoint times come from this clock too, so the crash path compares times
+-- of one clock only.
+SELECT clock_timestamp()::timestamptz AS now;
+
 -- name: RecordAgentSandbox :one
 -- Records the observed sandbox. started_at and stopped_at are stamped on the
 -- transition into ready and stopped. An empty home_generation (no sandbox
@@ -108,6 +93,12 @@ SET state = @state::sandbox_state,
     home_dirtied_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
                             AND @home_generation::text IS DISTINCT FROM sandbox_id
                            THEN NULL ELSE home_dirtied_at END,
+    -- The snapshot clock belongs to one sandbox too (issue #1481). A snapshot time never goes back; an
+    -- unknown one (NULL) keeps the recorded time.
+    last_snapshot_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                             AND @home_generation::text IS DISTINCT FROM sandbox_id
+                            THEN sqlc.narg('snapshot_at')::timestamptz
+                            ELSE GREATEST(last_snapshot_at, sqlc.narg('snapshot_at')::timestamptz) END,
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
@@ -215,9 +206,51 @@ SET sandbox_name = @sandbox_name,
     restore_claimed_at = NULL,
     sandbox_id = NULL,
     home_generation = NULL,
-    home_dirtied_at = NULL
+    home_dirtied_at = NULL,
+    -- The task sandbox is a new actor: it gets a new actor name (issue #1386).
+    actor_name = NULL,
+    actor_uid = NULL,
+    -- A revert belonged to the previous sandbox (issue #1526). The count only goes up, so an owner that
+    -- reported it is not told twice; without a revert time, a new run does not report it.
+    reverted_at = NULL,
+    revert_snapshot_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
+
+-- name: SetAgentSandboxActorName :one
+-- Records the name of a new actor before the driver creates it (issue #1386, ADR 0120 amendment item 6).
+-- The name is new and never used again; the new actor has no observed UID yet. It also resets the agent's
+-- forge row, so no run passes waitForge on a State revision of the old actor before the new UID is
+-- recorded (SetAgentSandboxActorUID resets it again).
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    WHERE f.org_id = @org_id AND f.agent_id = @agent_id
+)
+UPDATE agent_sandboxes a
+SET actor_name = @actor_name::text,
+    actor_uid = NULL
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+RETURNING a.*;
+
+-- name: SetAgentSandboxActorUID :one
+-- Records the UID of the observed actor actor_name (issue #1386). A new UID also resets the agent's forge
+-- row: its run waits again until every live koinon-gateway copy acked a State revision that holds the
+-- actor (gateway_agent_forge, agentd waitForge). No row: the name is not the recorded one, or the UID is
+-- recorded already.
+WITH forge AS (
+    UPDATE gateway_agent_forge f
+    SET state_revision = NULL, served_at = NULL, updated_at = now()
+    FROM agent_sandboxes s
+    WHERE f.org_id = @org_id AND f.agent_id = @agent_id
+      AND s.org_id = f.org_id AND s.agent_id = f.agent_id
+      AND s.actor_name = @actor_name::text AND s.actor_uid IS DISTINCT FROM @actor_uid::text
+)
+UPDATE agent_sandboxes a
+SET actor_uid = @actor_uid::text
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+  AND a.actor_name = @actor_name::text AND a.actor_uid IS DISTINCT FROM @actor_uid::text
+RETURNING a.*;
 
 -- name: WakeAgentSandbox :one
 -- The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
@@ -239,3 +272,15 @@ SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));
 -- Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 -- no org-owned row, so it takes no @org_id.
 SELECT state, count(*)::bigint AS n FROM agent_sandboxes GROUP BY state;
+
+-- name: NoteSandboxRevert :one
+-- Records that the reconciler reverted the agent's sandbox to its last snapshot (issue #1526). The
+-- reconciler does not own a run, so it writes this fact and the run's owner turns it into a run event.
+-- The count goes up once per accepted revert; the snapshot time is the one known at the revert (NULL:
+-- not known).
+UPDATE agent_sandboxes
+SET revert_count = revert_count + 1,
+    reverted_at = clock_timestamp(),
+    revert_snapshot_at = last_snapshot_at
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;

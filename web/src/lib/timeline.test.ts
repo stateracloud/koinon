@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { create, type JsonObject } from '@bufbuild/protobuf'
-import { timestampFromMs } from '@bufbuild/protobuf/wkt'
+import { create, type JsonObject, type MessageInitShape } from '@bufbuild/protobuf'
+import { timestampFromDate, timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { RunEventSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, TaskEventSchema } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { ActorKind, ExternalActorSchema, TaskEventSchema } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { TimelineEventSchema, type TimelineEvent } from '@/gen/koinon/task/v1alpha1/timeline_pb'
 import { buildTimeline } from '@/lib/timeline'
 
 const run = 'r-1234567890'
@@ -14,8 +15,49 @@ const run = 'r-1234567890'
 const runEvent = (seq: number, kind: string, payload: JsonObject) =>
   create(RunEventSchema, { runId: run, seq: BigInt(seq), kind, payload, createdAt: timestampFromMs(1000 + seq * 10) })
 
-const taskEvent = (seq: number, at: number, kind: string, payload: JsonObject, actorKind = ActorKind.SYSTEM, actorUserId = '') =>
-  create(TaskEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, actorUserId, payload, createdAt: timestampFromMs(at) })
+// The kind string of each member of the TimelineEvent oneof, as internal/tasks writes it.
+const kinds: Record<NonNullable<TimelineEvent['event']['case']>, string> = {
+  message: 'message',
+  taskCreated: 'task.created',
+  statusChanged: 'status.changed',
+  runQueued: 'run.queued',
+  runParked: 'run.parked',
+  runFailed: 'run.failed',
+  runCanceled: 'run.canceled',
+  runSessionReset: 'run.session_reset',
+  runSessionRestarted: 'run.session_restarted',
+  sandboxRecreated: 'sandbox.recreated',
+  sandboxWorkLost: 'sandbox.work_lost',
+  agentUnhealthy: 'agent.unhealthy',
+  approvalRequested: 'approval.requested',
+  approvalFirstApproved: 'approval.first_approved',
+  approvalApproved: 'approval.approved',
+  approvalDenied: 'approval.denied',
+  approvalExecuted: 'approval.executed',
+  approvalFailed: 'approval.failed',
+  approvalExpired: 'approval.expired',
+  approvalCanceled: 'approval.canceled',
+  questionAsked: 'question.asked',
+  questionAnswered: 'question.answered',
+  questionDismissed: 'question.dismissed',
+  questionExpired: 'question.expired',
+  questionCanceled: 'question.canceled',
+  questionRetargeted: 'question.retargeted',
+}
+
+type Body = MessageInitShape<typeof TimelineEventSchema>['event']
+
+// Task events as the API sends them: the typed event, and its kind.
+const taskEvent = (seq: number, at: number, body: Body, actorKind = ActorKind.SYSTEM, actorUserId = '') => {
+  const event = create(TimelineEventSchema, { event: body })
+  const kind = event.event.case ? kinds[event.event.case] : ''
+  return create(TaskEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, actorUserId, event, createdAt: timestampFromMs(at) })
+}
+
+const message = (text: string): Body => ({ case: 'message', value: { text } })
+const moved = (from: string, to: string, reason = ''): Body => ({ case: 'statusChanged', value: { from, to, reason } })
+const runFailed = (value: Extract<Body, { case: 'runFailed' }>['value']): Body => ({ case: 'runFailed', value })
+const runCanceled = (value: Extract<Body, { case: 'runCanceled' }>['value']): Body => ({ case: 'runCanceled', value })
 
 const text = (t: string) => ({ type: 'text', text: t })
 
@@ -99,13 +141,44 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a sandbox revert as a note, with and without the snapshot time', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.sandbox_reverted', { revert: 1, snapshot_at: '2026-11-28T01:00:00Z' }),
+        runEvent(2, 'run.sandbox_reverted', { revert: 2 }),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456: the sandbox crashed and was reverted to its last snapshot; the writes after 2026-11-28T01:00:00Z are lost',
+      'Run r-123456: the sandbox crashed and was reverted to its last snapshot; the writes after its last snapshot are lost',
+    ])
+  })
+
+  it('shows a home restore that fell back to an older checkpoint as a note', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.home_fell_back', {
+          checkpoint: 'c-old',
+          taken_at: '2026-11-28T01:00:00Z',
+          skipped: [{ checkpoint: 'c-new', taken_at: '2026-11-28T02:00:00Z', reason: 'its files do not match the recorded digest' }],
+          lost: 'the writes after 2026-11-28T01:00:00Z',
+        }),
+        runEvent(2, 'run.home_fell_back', {}),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456: the home restore skipped the checkpoint of 2026-11-28T02:00:00Z (its files do not match the recorded digest) and used the checkpoint of 2026-11-28T01:00:00Z; the writes after 2026-11-28T01:00:00Z are lost',
+      'Run r-123456: the home restore used an older checkpoint; the writes after it are lost',
+    ])
+  })
+
   it('says why a task waits on its owner after a run hit its time limit', () => {
     const items = buildTimeline(
       [
-        taskEvent(1, 100, 'status.changed', { from: 'working', to: 'input_required', reason: 'continuation_limit' }),
-        taskEvent(2, 200, 'status.changed', { from: 'working', to: 'input_required', reason: 'task_spend_cap' }),
-        taskEvent(3, 300, 'status.changed', { from: 'working', to: 'input_required', reason: 'continuation_agent_unavailable' }),
-        taskEvent(4, 400, 'status.changed', { from: 'working', to: 'input_required', reason: 'something_new' }),
+        taskEvent(1, 100, moved('working', 'input_required', 'continuation_limit')),
+        taskEvent(2, 200, moved('working', 'input_required', 'task_spend_cap')),
+        taskEvent(3, 300, moved('working', 'input_required', 'continuation_agent_unavailable')),
+        taskEvent(4, 400, moved('working', 'input_required', 'something_new')),
       ],
       {},
     )
@@ -118,20 +191,20 @@ describe('buildTimeline', () => {
   })
 
   it('shows a park and its approval task events', () => {
-    const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
+    const base = { approvalId: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', argsSha256: 'ab' }
     const items = buildTimeline(
       [
-        taskEvent(1, 100, 'approval.requested', { ...base, decision: 'ask', risk: {} }, ActorKind.AGENT),
-        taskEvent(2, 200, 'run.parked', { reason: 'approval', approvals: ['ap-1'] }),
-        taskEvent(3, 300, 'status.changed', { from: 'working', to: 'input_required' }),
-        taskEvent(4, 400, 'approval.approved', { ...base, note: 'ship it' }, ActorKind.USER),
-        taskEvent(5, 500, 'approval.executed', { ...base, result: { url: 'https://github.com/Acme/Widgets/pull/7', number: 7 } }),
-        taskEvent(6, 600, 'approval.failed', { ...base, error: 'base branch gone' }),
-        taskEvent(7, 700, 'approval.denied', base, ActorKind.USER),
-        taskEvent(8, 800, 'approval.expired', { ...base, expires_at: '2026-10-29T00:00:00Z' }),
-        taskEvent(9, 900, 'approval.canceled', { ...base, reason: 'run ended' }),
-        taskEvent(10, 950, 'approval.requested', { ...base, decision: 'allow' }, ActorKind.AGENT),
-        taskEvent(11, 1000, 'run.canceled', { reason: 'approval_expired', message: 'nobody decided in time' }),
+        taskEvent(1, 100, { case: 'approvalRequested', value: { ...base, decision: 'ask', risk: { kind: { case: 'structValue', value: {} } } } }, ActorKind.AGENT),
+        taskEvent(2, 200, { case: 'runParked', value: { reason: 'approval', approvalIds: ['ap-1'] } }),
+        taskEvent(3, 300, moved('working', 'input_required')),
+        taskEvent(4, 400, { case: 'approvalApproved', value: { ...base, note: 'ship it' } }, ActorKind.USER),
+        taskEvent(5, 500, { case: 'approvalExecuted', value: { ...base, result: { url: 'https://github.com/Acme/Widgets/pull/7', number: 7 } } }),
+        taskEvent(6, 600, { case: 'approvalFailed', value: { ...base, error: 'base branch gone' } }),
+        taskEvent(7, 700, { case: 'approvalDenied', value: base }, ActorKind.USER),
+        taskEvent(8, 800, { case: 'approvalExpired', value: { ...base, expiresAt: timestampFromDate(new Date('2026-10-29T00:00:00Z')) } }),
+        taskEvent(9, 900, { case: 'approvalCanceled', value: { ...base, reason: 'run ended' } }),
+        taskEvent(10, 950, { case: 'approvalRequested', value: { ...base, decision: 'allow' } }, ActorKind.AGENT),
+        taskEvent(11, 1000, runCanceled({ reason: 'approval_expired', message: 'nobody decided in time' })),
       ],
       {},
     )
@@ -156,11 +229,12 @@ describe('buildTimeline', () => {
   })
 
   it('names the scope that allowed a call without a decision', () => {
-    const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
+    const until = timestampFromDate(new Date('2099-03-04T12:00:00Z'))
+    const base = { approvalId: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', argsSha256: 'ab' }
     const items = buildTimeline(
       [
-        taskEvent(1, 100, 'approval.approved', { ...base, scope_id: 'sc-1', scope_kind: 'agent', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.USER),
-        taskEvent(2, 200, 'approval.requested', { ...base, decision: 'allow', scope_id: 'sc-1', scope_kind: 'task', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.AGENT),
+        taskEvent(1, 100, { case: 'approvalApproved', value: { ...base, scope: { id: 'sc-1', kind: 'agent', expiresAt: until } } }, ActorKind.USER),
+        taskEvent(2, 200, { case: 'approvalRequested', value: { ...base, decision: 'allow', scope: { id: 'sc-1', kind: 'task', expiresAt: until } } }, ActorKind.AGENT),
       ],
       {},
     )
@@ -170,12 +244,29 @@ describe('buildTimeline', () => {
     expect(items[1]).toMatchObject({ ask: false })
   })
 
+  it('names a scope without an end, and the first of two approvals', () => {
+    const base = { approvalId: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets' }
+    const never = timestampFromDate(new Date('0001-01-01T00:00:00Z'))
+    const items = buildTimeline(
+      [
+        taskEvent(1, 100, { case: 'approvalFirstApproved', value: { ...base, note: 'looks fine' } }, ActorKind.USER),
+        taskEvent(2, 200, { case: 'approvalApproved', value: { ...base, scope: { id: 'sc-1', kind: 'agent', expiresAt: never } } }, ActorKind.USER),
+      ],
+      {},
+    )
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'First approval of two: create_pull_request on Acme/Widgets: looks fine',
+      'Approved create_pull_request on Acme/Widgets for this agent',
+    ])
+    expect(items[0]).toMatchObject({ type: 'approval', kind: 'approval.first_approved', ask: false })
+  })
+
   it('shows a session reset as a note', () => {
     const message = "The agent's home was reset, so this run starts a new session."
     const items = buildTimeline(
       [
-        taskEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
-        taskEvent(2, 200, 'run.session_reset', {}),
+        taskEvent(1, 100, { case: 'runSessionReset', value: { message, previousSessionId: 'ses_1', sessionId: 'ses_2' } }),
+        taskEvent(2, 200, { case: 'runSessionReset', value: {} }),
       ],
       {},
     )
@@ -188,11 +279,11 @@ describe('buildTimeline', () => {
   it("shows Koinon's sandbox and health events as notes with their message", () => {
     const items = buildTimeline(
       [
-        taskEvent(1, 100, 'sandbox.recreated', { message: 'Sandbox recreated: stuck process' }),
-        taskEvent(2, 200, 'sandbox.work_lost', { message: 'Unsaved work was lost' }),
-        taskEvent(3, 300, 'agent.unhealthy', { message: 'Agent marked unhealthy: repeated stuck sandboxes' }),
-        taskEvent(4, 400, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
-        taskEvent(5, 500, 'sandbox.recreated', {}),
+        taskEvent(1, 100, { case: 'sandboxRecreated', value: { message: 'Sandbox recreated: stuck process' } }),
+        taskEvent(2, 200, { case: 'sandboxWorkLost', value: { message: 'Unsaved work was lost' } }),
+        taskEvent(3, 300, { case: 'agentUnhealthy', value: { message: 'Agent marked unhealthy: repeated stuck sandboxes' } }),
+        taskEvent(4, 400, { case: 'runSessionRestarted', value: { message: 'Session restarted: new instructions.' } }),
+        taskEvent(5, 500, { case: 'sandboxRecreated', value: {} }),
       ],
       {},
     )
@@ -208,7 +299,7 @@ describe('buildTimeline', () => {
 
   it('gives a system-requested approval (saved work) an approval item that a human decides', () => {
     const items = buildTimeline(
-      [taskEvent(1, 100, 'approval.requested', { system: true, approval_id: 'ap-9', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: 'abc' })],
+      [taskEvent(1, 100, { case: 'approvalRequested', value: { system: true, approvalId: 'ap-9', tool: 'push_saved_work', target: 'github:acme/widgets', argsSha256: 'abc' } })],
       {},
     )
     expect(items[0]).toMatchObject({ type: 'approval', approvalId: 'ap-9', kind: 'approval.requested', ask: true, text: 'Approval requested: push_saved_work on acme/widgets' })
@@ -224,7 +315,7 @@ describe('buildTimeline', () => {
   })
 
   it('shows a streamed reply once when the persisted message arrives', () => {
-    const items = buildTimeline([taskEvent(1, 1100, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
+    const items = buildTimeline([taskEvent(1, 1100, message('Hello there'), ActorKind.AGENT)], {
       [run]: [chunk(1, 'Hello '), chunk(2, 'there')],
     })
     expect(agentTexts(items)).toEqual(['Hello there'])
@@ -234,9 +325,9 @@ describe('buildTimeline', () => {
   it('shows each reply once across a park and resume', () => {
     const items = buildTimeline(
       [
-        taskEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT),
-        taskEvent(2, 1200, 'run.parked', { reason: 'approval', approvals: ['a'] }),
-        taskEvent(3, 1500, 'message', { text: 'The pull request is open.' }, ActorKind.AGENT),
+        taskEvent(1, 1100, message('Asked for approval.'), ActorKind.AGENT),
+        taskEvent(2, 1200, { case: 'runParked', value: { reason: 'approval', approvalIds: ['a'] } }),
+        taskEvent(3, 1500, message('The pull request is open.'), ActorKind.AGENT),
       ],
       { [run]: [chunk(1, 'Asked for '), chunk(2, 'approval.'), chunk(30, 'The pull request '), chunk(31, 'is open.')] },
     )
@@ -244,7 +335,7 @@ describe('buildTimeline', () => {
   })
 
   it('keeps the live text of a resumed turn until its message is persisted', () => {
-    const items = buildTimeline([taskEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT)], {
+    const items = buildTimeline([taskEvent(1, 1100, message('Asked for approval.'), ActorKind.AGENT)], {
       [run]: [chunk(1, 'Asked for approval.'), chunk(30, 'Resumed, still typing')],
     })
     expect(agentTexts(items)).toEqual(['Asked for approval.', 'Resumed, still typing'])
@@ -252,7 +343,7 @@ describe('buildTimeline', () => {
 
   it('shows a reply once when its last chunk lands in the same millisecond as the persisted message', () => {
     // chunk(2) is at 1020 ms; the message is persisted in that same millisecond, and the task event sorts first by order.
-    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
+    const items = buildTimeline([taskEvent(1, 1020, message('Hello there'), ActorKind.AGENT)], {
       [run]: [chunk(1, 'Hello '), chunk(2, 'there')],
     })
     expect(agentTexts(items)).toEqual(['Hello there'])
@@ -261,14 +352,14 @@ describe('buildTimeline', () => {
 
   it('keeps a task event that follows the reply in the same millisecond after it', () => {
     const items = buildTimeline(
-      [taskEvent(1, 1020, 'message', { text: 'Hello there' }, ActorKind.AGENT), taskEvent(2, 1020, 'message', { text: 'thanks' }, ActorKind.USER)],
+      [taskEvent(1, 1020, message('Hello there'), ActorKind.AGENT), taskEvent(2, 1020, message('thanks'), ActorKind.USER)],
       { [run]: [chunk(1, 'Hello '), chunk(2, 'there')] },
     )
     expect(items.map((i) => (i.type === 'message' ? i.text : i.type))).toEqual(['Hello there', 'thanks'])
   })
 
   it('keeps a user message that shares a millisecond with a chunk in its place', () => {
-    const items = buildTimeline([taskEvent(1, 1010, 'message', { text: 'hi' }, ActorKind.USER)], { [run]: [chunk(1, 'Hello')] })
+    const items = buildTimeline([taskEvent(1, 1010, message('hi'), ActorKind.USER)], { [run]: [chunk(1, 'Hello')] })
     expect(items.map((i) => i.type)).toEqual(['message', 'agent-text'])
   })
 
@@ -276,8 +367,8 @@ describe('buildTimeline', () => {
     const run2 = 'r-2234567890'
     const chunk2 = (seq: number, t: string) =>
       create(RunEventSchema, { runId: run2, seq: BigInt(seq), kind: 'acp.agent_message_chunk', payload: { sessionUpdate: 'agent_message_chunk', content: text(t) }, createdAt: timestampFromMs(2000 + seq * 10) })
-    const reply2 = create(TaskEventSchema, { seq: 2n, runId: run2, kind: 'message', actorKind: ActorKind.AGENT, payload: { text: 'Second' }, createdAt: timestampFromMs(2020) })
-    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'First' }, ActorKind.AGENT), reply2], {
+    const reply2 = create(TaskEventSchema, { ...taskEvent(2, 2020, message('Second'), ActorKind.AGENT), runId: run2 })
+    const items = buildTimeline([taskEvent(1, 1020, message('First'), ActorKind.AGENT), reply2], {
       [run]: [chunk(1, 'Fir'), chunk(2, 'st')],
       [run2]: [chunk2(1, 'Sec'), chunk2(2, 'ond')],
     })
@@ -286,13 +377,13 @@ describe('buildTimeline', () => {
 
   it('keeps a thought chunk when the reply is persisted', () => {
     const thought = runEvent(1, 'acp.agent_thought_chunk', { sessionUpdate: 'agent_thought_chunk', content: text('Thinking') })
-    const items = buildTimeline([taskEvent(1, 1020, 'message', { text: 'Done' }, ActorKind.AGENT)], { [run]: [thought, chunk(2, 'Done')] })
+    const items = buildTimeline([taskEvent(1, 1020, message('Done'), ActorKind.AGENT)], { [run]: [thought, chunk(2, 'Done')] })
     expect(items.map((i) => i.type)).toEqual(['agent-text', 'message'])
     expect(items[0]).toMatchObject({ thought: true, text: 'Thinking' })
   })
 
   it('keeps the streamed text of a failed run that persisted no reply', () => {
-    const items = buildTimeline([taskEvent(1, 1030, 'run.failed', { reason: 'boom' })], { [run]: [chunk(1, 'Half a rep'), chunk(2, 'ly')] })
+    const items = buildTimeline([taskEvent(1, 1030, runFailed({ reason: 'boom' }))], { [run]: [chunk(1, 'Half a rep'), chunk(2, 'ly')] })
     expect(agentTexts(items)).toEqual(['Half a reply'])
     expect(items.map((i) => i.type)).toEqual(['agent-text', 'note'])
   })
@@ -301,19 +392,43 @@ describe('buildTimeline', () => {
 describe('a spend limit', () => {
   it('shows the task note the ledger writes when a run is stopped at a limit', () => {
     const items = buildTimeline(
-      [taskEvent(1, 100, 'run.canceled', { reason: 'spend_limit', limit: 'org_monthly', message: 'Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })],
+      [taskEvent(1, 100, runCanceled({ reason: 'spend_limit', limit: 'org_monthly', message: 'Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' }))],
       {},
     )
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ type: 'note', text: 'Run r-123456 stopped at a spend limit: Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })
   })
 
-  it('names states from events written before the move from tickets', () => {
+  it('names the task states, and a state that it does not know', () => {
     const items = buildTimeline(
-      [taskEvent(1, 100, 'status.changed', { from: 'todo', to: 'waiting_on_you' }), taskEvent(2, 200, 'status.changed', { from: 'input_required', to: 'completed' }), taskEvent(3, 300, 'ticket.created', { title: 'Old' })],
+      [taskEvent(1, 100, moved('submitted', 'input_required')), taskEvent(2, 200, moved('', 'completed')), taskEvent(3, 300, { case: 'taskCreated', value: { title: 'New' } })],
       {},
     )
-    expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual(['Moved from Submitted to Input required', 'Moved from Input required to Completed', 'Task created: Old'])
+    expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual(['Moved from Submitted to Input required', 'Moved from Unknown to Completed', 'Task created: New'])
+  })
+
+  it('shows the kind of an event that the server cannot type, and not its payload', () => {
+    // The server leaves event unset for a kind that it does not know, or for a payload that it cannot read.
+    const items = buildTimeline(
+      [
+        create(TaskEventSchema, { seq: 1n, kind: 'future.kind', payload: { text: 'x' }, createdAt: timestampFromMs(100) }),
+        create(TaskEventSchema, { seq: 2n, kind: 'approval.requested', payload: { approval_id: 7 }, createdAt: timestampFromMs(200) }),
+      ],
+      {},
+    )
+    expect(items).toEqual([
+      { key: 't:1', at: 100, type: 'note', text: 'future.kind' },
+      { key: 't:2', at: 200, type: 'note', text: 'approval.requested' },
+    ])
+  })
+
+  it('shows what a person wrote in a direct message, not the instruction before it', () => {
+    const items = buildTimeline([taskEvent(1, 100, { case: 'message', value: { text: 'Instruction.\n\nhello', display: 'hello', source: 'direct_message' } }, ActorKind.USER)], {})
+    expect(items[0]).toMatchObject({ type: 'message', text: 'hello' })
+  })
+
+  it('shows a queued run', () => {
+    expect(buildTimeline([taskEvent(1, 100, { case: 'runQueued', value: { maxWallClockSeconds: 1800 } })], {})[0]).toMatchObject({ type: 'note', text: 'Run r-123456 queued' })
   })
 
   describe('time limit, sandbox cap and question notes', () => {
@@ -323,31 +438,36 @@ describe('a spend limit', () => {
     }
 
     it('says a run stopped at the time limit, with the last summary', () => {
-      const [text] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'reply' }))
+      const [text] = noteText(taskEvent(1, 100, runCanceled({ reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'reply' })))
       expect(text).toContain('stopped at the time limit of 30m')
       expect(text).toContain('Last summary:\nS')
     })
 
     it('says when the summary came from the agent\'s notes', () => {
-      const [text] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'notes' }))
+      const [text] = noteText(taskEvent(1, 100, runCanceled({ reason: 'wall_clock_cap', maxWallClockSeconds: 1800, summary: 'S', summarySource: 'notes' })))
       expect(text).toContain("(from the agent's notes)")
     })
 
     it('says a run stopped at its model request or spend limit, with the last summary (ADR 0081)', () => {
-      const [req] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' }))
+      const [req] = noteText(taskEvent(1, 100, runCanceled({ reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' })))
       expect(req).toContain('stopped at its model request limit: model request limit reached (150 of 150 requests)')
       expect(req).toContain('Last summary:\nS')
-      const [spend] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' }))
+      const [spend] = noteText(taskEvent(1, 100, runCanceled({ reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' })))
       expect(spend).toContain('stopped at its spend limit: run spend limit reached ($2.01 of $2.00)')
     })
 
+    it('says a limit was reached when the note has no message or no limit', () => {
+      expect(noteText(taskEvent(1, 100, runCanceled({ reason: 'request_cap' })))).toEqual(['Run r-123456 stopped at its model request limit: the limit was reached.'])
+      expect(noteText(taskEvent(1, 100, runCanceled({ reason: 'wall_clock_cap' })))).toEqual(['Run r-123456 stopped at the time limit.'])
+    })
+
     it('names why a sandbox never became ready', () => {
-      const [text] = noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: 'no_nodes' }))
+      const [text] = noteText(taskEvent(1, 100, runFailed({ reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: 'no_nodes' })))
       expect(text).toContain('no node can run the sandbox')
     })
 
     it('names a crash loop, an image pull and an unknown cause', () => {
-      const text = (cause: string) => noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: cause }))[0]
+      const text = (cause: string) => noteText(taskEvent(1, 100, runFailed({ reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: cause })))[0]
       expect(text('crash_loop')).toContain('a container in the sandbox keeps crashing')
       expect(text('container_create')).toContain('a container in the sandbox could not be created')
       expect(text('image_pull')).toContain('the image could not be pulled')
@@ -356,26 +476,26 @@ describe('a spend limit', () => {
 
     it('shows the one nudge to a looping agent and the stop after it', () => {
       expect(noteText(runEvent(1, 'run.loop_nudge', { pattern: 'same_error' }))[0]).toContain('looping (the same action failing)')
-      expect(noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'loop' }))[0]).toContain('kept looping')
+      expect(noteText(taskEvent(1, 100, runFailed({ reason: 'x', failureClass: 'loop' })))[0]).toContain('kept looping')
     })
 
     it('says when the loop stop came without the agent being asked', () => {
       const reason = 'the agent kept looping and could not be asked to change its approach (the harness ignored the cancel): it repeated the same action'
-      const note = noteText(taskEvent(1, 100, 'run.failed', { reason, failureClass: 'loop' }))[0]
+      const note = noteText(taskEvent(1, 100, runFailed({ reason, failureClass: 'loop' })))[0]
       expect(note).toContain('could not be asked')
       expect(note).not.toContain('after it was asked')
     })
 
     it('shows who answered a question', () => {
-      expect(noteText(taskEvent(1, 100, 'question.answered', { answered_by_name: 'Ana', answer: 'Yes' }))).toEqual(['Ana answered: Yes'])
+      expect(noteText(taskEvent(1, 100, { case: 'questionAnswered', value: { answeredByName: 'Ana', answer: 'Yes' } }))).toEqual(['Ana answered: Yes'])
     })
 
     it('shows the other ends of a question', () => {
-      expect(noteText(taskEvent(1, 100, 'question.asked', { to_label: "the org's admins", question: 'Ship it?' }))).toEqual(["Asked the org's admins: Ship it?"])
-      expect(noteText(taskEvent(1, 100, 'question.dismissed', { answered_by_name: 'Ana', answer: 'No' }))).toEqual(['Ana dismissed the question; the default applied: No'])
-      expect(noteText(taskEvent(1, 100, 'question.expired', { answer: 'No' }))).toEqual(['Nobody answered in time; the default applied: No'])
-      expect(noteText(taskEvent(1, 100, 'question.canceled', {}))).toEqual(['The question was closed: the run ended'])
-      expect(noteText(taskEvent(1, 100, 'question.retargeted', { to_label: "the org's admins" }))[0]).toContain("now asked the org's admins")
+      expect(noteText(taskEvent(1, 100, { case: 'questionAsked', value: { toLabel: "the org's admins", question: 'Ship it?' } }))).toEqual(["Asked the org's admins: Ship it?"])
+      expect(noteText(taskEvent(1, 100, { case: 'questionDismissed', value: { answeredByName: 'Ana', answer: 'No' } }))).toEqual(['Ana dismissed the question; the default applied: No'])
+      expect(noteText(taskEvent(1, 100, { case: 'questionExpired', value: { answer: 'No' } }))).toEqual(['Nobody answered in time; the default applied: No'])
+      expect(noteText(taskEvent(1, 100, { case: 'questionCanceled', value: {} }))).toEqual(['The question was closed: the run ended'])
+      expect(noteText(taskEvent(1, 100, { case: 'questionRetargeted', value: { toLabel: "the org's admins" } }))[0]).toContain("now asked the org's admins")
     })
 
     it('shows the wrap-up notice', () => {
@@ -405,7 +525,18 @@ describe('buildTimeline with purged content', () => {
   })
 
   it('carries the author of a message', () => {
-    const items = buildTimeline([taskEvent(1, 1000, 'message', { text: 'Hi' }, ActorKind.USER, 'u-2')], {})
+    const items = buildTimeline([taskEvent(1, 1000, message('Hi'), ActorKind.USER, 'u-2')], {})
     expect(items[0]).toMatchObject({ type: 'message', actor: ActorKind.USER, actorUserId: 'u-2' })
+  })
+})
+
+describe('buildTimeline with a person without a Koinon account (ADR 0130)', () => {
+  it('keeps the platform identity on the message and only on an external message', () => {
+    const external = taskEvent(1, 1000, message('the build is red'), ActorKind.EXTERNAL)
+    external.actorExternal = create(ExternalActorSchema, { platform: 'slack', team: 'T0TEST', platformUserId: 'U0TEST' })
+    const [item, other] = buildTimeline([external, taskEvent(2, 2000, message('on it'), ActorKind.USER, 'u-1')], {})
+    expect(item).toMatchObject({ type: 'message', actor: ActorKind.EXTERNAL, actorName: '', external: { platform: 'slack', platformUserId: 'U0TEST' }, text: 'the build is red' })
+    expect(other).toMatchObject({ type: 'message', actor: ActorKind.USER })
+    expect(other).not.toHaveProperty('external.platform')
   })
 })

@@ -5,6 +5,7 @@ import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
 import { TaskService, type SendDirectMessageResponse } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { describeError } from '@/lib/api-error'
 
 export type DirectMessageInput = { agentId: string; text: string; taskId?: string }
 
@@ -37,5 +38,5 @@ export function useDirectMessage(orgId: string, onSent?: (res: SendDirectMessage
       throw err
     }
   }
-  return { send, pending: mutation.isPending, error: mutation.error ? ConnectError.from(mutation.error).rawMessage : undefined }
+  return { send, pending: mutation.isPending, error: mutation.error ? describeError(mutation.error).message : undefined }
 }

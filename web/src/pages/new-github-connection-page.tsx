@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError, createClient } from '@connectrpc/connect'
+import { createClient } from '@connectrpc/connect'
 import { createConnectQueryKey, useQuery, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -9,6 +9,7 @@ import { GitHubAppSetup } from '@/components/github-app-setup'
 import { GitHubConnectionForm, type GitHubConnectionInput } from '@/components/github-connection-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 import { isApprover } from '@/lib/approvals'
 import { setupGuide } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
@@ -36,7 +37,7 @@ export function NewGitHubConnectionPage() {
       await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
       if (res.connection) await navigate({ to: '/connections/$connectionId', params: { connectionId: res.connection.id } })
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
       throw err
     } finally {
       setPending(false)
@@ -60,7 +61,7 @@ export function NewGitHubConnectionPage() {
       {types.isPending && <p role="status">Loading the setup guide…</p>}
       {types.isError && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(types.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(types.error).message}</AlertDescription>
         </Alert>
       )}
       {types.isSuccess && !github && (

@@ -60,6 +60,10 @@ type Options struct {
 	Scrub func(kind credkind.Kind, org string, values ...string)
 	// Now is the clock. Nil means time.Now.
 	Now func() time.Time
+	// Actors checks a bearer that is not a gateway key as a Substrate actor JWT for the model audience
+	// (issue #1489, gateway.IdentifyActor). The request then counts against the agent's own gateway key
+	// (its budget and usage records). Nil: only gateway keys are accepted.
+	Actors gateway.ActorIdentifier
 }
 
 // Gateway is the model path. It implements [gateway.ModelPathGateway].
@@ -116,10 +120,13 @@ type route struct {
 
 // snapshot is one applied configuration. A request reads one snapshot.
 type snapshot struct {
-	rev    gateway.Revision
-	keys   map[string]gateway.Key // by "sha256:" hash
-	state  gateway.ModelState
-	routes map[string]map[string]route // org -> model name -> route (priced models only)
+	rev  gateway.Revision
+	keys map[string]gateway.Key // by "sha256:" hash
+	// byAgent is the one key of each agent, for a request that an actor JWT identifies. An agent with
+	// more than one key has none here: such a request is refused (fail closed).
+	byAgent map[gateway.AgentRef]gateway.Key
+	state   gateway.ModelState
+	routes  map[string]map[string]route // org -> model name -> route (priced models only)
 }
 
 // ErrInvalidConfig means ApplyModel refused the config; the gateway keeps the one it had.
@@ -144,6 +151,7 @@ func (g *Gateway) ApplyModel(ctx context.Context, c gateway.ModelConfig) (gatewa
 		}
 		s.keys[k.Hash] = k
 	}
+	s.byAgent = keysByAgent(c.Keys)
 	for _, p := range c.Providers {
 		u, err := url.Parse(p.BaseURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -243,6 +251,22 @@ func (g *Gateway) draining() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.drain
+}
+
+// keysByAgent maps each agent with exactly one key to that key.
+func keysByAgent(keys []gateway.Key) map[gateway.AgentRef]gateway.Key {
+	out := make(map[gateway.AgentRef]gateway.Key, len(keys))
+	many := map[gateway.AgentRef]bool{}
+	for _, k := range keys {
+		if _, seen := out[k.Agent]; seen {
+			many[k.Agent] = true
+		}
+		out[k.Agent] = k
+	}
+	for a := range many {
+		delete(out, a)
+	}
+	return out
 }
 
 func (s *snapshot) authenticate(token string) (gateway.Key, bool) {

@@ -88,6 +88,7 @@ Agent is an agent and the definition it runs.
 | harness | 28 | `string` | singular |  | The name of the harness the agent runs on (ADR 0112), for example "opencode". Fixed when the agent is created. |
 | team | 29 | `string` | singular |  | The agent's team label (SetAgentPlacement); empty for no team. |
 | reports_to | 30 | `koinon.agent.v1alpha1.AgentReportsTo` | singular |  | Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also of a person who left the org since; AgentSummary gives the name and leaves out such a person. |
+| created_by | 31 | `string` | singular |  | The user ID of the person who created the agent; empty when no user did. While the agent is a draft that was never activated, this person may change it with the member role (UpdateAgent). |
 
 ### Message AgentDefinition
 
@@ -1131,6 +1132,7 @@ buckets of a request; org prices win over the default list. Admins and owners.
 | CheckPriceSources | `koinon.budget.v1alpha1.CheckPriceSourcesRequest` | `koinon.budget.v1alpha1.CheckPriceSourcesResponse` | - | CheckPriceSources fetches the sources now (a manual run, trigger cli; ADR 0098 decision 2.2). It makes proposals and applies nothing. |
 | DiffPlatformPriceVersions | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest` | `koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse` | - | DiffPlatformPriceVersions returns what changed between two versions of the platform list. |
 | DismissPriceProposal | `koinon.budget.v1alpha1.DismissPriceProposalRequest` | `koinon.budget.v1alpha1.DismissPriceProposalResponse` | - | DismissPriceProposal closes a proposal; the same values from the same source do not come back. |
+| ExplainOrgPrices | `koinon.budget.v1alpha1.ExplainOrgPricesRequest` | `koinon.budget.v1alpha1.ExplainOrgPricesResponse` | - | ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or default) prices it now and, for an org price, the price it replaces. It uses the same lookup as the gateway. It does not check the provider URL policy or a lost key. Admins and owners. |
 | ExplainPlatformPrice | `koinon.budget.v1alpha1.ExplainPlatformPriceRequest` | `koinon.budget.v1alpha1.ExplainPlatformPriceResponse` | - | ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its price_ref. |
 | GetDefaultPriceChanges | `koinon.budget.v1alpha1.GetDefaultPriceChangesRequest` | `koinon.budget.v1alpha1.GetDefaultPriceChangesResponse` | - | GetDefaultPriceChanges returns what changed between two versions of the default list. An empty from_version means the version before to_version; an empty to_version the current one. |
 | GetDefaultPrices | `koinon.budget.v1alpha1.GetDefaultPricesRequest` | `koinon.budget.v1alpha1.GetDefaultPricesResponse` | - | GetDefaultPrices returns the default list this installation runs. |
@@ -1246,6 +1248,18 @@ ContinuationValues are the continuation limits of one task of an agent.
 ### Message DismissPriceProposalResponse
 
 No fields.
+
+### Message ExplainOrgPricesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message ExplainOrgPricesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| models | 1 | `koinon.budget.v1alpha1.ModelPriceSource` | repeated |  | models has one row per enabled model, ordered by provider name then model name. |
 
 ### Message ExplainPlatformPriceRequest
 
@@ -1522,6 +1536,23 @@ No fields.
 
 No fields.
 
+### Message ModelPriceSource
+
+ModelPriceSource is the price in use now for one model of an org.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| provider_name | 1 | `string` | singular |  |  |
+| provider_type | 2 | `string` | singular |  |  |
+| model | 3 | `string` | singular |  |  |
+| source | 4 | `string` | singular |  | source is org, platform or default. It is empty when the model has no usable price. |
+| price_ref | 5 | `string` | singular |  |  |
+| entry | 6 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 7 | `int64` | singular |  | platform_version is set for source platform. |
+| list_version | 8 | `string` | singular |  | list_version is set for source default. |
+| replaces | 9 | `koinon.budget.v1alpha1.ReplacedPrice` | singular |  | replaces is set for source org when a lower layer would price the model without the org price. |
+| unpriced_reason | 10 | `string` | singular |  | unpriced_reason is no_price or unusable_price when source is empty. |
+
 ### Message Notification
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -1747,6 +1778,18 @@ means unset; a free model needs an explicit "0".
 | cache_read | 3 | `string` | singular |  |  |
 | cache_write | 4 | `string` | singular |  |  |
 | reasoning | 5 | `string` | singular |  |  |
+
+### Message ReplacedPrice
+
+ReplacedPrice is the price an org price replaces: the next layer down (platform or default).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| source | 1 | `string` | singular |  |  |
+| price_ref | 2 | `string` | singular |  |  |
+| entry | 3 | `koinon.budget.v1alpha1.PriceEntry` | singular |  |  |
+| platform_version | 4 | `int64` | singular |  |  |
+| list_version | 5 | `string` | singular |  |  |
 
 ### Message RetirePriceRequest
 
@@ -2494,6 +2537,20 @@ AgentRef names an agent.
 | agent | 1 | `koinon.gateway.v1alpha1.AgentRef` | singular |  |  |
 | grants | 2 | `koinon.gateway.v1alpha1.ToolGrant` | repeated |  |  |
 
+### Message EgressActor
+
+EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no
+token, only names.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| atespace | 1 | `string` | singular |  | atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave the actor: the three must all be equal to the claims of the token. |
+| name | 2 | `string` | singular |  |  |
+| uid | 3 | `string` | singular |  |  |
+| org | 4 | `string` | singular |  | org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the sandbox, empty when the State does not name one. |
+| agent | 5 | `string` | singular |  |  |
+| run | 6 | `string` | singular |  |  |
+
 ### Message EgressCredential
 
 EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
@@ -2539,6 +2596,7 @@ route file. A route that fails to load closes all org routes; it never opens one
 | --- | --- | --- | --- | --- | --- |
 | routes | 1 | `koinon.gateway.v1alpha1.EgressRoute` | repeated |  |  |
 | credentials | 2 | `koinon.gateway.v1alpha1.EgressCredential` | repeated |  | credentials say where the gateway reads each credential that a route names, and how it sends it (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable). |
+| actors | 3 | `koinon.gateway.v1alpha1.EgressActor` | repeated |  | actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5): the gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is not here, or a UID that is not equal, is refused. |
 
 ### Message Key
 
@@ -3239,9 +3297,11 @@ layer the admin API uses. Admins and owners only. Every change is audited.
 | GetApproverNotRequester | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse` | - |  |
 | GetHomeBackupRetention | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse` | - |  |
 | GetRunContentRetention | `koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse` | - |  |
+| GetRunLimits | `koinon.orgsettings.v1alpha1.GetRunLimitsRequest` | `koinon.orgsettings.v1alpha1.GetRunLimitsResponse` | - |  |
 | SetApproverNotRequester | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest` | `koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse` | - | SetApproverNotRequester turns the optional rule "the approver must not be the requester" on or off (issue #1175, ADR 0005). Audited as org.approver_not_requester.set. |
 | SetHomeBackupRetention | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest` | `koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse` | - | SetHomeBackupRetention sets how long an old home backup repository is kept after a key change, or returns it to the default (7 days) when days is 0. Audited as org.home_backup_retention.set. |
 | SetRunContentRetention | `koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest` | `koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse` | - | SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the default (30 days) when days is 0. Audited as org.run_content_retention.set. |
+| SetRunLimits | `koinon.orgsettings.v1alpha1.SetRunLimitsRequest` | `koinon.orgsettings.v1alpha1.SetRunLimitsResponse` | - | SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set stays as it is; 0 returns it to the default. Runs that are queued but not started get the new limits when they start. Audited as org.run_limits.set. |
 
 ### Message GetApproverNotRequesterRequest
 
@@ -3284,6 +3344,18 @@ host, such as two approvals on a protected branch, stays the org's own code-host
 | --- | --- | --- | --- | --- | --- |
 | retention | 1 | `koinon.orgsettings.v1alpha1.RunContentRetention` | singular |  |  |
 
+### Message GetRunLimitsRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+
+### Message GetRunLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.orgsettings.v1alpha1.RunLimits` | singular |  |  |
+
 ### Message HomeBackupRetention
 
 HomeBackupRetention is the org's effective retention of old home backup repositories. A key change
@@ -3311,6 +3383,29 @@ events, the run's status, traces and the spend ledger stay.
 | default_days | 2 | `int32` | singular |  |  |
 | min_days | 3 | `int32` | singular |  |  |
 | max_days | 4 | `int32` | singular |  |  |
+
+### Message RunLimit
+
+RunLimit is one run limit of the org. value is the limit in force; it is default_value when the
+org set none.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| value | 1 | `int32` | singular |  |  |
+| default_value | 2 | `int32` | singular |  |  |
+| min | 3 | `int32` | singular |  |  |
+| max | 4 | `int32` | singular |  |  |
+
+### Message RunLimits
+
+RunLimits are the org's run limits (DB2, ADR 0066).
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_concurrent_runs | 1 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | max_concurrent_runs is the most runs of the org that start or run at the same time. The other runs wait in the queue. |
+| trigger_concurrency | 2 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at the same time. |
+| trigger_rate_per_minute | 3 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | trigger_rate_per_minute is the most of those items that start in one minute. |
+| sandbox_creations_per_minute | 4 | `koinon.orgsettings.v1alpha1.RunLimit` | singular |  | sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in one minute. |
 
 ### Message SetApproverNotRequesterRequest
 
@@ -3350,6 +3445,25 @@ events, the run's status, traces and the spend ledger stay.
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
 | retention | 1 | `koinon.orgsettings.v1alpha1.RunContentRetention` | singular |  |  |
+
+### Message SetRunLimitsRequest
+
+SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0
+returns it to the default.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| max_concurrent_runs | 2 | `int32` | optional |  |  |
+| trigger_concurrency | 3 | `int32` | optional |  |  |
+| trigger_rate_per_minute | 4 | `int32` | optional |  |  |
+| sandbox_creations_per_minute | 5 | `int32` | optional |  |  |
+
+### Message SetRunLimitsResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| limits | 1 | `koinon.orgsettings.v1alpha1.RunLimits` | singular |  |  |
 
 ## koinon.outward.v1alpha1
 
@@ -3421,7 +3535,25 @@ OutwardTargetKind is what kind of target the switch is for.
 
 ## koinon.platform.v1alpha1
 
-Files: `koinon/platform/v1alpha1/platform.proto`
+Files: `koinon/platform/v1alpha1/platform.proto`, `koinon/platform/v1alpha1/resources.proto`
+
+### Service PlatformResourceService
+
+PlatformResourceService lists the providers, the templates and the MCP servers of every org for the
+platform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any
+other caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:
+changes stay with the per-org services (ProviderService, TemplateService, McpServerService), which
+a platform admin can call as for any org.
+
+Each list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of
+them, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that
+one org (personal or team) and has one page.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ListMcpServers | `koinon.platform.v1alpha1.ListMcpServersRequest` | `koinon.platform.v1alpha1.ListMcpServersResponse` | - | ListMcpServers lists the remote MCP servers of the orgs. |
+| ListProviders | `koinon.platform.v1alpha1.ListProvidersRequest` | `koinon.platform.v1alpha1.ListProvidersResponse` | - | ListProviders lists the model providers of the orgs. A provider never holds its key here either. |
+| ListTemplates | `koinon.platform.v1alpha1.ListTemplatesRequest` | `koinon.platform.v1alpha1.ListTemplatesResponse` | - | ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts with the platform templates, which have no org. |
 
 ### Service PlatformService
 
@@ -3447,6 +3579,22 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | org | 1 | `koinon.platform.v1alpha1.OrgSummary` | singular |  |  |
 | month_start | 2 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
 
+### Message ListMcpServersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListMcpServersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| servers | 1 | `koinon.platform.v1alpha1.OrgMcpServer` | repeated |  | servers are by org slug, then in the order of McpServerService.ListServers. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
 ### Message ListOrgsRequest
 
 | Field | Number | Type | Label | Oneof | Description |
@@ -3462,6 +3610,67 @@ archive and delete of an org need a decision first (ADR 0126 section 7).
 | orgs | 1 | `koinon.platform.v1alpha1.OrgSummary` | repeated |  |  |
 | next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
 | month_start | 3 | `google.protobuf.Timestamp` | singular |  | month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from. |
+
+### Message ListProvidersRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListProvidersResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| providers | 1 | `koinon.platform.v1alpha1.OrgProvider` | repeated |  | providers are by org slug, then in the order of ProviderService.ListProviders. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message ListTemplatesRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | org_id narrows the list to one live org. Empty for every org. |
+| include_personal | 2 | `bool` | singular |  | include_personal also lists the rows of the personal orgs. It has no effect with org_id. |
+| page_size | 3 | `int32` | singular |  | page_size is the number of orgs that a page covers: 20 by default and at most 100. |
+| page_token | 4 | `string` | singular |  | page_token is the next_page_token of the previous page, from a request with the same org_id and include_personal. |
+
+### Message ListTemplatesResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| templates | 1 | `koinon.platform.v1alpha1.OrgTemplate` | repeated |  | templates are the platform templates by slug (first page only), then the org templates by org slug and template slug. |
+| next_page_token | 2 | `string` | singular |  | next_page_token is empty on the last page. |
+
+### Message OrgMcpServer
+
+OrgMcpServer is one remote MCP server with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| server | 2 | `koinon.mcpserver.v1alpha1.Server` | singular |  |  |
+
+### Message OrgProvider
+
+OrgProvider is one provider with the org that owns it.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| provider | 2 | `koinon.provider.v1alpha1.Provider` | singular |  |  |
+
+### Message OrgRef
+
+OrgRef names the org that owns a row.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| slug | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  |  |
+| kind | 4 | `koinon.org.v1alpha1.OrgKind` | singular |  |  |
 
 ### Message OrgSummary
 
@@ -3480,6 +3689,15 @@ BudgetService writes them.
 | monthly_cap_usd | 8 | `string` | singular |  | monthly_cap_usd is the org's monthly budget; empty when the org has none. |
 | platform_ceiling_usd | 9 | `string` | singular |  | platform_ceiling_usd is the platform admin's ceiling on the org; empty when there is none. |
 | created_at | 10 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message OrgTemplate
+
+OrgTemplate is one template with the org that owns it. org is unset on a platform template.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org | 1 | `koinon.platform.v1alpha1.OrgRef` | singular |  |  |
+| template | 2 | `koinon.template.v1alpha1.Template` | singular |  |  |
 
 ## koinon.provider.v1alpha1
 
@@ -3988,6 +4206,40 @@ QuestionState is where a question stands.
 | QUESTION_STATE_EXPIRED | 5 | Nobody answered in time; the default was applied. |
 | QUESTION_STATE_CANCELED | 6 | The run ended (canceled, failed or finished) before anyone answered; nothing was applied. |
 
+## koinon.refusal.v1
+
+Files: `koinon/refusal/v1/refusal.proto`
+
+### Enum Reason
+
+Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a
+value as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the
+same string in `error.reason`. The value names are the wire strings, so they have no enum prefix.
+A spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.
+
+Add a value only when a client acts on the reason differently. Values are add-only: never reuse,
+rename or remove one. A client that does not know a reason shows the message of the error.
+
+buf:lint:ignore ENUM_VALUE_PREFIX
+
+| Value | Number | Description |
+| --- | --- | --- |
+| REASON_UNSPECIFIED | 0 | The error has no reason. A server never sends this value. |
+| INVALID | 1 | The request is not valid. The message says why. |
+| NOT_FOUND | 2 | The thing does not exist, or the caller may not see it. |
+| INSTALL_HELD | 3 | The install is held (ADR 0107) and the call reaches outward. |
+| ROLE_TOO_LOW | 4 | The caller's Role is too low for the field rule of the call (ADR 0116 decision 4). |
+| ADMIN_REQUIRED | 5 | Only an org admin or owner may do this. |
+| PLATFORM_ADMIN_REQUIRED | 6 | Only a platform admin may do this. |
+| CHANGED | 7 | The destination changed since the caller loaded it. |
+| OWNER_ONLY | 8 | Only an org owner may choose content level full. |
+| OWNER_AT_FULL | 9 | The org sends full content, so only an owner may add a destination or change its connection. |
+| NOT_MEMBER | 10 | The caller is not a member of the org, so may only lower its settings. |
+| ABOVE_CEILING | 11 | The level is above the platform ceiling. |
+| TEST_FAILED | 12 | The test trace was not accepted, so nothing was saved. |
+| PRICE_REFRESH_OFF | 13 | The price refresh is off on this install. |
+| CREDENTIAL_TOO_SHORT | 14 | The credential of an MCP server is too short. |
+
 ## koinon.remoteagent.v1alpha1
 
 Files: `koinon/remoteagent/v1alpha1/remoteagent.proto`
@@ -4358,7 +4610,7 @@ RunState is the ADR 0030 state machine.
 
 ## koinon.task.v1alpha1
 
-Files: `koinon/task/v1alpha1/task.proto`
+Files: `koinon/task/v1alpha1/task.proto`, `koinon/task/v1alpha1/timeline.proto`
 
 ### Service TaskService
 
@@ -4394,6 +4646,51 @@ AppendMessageResponse holds the new event and the queued run, if one was queued 
 | --- | --- | --- | --- | --- | --- |
 | event | 1 | `koinon.task.v1alpha1.TaskEvent` | singular |  |  |
 | run | 2 | `koinon.run.v1alpha1.Run` | singular |  |  |
+
+### Message ApprovalChanged
+
+ApprovalChanged records a step of an approval after its request.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| approval_id | 1 | `string` | singular |  |  |
+| tool | 2 | `string` | singular |  |  |
+| target | 3 | `string` | singular |  |  |
+| args_sha256 | 4 | `string` | singular |  |  |
+| note | 5 | `string` | singular |  | The approver's note. |
+| scope | 6 | `koinon.task.v1alpha1.ApprovalScope` | singular |  | The scope that an approval created. |
+| result | 7 | `google.protobuf.Struct` | singular |  | The result of an executed action. |
+| error | 8 | `string` | singular |  | Why the action failed. |
+| expires_at | 9 | `google.protobuf.Timestamp` | singular |  | When the approval expired. |
+| reason | 10 | `string` | singular |  | Why the approval was canceled. |
+
+### Message ApprovalRequested
+
+ApprovalRequested records an action that waits for approval, or one that a scope covered.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| approval_id | 1 | `string` | singular |  |  |
+| tool | 2 | `string` | singular |  |  |
+| target | 3 | `string` | singular |  |  |
+| args_sha256 | 4 | `string` | singular |  |  |
+| decision | 5 | `string` | singular |  | The policy decision, for example "ask" or "allow". |
+| risk | 6 | `google.protobuf.Value` | singular |  | The risk card of the action. |
+| approvals_required | 7 | `int32` | singular |  | The number of approvals that the action needs, when it is more than one. |
+| system | 8 | `bool` | singular |  | True when Koinon asks, not the agent. |
+| scope | 9 | `koinon.task.v1alpha1.ApprovalScope` | singular |  | The scope that covered the call. |
+
+### Message ApprovalScope
+
+ApprovalScope is the scoped approval that covered a call.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| id | 1 | `string` | singular |  |  |
+| kind | 2 | `string` | singular |  | "once", "task" or "agent". |
+| expires_at | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| created_by | 4 | `string` | singular |  |  |
+| task_id | 5 | `string` | singular |  |  |
 
 ### Message CancelTaskRequest
 
@@ -4444,6 +4741,17 @@ Creator is who or what created a task. Exactly the field of its kind is set.
 | user_id | 2 | `string` | singular |  |  |
 | agent_id | 3 | `string` | singular |  |  |
 | trigger_id | 4 | `string` | singular |  |  |
+
+### Message ExternalActor
+
+ExternalActor is a person without a linked Koinon account who writes from a chat platform
+(ADR 0130). It holds no display name and no other profile data.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| platform | 1 | `string` | singular |  | "slack" or "teams". |
+| team | 2 | `string` | singular |  | The Slack team ID or the Teams tenant ID of the workspace in which the person wrote. |
+| platform_user_id | 3 | `string` | singular |  | The Slack user ID or the Teams user ID. |
 
 ### Message GetTaskRequest
 
@@ -4496,6 +4804,110 @@ NotifyTypingResponse is empty.
 
 No fields.
 
+### Message QuestionAsked
+
+QuestionAsked records a question from the agent to a person.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| question | 2 | `string` | singular |  |  |
+| target | 3 | `koinon.task.v1alpha1.QuestionTarget` | singular |  |  |
+| to_label | 4 | `string` | singular |  | The recipients as people read them. |
+| recipients | 5 | `string` | repeated |  |  |
+| choices | 6 | `string` | repeated |  |  |
+| has_draft | 7 | `bool` | singular |  |  |
+| default_answer | 8 | `string` | singular |  | The answer that applies when the question expires. |
+| expires_at | 9 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message QuestionCanceled
+
+QuestionCanceled records a question that nobody needs to answer now.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| reason | 2 | `string` | singular |  |  |
+
+### Message QuestionResolved
+
+QuestionResolved records the end of a question: answered, dismissed or expired.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| answer_kind | 2 | `string` | singular |  |  |
+| answer | 3 | `string` | singular |  |  |
+| default_applied | 4 | `bool` | singular |  |  |
+| answered_by_name | 5 | `string` | singular |  | The display name of the person who answered. |
+
+### Message QuestionRetargeted
+
+QuestionRetargeted records a question that goes to other recipients.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| question_id | 1 | `string` | singular |  |  |
+| to_label | 2 | `string` | singular |  |  |
+| recipients | 3 | `string` | repeated |  |  |
+| reason | 4 | `string` | singular |  |  |
+| requested_target | 5 | `koinon.task.v1alpha1.QuestionTarget` | singular |  | The target that was asked for, when a fallback applies. |
+| fallback_reason | 6 | `string` | singular |  |  |
+
+### Message QuestionTarget
+
+QuestionTarget names who a question is for.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| kind | 1 | `string` | singular |  | "user", "role" or "creator". |
+| user | 2 | `string` | singular |  |  |
+| role | 3 | `string` | singular |  |  |
+
+### Message RunEnded
+
+RunEnded records a run that failed or was canceled.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| reason | 1 | `string` | singular |  | A code or a text, for example "user", "wall_clock_cap" or "spend_limit". |
+| failure_class | 2 | `string` | singular |  | The run's failure class, for example "transient" or "loop". |
+| message | 3 | `string` | singular |  | A text for people. |
+| sandbox_cause | 4 | `string` | singular |  | A sandbox that was not available. |
+| waited_seconds | 5 | `int64` | singular |  |  |
+| detail | 6 | `string` | singular |  |  |
+| cause_seen_ms | 7 | `int64` | singular |  |  |
+| max_wall_clock_seconds | 8 | `int32` | singular |  | A run stopped at its time limit, and what the agent said last. |
+| summary | 9 | `string` | singular |  |  |
+| summary_source | 10 | `string` | singular |  | "reply", "notes" or "none". |
+| limit | 11 | `string` | singular |  | A run stopped at a spend or request limit. |
+| spend_limit_usd | 12 | `string` | singular |  |  |
+| spent_usd | 13 | `string` | singular |  |  |
+| window_start | 14 | `string` | singular |  |  |
+| model_requests | 15 | `int64` | singular |  |  |
+| requeue_reason | 16 | `string` | singular |  | Why a newer queued run replaced this one. |
+| max_model_requests | 17 | `int64` | singular |  | The request limit of a run that stopped at it. |
+
+### Message RunParked
+
+RunParked records a run that waits for a person.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| reason | 1 | `string` | singular |  | "approval" or "input_required". |
+| approval_ids | 2 | `string` | repeated |  | The approvals and the questions that the run waits for. |
+| question_ids | 3 | `string` | repeated |  |  |
+
+### Message RunQueued
+
+RunQueued records a run put on the queue with its limits.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| max_wall_clock_seconds | 1 | `int32` | singular |  |  |
+| max_model_requests | 2 | `int64` | singular |  |  |
+| max_spend_usd | 3 | `string` | singular |  | A decimal amount in US dollars; empty when the run has no spend cap. |
+
 ### Message SendDirectMessageRequest
 
 SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
@@ -4518,6 +4930,31 @@ SendDirectMessageResponse holds the thread's task.
 | event | 2 | `koinon.task.v1alpha1.TaskEvent` | singular |  | The message as it entered the timeline. A replay of an earlier call returns no event when the API runs the delivery inline; with the durable queue it attaches to the finished delivery and returns the original event and created flag. |
 | created | 3 | `bool` | singular |  | True when this call created the task. |
 | reopened | 4 | `bool` | singular |  | True when this call reopened a completed task as a follow-up. |
+
+### Message SessionChanged
+
+SessionChanged records a new harness session.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `string` | singular |  |  |
+| previous_session_id | 2 | `string` | singular |  |  |
+| session_id | 3 | `string` | singular |  |  |
+
+### Message StatusChanged
+
+StatusChanged records a move of the task's state.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `string` | singular |  | Task states as the database names them: "submitted", "working", "input_required", "completed", "canceled" or "failed". from is empty when the writer did not record it. They are strings, not TaskState, because task.proto imports this file. |
+| to | 2 | `string` | singular |  |  |
+| reason | 3 | `string` | singular |  | A code for the cause, for example "follow_up", "run_succeeded", "continuation_limit". |
+| continuations | 4 | `int32` | singular |  | The continuation and spend counts of a task that stopped at a limit. |
+| max_continuations | 5 | `int32` | singular |  |  |
+| task_spent_usd | 6 | `string` | singular |  |  |
+| task_spend_cap_usd | 7 | `string` | singular |  |  |
+| error | 8 | `string` | singular |  | Why the next continuation could not start, when its agent is not available. |
 
 ### Message Task
 
@@ -4543,6 +4980,18 @@ Task is one unit of work and its conversation.
 | direct_message_thread | 16 | `bool` | singular |  | True when a direct message to the agent started the task: replies in its inbox-chat thread go to SendDirectMessage with this task_id (plan item TR3). |
 | waiting_on_user_ids | 17 | `string` | repeated |  | Everyone the task's open questions wait on. Set by ListTasks and GetTask. The inbox uses it so that a task waiting on someone else's answer is not shown to its creator as theirs to act on. |
 
+### Message TaskCreated
+
+TaskCreated records the start of a task.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| title | 1 | `string` | singular |  |  |
+| source | 2 | `string` | singular |  | What created the task when it is not a person: "trigger", "trigger_manual" or "direct_message". |
+| fire | 3 | `string` | singular |  | How a trigger fired: "scheduled" or "manual". |
+| fired_by | 4 | `string` | singular |  | The user who fired a trigger by hand. |
+| trigger_id | 5 | `string` | singular |  | The trigger of a direct message thread. |
+
 ### Message TaskEvent
 
 TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
@@ -4556,8 +5005,72 @@ TaskEvent is one entry of the task timeline: a message, a state change or a run 
 | actor_user_id | 4 | `string` | singular |  |  |
 | actor_agent_id | 5 | `string` | singular |  |  |
 | run_id | 6 | `string` | singular |  | The run the event is about, if any. |
-| payload | 7 | `google.protobuf.Struct` | singular |  |  |
+| payload | 7 | `google.protobuf.Struct` | singular |  | The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old rows too. |
 | created_at | 8 | `google.protobuf.Timestamp` | singular |  |  |
+| actor_display_name | 9 | `string` | singular |  | The display name of actor_user_id, for a person's event; empty for other actors, an unnamed user or a deleted user. Never an email address. Any role that can read the task sees it. |
+| event | 10 | `koinon.task.v1alpha1.TimelineEvent` | singular |  | The typed event. It is not set for a kind that this server does not know, or for a payload that it cannot read. |
+| actor_external | 11 | `koinon.task.v1alpha1.ExternalActor` | singular |  | The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any role that can read the task sees it. |
+
+### Message TaskNote
+
+TaskNote is a note from Koinon about the task's sandbox or agent.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `string` | singular |  |  |
+
+### Message TimelineEvent
+
+TimelineEvent is the typed body of one Timeline event (issue #735). Each member of the oneof is
+one event kind; internal/tasks has the table that maps a member to the kind string in
+task_events.kind. A row with payload_version 1 stores this message as protojson. A row with
+payload_version 0 has the older free-form JSON, which the reader translates to this message.
+
+Add a kind as a new member with a new field number. Never reuse or renumber a member.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| message | 1 | `koinon.task.v1alpha1.TimelineMessage` | singular | event | "message": a message from a person, the agent or the system. |
+| task_created | 2 | `koinon.task.v1alpha1.TaskCreated` | singular | event | "task.created". |
+| status_changed | 3 | `koinon.task.v1alpha1.StatusChanged` | singular | event | "status.changed". |
+| run_queued | 4 | `koinon.task.v1alpha1.RunQueued` | singular | event | "run.queued". |
+| run_parked | 5 | `koinon.task.v1alpha1.RunParked` | singular | event | "run.parked": the run waits for a person. |
+| run_failed | 6 | `koinon.task.v1alpha1.RunEnded` | singular | event | "run.failed". |
+| run_canceled | 7 | `koinon.task.v1alpha1.RunEnded` | singular | event | "run.canceled". |
+| run_session_reset | 8 | `koinon.task.v1alpha1.SessionChanged` | singular | event | "run.session_reset": the harness started a new session. |
+| run_session_restarted | 9 | `koinon.task.v1alpha1.SessionChanged` | singular | event | "run.session_restarted": the harness session started again with a handoff prompt. |
+| sandbox_recreated | 10 | `koinon.task.v1alpha1.TaskNote` | singular | event | "sandbox.recreated". |
+| sandbox_work_lost | 11 | `koinon.task.v1alpha1.TaskNote` | singular | event | "sandbox.work_lost". |
+| agent_unhealthy | 12 | `koinon.task.v1alpha1.TaskNote` | singular | event | "agent.unhealthy". |
+| approval_requested | 13 | `koinon.task.v1alpha1.ApprovalRequested` | singular | event | "approval.requested". |
+| approval_first_approved | 14 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.first_approved": the first of two approvals. |
+| approval_approved | 15 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.approved". |
+| approval_denied | 16 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.denied". |
+| approval_executed | 17 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.executed". |
+| approval_failed | 18 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.failed". |
+| approval_expired | 19 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.expired". |
+| approval_canceled | 20 | `koinon.task.v1alpha1.ApprovalChanged` | singular | event | "approval.canceled". |
+| question_asked | 21 | `koinon.task.v1alpha1.QuestionAsked` | singular | event | "question.asked". |
+| question_answered | 22 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.answered". |
+| question_dismissed | 23 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.dismissed". |
+| question_expired | 24 | `koinon.task.v1alpha1.QuestionResolved` | singular | event | "question.expired": the question expired; its default can apply. |
+| question_canceled | 25 | `koinon.task.v1alpha1.QuestionCanceled` | singular | event | "question.canceled". |
+| question_retargeted | 26 | `koinon.task.v1alpha1.QuestionRetargeted` | singular | event | "question.retargeted": the question goes to other recipients. |
+
+### Message TimelineMessage
+
+TimelineMessage is a message on the task.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| text | 1 | `string` | singular |  | The message as the agent reads it. |
+| display | 2 | `string` | singular |  | The text to show to people when it is not text, for example a direct message without the trigger instruction that Koinon put before it. |
+| source | 3 | `string` | singular |  | Where a system message or a direct message comes from: "trigger", "trigger_manual", "direct_message" or "continuation". Empty for a message that a person or the agent wrote. |
+| message_id | 4 | `string` | singular |  | The ID of the direct message. |
+| fire | 5 | `string` | singular |  | How a trigger fired: "scheduled" or "manual". |
+| fired_by | 6 | `string` | singular |  | The user who fired a trigger by hand. |
+| continuation | 7 | `int32` | singular |  | For a continuation: its number, and the most that the task can have. |
+| continuation_max | 8 | `int32` | singular |  |  |
 
 ### Enum ActorKind
 
@@ -4569,6 +5082,7 @@ ActorKind says who wrote a task event.
 | ACTOR_KIND_USER | 1 |  |
 | ACTOR_KIND_AGENT | 2 |  |
 | ACTOR_KIND_SYSTEM | 3 |  |
+| ACTOR_KIND_EXTERNAL | 4 | A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages. |
 
 ### Enum CreatorKind
 
@@ -4601,13 +5115,34 @@ Files: `koinon/template/v1alpha1/template.proto`
 
 ### Service TemplateService
 
-TemplateService lists the agent templates shipped with Koinon (ADR 0020).
-Templates are platform data: they belong to no org, and every signed-in
-user can list them.
+TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs
+to no org and is read-only; an org template belongs to one org, which saved it from an agent
+(ADR 0126 section 5), and no other org sees it.
 
 | Method | Request | Response | Streaming | Description |
 | --- | --- | --- | --- | --- |
-| ListTemplates | `koinon.template.v1alpha1.ListTemplatesRequest` | `koinon.template.v1alpha1.ListTemplatesResponse` | - | ListTemplates returns the current content of every template. |
+| CreateTemplateFromAgent | `koinon.template.v1alpha1.CreateTemplateFromAgentRequest` | `koinon.template.v1alpha1.CreateTemplateFromAgentResponse` | - | CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as template"). It needs the member role, as creating an agent does. The template keeps the agent's definition (instructions, model, grants without their bindings, limits, triggers, settings) and nothing the agent is bound to: no connection, repository or run data. Promotion to a platform template is not part of this API. |
+| ListTemplates | `koinon.template.v1alpha1.ListTemplatesRequest` | `koinon.template.v1alpha1.ListTemplatesResponse` | - | ListTemplates returns the current content of every platform template and, when the request names an org, the org's own templates. Every signed-in user can list the platform templates; the org's templates need membership of the org. |
+
+### Message CreateTemplateFromAgentRequest
+
+CreateTemplateFromAgentRequest saves an agent as a template of its org.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| agent_id | 2 | `string` | singular |  |  |
+| display_name | 3 | `string` | singular |  | The template's name, 1 to 200 characters. |
+| description | 4 | `string` | singular |  |  |
+| slug | 5 | `string` | singular |  | Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name. |
+
+### Message CreateTemplateFromAgentResponse
+
+CreateTemplateFromAgentResponse is the new org template.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| template | 1 | `koinon.template.v1alpha1.Template` | singular |  |  |
 
 ### Message Grant
 
@@ -4627,13 +5162,16 @@ proposal; activating the agent approves it.
 
 ### Message ListTemplatesRequest
 
-ListTemplatesRequest is empty.
+ListTemplatesRequest names the org whose templates to list with the platform ones.
 
-No fields.
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  | Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs the viewer role in the org. |
 
 ### Message ListTemplatesResponse
 
-ListTemplatesResponse lists the templates, sorted by slug.
+ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when
+an org template has the same slug.
 
 | Field | Number | Type | Label | Oneof | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -4685,6 +5223,8 @@ Template is one version of an agent template.
 | thinking | 16 | `string` | singular |  | The starting value of the agent's thinking setting, "on" or "off"; empty when the template names none, which is the default, on (ADR 0069 amendment 2026-10-29). |
 | allowed_harnesses | 17 | `string` | repeated |  | Names of the harnesses the agent may run on (ADR 0112), for example "opencode". |
 | default_harness | 18 | `string` | singular |  | The harness an agent gets when the request names none; one of allowed_harnesses. |
+| scope | 19 | `koinon.template.v1alpha1.TemplateScope` | singular |  | Who owns the template. |
+| org_id | 20 | `string` | singular |  | The owning org of an org template; empty on a platform template. |
 
 ### Message Trigger
 
@@ -4734,6 +5274,16 @@ Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
 | PRESET_READ_ONLY | 1 |  |
 | PRESET_STANDARD | 2 |  |
 | PRESET_TRUSTED | 3 |  |
+
+### Enum TemplateScope
+
+TemplateScope says who owns a template.
+
+| Value | Number | Description |
+| --- | --- | --- |
+| TEMPLATE_SCOPE_UNSPECIFIED | 0 |  |
+| TEMPLATE_SCOPE_PLATFORM | 1 | Ships with Koinon; read-only; every signed-in user sees it. |
+| TEMPLATE_SCOPE_ORG | 2 | Saved by an org; only that org sees it. |
 
 ### Enum TriggerType
 
@@ -5302,3 +5852,163 @@ TestResult is what the last synthetic trace showed.
 | CONTENT_LEVEL_NONE | 1 | NONE: names, IDs, counts, timings, statuses and cost; no content. The default. |
 | CONTENT_LEVEL_REDACTED | 2 | REDACTED: content after the scrubber. |
 | CONTENT_LEVEL_FULL | 3 | FULL: content as is, apart from credentials. Only an org owner may choose it. |
+
+## koinon.usage.v1alpha1
+
+Files: `koinon/usage/v1alpha1/usage.proto`
+
+### Service UsageService
+
+UsageService is the usage and cost read model of the console home and the "Usage and cost" page
+(issue #1268, ADR 0126 section 4). It reads the spend ledger and the runs table in the database,
+never Prometheus. Amounts are USD decimal strings. A day is a UTC day.
+
+Every member of an org reads that org's usage and no other org's. The platform-wide calls are for
+platform admins. The CSV export holds the same rows and the same totals as the matching Get call.
+
+| Method | Request | Response | Streaming | Description |
+| --- | --- | --- | --- | --- |
+| ExportOrgUsage | `koinon.usage.v1alpha1.ExportOrgUsageRequest` | `koinon.usage.v1alpha1.ExportOrgUsageResponse` | - | ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above. |
+| ExportPlatformUsage | `koinon.usage.v1alpha1.ExportPlatformUsageRequest` | `koinon.usage.v1alpha1.ExportPlatformUsageResponse` | - | ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only. |
+| GetOrgUsage | `koinon.usage.v1alpha1.GetOrgUsageRequest` | `koinon.usage.v1alpha1.GetOrgUsageResponse` | - | GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and today's runs. Members and above. |
+| GetPlatformUsage | `koinon.usage.v1alpha1.GetPlatformUsageRequest` | `koinon.usage.v1alpha1.GetPlatformUsageResponse` | - | GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's runs. Platform admins only. |
+
+### Message ExportOrgUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| range | 2 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+| agent_id | 3 | `string` | singular |  |  |
+| model | 4 | `string` | singular |  |  |
+| provider_id | 5 | `string` | singular |  |  |
+
+### Message ExportOrgUsageResponse
+
+ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final
+row with the totals (day "total"). The text is UTF-8 and ends in a newline.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| filename | 1 | `string` | singular |  |  |
+| csv | 2 | `string` | singular |  |  |
+
+### Message ExportPlatformUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| range | 1 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+
+### Message ExportPlatformUsageResponse
+
+ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then
+a final row with the totals (day "total"). The text is UTF-8 and ends in a newline. Soft-deleted
+orgs stay in the rows, so the totals equal the ledger sums.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| filename | 1 | `string` | singular |  |  |
+| csv | 2 | `string` | singular |  |  |
+
+### Message GetOrgUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| range | 2 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+| agent_id | 3 | `string` | singular |  | agent_id, model and provider_id narrow the rows. Empty means all. |
+| model | 4 | `string` | singular |  |  |
+| provider_id | 5 | `string` | singular |  |  |
+
+### Message GetOrgUsageResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| org_id | 1 | `string` | singular |  |  |
+| from | 2 | `google.protobuf.Timestamp` | singular |  | from and to are the rounded period of the rows: from (inclusive) up to to (exclusive). |
+| to | 3 | `google.protobuf.Timestamp` | singular |  |  |
+| rows | 4 | `koinon.usage.v1alpha1.OrgUsageRow` | repeated |  |  |
+| totals | 5 | `koinon.usage.v1alpha1.UsageTotals` | singular |  | totals is the sum of rows. |
+| runs | 6 | `koinon.usage.v1alpha1.RunCounts` | singular |  | runs counts today's runs of the org, whatever the range and the filters. |
+
+### Message GetPlatformUsageRequest
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| range | 1 | `koinon.usage.v1alpha1.UsageRange` | singular |  |  |
+
+### Message GetPlatformUsageResponse
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `google.protobuf.Timestamp` | singular |  |  |
+| to | 2 | `google.protobuf.Timestamp` | singular |  |  |
+| rows | 3 | `koinon.usage.v1alpha1.PlatformUsageRow` | repeated |  |  |
+| totals | 4 | `koinon.usage.v1alpha1.UsageTotals` | singular |  | totals is the sum of rows. |
+| runs | 5 | `koinon.usage.v1alpha1.RunCounts` | singular |  | runs counts today's runs of every org. |
+
+### Message OrgUsageRow
+
+OrgUsageRow is the ledger of one org for one day, principal, agent, model and provider.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day | 1 | `string` | singular |  | day is the UTC day as YYYY-MM-DD. |
+| principal | 2 | `string` | singular |  | principal is "agent" or "system" (a system check of the org, with no agent). |
+| agent_id | 3 | `string` | singular |  |  |
+| agent_name | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  |  |
+| provider_id | 6 | `string` | singular |  | provider_id is empty when the ledger did not record the provider (older entries, or a provider that is deleted); provider_name is then empty too. |
+| provider_name | 7 | `string` | singular |  |  |
+| usage | 8 | `koinon.usage.v1alpha1.UsageTotals` | singular |  |  |
+
+### Message PlatformUsageRow
+
+PlatformUsageRow is the ledger of one org for one day and model.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day | 1 | `string` | singular |  |  |
+| org_id | 2 | `string` | singular |  |  |
+| org_slug | 3 | `string` | singular |  |  |
+| org_name | 4 | `string` | singular |  |  |
+| model | 5 | `string` | singular |  |  |
+| usage | 6 | `koinon.usage.v1alpha1.UsageTotals` | singular |  |  |
+
+### Message RunCounts
+
+RunCounts are the runs created on the current UTC day.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| day_start | 1 | `google.protobuf.Timestamp` | singular |  | day_start is the start of today (UTC). |
+| runs_today | 2 | `int64` | singular |  | runs_today counts the runs created since day_start, in any state. |
+| failed_runs_today | 3 | `int64` | singular |  | failed_runs_today counts those of them that are in the state failed now. |
+
+### Message UsageRange
+
+UsageRange is the period of a query: the UTC days from `from` up to, not including, `to`. Both
+are rounded down to the start of their UTC day. With none set, the period is the month to date
+(the first of the month up to the end of today). A period is at most 366 days.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| from | 1 | `google.protobuf.Timestamp` | singular |  |  |
+| to | 2 | `google.protobuf.Timestamp` | singular |  |  |
+
+### Message UsageTotals
+
+UsageTotals are the sums of a set of ledger rows. The token buckets are disjoint: input_tokens
+does not count the cache tokens, and reasoning_tokens are part of output_tokens.
+
+| Field | Number | Type | Label | Oneof | Description |
+| --- | --- | --- | --- | --- | --- |
+| requests | 1 | `int64` | singular |  |  |
+| input_tokens | 2 | `int64` | singular |  |  |
+| output_tokens | 3 | `int64` | singular |  |  |
+| cache_read_tokens | 4 | `int64` | singular |  |  |
+| cache_write_tokens | 5 | `int64` | singular |  |  |
+| reasoning_tokens | 6 | `int64` | singular |  |  |
+| cost_usd | 7 | `string` | singular |  | cost_usd is the recorded charge of the requests, estimated usage included. |
+| estimated_usd | 8 | `string` | singular |  | estimated_usd is the part of cost_usd that came from estimated usage. |
+| cache_read_share | 9 | `double` | singular |  | cache_read_share is cache_read_tokens over all the input side (input_tokens + cache_read_tokens + cache_write_tokens), from 0 to 1; 0 when there is none. |

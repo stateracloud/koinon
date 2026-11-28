@@ -140,7 +140,7 @@ var _ = Describe("Backend ownership", func() {
 		Expect(deleteErr(live.DeleteSandbox(ctx, ws, "ka-old"))).To(Succeed())
 	})
 
-	It("takes an unlabeled provider as its own while a sandbox attaches it, and claims it after", func(ctx SpecContext) {
+	It("takes an unlabeled provider as its own", func(ctx SpecContext) {
 		p := agentgatewayProvider("1")
 		p.Name = "kp-legacy0123456789"
 		Expect(legacy.EnsureProvider(ctx, ws, p)).To(Succeed())
@@ -153,19 +153,13 @@ var _ = Describe("Backend ownership", func() {
 		Expect(gw.Calls("DeleteProvider")).To(BeZero())
 		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).NotTo(HaveKey(execution.LabelInstall))
+	})
 
-		// OpenShell may refuse to delete an attached provider; the fake does when asked, so a claim then fails loudly.
-		gw.RefuseAttachedProviderDelete()
-		claim := p
-		claim.ClaimLegacy = true
-		Expect(live.EnsureProvider(ctx, ws, claim)).NotTo(Succeed())
-		Expect(gw.Provider(ws, p.Name)).NotTo(BeNil())
-
-		// After the sandbox is gone the claim recreates it with the label.
-		Expect(deleteErr(live.DeleteSandbox(ctx, ws, "ka-old"))).To(Succeed())
-		Expect(live.EnsureProvider(ctx, ws, claim)).To(Succeed())
+	It("refuses a provider another install made", func(ctx SpecContext) {
+		p := agentgatewayProvider("1")
+		p.Name = "kp-live0123456789ab"
+		Expect(live.EnsureProvider(ctx, ws, p)).To(Succeed())
 		Expect(gw.Provider(ws, p.Name).GetMetadata().GetLabels()).To(HaveKeyWithValue(execution.LabelInstall, execution.OwnerID("mark-live")))
-
 		Expect(restore.EnsureProvider(ctx, ws, p)).To(MatchError(execution.ErrForeign))
 		Expect(restore.DeleteProvider(ctx, ws, p.Name)).To(MatchError(execution.ErrForeign))
 		Expect(restore.DeleteProviderProfile(ctx, ws, p.Profile.ID)).To(MatchError(execution.ErrForeign), "the profile is stamped too")

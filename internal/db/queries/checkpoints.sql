@@ -180,9 +180,9 @@ WHERE e.org_id = @org_id AND e.seed_from_epoch IS NOT NULL AND e.seeded_at IS NU
 -- source was, so it sorts with it (and just before it: a newer id) and the recreate gate reads the
 -- same times. No row: the source is gone or not complete.
 INSERT INTO home_checkpoints (org_id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id,
-                              size_bytes, requested_at, started_at, finished_at, repository_epoch)
+                              size_bytes, requested_at, started_at, finished_at, repository_epoch, content_digest)
 SELECT c.org_id, c.agent_id, c.reason, 'complete', c.sandbox_id, c.generation, c.epoch, @snapshot_id,
-       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch
+       @size_bytes, c.requested_at, c.started_at, c.finished_at, @repository_epoch, @content_digest
 FROM home_checkpoints c
 WHERE c.org_id = @org_id AND c.id = @source_id AND c.status = 'complete'
 RETURNING *;
@@ -279,6 +279,27 @@ WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
 ORDER BY c.finished_at DESC, c.id DESC
 LIMIT @max_rows::int;
 
+-- name: ListHiddenNewerHomeCheckpoints :many
+-- The complete checkpoints that ListCompleteHomeCheckpoints hides and that are newer than the one a
+-- restore used (@used_finished_at, @used_id): newest first, each with why it is hidden. A restore
+-- that uses an older checkpoint reports them, so the loss of newer work is never silent (issue #1538).
+SELECT c.id, c.finished_at,
+  CASE WHEN c.epoch > coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+       THEN 'epoch_too_high' ELSE 'repository_gone' END::text AS reason
+FROM home_checkpoints c
+WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
+  AND (c.finished_at, c.id) > (@used_finished_at::timestamptz, @used_id::uuid)
+  AND (
+    c.epoch > coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+    OR EXISTS (SELECT 1 FROM home_repositories h
+               WHERE h.org_id = c.org_id AND h.agent_id = c.agent_id AND c.repository_epoch = 0 AND h.deleted_at IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM home_repository_epochs e
+               WHERE e.org_id = c.org_id AND e.agent_id = c.agent_id AND e.repository_epoch = c.repository_epoch
+                 AND e.deleted_at IS NOT NULL)
+  )
+ORDER BY c.finished_at DESC, c.id DESC
+LIMIT 20;
+
 -- name: ClaimHomeCheckpoint :one
 -- The writer's next request: a requested one that is due, or a running one whose writer died
 -- (started more than @lease_seconds ago), for an agent whose sandbox is ready. No row: nothing to
@@ -301,7 +322,8 @@ RETURNING *;
 -- name: CompleteHomeCheckpoint :one
 UPDATE home_checkpoints
 SET status = 'complete', snapshot_id = @snapshot_id, size_bytes = @size_bytes, epoch = @epoch,
-    generation = @generation, repository_epoch = @repository_epoch, error = NULL, finished_at = now()
+    generation = @generation, repository_epoch = @repository_epoch, content_digest = @content_digest,
+    error = NULL, finished_at = now()
 WHERE org_id = @org_id AND id = @id AND status = 'running'
 RETURNING *;
 
@@ -364,8 +386,40 @@ UPDATE agent_sandboxes SET restore_claimed_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
 -- name: ClearSandboxRestore :exec
+-- The restore is done. The restored-home mark says no snapshot of the sandbox holds the home yet
+-- (issue #1481); the reconciler clears it after the stop that takes the snapshot. The checkpoint ID
+-- is a flag with a usable ID: a restore takes the newest complete checkpoint of the home.
+UPDATE agent_sandboxes
+SET restored_checkpoint_id = restore_checkpoint_id,
+    restored_sandbox_id = sandbox_id,
+    restored_at = now(),
+    restore_checkpoint_id = NULL, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: DropSandboxRestore :exec
+-- Nothing was restored (an ephemeral agent starts empty): no mark.
 UPDATE agent_sandboxes SET restore_checkpoint_id = NULL, restore_claimed_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: ClearSandboxRestoredMark :exec
+-- A stop of this sandbox took the snapshot that holds the restored home. The sandbox ID keeps a clear
+-- from touching the mark of another sandbox.
+UPDATE agent_sandboxes SET restored_sandbox_id = NULL, restored_checkpoint_id = NULL, restored_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id AND restored_sandbox_id = @sandbox_id;
+
+-- name: RestoreFromMark :one
+-- A crash may revert the sandbox to a snapshot that lacks the restored home. This points the next run
+-- at the restore again. It is written BEFORE the revert, in one statement that reads the row itself
+-- (not a cached copy): a leader change or a failed write after the revert then cannot leave a mark
+-- with no restore pending. It writes only for a sandbox with a mark and no restore pending. No row:
+-- nothing to do.
+UPDATE agent_sandboxes
+SET restore_checkpoint_id = restored_checkpoint_id, restore_claimed_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id
+  AND restore_checkpoint_id IS NULL
+  AND restored_checkpoint_id IS NOT NULL
+  AND restored_sandbox_id = sandbox_id
+RETURNING *;
 
 -- name: FailStaleHomeCheckpoints :many
 -- Requests that never started because the sandbox was not ready for the configured wait.

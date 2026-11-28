@@ -77,8 +77,9 @@ between the entry script's checks and the harness reading it. It sweeps again on
 harness has ended, before the run is finished or parked and so while it still holds the agent;
 a fenced worker (taken over, canceled, given up) skips that sweep, and the next run's sweep
 catches what is left. Under OpenShell, PID 1 is the supervisor and the main process its first
-child; the contract suite's Docker stand-in marks its PID 1 as the main process
-(`KOINON_SANDBOX_STANDIN=1`). Under any other PID 1 the sweep ends nothing and the run fails.
+child; under Substrate, PID 1 is `koinon-guest-front` and it is the main process; the contract
+suite's Docker stand-in marks its PID 1 as the main process (`KOINON_SANDBOX_STANDIN=1`). Under
+any other PID 1 the sweep ends nothing and the run fails.
 The script needs `/bin/sh`, `grep`, `sleep` and `/proc`, which every harness image has.
 
 The substrate overlay (`make harness-substrate-<name>`, ADR 0119) needs no per-harness file: the target reads the harness name from `HARNESSES` and uses `/usr/local/bin/koinon-<name>` as the entry script.

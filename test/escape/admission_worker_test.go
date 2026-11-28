@@ -332,7 +332,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		sc := func(f func(*corev1.SecurityContext)) func(*corev1.Pod) {
 			return func(p *corev1.Pod) { f(p.Spec.Containers[0].SecurityContext) }
 		}
-		// Both classes of Substrate v1.0.0.
+		// Both classes of Substrate v1.0.1.
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-gvisor"))).To(Succeed())
 		Expect(create(ctx, replicaSetController, workerNamespace, worker("shape-microvm", func(p *corev1.Pod) {
 			p.Spec.Containers[0].Image = microvmDigest
@@ -463,7 +463,7 @@ var _ = Describe("Worker pod admission policy", Label("escape", "admission", "su
 		It("admits the atelet pod: the DaemonSet controller, a DaemonSet owner, the atelet ServiceAccount, an allowed hostPath (control)", func(ctx SpecContext) {
 			Expect(create(ctx, daemonSetController, controlNamespace, atelet("atelet"))).To(Succeed())
 		})
-		It("admits each hostPath of the atelet manifest (Substrate v1.0.0 atelet.yaml), and no worker device for the node agent", func(ctx SpecContext) {
+		It("admits each hostPath of the atelet manifest (Substrate v1.0.1 atelet.yaml), and no worker device for the node agent", func(ctx SpecContext) {
 			for i, path := range []string{"/var/lib/ate", "/var/lib/kubelet/plugins", "/var/lib/kubelet/device-plugins", "/dev", "/home/kubernetes/bin", "/etc/srv/kubernetes/cri_auth_config.yaml"} {
 				Expect(create(ctx, daemonSetController, controlNamespace, atelet(fmt.Sprintf("atelet-path-%d", i), func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = path }))).To(Succeed())
 			}
@@ -859,13 +859,13 @@ func renderWorkerPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmission
 	cmd := exec.CommandContext(ctx, helm, "template", "koinon", "../../charts/koinon", "--namespace", "koinon",
 		"--set", "execution.driver=substrate",
 		"--set", "execution.substrate.controlAddress=api.ate-system.svc:443",
-		"--set", "execution.substrate.routerAddress=atenet-router.ate-system.svc:80",
+		"--set", "execution.substrate.routerAddress=atenet-router.ate-system.svc:443",
 		"--set", "execution.substrate.tokenAudience=ateapi",
 		"--set", "execution.substrate.allowUnhardened=true",
 		"--set", "execution.substrate.workerNetworkPolicy.enabled=false",
 		"--set", "execution.substrate.defaultTier=dev",
 		// The default exempts the platform controllers from the digest rule (worker images are tags in
-		// Substrate v1.0.0, #1140). The specs test the rule itself, so they exempt nobody.
+		// Substrate v1.0.1, #1140). The specs test the rule itself, so they exempt nobody.
 		"--set", "execution.substrate.workerPolicy.digestExemptIdentities={}",
 		// The default WorkerPool has a tag image, which the chart refuses without the exemption; the specs
 		// test the policy, not the pool.

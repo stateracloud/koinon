@@ -48,7 +48,6 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ProviderService, {
-      getDefaultModel: () => ({ model: '', available: [] }),
       listProviders: () => {
         calls.listed++
         return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAdminOff ? [adminOff] : []), ...(opts.withAnthropic ? [opts.withLostCostKey ? create(ProviderSchema, { ...claude, costKeyLostAt: timestampFromMs(Date.now()), costScope: 'wrkspc_01Cost' }) : opts.withCostKey ? create(ProviderSchema, { ...claude, hasCostKey: true, costScope: 'wrkspc_01Cost' }) : claude] : [])] }

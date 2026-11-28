@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/reconciler/leaderterm"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -31,9 +32,6 @@ const (
 	// follows the kubelet's ConfigMap sync (about a minute by default). It does not bound the
 	// sandbox work of the pass, which has its own timeout per agent (Config.WorkTimeout).
 	passTimeout = 5 * time.Minute
-	// unmarkedTimeout bounds the gateway count of unmarked objects, which runs after a pass and not
-	// inside its timeout.
-	unmarkedTimeout = time.Minute
 )
 
 // Run reconciles until ctx ends. Only the replica holding the leader lock reconciles; the
@@ -111,6 +109,12 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 	if err := lockBlocking(ctx, conn.Conn(), leaderLock); err != nil {
 		return false, fmt.Errorf("take leader lock: %w", err)
 	}
+	// The term fences this lead's database writes: once a newer leader takes it, the database refuses
+	// every statement of this lead (issue 635).
+	term, err := leaderterm.Take(ctx, conn.Conn())
+	if err != nil {
+		return false, err
+	}
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
 		return false, fmt.Errorf("listen: %w", err)
 	}
@@ -120,9 +124,13 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 		return false, fmt.Errorf("listen: %w", err)
 	}
 	r.log.Info("reconciler is leading", "waited", time.Since(start).Round(time.Millisecond),
-		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout)
+		"resync", r.cfg.ResyncInterval, "idle_timeout", r.cfg.IdleTimeout, "term", term)
+	// Registered first, so it runs last: after the work queue stops, no front check adds a mark.
+	defer r.endLeadFleet()
 
 	lctx, cancel := context.WithCancelCause(ctx)
+	// A refused term ends the whole lead, as a lost lock connection does: a newer leader works now.
+	lctx = leaderterm.WithTerm(lctx, term, cancel)
 	wake := make(chan struct{}, 1)
 	readerDone := make(chan struct{})
 	// alive is the time of the last proof that the lock connection works: a notification or the
@@ -174,7 +182,6 @@ func (r *Reconciler) lead(ctx context.Context) (led bool, _ error) {
 		pctx, pcancel := context.WithTimeout(fctx, passTimeout)
 		_, err := r.reconcilePass(pctx, queue)
 		pcancel()
-		r.observeUnmarkedDue(lctx)
 		if err != nil && lctx.Err() == nil {
 			r.log.Warn("reconcile pass incomplete", "err", err)
 		}

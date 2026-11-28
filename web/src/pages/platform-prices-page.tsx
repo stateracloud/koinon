@@ -1,38 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
+import { PriceLegend, PriceTable } from '@/components/price-table'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
-import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { SkeletonRows } from '@/components/ui/skeleton'
 import { PriceService, type PlatformPriceVersion, type PriceProposal, type PriceProvenance } from '@/gen/koinon/budget/v1alpha1/price_pb'
 import { usePlatformPriceActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
+import { platformVersionInUse, rowFromPlatformEntry } from '@/lib/price-table'
 import { actorLabel, classLabel, formatWhen, rateChangeLine, ratesLine, shortHash } from '@/lib/prices'
 
 /**
- * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's
- * versions and where each price came from, rolls back, reads the fetch log and checks the sources
- * (ADR 0098). Others get a notice.
+ * PlatformPricesPage is where a platform admin reviews the price proposals, sees the platform list's versions and where
+ * each price came from, rolls back, reads the fetch log and checks the sources (ADR 0098). The platform console lets in
+ * only platform admins (PlatformLayout).
  */
 export function PlatformPricesPage() {
-  const who = useQuery(AuthService.method.whoAmI, {})
   return (
-    <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)] gap-6">
-      {who.isPending ? (
-        <p role="status">Loading…</p>
-      ) : who.data?.platformAdmin ? (
-        <PlatformPrices />
-      ) : (
-        <Alert role="alert">
-          <AlertDescription>Only platform admins can manage the platform prices.</AlertDescription>
-        </Alert>
-      )}
+    <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-6">
+      <PlatformPrices />
     </div>
   )
 }
@@ -58,7 +52,7 @@ function PlatformPrices() {
       const failed = Object.entries(result.failed)
       say(`Checked ${result.fetched.length} source(s); ${result.proposals} proposal(s) made or refreshed.${failed.map(([source, why]) => ` ${source} failed: ${why}.`).join('')}`)
     } catch (e) {
-      refuse(ConnectError.from(e).rawMessage)
+      refuse(describeError(e).message)
     } finally {
       setChecking(false)
     }
@@ -93,11 +87,54 @@ function PlatformPrices() {
           <AlertDescription>{refused}</AlertDescription>
         </Alert>
       )}
+      <PlatformPricesInUse />
       <Proposals say={say} refuse={refuse} actions={actions} />
       <Versions say={say} refuse={refuse} actions={actions} />
       <Explain />
       <FetchLog />
     </>
+  )
+}
+
+/**
+ * PlatformPricesInUse is the model prices table (ADR 0126 section 6, issue #1277) for the newest platform version: one
+ * row per platform entry. Models that no platform entry matches use the default list; an org's own price wins over
+ * both. A platform price changes through proposals and versions below, so the table has no "Override".
+ */
+function PlatformPricesInUse() {
+  // The same request as <Versions>, so the cache is shared. A version can start later: getPlatformPriceVersion with
+  // 0 returns the newest written version, so ask for the newest version that applies now.
+  const list = useQuery(PriceService.method.listPlatformPriceVersions, { limit: 50 })
+  const [now] = useState(() => new Date())
+  const { inUse, upcoming } = useMemo(() => platformVersionInUse(list.data?.versions ?? [], now), [list.data, now])
+  const current = useQuery(PriceService.method.getPlatformPriceVersion, { version: inUse?.version ?? 0n }, { enabled: !!inUse })
+  const none = current.error && describeError(current.error).code === Code.NotFound
+  const rows = useMemo(() => (inUse ? (current.data?.version?.entries ?? []) : []).map(rowFromPlatformEntry), [current.data, inUse])
+  const error = list.error ?? (none ? undefined : current.error)
+  const pending = list.isPending || (!!inUse && current.isPending)
+  return (
+    <section aria-labelledby="platform-in-use" className="grid gap-3">
+      <h2 id="platform-in-use" className="text-lg font-semibold">
+        Platform prices in use
+      </h2>
+      <PriceLegend sources={['platform', 'default']} />
+      {current.data?.version && inUse && <p className="text-muted-foreground text-sm">Version {String(current.data.version.version)}. Models that no entry here matches use the default list.</p>}
+      {upcoming && inUse && (
+        <p className="text-muted-foreground text-sm">
+          Version {String(upcoming.version)} starts {formatWhen(upcoming.validFrom)}; the table shows version {String(inUse.version)}, in use now.
+        </p>
+      )}
+      {error && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>{describeError(error).message}</AlertDescription>
+        </Alert>
+      )}
+      {pending ? (
+        <SkeletonRows label="Loading platform prices…" />
+      ) : error ? null : (
+        <PriceTable caption="Platform prices in use" searchId="platform-price-search" rows={rows} emptyTitle="No platform prices yet. Every model uses the default list." />
+      )}
+    </section>
   )
 }
 
@@ -186,7 +223,7 @@ function Proposals({ say, refuse, actions }: Feedback) {
         <p role="status">Loading…</p>
       ) : list.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       ) : list.data.proposals.length === 0 ? (
         <p className="text-muted-foreground text-sm">No open proposals.</p>
@@ -217,7 +254,7 @@ function ProposalCard({ p, say, refuse, actions }: { p: PriceProposal } & Feedba
       const result = await actions.accept(p.id, typed, needsMax ? maxN : 0)
       say(`Accepted ${p.model}: platform price version ${result.version} written.${result.warnings.map((warning) => ` ${warning}`).join('')}`)
     } catch (err) {
-      refuse(ConnectError.from(err).rawMessage)
+      refuse(describeError(err).message)
     } finally {
       setBusy(false)
     }
@@ -299,7 +336,7 @@ function Versions({ say, refuse, actions }: Feedback) {
         <p role="status">Loading…</p>
       ) : versions.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(versions.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(versions.error).message}</AlertDescription>
         </Alert>
       ) : versions.data.versions.length === 0 ? (
         <p className="text-muted-foreground text-sm">No platform version yet. Models are priced from the default list.</p>
@@ -359,7 +396,7 @@ function VersionDetail({ version }: { version: bigint }) {
         {diff.isPending ? (
           <p role="status">Loading…</p>
         ) : diff.error ? (
-          <p role="alert">{ConnectError.from(diff.error).rawMessage}</p>
+          <p role="alert">{describeError(diff.error).message}</p>
         ) : diff.data.changes.length === 0 ? (
           <p className="text-muted-foreground text-sm">No change.</p>
         ) : (
@@ -380,7 +417,7 @@ function VersionDetail({ version }: { version: bigint }) {
         {detail.isPending ? (
           <p role="status">Loading…</p>
         ) : detail.error ? (
-          <p role="alert">{ConnectError.from(detail.error).rawMessage}</p>
+          <p role="alert">{describeError(detail.error).message}</p>
         ) : (
           <ul className="grid gap-2">
             {(detail.data.version?.entries ?? []).map((e) => (
@@ -433,7 +470,7 @@ function Explain() {
         </Button>
       </form>
       {ask && res.isPending && <p role="status">Loading…</p>}
-      {ask && res.error && <p role="alert">{ConnectError.from(res.error).rawMessage}</p>}
+      {ask && res.error && <p role="alert">{describeError(res.error).message}</p>}
       {ask && res.data && (
         <div role="group" aria-label="Price in use" className="grid gap-1 text-sm">
           <p>
@@ -459,7 +496,7 @@ function FetchLog() {
         <p role="status">Loading…</p>
       ) : fetches.error ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(fetches.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(fetches.error).message}</AlertDescription>
         </Alert>
       ) : fetches.data.fetches.length === 0 ? (
         <p className="text-muted-foreground text-sm">No source has been fetched yet.</p>

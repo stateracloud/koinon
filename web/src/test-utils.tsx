@@ -18,10 +18,18 @@ import { CreatorKind, CreatorSchema, TaskSchema, TaskState } from '@/gen/koinon/
 
 export const orgId = 'org-1'
 
-export function whoAmI(opts: { passwordChangeRequired?: boolean; role?: OrgRole } = {}) {
+/** membership is one org of the signed-in user. */
+export function membership(id: string, name: string, role: OrgRole) {
+  return create(MembershipSchema, { orgId: id, orgSlug: name.toLowerCase().replace(/\W+/g, '-'), orgDisplayName: name, role })
+}
+
+export function whoAmI(
+  opts: { passwordChangeRequired?: boolean; role?: OrgRole; platformAdmin?: boolean; personalOrgId?: string; memberships?: ReturnType<typeof membership>[] } = {},
+) {
   return create(WhoAmIResponseSchema, {
-    user: create(UserSchema, { id: 'u-1', email: 'admin@example.test', displayName: 'Admin' }),
-    memberships: [create(MembershipSchema, { orgId, orgSlug: 'default', orgDisplayName: 'Default', role: opts.role ?? OrgRole.OWNER })],
+    user: create(UserSchema, { id: 'u-1', email: 'admin@example.test', displayName: 'Admin', personalOrgId: opts.personalOrgId ?? '' }),
+    memberships: opts.memberships ?? [create(MembershipSchema, { orgId, orgSlug: 'default', orgDisplayName: 'Default', role: opts.role ?? OrgRole.OWNER })],
+    platformAdmin: opts.platformAdmin ?? false,
     passwordChangeRequired: opts.passwordChangeRequired ?? false,
   })
 }

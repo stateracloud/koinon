@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	mrand "math/rand/v2"
 	"net/http"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -39,7 +40,10 @@ const (
 	DefaultMinBackoff   = time.Second
 	DefaultMaxBackoff   = 30 * time.Second
 	DefaultApplyTimeout = 2 * time.Minute
-	ackAttempts         = 3
+	// DefaultStaleAfter is how long a half may fail to apply before Stale reports it (#1347). A copy
+	// that cannot apply a revision keeps serving its old one: it accepts keys that were revoked.
+	DefaultStaleAfter = 2 * time.Minute
+	ackAttempts       = 3
 	// maxBase leaves room in stateserver.MaxCopyIDLen (253) for "-" and the 16-digit boot nonce.
 	maxBase = 236
 )
@@ -89,8 +93,12 @@ type Config struct {
 	MinBackoff, MaxBackoff time.Duration
 	// ApplyTimeout bounds one apply call (default DefaultApplyTimeout).
 	ApplyTimeout time.Duration
-	Metrics      *Metrics
-	Log          *slog.Logger
+	// StaleAfter is how long a half may fail to apply before Stale reports it (default
+	// DefaultStaleAfter). Now is the clock (default time.Now); a test sets it.
+	StaleAfter time.Duration
+	Now        func() time.Time
+	Metrics    *Metrics
+	Log        *slog.Logger
 }
 
 // EgressApplier installs the org egress routes of a revision and the credentials they name
@@ -109,6 +117,38 @@ type Client struct {
 	// reconnect that replays the same revision neither re-applies it nor loses a failed ack.
 	applied map[gwv1.Half]int64
 	acked   map[gwv1.Half]int64
+
+	// failing is when each half began to fail to apply, with no success since. It is read from the
+	// health listener, so mu guards it.
+	mu      sync.Mutex
+	failing map[gwv1.Half]time.Time
+}
+
+// Stale returns an error when a half has failed to apply for longer than StaleAfter. The copy then
+// serves an old revision (and accepts keys revoked since), so its /readyz must say so (#1347). It
+// returns nil while every half applies, and for a first failure that is still inside the bound.
+func (c *Client) Stale() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.cfg.Now()
+	for h, since := range c.failing {
+		if d := now.Sub(since); d >= c.cfg.StaleAfter {
+			return fmt.Errorf("the %s half has failed to apply a State revision for %s", halfLabel(h), d.Round(time.Second))
+		}
+	}
+	return nil
+}
+
+func (c *Client) setFailing(h gwv1.Half, failed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !failed {
+		delete(c.failing, h)
+		return
+	}
+	if _, ok := c.failing[h]; !ok {
+		c.failing[h] = c.cfg.Now()
+	}
 }
 
 // New returns a Client.
@@ -135,6 +175,12 @@ func New(cfg Config) (*Client, error) {
 	if cfg.ApplyTimeout <= 0 {
 		cfg.ApplyTimeout = DefaultApplyTimeout
 	}
+	if cfg.StaleAfter <= 0 {
+		cfg.StaleAfter = DefaultStaleAfter
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	if cfg.Metrics == nil {
 		cfg.Metrics = NewMetrics(nil)
 	}
@@ -152,6 +198,7 @@ func New(cfg Config) (*Client, error) {
 		cfg: cfg, log: log,
 		api:     gatewayv1alpha1connect.NewGatewayStateServiceClient(connect.NewClient(connecthttp.NewTransport(&hc, cfg.URL))),
 		applied: map[gwv1.Half]int64{}, acked: map[gwv1.Half]int64{},
+		failing: map[gwv1.Half]time.Time{},
 	}, nil
 }
 
@@ -238,9 +285,14 @@ func (c *Client) session(ctx context.Context) (int, bool, error) {
 
 // handle applies both halves of u and acks each one that applied. The halves are independent: one
 // failing to apply does not hold back the other. It returns an error for a lost ack or a failed apply, which ends the session so that Run
-// reconnects and the replayed newest revision retries the half.
+// reconnects and the replayed newest revision retries the half. The org egress routes go first: the
+// reconciler reads an ack of the MCP half as "this copy serves the revision's forge credentials" too
+// (#1086 part C2), so a run's first clone never meets the routes of an older revision.
 func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 	state := staterev.FromProto(u)
+	if c.cfg.Egress != nil {
+		c.egress(ctx, u.GetRevision(), state.EgressState)
+	}
 	var ackErr error
 	if c.cfg.Model != nil {
 		ackErr = errors.Join(ackErr, c.half(ctx, u.GetRevision(), gwv1.Half_HALF_MODEL, func(ctx context.Context) error {
@@ -254,9 +306,6 @@ func (c *Client) handle(ctx context.Context, u *gwv1.StateUpdate) error {
 			return err
 		}))
 	}
-	if c.cfg.Egress != nil {
-		c.egress(ctx, u.GetRevision(), state.EgressState)
-	}
 	return ackErr
 }
 
@@ -267,8 +316,9 @@ func (c *Client) egress(ctx context.Context, rev int64, e gateway.EgressState) {
 	defer cancel()
 	if err := c.cfg.Egress.ApplyEgress(actx, e); err != nil {
 		c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultFailed).Inc()
-		c.log.Error("the org egress routes of a State revision were refused; the platform routes alone are served",
-			"revision", rev, "routes", len(e.EgressRoutes), "credentials", len(e.EgressCredentials), "err", err)
+		// A route fault serves the platform routes alone; a bad actor row is skipped and the other actors stay.
+		c.log.Error("the org egress routes or actors of a State revision had a fault; a route fault serves the platform routes alone, and bad actor rows are skipped while the other actors are served",
+			"revision", rev, "routes", len(e.EgressRoutes), "credentials", len(e.EgressCredentials), "actors", len(e.EgressActors), "err", err)
 		return
 	}
 	c.cfg.Metrics.Applied.WithLabelValues(halfEgress, resultOK).Inc()
@@ -293,11 +343,13 @@ func (c *Client) half(ctx context.Context, rev int64, h gwv1.Half, apply func(co
 			c.cfg.Metrics.Applied.WithLabelValues(name, resultFailed).Inc()
 			c.log.Error("applying a State revision failed; not acked", "half", name, "revision", rev, "err", err)
 			delete(c.applied, h)
+			c.setFailing(h, true)
 			// End the session: Run reconnects with backoff and the server replays the newest
 			// revision, which applies this half again (the other half is skipped as applied).
 			return fmt.Errorf("apply %s revision %d: %w", name, rev, err)
 		}
 		c.cfg.Metrics.Applied.WithLabelValues(name, resultOK).Inc()
+		c.setFailing(h, false)
 		c.applied[h] = rev
 	}
 	if got, ok := c.acked[h]; ok && got == rev {

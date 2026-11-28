@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
@@ -13,17 +12,20 @@ import { RunStatus } from '@/components/run-status'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { StatusBadge } from '@/components/status-badge'
-import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import type { Cost, Run, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { useMemberNames } from '@/hooks/use-member-names'
+import { useAllAgents } from '@/hooks/use-all-agents'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
+import { describeError } from '@/lib/api-error'
 import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
 import { isEnded, runFinished, runStateLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/tasks/$taskId')
+const route = getRouteApi('/app/org/tasks/$taskId')
+
+// sentence ends a message with a full stop when it has no end punctuation, so the link after it does not run on.
+const sentence = (m: string) => (/[.!?]$/.test(m) ? m : `${m}.`)
 
 export function TaskPage() {
   const { taskId } = route.useParams()
@@ -34,9 +36,8 @@ export function TaskPage() {
   const queryClient = useQueryClient()
 
   const { task: taskQuery, watches, items, refresh: refreshTask } = useTaskConversation(orgId, taskId)
-  const agents = useQuery(AgentService.method.listAgents, { orgId })
+  const agents = useAllAgents(orgId)
   const who = useQuery(AuthService.method.whoAmI, {})
-  const memberNames = useMemberNames(orgId)
 
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refreshTask })
   const cancel = useMutation(TaskService.method.cancelTask, {
@@ -53,8 +54,8 @@ export function TaskPage() {
     return (
       <Alert variant="destructive" role="alert">
         <AlertDescription>
-          {ConnectError.from(taskQuery.error).rawMessage}.{' '}
-          <Link to="/" className="underline">
+          {sentence(describeError(taskQuery.error).message)}{' '}
+          <Link to="/inbox" className="underline">
             Back to the inbox
           </Link>
         </AlertDescription>
@@ -74,7 +75,7 @@ export function TaskPage() {
     <div className="mx-auto grid max-w-3xl gap-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="grid gap-1">
-          <Link to="/" className="text-muted-foreground text-sm hover:underline">
+          <Link to="/inbox" className="text-muted-foreground text-sm hover:underline">
             ← Inbox
           </Link>
           <h1 className="text-xl font-semibold">{t?.title}</h1>
@@ -122,18 +123,18 @@ export function TaskPage() {
 
       <AgentNotes summary={t?.agentSummary ?? ''} at={t?.agentSummaryAt} />
 
-      <Timeline items={items} meUserId={who.data?.user?.id} memberNames={memberNames} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
+      <Timeline items={items} meUserId={who.data?.user?.id} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
 
       {canEdit && (
         <Composer
           pending={append.isPending}
-          error={append.error ? ConnectError.from(append.error).rawMessage : undefined}
+          error={append.error ? describeError(append.error).message : undefined}
           onSend={(text) => append.mutateAsync({ orgId, taskId, text })}
         />
       )}
       {cancel.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not cancel the task: {ConnectError.from(cancel.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not cancel the task: {describeError(cancel.error).message}</AlertDescription>
         </Alert>
       )}
     </div>

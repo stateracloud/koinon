@@ -4,8 +4,8 @@
 # Chart assertions: the LimitRange and the ResourceQuota of the Substrate worker namespace (issue #1161).
 # Sourced in order by hack/chart-check.sh; it uses that script's helpers (render, has, lacks, ...).
 
-wl=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+wl=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 lim=(--show-only templates/substrate-workerlimits.yaml)

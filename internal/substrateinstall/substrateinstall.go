@@ -65,7 +65,7 @@ type Profile struct {
 	SetupCSI string
 	// ExpectedJWTIssuer is ate-setup --ateapi-expected-jwt-issuer: the service-account issuer Substrate's api
 	// server trusts. Empty lets ate-setup read it from the API server's discovery document. It must equal the
-	// iss of the cluster's tokens, and Substrate v1.0.0 fetches discovery from this URL, so pods must reach it.
+	// iss of the cluster's tokens, and Substrate v1.0.1 fetches discovery from this URL, so pods must reach it.
 	// It cannot make an unroutable cluster issuer work: Kubernetes names the first --service-account-issuer in
 	// both the tokens and the discovery document, so that flag is the one to change.
 	ExpectedJWTIssuer string
@@ -85,6 +85,9 @@ type Profile struct {
 	// SNAPSHOT_TRANSFER_GSA_NAME). They are refused on other platforms.
 	GCPProjectID            string
 	SnapshotTransferGSAName string
+	// EgressDNSV4Preferred sets dns_lookup_family V4_PREFERRED on the egress gateway (egress.go) instead of
+	// Substrate's ALL. Off by default. Turn it on for a cluster without an IPv6 route.
+	EgressDNSV4Preferred bool
 }
 
 // csiDrivers are the values of ate-setup --setup-csi (cmd/ate-setup/internal/steps/csi.go ValidateCSIDriver).
@@ -123,6 +126,24 @@ func (p Profile) UsesGVisor() bool {
 	return false
 }
 
+// UsesMicroVM says whether the install has the microvm sandbox class, which needs /dev/kvm and the other microVM
+// devices on a node: the default classes (gvisor,microvm) or a list that names microvm. The generic platform
+// installs gvisor only.
+func (p Profile) UsesMicroVM() bool {
+	if p.Platform == PlatformGeneric {
+		return false
+	}
+	if p.SandboxClasses == "" {
+		return true
+	}
+	for _, class := range strings.Split(p.SandboxClasses, ",") {
+		if strings.TrimSpace(class) == "microvm" {
+			return true
+		}
+	}
+	return false
+}
+
 // noDevEnvFlag is passed to ate-setup deploy and delete alike, so a delete undoes the same install.
 const noDevEnvFlag = "--no-dev-env"
 
@@ -132,8 +153,9 @@ const egressProviderFlag = `--credential-provider={"name":"k8s.io"}`
 
 // SetupArgs are the arguments of the pinned ate-setup for the Koinon profile, with pre-built release
 // images of the pinned tag (never a build from source), the router allow-list for the atenet client of
-// the given namespace, and no developer settings.
-func (p Profile) SetupArgs(namespace string) []string {
+// the given namespace plus the extra identities (agentd's pod certificate, issue #1446), and no developer
+// settings.
+func (p Profile) SetupArgs(namespace string, extraIDs ...string) []string {
 	repo := p.ImageRepo
 	if repo == "" {
 		repo = preflight.SubstratePinnedImageRepo
@@ -144,7 +166,7 @@ func (p Profile) SetupArgs(namespace string) []string {
 		"--namespace=" + namespace,
 		"--storage-bucket-name=" + p.StorageBucket,
 		egressProviderFlag,
-		"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID(namespace),
+		"--ingress-allowed-spiffe-ids=" + strings.Join(append([]string{preflight.SubstrateRouterSPIFFEID(namespace)}, extraIDs...), ","),
 		"--image-repo=" + repo,
 		"--image-tag=" + PinnedVersion,
 	}
@@ -215,6 +237,18 @@ type Installer struct {
 	// port-forward to its rustfs pod, and a plain HTTP GET (gvisorstore.go).
 	GVisorStore   func(ctx context.Context) (AssetStore, func(), error)
 	GVisorFetcher AssetFetcher
+	// ProvisionerNamespace and ProvisionerServiceAccount name the ServiceAccount of Koinon's provisioner, which
+	// the installer makes an owner in Substrate's global access policy (ADR 0128).
+	ProvisionerNamespace      string
+	ProvisionerServiceAccount string
+	// APITokenFile is a token of a principal that holds the global owner role, for an install whose bootstrap
+	// owners are not ate-client. Empty mints a token for ate-client.
+	APITokenFile string
+	// APICAFile is a PEM CA file that verifies ate-api-server's serving certificate. Empty reads the CA from
+	// Substrate's ClusterTrustBundle.
+	APICAFile string
+	// Control opens the control API as a global owner; nil is the port-forward of openControl. For the tests.
+	Control ControlDialer
 }
 
 // ErrPrerequisites is returned when the prerequisite preflight fails: nothing was installed.
@@ -258,29 +292,58 @@ func (b *Build) Cleanup() { _ = os.RemoveAll(b.tmp) }
 
 // exportPin exports PinnedCommit from SourceRepo into dst. Scratch files go into tmp.
 func (i *Installer) exportPin(ctx context.Context, tmp, dst string) error {
-	// The export comes from a fresh bare clone, not from SourceRepo itself: a local clone copies the
-	// objects but not the source's config, hooks, info/attributes or replace refs, so no filter driver
-	// of the source runs in git archive and no replace ref substitutes the pinned objects.
+	return i.exportCommit(ctx, tmp, dst, PinnedCommit)
+}
+
+// exportCommit exports the commit with this id from SourceRepo into dst.
+func (i *Installer) exportCommit(ctx context.Context, tmp, dst, commit string) error {
+	// The export comes from a fresh bare repository that fetches the commit by its id, not from SourceRepo
+	// itself: a fetch copies the objects but not the source's config, hooks, info/attributes or replace refs,
+	// so no filter driver of the source runs in git archive and no replace ref substitutes the pinned objects.
+	// The fetch names the id, so the source needs no ref that points at it (a cache that holds the commit
+	// only as FETCH_HEAD works), and no other history is copied.
 	repo := filepath.Join(tmp, "repo.git")
-	clone := []string{"--no-replace-objects", "-c", "core.fsmonitor=", "clone", "--quiet", "--bare", "--", i.SourceRepo, repo}
-	if err := i.Runner.Run(ctx, "", "git", clone, nil, i.Out); err != nil {
-		return fmt.Errorf("%w: clone %s: %w", ErrPin, i.SourceRepo, err)
-	}
-	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", PinnedCommit+"^{commit}"))
+	// The fetch runs under git -C <repo>, so a relative local path would resolve inside the temporary
+	// repository. A local path is made absolute against the working directory of the caller first.
+	source, err := absoluteLocalSource(i.SourceRepo)
 	if err != nil {
-		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, PinnedCommit, i.SourceRepo, err)
+		return fmt.Errorf("%w: %s: %w", ErrPin, i.SourceRepo, err)
 	}
-	if strings.TrimSpace(got) != PinnedCommit {
+	if err := i.Runner.Run(ctx, "", "git", []string{"--no-replace-objects", "-c", "core.fsmonitor=", "init", "--quiet", "--bare", "--", repo}, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: init %s: %w", ErrPin, repo, err)
+	}
+	fetch := gitArgs(repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", source, commit)
+	if err := i.Runner.Run(ctx, "", "git", fetch, nil, i.Out); err != nil {
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, commit, i.SourceRepo, err)
+	}
+	got, err := i.Runner.Output(ctx, "", "git", gitArgs(repo, "rev-parse", "--verify", commit+"^{commit}"))
+	if err != nil {
+		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, commit, i.SourceRepo, err)
+	}
+	if strings.TrimSpace(got) != commit {
 		return fmt.Errorf("%w: %s resolves the pinned commit to %q", ErrPin, i.SourceRepo, strings.TrimSpace(got))
 	}
 	archive := filepath.Join(tmp, "src.tar")
-	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, PinnedCommit), nil, i.Out); err != nil {
-		return fmt.Errorf("%w: git archive %s: %w", ErrPin, PinnedCommit, err)
+	if err := i.Runner.Run(ctx, "", "git", gitArgs(repo, "archive", "--format=tar", "--output="+archive, commit), nil, i.Out); err != nil {
+		return fmt.Errorf("%w: git archive %s: %w", ErrPin, commit, err)
 	}
 	if err := extractTar(archive, dst); err != nil {
 		return fmt.Errorf("%w: %w", ErrPin, err)
 	}
 	return nil
+}
+
+// absoluteLocalSource makes a relative local path absolute. A remote URL (scheme://, or the scp form host:path)
+// and an absolute path stay as they are.
+func absoluteLocalSource(src string) (string, error) {
+	if strings.Contains(src, "://") || filepath.IsAbs(src) {
+		return src, nil
+	}
+	// scp form: a colon before the first slash names a host.
+	if c := strings.Index(src, ":"); c > 0 && !strings.Contains(src[:c], "/") {
+		return src, nil
+	}
+	return filepath.Abs(src)
 }
 
 // BuildSetup exports the pinned commit from SourceRepo into a fresh temporary directory, builds
@@ -452,11 +515,15 @@ func (i *Installer) Install(ctx context.Context) error {
 	// The installed classes decide whether the gVisor node check applies.
 	sub.GVisor = i.Profile.UsesGVisor()
 	i.Checker.Config.Substrate = &sub
-	if platform == PlatformGeneric {
-		// Only the gvisor class is installed, so the node devices of the vm tier are not needed.
+	if !i.Profile.UsesMicroVM() {
+		// No microvm class is installed, so the node devices of the vm tier are not needed.
 		sub.VMTier = false
 		i.Checker.Config.Substrate = &sub
-		_, _ = fmt.Fprintln(i.Out, "platform generic: the vm tier (microVM) is not installed; the sandbox class is gvisor")
+		if platform == PlatformGeneric {
+			_, _ = fmt.Fprintln(i.Out, "platform generic: the vm tier (microVM) is not installed; the sandbox class is gvisor")
+		} else {
+			_, _ = fmt.Fprintf(i.Out, "sandbox classes %q: the vm tier (microVM) is not installed, so the node devices are not checked\n", i.Profile.SandboxClasses)
+		}
 	}
 	setup, err := i.BuildSetup(ctx)
 	if err != nil {
@@ -469,6 +536,10 @@ func (i *Installer) Install(ctx context.Context) error {
 			setup.Cleanup()
 		}
 	}()
+	// Corrections of the egress gateway apply on every platform (egress.go, issue #1486). File work only.
+	if err := i.Profile.ApplyEgressCorrections(setup.Dir()); err != nil {
+		return err
+	}
 	var setupEnv []string
 	switch platform {
 	case PlatformGeneric:
@@ -539,7 +610,7 @@ func (i *Installer) Install(ctx context.Context) error {
 			return err
 		}
 	}
-	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace),
+	args := append(profile.SetupArgs(i.Checker.Config.SubstrateOrDefault().Namespace, i.routerIDs()...),
 		"--kubeconfig="+i.Kubeconfig, "--context="+i.Context)
 	if err := i.Runner.Run(ctx, setup.Dir(), setup.Binary(), args, setupEnv, i.Out); err != nil {
 		keepBuild = true
@@ -557,6 +628,10 @@ func (i *Installer) Install(ctx context.Context) error {
 		return err
 	}
 	if err := i.EnsureRouterSPIFFE(ctx); err != nil {
+		return err
+	}
+	// The one grant in the global policy (ADR 0128); every upgrade runs it again.
+	if _, err := i.EnsureProvisionerGrant(ctx); err != nil {
 		return err
 	}
 	if err := i.EnsureGVisorAssets(ctx); err != nil {
@@ -691,7 +766,7 @@ func (i *Installer) pendingCRDs(ctx context.Context) ([]string, error) {
 	return pending, nil
 }
 
-// routerContainer is the router container of the atenet-router Deployment (Substrate v1.0.0).
+// routerContainer is the router container of the atenet-router Deployment (Substrate v1.0.1).
 const routerContainer = "atenet-router"
 
 // EnsureRouterSPIFFE adds the atenet client identity to the router's --ingress-allowed-spiffe-ids when
@@ -711,7 +786,11 @@ func (i *Installer) EnsureRouterSPIFFE(ctx context.Context) error {
 			return fmt.Errorf("router Deployment %s has no container %q", where, routerContainer)
 		}
 		ctr := &d.Spec.Template.Spec.Containers[n]
-		if !addSPIFFEID(ctr, preflight.SubstrateRouterSPIFFEID(sub.Namespace)) {
+		changed := false
+		for _, id := range append([]string{preflight.SubstrateRouterSPIFFEID(sub.Namespace)}, i.routerIDs()...) {
+			changed = addSPIFFEID(ctr, id) || changed
+		}
+		if !changed {
 			return nil
 		}
 		if _, err := deployments.Update(ctx, d, metav1.UpdateOptions{}); err != nil {
@@ -720,6 +799,16 @@ func (i *Installer) EnsureRouterSPIFFE(ctx context.Context) error {
 		return nil
 	})
 	return err
+}
+
+// routerIDs are the identities beyond the atenet client that the router allows: agentd's pod certificate, when the
+// Koinon namespace and its ServiceAccount are known. Only agentd gets one (ADR 0120 amendment, issue #1446).
+func (i *Installer) routerIDs() []string {
+	sub := i.Checker.Config.SubstrateOrDefault()
+	if sub.AgentdServiceAccount == "" {
+		return nil
+	}
+	return []string{preflight.SubstrateAgentdSPIFFEID(sub.AgentdNamespace, sub.AgentdServiceAccount)}
 }
 
 // addSPIFFEID makes the flag of the container allow id, in its command or its arguments, and reports

@@ -38,7 +38,7 @@ func sys(name string, nr uintptr, a ...uintptr) {
 // denied reports an attempt that failed for want of permission: EPERM from seccomp or a capability,
 // EACCES from Landlock. Any other result, success included, leaves the attempt open.
 func denied(name string, err error, detail string) {
-	report(name, err == nil || !(errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)), detail+" "+fmt.Sprint(err))
+	report(name, err == nil || !errors.Is(err, unix.EPERM) && !errors.Is(err, unix.EACCES), detail+" "+fmt.Sprint(err))
 }
 
 // sysErrno runs a raw syscall and returns its errno as an error (nil on success).
@@ -76,7 +76,7 @@ func inherit(argv []string) {
 		fmt.Println("probe: inherit:", err)
 		os.Exit(2)
 	}
-	holder := exec.Command(os.Args[0], "sleep")
+	holder := exec.Command(os.Args[0], "sleep") //nolint:gosec,noctx // the probe starts itself; it has no context
 	holder.ExtraFiles = []*os.File{os.NewFile(uintptr(fd), "socket")}
 	if err := holder.Start(); err != nil {
 		fmt.Println("probe: cannot start the outside process:", err)
@@ -117,12 +117,12 @@ func fdChecks() {
 	_, _ = fmt.Sscan(other, &pid)
 	_, err = os.ReadDir("/proc/" + other + "/fd")
 	blockedAny("proc_fd_list_other", err, "readdir(/proc/<outside pid>/fd)")
-	f, err := os.OpenFile("/proc/"+other+"/fd/3", os.O_RDWR, 0)
+	f, err := os.OpenFile("/proc/"+other+"/fd/3", os.O_RDWR, 0) //nolint:gosec // the pid of the outside process the test started
 	if err == nil {
 		_ = f.Close()
 	}
 	blockedAny("proc_fd_open_other", err, "open(/proc/<outside pid>/fd/3), a socket")
-	_, err = os.ReadFile("/proc/" + other + "/environ")
+	_, err = os.ReadFile("/proc/" + other + "/environ") //nolint:gosec // the pid of the outside process the test started
 	blockedAny("proc_environ_other", err, "read(/proc/<outside pid>/environ)")
 
 	buf := make([]byte, 8)
@@ -132,11 +132,15 @@ func fdChecks() {
 	denied("process_vm_readv_other", err, "process_vm_readv(<outside pid>)")
 	err = unix.PtraceAttach(pid)
 	denied("ptrace_other", err, "PTRACE_ATTACH <outside pid>")
+	// Signal 0 runs the kernel's full permission check and delivers nothing (issue #1496: a root
+	// payload must not signal the guest front, which runs as the same uid).
+	denied("kill_other", unix.Kill(pid, 0), "kill(<outside pid>, 0)")
 	pfd, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
 		fmt.Println("pidfd_getfd_other skip pidfd_open:", err)
 		return
 	}
+	denied("pidfd_signal_other", unix.PidfdSendSignal(pfd, 0, nil, 0), "pidfd_send_signal(<outside pid>, 0)")
 	got, err := unix.PidfdGetfd(pfd, 3, 0)
 	if err == nil {
 		_ = unix.Close(got)
@@ -155,7 +159,7 @@ func main() {
 	}
 	fdChecks()
 	// ptrace of our own child: allowed to an unprivileged process, so only seccomp stops it.
-	child := exec.Command(os.Args[0], "sleep")
+	child := exec.Command(os.Args[0], "sleep") //nolint:gosec,noctx // the probe starts itself; it has no context
 	if err := child.Start(); err != nil {
 		fmt.Println("probe: cannot start child:", err)
 		os.Exit(2)
@@ -163,12 +167,14 @@ func main() {
 	runtime.LockOSThread()
 	err := unix.PtraceAttach(child.Process.Pid)
 	report("ptrace", err == nil, fmt.Sprint(err))
-	_ = child.Process.Kill()
+	// The payload still signals its own processes: agents stop the tools they start.
+	err = child.Process.Kill()
+	report("kill_own_child", err == nil, fmt.Sprint(err))
 
 	empty, _ := unix.BytePtrFromString("")
 	tmpfs, _ := unix.BytePtrFromString("tmpfs")
 	dir, _ := unix.BytePtrFromString("/tmp")
-	sys("mount", unix.SYS_MOUNT, uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(dir)), uintptr(unsafe.Pointer(tmpfs)), 0, 0)
+	sys("mount", unix.SYS_MOUNT, uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(dir)), uintptr(unsafe.Pointer(tmpfs)), 0, 0) //nolint:gosec // mount(2) takes C strings
 	sys("bpf", unix.SYS_BPF, 5, 0, 0)
 	sys("keyctl", unix.SYS_KEYCTL, 0, ^uintptr(2), 0) // KEYCTL_GET_KEYRING_ID, KEY_SPEC_USER_SESSION_KEYRING (-3)
 	sys("perf_event_open", unix.SYS_PERF_EVENT_OPEN, 0, 0, ^uintptr(0), ^uintptr(0), 0)
@@ -186,7 +192,32 @@ func main() {
 		_ = unix.Close(fd)
 	}
 	denied("socket_vsock", serr, "socket(AF_VSOCK)")
+	// Issue #1496: the capabilities a root payload must not hold. Each call has arguments that make
+	// the kernel answer EBADF or EINVAL when nothing stops it, never a real effect.
+	denied("finit_module", sysErrno(unix.SYS_FINIT_MODULE, ^uintptr(0), 0, 0), "finit_module(-1)")
+	denied("reboot", sysErrno(unix.SYS_REBOOT, 0, 0, 0, 0), "reboot with no magic")
+	rfd, rerr := unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_ICMP)
+	if rerr == nil {
+		_ = unix.Close(rfd)
+	}
+	denied("socket_raw", rerr, "socket(AF_INET, SOCK_RAW)")
 
+	// Issue #1503: the guest front, as root, writes its job logs in a directory under /run. The
+	// payload must not create a file or a symlink there, or the front could follow the link.
+	wf, werr := os.OpenFile("/run/koinon-probe", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if werr == nil {
+		_ = wf.Close()
+		_ = os.Remove("/run/koinon-probe")
+	}
+	denied("write:/run/koinon-probe", werr, "create a file under /run")
+	lerr := os.Symlink("/etc/koinon-probe", "/run/koinon-link")
+	if lerr == nil {
+		_ = os.Remove("/run/koinon-link")
+	}
+	denied("symlink:/run/koinon-link", lerr, "plant a symlink under /run")
+	// Issue #1516: nor may it read the job logs (the policy lists /run/koinon as hidden).
+	_, rderr := os.ReadDir("/run/koinon/ate-jobs")
+	denied("read:/run/koinon/ate-jobs", rderr, "list the job log directory")
 	// Devices: the listed nodes work, nothing else under /dev does.
 	f, ferr := os.OpenFile("/dev/null", os.O_WRONLY, 0)
 	if ferr == nil {
@@ -201,7 +232,7 @@ func main() {
 		_ = os.Remove("/dev/koinon-probe")
 	}
 	denied("dev_create:/dev/koinon-probe", ferr, "create a regular file in /dev")
-	merr := unix.Mknod("/dev/koinon-blk", unix.S_IFBLK|0o600, int(unix.Mkdev(7, 0)))
+	merr := unix.Mknod("/dev/koinon-blk", unix.S_IFBLK|0o600, int(unix.Mkdev(7, 0))) //nolint:gosec // loop device 7:0 fits in an int
 	if merr == nil {
 		_ = os.Remove("/dev/koinon-blk")
 	}

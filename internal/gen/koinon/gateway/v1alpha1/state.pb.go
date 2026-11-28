@@ -1522,7 +1522,11 @@ type EgressState struct {
 	Routes []*EgressRoute         `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
 	// credentials say where the gateway reads each credential that a route names, and how it sends it
 	// (#1086 part C). A route whose credential is not here is refused (503 credential_unavailable).
-	Credentials   []*EgressCredential `protobuf:"bytes,2,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	Credentials []*EgressCredential `protobuf:"bytes,2,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	// actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5):
+	// the gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is
+	// not here, or a UID that is not equal, is refused.
+	Actors        []*EgressActor `protobuf:"bytes,3,rep,name=actors,proto3" json:"actors,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1571,6 +1575,103 @@ func (x *EgressState) GetCredentials() []*EgressCredential {
 	return nil
 }
 
+func (x *EgressState) GetActors() []*EgressActor {
+	if x != nil {
+		return x.Actors
+	}
+	return nil
+}
+
+// EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no
+// token, only names.
+type EgressActor struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave
+	// the actor: the three must all be equal to the claims of the token.
+	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
+	Name     string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Uid      string `protobuf:"bytes,3,opt,name=uid,proto3" json:"uid,omitempty"`
+	// org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the
+	// sandbox, empty when the State does not name one.
+	Org           string `protobuf:"bytes,4,opt,name=org,proto3" json:"org,omitempty"`
+	Agent         string `protobuf:"bytes,5,opt,name=agent,proto3" json:"agent,omitempty"`
+	Run           string `protobuf:"bytes,6,opt,name=run,proto3" json:"run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EgressActor) Reset() {
+	*x = EgressActor{}
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EgressActor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EgressActor) ProtoMessage() {}
+
+func (x *EgressActor) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EgressActor.ProtoReflect.Descriptor instead.
+func (*EgressActor) Descriptor() ([]byte, []int) {
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *EgressActor) GetAtespace() string {
+	if x != nil {
+		return x.Atespace
+	}
+	return ""
+}
+
+func (x *EgressActor) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EgressActor) GetUid() string {
+	if x != nil {
+		return x.Uid
+	}
+	return ""
+}
+
+func (x *EgressActor) GetOrg() string {
+	if x != nil {
+		return x.Org
+	}
+	return ""
+}
+
+func (x *EgressActor) GetAgent() string {
+	if x != nil {
+		return x.Agent
+	}
+	return ""
+}
+
+func (x *EgressActor) GetRun() string {
+	if x != nil {
+		return x.Run
+	}
+	return ""
+}
+
 // EgressCredential is one credential of the egress routes. file is where a sealed envelope (v2, ADR
 // 0097 decision 12) is mounted in the gateway: ciphertext that only the gateway key opens, never the
 // value. The envelope is bound to the org ID and the agent ID in the file name.
@@ -1594,7 +1695,7 @@ type EgressCredential struct {
 
 func (x *EgressCredential) Reset() {
 	*x = EgressCredential{}
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1606,7 +1707,7 @@ func (x *EgressCredential) String() string {
 func (*EgressCredential) ProtoMessage() {}
 
 func (x *EgressCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[21]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1619,7 +1720,7 @@ func (x *EgressCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EgressCredential.ProtoReflect.Descriptor instead.
 func (*EgressCredential) Descriptor() ([]byte, []int) {
-	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{21}
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EgressCredential) GetName() string {
@@ -1696,7 +1797,7 @@ type EgressRoute struct {
 
 func (x *EgressRoute) Reset() {
 	*x = EgressRoute{}
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1708,7 +1809,7 @@ func (x *EgressRoute) String() string {
 func (*EgressRoute) ProtoMessage() {}
 
 func (x *EgressRoute) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[22]
+	mi := &file_koinon_gateway_v1alpha1_state_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1721,7 +1822,7 @@ func (x *EgressRoute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EgressRoute.ProtoReflect.Descriptor instead.
 func (*EgressRoute) Descriptor() ([]byte, []int) {
-	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{22}
+	return file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *EgressRoute) GetName() string {
@@ -1945,10 +2046,18 @@ const file_koinon_gateway_v1alpha1_state_proto_rawDesc = "" +
 	"\tToolGrant\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x14\n" +
 	"\x05tools\x18\x02 \x03(\tR\x05tools\x12\x10\n" +
-	"\x03all\x18\x03 \x01(\bR\x03all\"\x98\x01\n" +
+	"\x03all\x18\x03 \x01(\bR\x03all\"\xd6\x01\n" +
 	"\vEgressState\x12<\n" +
 	"\x06routes\x18\x01 \x03(\v2$.koinon.gateway.v1alpha1.EgressRouteR\x06routes\x12K\n" +
-	"\vcredentials\x18\x02 \x03(\v2).koinon.gateway.v1alpha1.EgressCredentialR\vcredentials\"\x8e\x01\n" +
+	"\vcredentials\x18\x02 \x03(\v2).koinon.gateway.v1alpha1.EgressCredentialR\vcredentials\x12<\n" +
+	"\x06actors\x18\x03 \x03(\v2$.koinon.gateway.v1alpha1.EgressActorR\x06actors\"\x89\x01\n" +
+	"\vEgressActor\x12\x1a\n" +
+	"\batespace\x18\x01 \x01(\tR\batespace\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
+	"\x03uid\x18\x03 \x01(\tR\x03uid\x12\x10\n" +
+	"\x03org\x18\x04 \x01(\tR\x03org\x12\x14\n" +
+	"\x05agent\x18\x05 \x01(\tR\x05agent\x12\x10\n" +
+	"\x03run\x18\x06 \x01(\tR\x03run\"\x8e\x01\n" +
 	"\x10EgressCredential\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03org\x18\x02 \x01(\tR\x03org\x12\x14\n" +
@@ -2000,7 +2109,7 @@ func file_koinon_gateway_v1alpha1_state_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_gateway_v1alpha1_state_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_koinon_gateway_v1alpha1_state_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(Half)(0),                   // 0: koinon.gateway.v1alpha1.Half
 	(*StreamStateRequest)(nil),  // 1: koinon.gateway.v1alpha1.StreamStateRequest
@@ -2024,9 +2133,10 @@ var file_koinon_gateway_v1alpha1_state_proto_goTypes = []any{
 	(*AgentTools)(nil),          // 19: koinon.gateway.v1alpha1.AgentTools
 	(*ToolGrant)(nil),           // 20: koinon.gateway.v1alpha1.ToolGrant
 	(*EgressState)(nil),         // 21: koinon.gateway.v1alpha1.EgressState
-	(*EgressCredential)(nil),    // 22: koinon.gateway.v1alpha1.EgressCredential
-	(*EgressRoute)(nil),         // 23: koinon.gateway.v1alpha1.EgressRoute
-	nil,                         // 24: koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
+	(*EgressActor)(nil),         // 22: koinon.gateway.v1alpha1.EgressActor
+	(*EgressCredential)(nil),    // 23: koinon.gateway.v1alpha1.EgressCredential
+	(*EgressRoute)(nil),         // 24: koinon.gateway.v1alpha1.EgressRoute
+	nil,                         // 25: koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
 }
 var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
 	0,  // 0: koinon.gateway.v1alpha1.StreamStateRequest.halves:type_name -> koinon.gateway.v1alpha1.Half
@@ -2051,18 +2161,19 @@ var file_koinon_gateway_v1alpha1_state_proto_depIdxs = []int32{
 	18, // 19: koinon.gateway.v1alpha1.MCPTarget.remote_agents:type_name -> koinon.gateway.v1alpha1.RemoteAgent
 	5,  // 20: koinon.gateway.v1alpha1.AgentTools.agent:type_name -> koinon.gateway.v1alpha1.AgentRef
 	20, // 21: koinon.gateway.v1alpha1.AgentTools.grants:type_name -> koinon.gateway.v1alpha1.ToolGrant
-	23, // 22: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
-	22, // 23: koinon.gateway.v1alpha1.EgressState.credentials:type_name -> koinon.gateway.v1alpha1.EgressCredential
-	24, // 24: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
-	1,  // 25: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
-	2,  // 26: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
-	4,  // 27: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
-	3,  // 28: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
-	27, // [27:29] is the sub-list for method output_type
-	25, // [25:27] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	24, // 22: koinon.gateway.v1alpha1.EgressState.routes:type_name -> koinon.gateway.v1alpha1.EgressRoute
+	23, // 23: koinon.gateway.v1alpha1.EgressState.credentials:type_name -> koinon.gateway.v1alpha1.EgressCredential
+	22, // 24: koinon.gateway.v1alpha1.EgressState.actors:type_name -> koinon.gateway.v1alpha1.EgressActor
+	25, // 25: koinon.gateway.v1alpha1.EgressRoute.query_values:type_name -> koinon.gateway.v1alpha1.EgressRoute.QueryValuesEntry
+	1,  // 26: koinon.gateway.v1alpha1.GatewayStateService.StreamState:input_type -> koinon.gateway.v1alpha1.StreamStateRequest
+	2,  // 27: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:input_type -> koinon.gateway.v1alpha1.AckRevisionRequest
+	4,  // 28: koinon.gateway.v1alpha1.GatewayStateService.StreamState:output_type -> koinon.gateway.v1alpha1.StateUpdate
+	3,  // 29: koinon.gateway.v1alpha1.GatewayStateService.AckRevision:output_type -> koinon.gateway.v1alpha1.AckRevisionResponse
+	28, // [28:30] is the sub-list for method output_type
+	26, // [26:28] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_koinon_gateway_v1alpha1_state_proto_init() }
@@ -2076,7 +2187,7 @@ func file_koinon_gateway_v1alpha1_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_gateway_v1alpha1_state_proto_rawDesc), len(file_koinon_gateway_v1alpha1_state_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -49,8 +49,8 @@ are in [0046](0046-adr-conventions.md).
 | [0022](0022-frontend-architecture.md) | React SPA served by the Go API over connect-rpc | Accepted |
 | [0023](0023-observability-and-audit.md) | Optional observability, hash-chained audit on by default | Accepted; amended 2026-10-26, 2026-10-28, 2026-10-30 and 2026-10-31 (below); run traces by [0074](0074-run-traces-trace-router.md); install-level audit chain and anchors by [0100](0100-install-audit-chain.md) (note of 2026-11-07 below) |
 | [0024](0024-roadmap.md) | Release roadmap from v0.1 to v1.0 | Accepted |
-| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind) |
-| [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md) |
+| [0025](0025-testing-strategy.md) | Deterministic, free CI with a continuous sandbox escape suite | Accepted; amended 2026-11-02 (below); the lab as e2e evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-11 (below: real-model evals are local or own-cluster runs, no nightly eval job, the escape suite's OpenShell cases run on kind); amended 2026-11-26 (below: no `go-test-lab` status, no test result reuse, #682) |
+| [0026](0026-home-lab-and-license.md) | Home lab for real isolation testing; Apache-2.0 with DCO | Accepted; amended 2026-11-02 (below); the lab as merge evidence amended by [0105](0105-merge-queue-route.md); amended 2026-11-26 (below: the sign-off is checked in `quick checks`, #682) |
 | [0027](0027-repo-and-versioning.md) | Monorepo, one version, supply-chain hygiene | Accepted; amended 2026-10-25 (below) |
 | [0028](0028-name-koinon.md) | Name the project Koinon | Accepted |
 | [0029](0029-run-level-resume.md) | Run-level resume through the harness session | Accepted; amended by [0051](0051-session-home-generations.md) |
@@ -127,7 +127,7 @@ are in [0046](0046-adr-conventions.md).
 | [0101](0101-agent-substrate-and-kagent-not-adopted.md) | Agent Substrate and kagent 1.x evaluated, not adopted for v0.x | Superseded by [0119](0119-agent-substrate-execution-layer.md) (was: Accepted, maintainer decision 2026-11-04) |
 | [0102](0102-merge-queue-runs-the-kind-e2e.md) | The merge queue runs the kind e2e on the queue commit | Accepted (procoduck, 2026-11-09); decisions 2, 3 and 6 superseded in part by [0105](0105-merge-queue-route.md) |
 | [0103](0103-recorded-review-verdict-check.md) | A recorded review verdict, checked by `review`, replaces the second-owner approval outside `.github/` | Deprecated (2026-11-11, #546: the check is removed; see the amendment). Earlier: Accepted (direction by procoduck, 2026-11-09; details by the implementing lane); amended 2026-11-11: the review verdict is advisory, not a gate |
-| [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default) |
+| [0104](0104-work-claims-reduced-to-the-lock.md) | Work claims reduced to the lock: no lease, no heartbeat, holder is login and lane | Accepted (procoduck, 2026-11-09: "reduce claims to the lock"); amended 2026-11-11 (below: the per-human cap is off by default) and 2026-11-26 (below: `claim` is not required, #682) |
 | [0105](0105-merge-queue-route.md) | One route to main: the merge queue, and drafts run nothing | Accepted (procoduck, 2026-11-09; built in PR A #479 and PR B #487; amended 2026-11-11, below) |
 | [0106](0106-install-mark-owns-openshell-objects.md) | An install mark decides which OpenShell objects an install owns | Accepted |
 | [0107](0107-restore-hold-mode.md) | Restore-hold mode: a restored install starts held | Accepted |
@@ -149,3 +149,6 @@ are in [0046](0046-adr-conventions.md).
 | [0124](0124-mise-lint-tool-versions.md) | Trial of mise for the versions of five lint tools | Accepted |
 | [0125](0125-hide-unreviewed-mcp-tools.md) | Hide MCP tools that no admin reviewed | Proposed (needs main: ADR number) |
 | [0126](0126-web-ui-v2.md) | Web UI v2: brand look, org home, platform console and new-agent flow | Accepted (maintainer decisions of 2026-11-24; mockups approved: "Mocks lgtm") |
+| [0127](0127-chat-adapter-pure-core.md) | Slack and Teams adapter as a pure event-to-actions core | Proposed (step 1 of #24: the maintainer reviews this ADR before any code); amended by [0130](0130-external-actor-kind.md) (the identity of an `external` actor is a row, not payload fields) |
+| [0128](0128-substrate-provisioner.md) | A provisioner holds the global Substrate role | Accepted (decided by the maintainer on 2026-11-26) |
+| [0130](0130-external-actor-kind.md) | The external actor kind: people without a Koinon account on the task timeline | Accepted (issue #1408; the maintainer accepted it on 2026-11-26) |

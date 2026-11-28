@@ -68,12 +68,32 @@ function expectHeader(headers: Record<string, string>, name: string, value: stri
   if (headers[name] !== value) throw new Error(`missing ${name}: ${value} (the API's CSRF check requires it)`)
 }
 
+/**
+ * agentSummaries is ListAgentSummaries for the agents a spec gives ListAgents (the JSON form of Agent): the org home
+ * cards of ADR 0126 section 4. `extra` adds summary fields per agent id (the spend, the runs, team, reports_to).
+ */
+export function agentSummaries(agents: Json[], extra: Record<string, Json> = {}) {
+  return () => ({
+    agents: agents.map((a) => ({
+      agentId: a.id,
+      displayName: a.displayName,
+      status: a.status,
+      harness: a.harness,
+      model: 'claude-sonnet-5-5',
+      spentTodayUsd: '0',
+      ...(a.unhealthyAt ? { unhealthyAt: a.unhealthyAt } : {}),
+      ...extra[a.id as string],
+    })),
+  })
+}
+
 const mcp = 'koinon.mcpserver.v1alpha1.McpServerService/'
 
 /**
  * mcpServerHandlers is an in-memory McpServerService: a healthy server, an unhealthy one and one
- * declared by a Secret, with tools in different tiers and one carrying a review flag. `seen` records
- * the writes so a spec can assert on them. Credentials are never returned.
+ * declared by a Secret, with tools in different tiers, one carrying a review flag and one new tool
+ * that waits for review. It also answers OutwardService.SetOutwardTargetDisabled for the servers.
+ * `seen` records the writes so a spec can assert on them. Credentials are never returned.
  */
 export function mcpServerHandlers() {
   const at = new Date(Date.now() - 120_000).toISOString()
@@ -100,9 +120,11 @@ export function mcpServerHandlers() {
     { serverId: 's-docs', name: 'a_very_long_tool_name', description: 'Too long', tier: 'TIER_ASK', present: true, unavailable: 'unavailable: name too long for the gateway' },
     { serverId: 's-issues', name: 'list_issues', description: 'List issues', tier: 'TIER_AUTO', present: true },
     { serverId: 's-wiki', name: 'read', description: 'Read a page', tier: 'TIER_ASK', present: true },
+    // A new tool: no admin approved its text yet, so agents do not get it (ADR 0125).
+    { serverId: 's-wiki', name: 'write_item', description: 'Write an item', tier: 'TIER_ASK', present: true, toolHash: 'hash-write-item', toolJson: '{"name":"write_item","description":"Write an item"}' },
   ]
   let allowed: Json[] = []
-  const seen: { create?: Json; tier?: Json; two?: Json; ack?: Json; allow?: Json } = {}
+  const seen: { create?: Json; tier?: Json; two?: Json; ack?: Json; allow?: Json; outward?: Json } = {}
   const find = (req: Json) => tools.find((t) => t.serverId === req.serverId && t.name === req.tool)!
   const unary: Handlers['unary'] = {
     [mcp + 'ListServers']: () => ({ servers }),
@@ -133,6 +155,17 @@ export function mcpServerHandlers() {
       delete t.reviewReason
       t.approvedHash = t.toolHash
       return { tool: t }
+    },
+    [mcp + 'DeleteServer']: (req) => {
+      servers.splice(servers.findIndex((s) => s.id === req.serverId), 1)
+      return {}
+    },
+    'koinon.outward.v1alpha1.OutwardService/SetOutwardTargetDisabled': (req) => {
+      seen.outward = req
+      const s = servers.find((x) => x.id === req.targetId)!
+      if (req.disabled) s.adminDisabled = { at: new Date().toISOString(), by: 'user u-1', note: req.note }
+      else delete s.adminDisabled
+      return { state: { kind: req.kind, targetId: req.targetId, name: s.name, disabled: !!req.disabled } }
     },
     [mcp + 'GetAgentServers']: () => ({ servers: allowed }),
     [mcp + 'SetAgentServers']: (req) => {

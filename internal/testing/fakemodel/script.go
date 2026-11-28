@@ -91,6 +91,10 @@ type When struct {
 	// harness's prefix for Koinon's MCP server (koinon_<name>, mcp__koinon__<name>) also
 	// matches, so one script fits every harness.
 	ToolResult string `yaml:"toolResult,omitempty"`
+	// ToolResultContains requires the text of a trailing tool result to contain this substring.
+	// Use it to answer a tool's output: a script can let a run continue only when a command printed
+	// its success marker, so a failed command leaves no turn that matches and the run fails.
+	ToolResultContains string `yaml:"toolResultContains,omitempty"`
 	// UserContains requires the latest user text to contain this substring.
 	UserContains string `yaml:"userContains,omitempty"`
 	// SystemContains requires the system prompt to contain this substring: the text of every
@@ -213,10 +217,12 @@ func LoadFS(fsys fs.FS, dir string) ([]Script, error) {
 type conversation struct {
 	// toolResults names the tools whose results form the trailing message(s); nil when the last
 	// message is not a tool result. A result whose call cannot be resolved has an empty name.
-	toolResults    []string
-	lastUserText   string
-	systemText     string
-	assistantTurns int
+	toolResults []string
+	// toolResultTexts are the texts of those results, in the same order.
+	toolResultTexts []string
+	lastUserText    string
+	systemText      string
+	assistantTurns  int
 	// tools are the tool names the request declares.
 	tools []string
 }
@@ -285,6 +291,11 @@ func (w When) holds(c conversation) bool {
 		if !slices.ContainsFunc(c.toolResults, func(n string) bool { return toolMatches(n, w.ToolResult) }) {
 			return false
 		}
+	}
+	if w.ToolResultContains != "" && !slices.ContainsFunc(c.toolResultTexts, func(t string) bool {
+		return strings.Contains(t, w.ToolResultContains)
+	}) {
+		return false
 	}
 	if w.UserContains != "" && !strings.Contains(c.lastUserText, w.UserContains) {
 		return false

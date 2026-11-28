@@ -221,7 +221,7 @@ var _ = Describe("home repository seeds", func() {
 	restored := func(ctx context.Context, prefix, pw, snapshot string) string {
 		GinkgoHelper()
 		var out bytes.Buffer
-		Expect(writer.Restore(ctx, prefix, pw, snapshot, &out)).To(Succeed())
+		Expect(writer.Restore(ctx, prefix, pw, snapshot, "", &out)).To(Succeed())
 		return out.String()
 	}
 	audited := func(ctx context.Context, action string) []string {
@@ -292,7 +292,7 @@ var _ = Describe("home repository seeds", func() {
 
 		By("the new repository holds the newest home: the sweeper deletes the old one")
 		Eventually(deleted0(ctx)).WithTimeout(racescale.D(10 * time.Second)).Should(BeTrue())
-		Expect(writer.Restore(ctx, e0, pw0, newest.SnapshotID.String, io.Discard)).NotTo(Succeed(), "the old repository's blobs are gone")
+		Expect(writer.Restore(ctx, e0, pw0, newest.SnapshotID.String, "", io.Discard)).NotTo(Succeed(), "the old repository's blobs are gone")
 		By("the gauge counts at the end of a tick, so it follows the delete by a tick")
 		Eventually(gauge("pending")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())
 		Eventually(gauge("failed")).WithTimeout(racescale.D(5 * time.Second)).Should(BeZero())

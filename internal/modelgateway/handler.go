@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,17 @@ func (g *Gateway) refuse(w http.ResponseWriter, status int, text string) {
 	g.o.Metrics.request(resRefused)
 	w.Header().Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
 	http.Error(w, text, status)
+}
+
+// refuseActor answers an actor JWT that is not accepted. A 503 (no issuer keys) is not final.
+func (g *Gateway) refuseActor(w http.ResponseWriter, r *gateway.ActorRefusal) {
+	if r.Final {
+		g.refuse(w, r.Status, r.Text)
+		return
+	}
+	g.o.Metrics.request(resRefused)
+	w.Header().Set("Retry-After", "5")
+	http.Error(w, r.Text, r.Status)
 }
 
 // refuseBudget answers a key whose spend reached its limit: 429 budget_exceeded, marked final. The
@@ -110,9 +122,23 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.refuse(w, http.StatusUnauthorized, "refused: no gateway key")
 		return
 	}
+	token = strings.TrimSpace(token)
 	snap := g.snap.Load()
-	key, ok := snap.authenticate(strings.TrimSpace(token))
-	if !ok {
+	var key gateway.Key
+	if g.o.Actors != nil && !gateway.IsGatewayKey(token) {
+		// A Substrate guest: atenet-egress put the actor JWT here (issue #1489). No fallback to a key. The
+		// JWT never goes upstream: upstreamHeaders forwards no Authorization of the client.
+		agent, refusal := gateway.IdentifyActor(g.o.Actors, token)
+		if refusal != nil {
+			g.o.Logger.Info("refused a model request: actor token", "reason", refusal.Reason, "status", refusal.Status)
+			g.refuseActor(w, refusal)
+			return
+		}
+		if key, ok = snap.byAgent[agent]; !ok {
+			g.refuse(w, http.StatusForbidden, "refused: the agent has no gateway key")
+			return
+		}
+	} else if key, ok = snap.authenticate(token); !ok {
 		g.refuse(w, http.StatusUnauthorized, "refused: unknown gateway key")
 		return
 	}
@@ -202,7 +228,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Body, pr.Out.ContentLength = io.NopCloser(bytes.NewReader(out)), int64(len(out))
 			pr.Out.Header = upstreamHeaders(r.Header, rt, rendering, secret)
 		},
-		ModifyResponse: func(resp *http.Response) error { return c.response(resp, rt, format, stream) },
+		ModifyResponse: func(resp *http.Response) error { return c.response(resp, rt, format, secret) },
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
 			c.transportError(w, req, err)
 		},
@@ -382,12 +408,13 @@ func (c *call) emit(result string, edit func(*gateway.UsageRecord)) {
 }
 
 // response runs on the upstream's answer, before its headers go to the client.
-func (c *call) response(resp *http.Response, rt route, format modelformat.Format, stream bool) error {
+func (c *call) response(resp *http.Response, rt route, format modelformat.Format, secret string) error {
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		// A redirect is never followed: it could lead the provider key to another host.
 		_ = resp.Body.Close()
 		return errRedirect
 	}
+	c.watchEcho(resp, rt, secret)
 	c.rec.Status = int64(resp.StatusCode)
 	c.rec.ResponseID = resp.Header.Get(generationHeader)
 	if resp.StatusCode == http.StatusForbidden {
@@ -410,6 +437,38 @@ func (c *call) response(resp *http.Response, rt route, format modelformat.Format
 		c.finishBody(resp.Request.Context(), cn, complete, readErr, n)
 	}}
 	return nil
+}
+
+// watchEcho counts and logs a provider key that the upstream echoes back in a response header or body (#1332,
+// ADR 0097 section 15), once per response. It detects only: the bytes reach the agent unchanged (an accepted
+// risk for v0.2). The body watch streams with the body and never buffers it. A 1xx answer is not wrapped: a 101
+// upgrade needs its body to stay an io.ReadWriteCloser.
+func (c *call) watchEcho(resp *http.Response, rt route, secret string) {
+	w := newEchoWatch(secret)
+	if w == nil || resp.StatusCode < 200 {
+		return
+	}
+	answer := answerError
+	if resp.StatusCode < 300 {
+		answer = answerSuccess
+	}
+	status := resp.StatusCode
+	var once sync.Once
+	report := func(where string) {
+		once.Do(func() {
+			c.g.o.Metrics.keyEcho(answer)
+			// Never the key, the body or a part of them: the provider name, the status and where only.
+			c.g.o.Logger.Warn("provider key echoed in a model response", "provider", rt.p.Name, "status", status,
+				"in", where)
+		})
+	}
+	for _, vs := range resp.Header {
+		if slices.ContainsFunc(vs, func(v string) bool { return strings.Contains(v, secret) }) {
+			report("header")
+			break
+		}
+	}
+	resp.Body = &echoBody{ReadCloser: resp.Body, watch: w, seen: func() { report("body") }}
 }
 
 func (c *call) finishBody(ctx context.Context, cn counts, complete bool, readErr error, n int64) {

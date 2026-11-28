@@ -172,6 +172,9 @@ func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap exec
 	if err := checkSpec(op, spec); err != nil {
 		return execution.Sandbox{}, err
 	}
+	if err := d.requireGatewayRoutes(op); err != nil {
+		return execution.Sandbox{}, err
+	}
 	tag, err := d.control.GetTag(ctx, &ateapiv1.GetTagRequest{Tag: ref(workspace, snap.ID)})
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
@@ -197,6 +200,14 @@ func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap exec
 	}})
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
+	}
+	// Like CreateSandbox: Substrate v1.0.0 may create the actor suspended, and a restored sandbox
+	// must become ready too (issue #1092). Harmless when the actor already boots.
+	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		return d.resume(ctx, op, workspace, spec.Name)
+	}
+	if err := d.ensureEgressPolicy(ctx, op, key{workspace, spec.Name}); err != nil {
+		return execution.Sandbox{}, err
 	}
 	return sandboxFrom(workspace, actor), nil
 }

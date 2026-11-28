@@ -7,11 +7,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -478,6 +479,89 @@ var _ = Describe("fake Gitea", func() {
 			Expect(f.Snapshot("widgets").Branches["big"]).To(Equal(strings.TrimSpace(git(one, "rev-parse", "HEAD"))))
 		})
 
+		It("fetches into a clone that has diverged, with a gzip request body", func() {
+			tmp := GinkgoT().TempDir()
+			one := filepath.Join(tmp, "one")
+			git(tmp, "clone", "-q", cloneURL(fakegitea.DefaultToken), one)
+			// Many local commits make many haves. The rounds of the negotiation grow (16, 32, 64 haves), and
+			// git gzips an upload-pack request above 1 KiB. fast-import makes the commits in one process.
+			var stream strings.Builder
+			for i := range 300 {
+				msg := fmt.Sprintf("local %d\n", i)
+				fmt.Fprintf(&stream, "commit refs/heads/main\ncommitter t <t@example.test> %d +0000\ndata %d\n%s", 1700000000+i, len(msg), msg)
+				if i == 0 {
+					stream.WriteString("from refs/heads/main^0\n")
+				}
+				stream.WriteString("\n")
+			}
+			imp := gitenv.Command(context.Background(), one, one, "fast-import", "--quiet", "--force")
+			imp.Stdin = strings.NewReader(stream.String())
+			out, err := imp.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+			// Without the remote-tracking refs the client finds the common commit only after several rounds.
+			git(one, "update-ref", "-d", "refs/remotes/origin/HEAD")
+			git(one, "update-ref", "-d", "refs/remotes/origin/main")
+			ch := doAuth(f, "POST", repo+"/contents", map[string]any{
+				"branch": "main", "message": "upstream",
+				"files": []map[string]any{{"operation": "create", "path": "up.txt", "content": base64.StdEncoding.EncodeToString([]byte("up\n"))}},
+			}, "token "+fakegitea.DefaultToken)
+			Expect(ch.Status).To(Equal(201), string(ch.Body))
+			cmd := gitenv.Command(context.Background(), one, one, "-c", "maintenance.auto=false", "-c", "protocol.version=0", "fetch", "origin", "main")
+			cmd.Env = gitenv.Env(one, "GIT_TRACE_CURL=1", "GIT_TRACE_CURL_NO_DATA=1")
+			out, err = cmd.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+			Expect(string(out)).To(ContainSubstring("Content-Encoding: gzip"), "the fetch sent a gzip body")
+			Expect(git(one, "log", "--format=%s", "-1", "FETCH_HEAD")).To(Equal("upstream\n"))
+		})
+
+		It("serves only the smart protocol's requests", func() {
+			call := func(method, path, contentType, encoding string, body []byte) int {
+				GinkgoHelper()
+				req, err := http.NewRequestWithContext(context.Background(), method, f.Server.URL+"/acme/widgets.git/"+path, bytes.NewReader(body))
+				Expect(err).NotTo(HaveOccurred())
+				req.SetBasicAuth("x", fakegitea.DefaultToken)
+				if contentType != "" {
+					req.Header.Set("Content-Type", contentType)
+				}
+				if encoding != "" {
+					req.Header.Set("Content-Encoding", encoding)
+				}
+				res, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				return res.StatusCode
+			}
+			Expect(call("GET", "info/refs?service=git-upload-pack", "", "", nil)).To(Equal(http.StatusOK))
+			Expect(call("GET", "info/refs", "", "", nil)).To(Equal(http.StatusForbidden), "the dumb protocol")
+			Expect(call("GET", "HEAD", "", "", nil)).To(Equal(http.StatusForbidden), "the dumb protocol")
+			Expect(call("GET", "info/refs?service=--upload-pack=x", "", "", nil)).To(Equal(http.StatusForbidden), "a service that is not known")
+			Expect(call("POST", "git-upload-pack", "text/plain", "", []byte("0000"))).To(Equal(http.StatusUnsupportedMediaType))
+			Expect(call("POST", "git-upload-pack", "application/x-git-upload-pack-request", "gzip", []byte("not gzip"))).To(Equal(http.StatusBadRequest))
+		})
+
+		It("answers 404 for a repository name that is not a known repository", func() {
+			noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			for _, path := range []string{
+				"/acme/-widgets.git/info/refs?service=git-upload-pack",
+				"/acme/--upload-pack=touch.git/info/refs?service=git-upload-pack",
+				"/acme/..%2Fwidgets.git/info/refs?service=git-upload-pack",
+				"/acme/widgets.git/..%2F..%2Fother.git/git-upload-pack",
+				"/acme/%2E%2E.git/info/refs?service=git-upload-pack",
+			} {
+				req, err := http.NewRequestWithContext(context.Background(), "GET", f.Server.URL+path, nil)
+				Expect(err).NotTo(HaveOccurred())
+				req.SetBasicAuth("x", fakegitea.DefaultToken)
+				res, err := noRedirect.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				_ = res.Body.Close()
+				Expect(res.StatusCode).To(BeElementOf(http.StatusNotFound, http.StatusForbidden), path)
+			}
+		})
+
+		It("checks at startup that it can serve git", func() {
+			Expect(f.CheckServe()).To(Succeed())
+		})
+
 		It("serves the owner/repo path case-insensitively", func() {
 			tmp := GinkgoT().TempDir()
 			url := strings.Replace(f.Server.URL, "http://", "http://x:"+fakegitea.DefaultToken+"@", 1) + "/ACME/Widgets.git"
@@ -508,15 +592,17 @@ func doAuth(f *fakegitea.Fake, method, path string, body any, authorization stri
 	return resp{Status: res.StatusCode, Header: res.Header, Body: b}
 }
 
+// noMaintenanceEnv switches off the background maintenance that git starts after a fetch or a commit. That process
+// detaches, writes into the clone (the commit-graph) after git exits and races the removal of the test directory
+// ("directory not empty", #1425).
+var noMaintenanceEnv = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=maintenance.auto", "GIT_CONFIG_VALUE_0=false"}
+
 // gitErr runs git hermetically in dir and returns its combined output.
 func gitErr(dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "git", args...)
-	cmd.Dir = dir
-	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
-		"GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.invalid",
-		"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.invalid",
-	}
+	cmd := gitenv.Command(context.Background(), dir, dir, args...)
+	cmd.Env = gitenv.Env(dir, "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.invalid",
+		"GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.invalid")
+	cmd.Env = append(cmd.Env, noMaintenanceEnv...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -593,21 +679,21 @@ var _ = Describe("fake Gitea permissions", func() {
 	Describe("git over HTTP", func() {
 		clone := func(tok, name string) (string, error) {
 			dir := GinkgoT().TempDir()
-			out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok,
+			out, err := gitenv.Command(context.Background(), dir, dir, "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok,
 				"clone", "-q", f.URL()+"/acme/"+name+".git", filepath.Join(dir, "c")).CombinedOutput()
 			return string(out), err
 		}
 		push := func(tok, name string) (string, error) {
 			dir := GinkgoT().TempDir()
 			run := func(args ...string) (string, error) {
-				out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+				out, err := gitenv.Command(context.Background(), dir, dir, args...).CombinedOutput()
 				return string(out), err
 			}
-			if out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+writeTok,
+			if out, err := gitenv.Command(context.Background(), dir, dir, "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+writeTok,
 				"clone", "-q", f.URL()+"/acme/"+name+".git", dir).CombinedOutput(); err != nil {
 				return string(out), err
 			}
-			if out, err := run("-c", "user.email=a@b.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"); err != nil {
+			if out, err := run("-c", "maintenance.auto=false", "-c", "user.email=a@b.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"); err != nil {
 				return out, err
 			}
 			return run("-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok, "push", "-q", "origin", "HEAD:refs/heads/new")

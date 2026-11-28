@@ -25,9 +25,10 @@ names what needs the upstream project's rights and what still works from a fork.
 | `wt.sh` | nothing: local worktrees, and it only reads pull requests |
 | `go tool worktidy` (`make tidy`) | nothing: it reads pull requests and claims; `APPLY=1` removes local worktrees, branches and (opt-in) Docker objects |
 | `e2e-status.sh` | posting a commit status |
-| `go-test-lab.sh` | posting a commit status, a lab host |
 | `e2e-remote.sh` | the lab target (`--local` needs none) |
 | `e2e-bisect.sh` | the upstream CI's token |
+| `e2e-dispatch.sh` | write access to dispatch `e2e-kind.yml` |
+| `relay-classify.sh` | nothing: it only reads |
 | `drill-issue.sh` | the upstream CI's token |
 | `release-gate.sh` | nothing: it only reads (the release workflow runs it) |
 | `release-base-mirror.sh` | the release registry (the release workflow runs it before GoReleaser) |
@@ -37,7 +38,6 @@ names what needs the upstream project's rights and what still works from a fork.
 | `release-harness.sh` | the release registry (`release-flavor.sh` is a link to it) |
 | `release-harness-substrate.sh` | the release registry (the release workflow runs it after `release-harness.sh`) |
 | `build-env-guest.sh` | a local directory (`build/env-guest`): it clones the public Substrate env source and builds two static binaries; no registry, no token |
-| `spike/teardown.sh` | the maintainers' spike infrastructure |
 
 ## Which repository and board
 

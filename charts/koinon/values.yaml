@@ -397,9 +397,11 @@ gateway:
       port: 8080
       # On SIGTERM readiness turns 503 at once and the pod keeps serving for the shutdown delay, so the
       # Service and clients stop sending to it. Then it refuses new requests and lets calls in flight
-      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30.
+      # finish for up to the drain timeout. terminationGracePeriodSeconds is both plus 30. A tool call is
+      # never retried. It may wait up to 120 seconds for a person's approval and then run for up to 120
+      # seconds (the gateway's call timeout), so the chart refuses a drain timeout below 240 (issue 1347).
       shutdownDelaySeconds: 5
-      drainTimeoutSeconds: 30
+      drainTimeoutSeconds: 270
       podDisruptionBudget:
         maxUnavailable: 1
       resources:
@@ -409,6 +411,28 @@ gateway:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      # The egress listener (ADR 0097, ADR 0120 sections 1 and 2, issue #1086 part C2). With it on, git of an
+      # agent with a code-host connection goes to <this Service>:<port>/egress/<host>/ and not to the forge.
+      # The gateway checks the run's actor token, matches the agent's forge routes and attaches the
+      # credential, so the sandbox holds no forge credential. koinon-agentd mints the token outside the guest
+      # with an Ed25519 key: only koinon-agentd mounts the private seed, and only this gateway mounts the
+      # public key. The reconciler adds an enforced L7 sandbox rule for this port. The direct forge rule of
+      # the sandbox stays until part C3. Off by default.
+      egress:
+        enabled: false
+        port: 8081
+        # PEM bundle of extra CA roots, added to the system roots, that verify the forges the listener
+        # reaches (a forge with a private CA). The host must also be in egress.allowedInternalHosts and
+        # networkPolicy.gatewayEgressTo when it is internal. Empty: the system roots only.
+        caBundle: ""
+        actorToken:
+          # The issuer (iss) of the tokens and the key ID (kid). Change keyId to rotate the key: set
+          # existingSecret to a new Secret, or delete the generated one, and roll koinon-agentd and the gateway.
+          issuer: koinon-agentd
+          keyId: k1
+          # A Secret with the keys key (64 lowercase hex characters, the Ed25519 seed) and public.pem (its PEM
+          # public key). Empty: the ensure-secrets Job creates <fullname>-actor-token-key once.
+          existingSecret: ""
       # The gateway's recipient key (ADR 0097 decision 12, issue #1151): koinon-api seals each stored MCP
       # credential to the public key, and only koinon-gateway holds the private key. The private key is
       # wrapped by a KMS key of its own, never the KEK's: the gateway identity may decrypt with it, only the
@@ -482,11 +506,13 @@ gateway:
               memory: 32Mi
             limits:
               memory: 128Mi
-  # The model path (ADR 0097 step 2, issue #279). agentgateway: agentgateway serves it (the default).
+  # The model path (ADR 0097 step 2, issue #279). Empty (the default): koinon with execution.driver=substrate,
+  # agentgateway otherwise. agentgateway: agentgateway serves it; the chart refuses it with Substrate.
   # koinon: also run koinon-gateway's model path, in pods of its own. It meters, stops a key at its
-  # budget and charges after each call (slice 2). It has no retry rule. No agent is routed to it yet.
+  # budget and charges after each call (slice 2). It has no retry rule. Substrate needs it (issue #1489): only
+  # koinon-gateway checks the actor JWT, so gateway.mode=kubernetes is not supported with Substrate in v0.1.0.
   model:
-    driver: agentgateway
+    driver: ""
     koinon:
       image:
         repository: gateway
@@ -834,16 +860,40 @@ execution:
   # features (sandboxObserver, sandboxNetworkPolicy, sandboxLimitRange) to enabled=true.
   driver: substrate
   substrate:
-    # ateapi's host:port: the in-cluster address of a default Substrate install. Required with substrate.
-    controlAddress: api.ate-system.svc.cluster.local:443
-    # The atenet router's host:port of a default Substrate install.
-    routerAddress: atenet-router.ate-system.svc.cluster.local:80
+    # ateapi's host:port: the in-cluster address of a default Substrate install. Required with substrate. Use that
+    # exact name: the ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the
+    # TLS handshake.
+    controlAddress: api.ate-system.svc:443
+    # The atenet router's host:port of a default Substrate install. The router serves TLS on 443
+    # only (Substrate v1.0.1 has no plain listener) and requires a client certificate: koinon-agentd, the one
+    # component that calls it, gets a pod certificate (a podCertificate projected volume) and the CA of the
+    # router's certificate (a clusterTrustBundle volume), and the installer puts agentd's SPIFFE ID on the router
+    # allow-list (koinon-api substrate install --koinon-namespace and --koinon-release; issue #1446).
+    routerAddress: atenet-router.ate-system.svc:443
+    # Name checked against the router's certificate. Empty uses the host of routerAddress; the certificate names
+    # atenet-router.<namespace>.svc, so use that form in routerAddress or set this.
+    routerServerName: ""
     # Secret with ca.crt, the CA that signed ateapi's certificate. Empty uses the system roots.
     caSecret: ""
     # Name checked against ateapi's certificate. Empty uses the host of controlAddress.
     serverName: ""
-    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi.
-    tokenAudience: ateapi
+    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi. Keep
+    # api.ate-system.svc: ate-setup makes ateapi accept that audience only, and any other gives "invalid bearer token".
+    tokenAudience: api.ate-system.svc
+    # The provisioner (ADR 0128). Substrate lets only its global owner create an atespace, and the reconciler must
+    # not hold that role. The provisioner is a small pod of its own with its own ServiceAccount: it creates the
+    # atespace of each org and writes its access policy (the reconciler gets editor, agentd gets viewer). The
+    # installer (koinon-api substrate install) makes its ServiceAccount an owner in Substrate's global access
+    # policy. Turn it off only when the reconciler's ServiceAccount is a global owner itself (a lab).
+    provisioner:
+      enabled: true
+      port: 8086
+      # Audience of the token that the reconciler sends to the provisioner. The provisioner checks it with a
+      # TokenReview, so its ServiceAccount gets a ClusterRole that creates TokenReviews.
+      tokenAudience: koinon-provisioner
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {memory: 128Mi}
     # Not used. The guest server now runs inside koinon-guest-front, in the harness image's substrate
     # overlay (issue #1309), and the chart reads no separate guest image. Kept so that existing values
     # files still pass the schema; remove it from your values.
@@ -877,12 +927,46 @@ execution:
     # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
     # the gVisor tiers keep a writable root by decision (issue #1150).
     allowUnhardened: false
+    # Golden snapshots of a template (Substrate builds one actor per template and clones it). Off by default
+    # in every tier (issue #1492, ADR 0120 section 5.2): a clone copies memory from one sandbox to another,
+    # and a golden build holds a pool slot for about 20 s each time a template changes. Cold start is
+    # about the same without it (p50 1.0 s gVisor, 2.7 s vm). Setting true is an exception to the
+    # no-memory-clone rule; see docs/dev/substrate-install.md.
+    goldenSnapshots: false
     # Namespaces whose pods may reach the gateway's model port with substrate: the actors' traffic
     # comes through atenet from Substrate's namespace. Replaces sandboxPolicy.namespaceSelector in the
     # gateway NetworkPolicy under substrate.
     gatewayClientNamespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: ate-system
+    # The actor token of the egress listener (ADR 0120, amendment of issue #1386; used with
+    # gateway.mcp.koinon.egress.enabled). On substrate no actor token is in the guest: atenet-egress adds a token
+    # that ateapi mints, and koinon-gateway verifies it against Substrate's issuer, ate-idp-server. Then the
+    # chart makes no Ed25519 actor token key, and koinon-agentd gets none.
+    actorJwt:
+      # The one issuer the gateway trusts, as ate-api-server's --actor-jwt-issuer: https://<host>, no path. The
+      # gateway never reads it from a token. Empty: Substrate's installer default, https://idp.<namespace>.svc
+      # (the Service idp of ate-idp-server in execution.substrate.namespace).
+      issuer: ""
+      # The CA bundle that verifies the issuer's TLS certificate, mounted read-only into koinon-gateway. Default:
+      # the ClusterTrustBundle of Substrate's servicedns signer, which signs ate-idp-server's certificate (the
+      # same bundle that koinon-agentd trusts for the router). The kubelet updates the file when the CA rotates.
+      ca:
+        signerName: servicedns.podcert.ate.dev/identity
+        labelSelector:
+          matchLabels:
+            podcert.ate.dev/canarying: live
+        # A ConfigMap in Koinon's namespace (key configMapKey, PEM) replaces the ClusterTrustBundle, for an issuer
+        # that another CA signs (an issuer outside the cluster). Public certificates only.
+        configMap: ""
+        configMapKey: ca.crt
+      # The NetworkPolicy egress rule of the gateway to the issuer: the ate-idp-server pods in
+      # execution.substrate.namespace, on their pod port (8443, named https; the Service port 443 maps to it).
+      # From Substrate v1.0.1 manifests/ate-install/ate-idp-server.yaml.
+      idpPodSelector:
+        matchLabels:
+          app: ate-idp-server
+      idpPort: 8443
     # Substrate's control-plane namespace (ate-api, ate-controller, atenet, atelet, the object store and
     # the database). It must exist (koinon-api substrate install creates it) and holds nothing but
     # Substrate (ADR 0120 section 6.2). Worker pods do not run here: see workerNamespace.
@@ -929,7 +1013,7 @@ execution:
         - system:kube-controller-manager
       # Identities whose pods may use a tag instead of a digest. This list is used as written, so an
       # empty list means every image needs a digest.
-      # Interim: Substrate v1.0.0 publishes tags only. Exit condition: ate-setup deploys by digest;
+      # Interim: Substrate v1.0.1 publishes tags only. Exit condition: ate-setup deploys by digest;
       # then set this to [] (the chart check pins the default) and pin the default WorkerPool image by digest
       # (the chart refuses a tag pool image without the ReplicaSet controller here). Tracking issue: #1140.
       digestExemptIdentities:
@@ -972,7 +1056,7 @@ execution:
       # The node agent (atelet) in the control-plane namespace: the one pod there that may mount a
       # hostPath. The DaemonSet controller must create it for a DaemonSet, and it must run as this
       # ServiceAccount. The list is atelet's own, not the worker list: the hostPath volumes of
-      # Substrate v1.0.0 manifests/ate-install/atelet.yaml (b34fbee7) lines 394-430. The last two are
+      # Substrate v1.0.1 manifests/ate-install/atelet.yaml (20778a6d) lines 394-430. The last two are
       # the GKE credential-provider paths; remove them on a platform without GKE.
       nodeAgent:
         serviceAccount: atelet  # atelet.yaml:145
@@ -998,11 +1082,16 @@ execution:
     # so keep the list in step with the Substrate manifests.
     workerNetworkPolicy:
       enabled: true
-      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.0
-      # (b34fbee7) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
-      # atenet-router.yaml:189, atenet-egress.yaml:1179. A missing pod keeps the cluster default
+      # `app` label values of the control-plane pods, from the pod templates of Substrate v1.0.1
+      # (20778a6d) manifests/ate-install: atelet.yaml:140, ate-controller.yaml:99, ate-api-server.yaml:77,
+      # atenet-router.yaml:189, atenet-egress.yaml:1211. A missing pod keeps the cluster default
       # network rules; confirmed on kind at the READY head.
       controlPlaneApps: [atelet, ate-controller, ate-api-server, atenet-router, atenet-egress]
+      # The container ports of the control-plane pods that Koinon's namespace may reach (issue #1446): 443 is
+      # ate-api-server (the Service api, ate-api-server.yaml:281,420) and 8443 is the TLS listener of atenet-router (the
+      # Service atenet-router port 443 targets it, atenet-router.yaml:344,427). The ingress of the control policy for
+      # Koinon's namespace lists only these, not every port of every control-plane pod.
+      koinonIngressPorts: [443, 8443]
       # The control-plane namespace has one default-deny egress policy, so the pods that call nothing have no egress and
       # need no list: ate-idp-server (it mounts no API token, ate-idp-server.yaml, automountServiceAccountToken false),
       # postgres (postgres/postgres.yaml) and rustfs (kind/rustfs.yaml:64). Substrate's own ingress policies stay the
@@ -1031,20 +1120,20 @@ execution:
       bucketInitJobs: [rustfs-bucket-init]
       objectStoreApp: rustfs
       objectStorePort: 9000
-      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1179), in the
+      # The pods that carry worker traffic out (atenet-egress, atenet-egress.yaml:1211), in the
       # control-plane namespace.
       atenetEgressSelector:
         matchLabels:
           app: atenet-egress
       # The control-plane pods that call the Kubernetes API server: only these get the apiServerPorts route. Keep a
-      # pod out of this list unless it needs it. Evidence, Substrate v1.0.0 (b34fbee7):
+      # pod out of this list unless it needs it. Evidence, Substrate v1.0.1 (20778a6d):
       #  - atenet-router DOES call it: ingress mode builds a client-go clientset for the EndpointSlice resolver
       #    (cmd/atenet/internal/router/router.go:73-95, "Only ingress needs Kubernetes"). Its manifest has
       #    ServiceAccount atenet-router, Role atenet-router-endpointslices (endpointslices get, list, watch) and a
       #    RoleBinding (manifests/ate-install/atenet-router.yaml:16-50, serviceAccountName at :194), and no
       #    automountServiceAccountToken override, so the token is mounted.
       #  - atenet-egress does NOT: ServiceAccount only, "No RBAC is bound ... on purpose ... no Kubernetes access"
-      #    (atenet-egress.yaml:30-38, serviceAccountName at :1181), and --mode=egress builds no client
+      #    (atenet-egress.yaml:30-38, serviceAccountName at :1213), and --mode=egress builds no client
       #    (router.go:75-79). It stays out: it carries worker traffic out and gets no TCP route to any address.
       apiServerApps: [atelet, ate-controller, ate-api-server, atenet-router]
       # TCP ports of the Kubernetes API server. The pods that call the API server (the apiServerApps, the
@@ -1074,7 +1163,7 @@ execution:
           matchLabels:
             app: opentelemetry-collector
         ports: [4317, 4318]
-      # Fence of the otel-system namespace (kind/otel-collector.yaml, kind/prometheus.yaml of Substrate v1.0.0): default
+      # Fence of the otel-system namespace (kind/otel-collector.yaml, kind/prometheus.yaml of Substrate v1.0.1): default
       # deny, then one policy per app. Set enabled=false when the namespace does not exist (a cluster that has a managed
       # collector in another namespace): a NetworkPolicy in a missing namespace fails the install.
       otelSystem:
@@ -1121,6 +1210,8 @@ execution:
       # url is where the cache pulls it. A reference whose host is not listed is not rewritten, so atelet (which has no
       # route to it) cannot pull it: add the host here, or leave it out on purpose. Docker Hub redirects blob downloads
       # to a CDN, and the cache follows the redirect itself; atelet never sees the redirect host.
+      # A plain http url (a private registry) is refused unless the entry sets allowHTTP: true; add its range and port to
+      # egress.extra as well.
       upstreams:
         - {host: ghcr.io, url: "https://ghcr.io"}
         - {host: docker.io, url: "https://registry-1.docker.io"}
@@ -1145,6 +1236,10 @@ execution:
       egress:
         cidrs: []
         exceptCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, fc00::/7, fe80::/10]
+        # Off by default. One more egress rule for each entry: TCP <port> to <cidr>. Use it for an upstream on another port
+        # or in a private range (an operator registry, the registry of a kind test cluster); also add it to upstreams.
+        # Example: extra: [{cidr: 172.18.0.0/16, port: 5000}]
+        extra: []
       resources:
         requests: {cpu: 50m, memory: 128Mi}
         limits: {memory: 512Mi}
@@ -1189,7 +1284,7 @@ execution:
     # `koinon-api substrate install` create no pool, and the preflight needs one per sandbox class, so the
     # chart owns it (issue #1089): on by default with execution.driver=substrate (with openshell nothing of it
     # renders). helm upgrade changes the size, helm uninstall removes the pool. Set enabled=false to manage the
-    # pools yourself. The fields follow Substrate v1.0.0's WorkerPoolSpec: sandboxClasses takes exactly one
+    # pools yourself. The fields follow Substrate v1.0.1's WorkerPoolSpec: sandboxClasses takes exactly one
     # class (immutable), and node placement, resources and the pull ServiceAccount live under spec.template.
     # Node cost of the default: one worker pod that requests 500m CPU and 1Gi memory (the idle cost), with
     # limits of 4 CPU and 8704Mi, on one node that runs the gvisor class. To run the largest sandbox, that
@@ -1203,8 +1298,8 @@ execution:
       name: ""
       replicas: 1
       # Empty: the worker image of the pinned Substrate release for sandboxClass,
-      # ghcr.io/agent-substrate/substrate/ateworker-<sandboxClass>:v1.0.0 (registry mirrors apply). Substrate
-      # v1.0.0 publishes tags only; to pin a digest, set the image here (name@sha256:...).
+      # ghcr.io/agent-substrate/substrate/ateworker-<sandboxClass>:v1.0.1 (registry mirrors apply). Substrate
+      # v1.0.1 publishes tags only; to pin a digest, set the image here (name@sha256:...).
       workerImage: ""
       # The one sandbox class of the pool: gvisor or microvm. It must be a class the Substrate install
       # has (ate-setup --sandbox-classes; the generic platform and kind install gvisor only).
@@ -1356,7 +1451,7 @@ oidc:
   # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
   # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
   # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
-  # platform budget ceilings (/platform/budgets).
+  # platform budget ceilings (/platform/usage/budgets).
   platformAdminGroups: []
   # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
   # or hybrid (both).
@@ -1399,7 +1494,9 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # Peers allowed to scrape the gateway stats port (15020): agentgateway's, the mcp-gateway's with
+  # gateway.mcp.driver=koinon (the default), and the model-gateway's with gateway.model.driver=koinon
+  # (the KoinonModelKeyEcho alert reads its counter). Like metrics.allowFrom, this only
   # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
   # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
@@ -1423,7 +1520,7 @@ metrics:
   # example Prometheus's namespace:
   #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
   # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
-  # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  # until you name the scraper. (networkPolicy.metricsFrom is separate: the gateways' stats ports.)
   # This only opens the port. A scraper that is not prometheus-operator (for example VictoriaMetrics'
   # VMServiceScrape) needs no ServiceMonitor: leave serviceMonitor.enabled false, list its namespace
   # here and in networkPolicy.metricsFrom, and point it at the <release>-koinon-<component>-metrics
@@ -1431,7 +1528,10 @@ metrics:
   allowFrom: []
   serviceMonitor:
     # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
-    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes), one for
+    # the mcp-gateway Service's "stats" port with gateway.mcp.driver=koinon (the default), and one
+    # for the model-gateway Service's "stats" port with gateway.model.driver=koinon. A scraper of its
+    # own must add the model-gateway port as a target too, or KoinonModelKeyEcho gets no data. Needs
     # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
     # enabling it without them fails the install.
     enabled: false
@@ -1455,6 +1555,14 @@ metrics:
     # It covers a rolling upgrade, where the new pods carry the old version's workflows over within
     # a sweep (a minute).
     durableStrandedFor: 15m
+    # With execution.driver=substrate: the alert on a filling /var/lib/ate filesystem on a worker node (issue #1494).
+    # It reads node-exporter's node_filesystem_* series of the mount point /var/lib/ate, so it needs node-exporter and
+    # a filesystem of its own for that path. The byte-cap alert of the leak guard does not cover disk.
+    ateFilesystem:
+      enabled: true
+      # The alert fires when the free space of that filesystem is below this percent for the time in `for`.
+      freeBelowPercent: 15
+      for: 10m
   grafanaDashboard:
     # Grafana dashboards as a ConfigMap for the Grafana dashboard sidecar (templates/grafana-dashboard.yaml;
     # today one row, the leak guard). Needs no CRD. Every query uses only fixed label sets (ADR 0023).

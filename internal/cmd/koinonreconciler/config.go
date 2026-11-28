@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -52,7 +53,11 @@ type config struct {
 	gatewayURL  string
 	// gatewayMCPURL is koinon-gateway's MCP listener as sandboxes reach it (gateway.mcp.driver=koinon):
 	// the sandbox profile allows /mcp there and not on agentgateway. Empty: agentgateway serves /mcp.
-	gatewayMCPURL      string
+	gatewayMCPURL string
+	// gatewayModelURL is koinon-gateway's model listener as sandboxes reach it (gateway.model.driver=koinon).
+	// On Agent Substrate the guest's model calls go there and not to agentgateway, so the listener checks the
+	// actor JWT (issue #1489, ADR 0097). Required with --execution-driver=substrate.
+	gatewayModelURL    string
 	gatewayConfigMap   string
 	gatewayDeployment  string
 	gatewayStatsURL    string
@@ -68,6 +73,9 @@ type config struct {
 	mcpKeysDir    string
 	// mcpSealed: koinon-gateway serves every MCP path, so the reconciler may serve sealed credentials.
 	mcpSealed bool
+	// egressURL is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it the
+	// sandbox of an agent with a code-host grant may reach the forge routes there; empty: no such rule.
+	egressURL string
 	kekDir    string
 	// kekWrapping is how the KEKs are wrapped (wrapping.New); zero is the default local KEK.
 	kekWrapping     wrapping.Config
@@ -124,6 +132,68 @@ func (c *config) mcpGatewayEndpoint() (reconciler.Endpoint, error) {
 		return reconciler.Endpoint{}, nil
 	}
 	return endpointOf("--gateway-mcp-url", c.gatewayMCPURL)
+}
+
+// egressEndpoint is the gateway's egress listener, nil without --gateway-egress-url.
+func (c *config) egressEndpoint() (*reconciler.Endpoint, error) {
+	if c.egressURL == "" {
+		return nil, nil
+	}
+	e, err := endpointOf("--gateway-egress-url", c.egressURL)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+// substrateGatewayRoutes are the gateway listeners of the Substrate actor egress policy (issues #1444 and #1489):
+// routes for every actor (koinon-gateway's model and MCP listeners), and egress, the egress listener, which only an
+// actor of an agent with a code-host grant gets (nil without --gateway-egress-url). Each listener checks the actor
+// JWT of its own audience, so the guest calls only koinon-gateway: agentgateway (--gateway-url) is not a route, and
+// --gateway-model-url and --gateway-mcp-url are required. The guest calls them over cleartext HTTP (ADR 0120), and
+// the policy has HTTP rules only, so an https URL is refused.
+func (c *config) substrateGatewayRoutes() (routes []substrate.GatewayRoute, egress *substrate.GatewayRoute, err error) {
+	routeOf := func(flag, raw string, mk func(string, uint32) substrate.GatewayRoute) (substrate.GatewayRoute, error) {
+		if raw == "" {
+			return substrate.GatewayRoute{}, fmt.Errorf("%s is required with --execution-driver=substrate: the guest calls koinon-gateway's listeners, which check the actor JWT (issue #1489)", flag)
+		}
+		if u, err := url.Parse(raw); err == nil && u.Scheme != "http" {
+			return substrate.GatewayRoute{}, fmt.Errorf("%s %q: the Substrate egress policy allows cleartext HTTP to the gateway only; use an http:// URL", flag, raw)
+		}
+		e, err := endpointOf(flag, raw)
+		if err != nil {
+			return substrate.GatewayRoute{}, err
+		}
+		r := mk(e.Host, e.Port)
+		if err := substrate.ValidateGatewayRoutes([]substrate.GatewayRoute{r}, nil); err != nil {
+			return substrate.GatewayRoute{}, fmt.Errorf("%s %q: the Substrate egress policy cannot allow it: %w", flag, raw, err)
+		}
+		return r, nil
+	}
+	for _, f := range []struct {
+		flag, raw string
+		mk        func(string, uint32) substrate.GatewayRoute
+	}{
+		{"--gateway-model-url", c.gatewayModelURL, substrate.ModelRoute},
+		{"--gateway-mcp-url", c.gatewayMCPURL, substrate.MCPRoute},
+	} {
+		r, err := routeOf(f.flag, f.raw, f.mk)
+		if err != nil {
+			return nil, nil, err
+		}
+		routes = append(routes, r)
+	}
+	if c.egressURL != "" {
+		r, err := routeOf("--gateway-egress-url", c.egressURL, substrate.EgressRoute)
+		if err != nil {
+			return nil, nil, err
+		}
+		egress = &r
+	}
+	if err := substrate.ValidateGatewayRoutes(routes, egress); err != nil {
+		return nil, nil, fmt.Errorf("substrate egress policy: %w", err)
+	}
+	return routes, egress, nil
 }
 
 // endpointOf parses an http(s)://host[:port] URL, named flag in errors, into a host and a port.

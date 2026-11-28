@@ -119,7 +119,7 @@ var _ = Describe("the launcher prefix", func() {
 		Expect(tw.Close()).To(Succeed())
 		Expect(d.Upload(ctx, ws, "sb", "/sandbox", &buf)).To(Succeed())
 		started := cl.Started(ws, "sb")
-		Expect(started).To(HaveLen(3)) // rm of the archive comes last, so mkdir and tar come first
+		Expect(started).To(HaveLen(2)) // mkdir, then tar with the archive on stdin
 		for _, argv := range started {
 			Expect(argv[:4]).To(Equal([]string{launcher, "--policy", "/etc/koinon/guest-launcher/policy-gvisor.json", "--"}))
 		}

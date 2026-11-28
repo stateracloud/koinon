@@ -694,6 +694,38 @@ func describeMode(name, valuesFile string) {
 			}
 		}, SpecTimeout(3*time.Minute))
 
+		// The provisioner (ADR 0128, issue 1398) is "koinon-reconciler provision". It must start with the
+		// rendered args, answer /healthz, and be allowed to create a TokenReview: a request with a token
+		// that is not valid makes it review that token, which must end in 401 and never in a Forbidden answer.
+		It("starts koinon-provisioner, answers /healthz and may create a TokenReview", func(ctx SpecContext) {
+			d := r.deployment("koinon-provisioner")
+			if d == nil {
+				Skip("execution.substrate.provisioner is not rendered in this values file")
+			}
+			ws := startDeployment(ctx, rn, r, "koinon-provisioner")
+			ready["koinon-provisioner"] = ws
+			accounted = append(accounted, "koinon-provisioner")
+			Expect(ws).To(HaveLen(1))
+			w := ws[0]
+			port := w.portNumber(intOrName{name: "http"})
+			mapped, err := w.Ctr.MappedPort(ctx, fmt.Sprintf("%d/tcp", port))
+			Expect(err).NotTo(HaveOccurred())
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://127.0.0.1:"+mapped.Port()+"/v1/atespaces", strings.NewReader(`{"name":"kw-smoke"}`))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer koinon_test_not-a-real-token")
+			resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+			Expect(err).NotTo(HaveOccurred(), "logs:\n%s", w.Logs(ctx))
+			_ = resp.Body.Close()
+			Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), "a token that is not valid is refused; logs:\n%s", w.Logs(ctx))
+			logs := w.Logs(ctx)
+			Expect(logs).To(ContainSubstring("token not accepted"), "the provisioner reviewed the token; logs:\n%s", logs)
+			Expect(logs).To(ContainSubstring("token review: not authenticated"), "the API server answered the review (no transport error); logs:\n%s", logs)
+			Expect(strings.ToLower(logs)).NotTo(ContainSubstring("forbidden"), "the provisioner may create a TokenReview; logs:\n%s", logs)
+			expectRunning(ctx, w, "still running; logs:\n%s", logs)
+			// The reconciler started above with the provisioner-token mount and the provisioner url and tokenFile keys.
+			Expect(ready["koinon-reconciler"]).NotTo(BeEmpty())
+		}, SpecTimeout(3*time.Minute))
+
 		It("starts koinon-agentd and answers its probes", func(ctx SpecContext) {
 			ready["koinon-agentd"] = startDeployment(ctx, rn, r, "koinon-agentd")
 			accounted = append(accounted, "koinon-agentd")
@@ -730,10 +762,10 @@ func describeMode(name, valuesFile string) {
 		}, SpecTimeout(3*time.Minute))
 
 		// koinon-gateway (the MCP path, gateway.mcp.driver=koinon). The Docker network has no Service DNS,
-		// so it cannot reach koinon-api's State stream and must stay unready: that is what keeps a rollout
+		// so it cannot reach koinon-api's State stream and must stay unready unless held (issue #1358): that keeps a rollout
 		// from taking old pods away before a new pod can serve. It must still run, answer its liveness
 		// probe and serve /metrics, with the args, the mounts and the environment the chart gives it.
-		It("starts koinon-mcp-gateway, alive but not ready without a config", func(ctx SpecContext) {
+		It("starts koinon-mcp-gateway, alive; ready only when held, without a config", func(ctx SpecContext) {
 			d := r.deployment("koinon-mcp-gateway")
 			if d == nil {
 				Skip("gateway.mcp.driver is not koinon in this values file")
@@ -754,10 +786,38 @@ func describeMode(name, valuesFile string) {
 			// through --database-url-file, and the migration's grants let it read what the guard reads.
 			Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
 				Should(ContainSubstring("the leak guard reached its database"), "the gateway's login and grants work; logs:\n%s", w.Logs(ctx))
+			if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
+				// The egress listener (#1086 part C2) loads the public actor token key that the ensure-secrets
+				// Job made, before any listener starts; a missing or bad key stops the pod. With the Substrate
+				// verifier (#1386) it loads the issuer's CA instead and reads the keys on the first token.
+				want := `egress routes loaded"?,? ?"?actor_token_verifier"?[=:]"?ed25519"?,? ?"?keys"?[=:]1\b`
+				if slices.Contains(c.Args, "--actor-token-verifier=substrate") {
+					want = `egress routes loaded"?,? ?"?actor_token_verifier"?[=:]"?substrate"?,? ?"?keys"?[=:]0\b`
+				}
+				Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+					Should(MatchRegexp(want), "the egress listener loaded its actor token check; logs:\n%s", w.Logs(ctx))
+			}
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
-			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			if slices.Contains(c.Args, "--restore-hold") {
+				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
+				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+				if slices.ContainsFunc(c.Args, func(a string) bool { return strings.HasPrefix(a, "--egress-addr=") }) {
+					// The held egress listener serves no request either (issue #1390): 503, reason held, before
+					// the actor token check and the route match.
+					eg := &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+						Path: "/egress/registry.example.test/held", Port: intstr.FromString("egress"),
+					}}}
+					egStatus, why := w.ProbeStatus(ctx, eg, 10*time.Second)
+					Expect(why).To(BeEmpty(), "the egress listener did not answer; logs:\n%s", w.Logs(ctx))
+					Expect(egStatus).To(Equal(http.StatusServiceUnavailable), "a held egress listener refuses every request; logs:\n%s", w.Logs(ctx))
+					Eventually(func() string { return w.Logs(ctx) }).WithTimeout(time.Minute).
+						Should(MatchRegexp(`egress request.*"?result"?[=:]"?held\b`), "the refusal is logged as held; logs:\n%s", w.Logs(ctx))
+				}
+			} else {
+				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			}
 			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())
@@ -765,10 +825,10 @@ func describeMode(name, valuesFile string) {
 		}, SpecTimeout(3*time.Minute))
 
 		// koinon-gateway (the model path, gateway.model.driver=koinon). The Docker network has no Service DNS,
-		// so it cannot reach koinon-api's State stream and must stay unready: that is what keeps a rollout
+		// so it cannot reach koinon-api's State stream and must stay unready unless held (issue #1358): that keeps a rollout
 		// from taking old pods away before a new pod can serve. It must still run, answer its liveness
 		// probe and serve /metrics, with the args, the mounts and the environment the chart gives it.
-		It("starts koinon-model-gateway, alive but not ready without a config", func(ctx SpecContext) {
+		It("starts koinon-model-gateway, alive; ready only when held, without a config", func(ctx SpecContext) {
 			d := r.deployment("koinon-model-gateway")
 			if d == nil {
 				Skip("gateway.model.driver is not koinon in this values file")
@@ -788,7 +848,12 @@ func describeMode(name, valuesFile string) {
 			Expect(c.ReadinessProbe).NotTo(BeNil())
 			status, why := w.ProbeStatus(ctx, c.ReadinessProbe, 10*time.Second)
 			Expect(why).To(BeEmpty(), "readiness endpoint did not answer; logs:\n%s", w.Logs(ctx))
-			Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			if slices.Contains(c.Args, "--restore-hold") {
+				// A held gateway is ready but deny-all: the held reconciler publishes no revision (issue #1358).
+				Expect(status).To(Equal(http.StatusOK), "held and ready with no config (200 from /readyz); logs:\n%s", w.Logs(ctx))
+			} else {
+				Expect(status).To(Equal(http.StatusServiceUnavailable), "unready before any config applied (503 from /readyz); logs:\n%s", w.Logs(ctx))
+			}
 			expectRunning(ctx, w, "still running; logs:\n%s", w.Logs(ctx))
 			// The drain on SIGTERM must fit in the grace period, with 30 seconds to exit.
 			Expect(ps.TerminationGracePeriodSeconds).NotTo(BeNil())

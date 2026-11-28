@@ -106,3 +106,46 @@ var _ = Describe("verifier key files", func() {
 		Expect(c.Actor.Org).To(Equal("acme"))
 	})
 })
+
+var _ = Describe("minting key files", func() {
+	// A fixed, obviously fake seed: 32 bytes of 0x01.
+	const seedHex = "0101010101010101010101010101010101010101010101010101010101010101"
+
+	It("reads a hex seed and mints a token that the public key checks", func() {
+		file := filepath.Join(GinkgoT().TempDir(), "seed")
+		Expect(os.WriteFile(file, []byte(seedHex+"\n"), 0o600)).To(Succeed())
+		priv, err := actortoken.LoadSeedKey(file)
+		Expect(err).NotTo(HaveOccurred())
+		m, err := actortoken.NewMinter("koinon-agentd", "k1", priv)
+		Expect(err).NotTo(HaveOccurred())
+		tok, err := m.Mint(actortoken.Actor{Org: "acme", Agent: "a1"}, 0)
+		Expect(err).NotTo(HaveOccurred())
+		pub, ok := priv.Public().(ed25519.PublicKey)
+		Expect(ok).To(BeTrue())
+		v, err := actortoken.NewVerifier("koinon-agentd", map[string]ed25519.PublicKey{"k1": pub})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = v.Verify(tok)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	DescribeTable("refuses a seed that is not 64 hex characters, without its text in the error",
+		func(text string) {
+			_, err := actortoken.ParseSeedKey([]byte(text))
+			Expect(err).To(HaveOccurred())
+			if text != "" {
+				Expect(err.Error()).NotTo(ContainSubstring(text))
+			}
+		},
+		Entry("empty", ""),
+		Entry("short", seedHex[:62]),
+		Entry("long", seedHex+"01"),
+		Entry("not hex", "zz"+seedHex[2:]),
+	)
+
+	It("refuses a missing file and a directory", func() {
+		_, err := actortoken.LoadSeedKey(filepath.Join(GinkgoT().TempDir(), "none"))
+		Expect(err).To(HaveOccurred())
+		_, err = actortoken.LoadSeedKey(GinkgoT().TempDir())
+		Expect(err).To(HaveOccurred())
+	})
+})

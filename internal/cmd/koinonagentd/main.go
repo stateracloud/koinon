@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/installbinding"
 	"github.com/stateracloud/koinon/internal/mcpcheck"
 	"github.com/stateracloud/koinon/internal/mcpguard"
@@ -73,6 +74,13 @@ type config struct {
 	s3Endpoint, s3Region string
 	s3Bucket             string
 
+	// The actor token (ADR 0120 1.2, #1086 part C2): the file with the hex Ed25519 seed that signs
+	// it (a mounted Secret), the key ID and issuer the gateway checks. With --egress-url, git of a
+	// run on a code-host connection goes through the gateway's egress listener.
+	actorTokenKeyFile string
+	actorTokenKeyID   string
+	actorTokenIssuer  string
+
 	// restoreHold keeps the process from claiming or driving any run (issue #462).
 	restoreHold bool
 }
@@ -99,6 +107,12 @@ func (c *config) flags(fs *pflag.FlagSet) {
 		"agentgateway's base URL as sandboxes reach it; harnesses get <url>/v1, and <url>/mcp unless --agent-mcp-url is set")
 	fs.StringVar(&c.pool.MCPURL, "agent-mcp-url", "",
 		"the MCP URL harnesses get, as sandboxes reach it (koinon-gateway's /mcp with gateway.mcp.driver=koinon); empty: <gateway-url>/mcp")
+	fs.StringVar(&c.pool.EgressURL, "egress-url", "",
+		"the gateway's egress listener as sandboxes reach it (for example http://koinon-mcp-gateway.koinon.svc:8081); git of runs on a code-host connection goes to <url>/egress/<host>/ with a short-lived actor token; empty: git uses the driver's egress. Requires --actor-token-key-file on OpenShell; on Substrate it must be http, and the egress layer adds the actor token")
+	fs.StringVar(&c.actorTokenKeyFile, "actor-token-key-file", "",
+		"file with the hex Ed25519 seed that signs actor tokens (the Secret koinon-actor-token-key, key key, mounted read-only); required with --egress-url on OpenShell, refused on Substrate")
+	fs.StringVar(&c.actorTokenKeyID, "actor-token-key-id", "k1", "key ID of --actor-token-key-file; the gateway reads the public key as <key-id>.pub")
+	fs.StringVar(&c.actorTokenIssuer, "actor-token-issuer", "koinon-agentd", "issuer of actor tokens; the gateway's --actor-token-issuer must match")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
 	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
 	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
@@ -109,6 +123,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
 	fs.DurationVar(&c.pool.ModelServeTimeout, "model-serve-timeout", agentd.DefaultModelServeTimeout, "how long a run waits for the gateway to serve its model (a new provider still reaching the gateway) before it fails; keep it well above koinon-reconciler's --provider-key-settle plus a gateway apply")
+	fs.DurationVar(&c.pool.ForgeServeTimeout, "forge-serve-timeout", agentd.DefaultForgeServeTimeout, "how long a run that clones through koinon-gateway waits for the gateway to serve the agent's forge credential before it fails; keep it well above koinon-reconciler's --provider-key-settle plus a gateway apply")
 	fs.DurationVar(&c.pool.SandboxWaitCap, "sandbox-wait-cap", time.Hour, "the total time a run waits for its sandbox, across requeues, before it fails")
 	fs.DurationVar(&c.pool.CancelGrace, "cancel-grace", 10*time.Second, "how long a harness gets to end a cancelled turn")
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
@@ -189,6 +204,24 @@ func (c *config) validate() error {
 			return err
 		}
 	}
+	// On Agent Substrate the egress layer outside the guest adds the actor identity (issue #1386, ADR 0120
+	// amendment of 2026-11-26): koinon-agentd mints no token and holds no signing key there.
+	outside := c.execution.IsSubstrate()
+	c.pool.ActorIdentityOutside = outside
+	switch {
+	case outside && c.actorTokenKeyFile != "":
+		return errors.New("--actor-token-key-file must not be set with --execution-driver=substrate: the Substrate egress layer adds the actor identity, and koinon-agentd holds no signing key")
+	case !outside && (c.pool.EgressURL == "") != (c.actorTokenKeyFile == ""):
+		return errors.New("--egress-url and --actor-token-key-file are required together: the gateway's egress listener refuses requests without an actor token")
+	}
+	if c.pool.EgressURL != "" {
+		if err := agentd.CheckEgressURL(c.pool.EgressURL, outside); err != nil {
+			return fmt.Errorf("--egress-url: %w", err)
+		}
+		if !outside && (c.actorTokenKeyID == "" || c.actorTokenIssuer == "") {
+			return errors.New("--actor-token-key-id and --actor-token-issuer must not be empty with --egress-url")
+		}
+	}
 	if c.checkpoints && (c.pool.SavedWorkURL == "" || c.savedWorkKeyFile == "") {
 		return errors.New("--saved-work-url and --saved-work-key-file are required with --checkpoints: koinon-api hands out the repository passwords")
 	}
@@ -258,6 +291,15 @@ func run(ctx context.Context, cfg config) error {
 			cfg.pool.MCPTools = mcpcheck.Remote{HTTP: &http.Client{Timeout: time.Minute}, BaseURL: cfg.pool.SavedWorkURL, Key: cfg.pool.SavedWorkKey}
 		}
 	}
+	if cfg.actorTokenKeyFile != "" {
+		key, err := actortoken.LoadSeedKey(cfg.actorTokenKeyFile)
+		if err != nil {
+			return fmt.Errorf("--actor-token-key-file: %w", err)
+		}
+		if cfg.pool.ActorTokens, err = actortoken.NewMinter(cfg.actorTokenIssuer, cfg.actorTokenKeyID, key); err != nil {
+			return fmt.Errorf("actor tokens: %w", err)
+		}
+	}
 	if cfg.checkpoints {
 		cp, err := checkpointsFrom(cfg)
 		if err != nil {
@@ -281,7 +323,11 @@ func run(ctx context.Context, cfg config) error {
 	// liveness probe that fails meanwhile gets the pod killed. It stops once the drain is over.
 	healthCtx, stopHealth := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopHealth()
-	if _, err := serveHealth(healthCtx, ctx, cfg.healthAddr, db, slog.Default()); err != nil {
+	// The schema gate (ADR 0085) keeps /readyz at 503 and, through Hold below, the workers from
+	// claiming runs while the schema is outside the range this build supports (issue 680).
+	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, slog.Default())
+	safego.Go(healthCtx, slog.Default(), "schema-gate", gate.Run)
+	if _, err := serveHealth(healthCtx, ctx, cfg.healthAddr, gate, slog.Default()); err != nil {
 		return err
 	}
 	if cfg.otlpEndpoint != "" {
@@ -308,17 +354,38 @@ func run(ctx context.Context, cfg config) error {
 		safego.Go(ctx, slog.Default(), "install-binding", binding.Run)
 	}
 	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
+	work := pool.Run
 	if cfg.restoreHold {
 		// No worker starts: no run is claimed, no expired lease is taken over, no sandbox is touched and no
 		// checkpoint is written. Only "koinon-api checkpoints resync" is served, because the runbook runs it
 		// before the release. The health listener and /metrics above keep answering.
 		slog.Warn("restore-hold: koinon-agentd claims no run and touches no sandbox until the hold is released (restoreHold=false in the chart); it only serves checkpoints resync")
-		err = pool.RunHeld(ctx)
-	} else {
-		err = pool.Run(ctx)
+		work = pool.RunHeld
 	}
+	err = holdWork(ctx, gate, work, slog.Default())
 	stopHealth()
 	slog.Info("stopping koinon-agentd")
+	return err
+}
+
+// schemaHolder is what holdWork needs of the schema gate.
+type schemaHolder interface {
+	Hold(ctx context.Context, work func(context.Context) error) error
+}
+
+// holdWork runs the pool under the schema gate: no worker or checkpoint loop starts until the schema
+// is supported, and once a check reads an unsupported schema the pool stops as on SIGTERM (no new
+// claims; turns in progress get the drain deadline) and agentd exits with an error. The restarted
+// container waits for the gate again (issue 680).
+func holdWork(ctx context.Context, gate schemaHolder, work func(context.Context) error, log *slog.Logger) error {
+	err := gate.Hold(ctx, work)
+	if errors.Is(err, schemagate.ErrUnsupported) {
+		log.Error("stopped claiming runs: the database schema is not supported by this build; exiting so that the restarted container waits for the schema gate", "err", err)
+		return err
+	}
+	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return nil // stopped while waiting for the gate: a normal shutdown
+	}
 	return err
 }
 
@@ -360,12 +427,10 @@ func checkpointsFrom(cfg config) (*agentd.Checkpoints, error) {
 // The listener runs until life ends. term is the termination signal: from then on /readyz answers
 // 503 (the pod leaves the Service) but /healthz keeps answering, because agentd is still draining
 // and the kubelet must not kill a pod that is busy finishing its runs.
-func serveHealth(life, term context.Context, addr string, db schemagate.Querier, log *slog.Logger) (string, error) {
+func serveHealth(life, term context.Context, addr string, gate *schemagate.Gate, log *slog.Logger) (string, error) {
 	if addr == "" {
 		return "", nil
 	}
-	gate := schemagate.New(db, schemagate.Range{Min: migrations.MinSupported, Latest: migrations.MustLatest()}, log)
-	safego.Go(life, log, "schema-gate", gate.Run)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	ready := gate.ReadyHandler()

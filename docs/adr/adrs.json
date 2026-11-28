@@ -42,7 +42,8 @@
       "0061",
       "0075",
       "0078",
-      "0106"
+      "0106",
+      "0128"
     ]
   },
   {
@@ -149,7 +150,9 @@
     "relates": [],
     "related_by": [
       "0075",
-      "0113"
+      "0113",
+      "0127",
+      "0130"
     ]
   },
   {
@@ -177,7 +180,8 @@
     "superseded_by": [],
     "relates": [],
     "related_by": [
-      "0071"
+      "0071",
+      "0127"
     ]
   },
   {
@@ -246,7 +250,9 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0011",
@@ -423,7 +429,9 @@
       "0055"
     ],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0018",
@@ -587,7 +595,9 @@
       "0110",
       "0116",
       "0121",
-      "0125"
+      "0125",
+      "0127",
+      "0130"
     ]
   },
   {
@@ -607,7 +617,9 @@
     "supersedes": [],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0025",
@@ -1443,7 +1455,9 @@
     ],
     "superseded_by": [],
     "relates": [],
-    "related_by": []
+    "related_by": [
+      "0127"
+    ]
   },
   {
     "number": "0056",
@@ -1766,7 +1780,9 @@
       "0089",
       "0096",
       "0123",
-      "0126"
+      "0126",
+      "0127",
+      "0130"
     ]
   },
   {
@@ -1800,7 +1816,9 @@
       "0076",
       "0081",
       "0085",
-      "0123"
+      "0123",
+      "0127",
+      "0130"
     ]
   },
   {
@@ -2096,7 +2114,8 @@
       "0080",
       "0083",
       "0097",
-      "0101"
+      "0101",
+      "0128"
     ]
   },
   {
@@ -3161,7 +3180,8 @@
     ],
     "related_by": [
       "0119",
-      "0120"
+      "0120",
+      "0127"
     ]
   },
   {
@@ -3455,7 +3475,8 @@
       "0111"
     ],
     "related_by": [
-      "0120"
+      "0120",
+      "0128"
     ]
   },
   {
@@ -3491,7 +3512,8 @@
       "0119"
     ],
     "related_by": [
-      "0123"
+      "0123",
+      "0128"
     ]
   },
   {
@@ -3620,6 +3642,96 @@
       "0065",
       "0067",
       "0125"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0127",
+    "file": "0127-chat-adapter-pure-core.md",
+    "title": "Slack and Teams adapter as a pure event-to-actions core",
+    "status": "proposed",
+    "date": "2026-11-26",
+    "area": "connectors-tools",
+    "tags": [
+      "connectors",
+      "eventing",
+      "triggers",
+      "secrets",
+      "testing"
+    ],
+    "amends": [],
+    "amended_by": [
+      "0130"
+    ],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0006",
+      "0007",
+      "0010",
+      "0017",
+      "0023",
+      "0024",
+      "0055",
+      "0065",
+      "0066",
+      "0110"
+    ],
+    "related_by": [
+      "0130"
+    ]
+  },
+  {
+    "number": "0128",
+    "file": "0128-substrate-provisioner.md",
+    "title": "A provisioner holds the global Substrate role",
+    "status": "accepted",
+    "date": "2026-11-26",
+    "area": "runtime-sandbox",
+    "tags": [
+      "sandbox",
+      "security",
+      "identity",
+      "kubernetes"
+    ],
+    "amends": [],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0002",
+      "0075",
+      "0119",
+      "0120"
+    ],
+    "related_by": []
+  },
+  {
+    "number": "0130",
+    "file": "0130-external-actor-kind.md",
+    "title": "The external actor kind: people without a Koinon account on the task timeline",
+    "status": "accepted",
+    "date": "2026-11-26",
+    "area": "work-model",
+    "tags": [
+      "tasks",
+      "chat",
+      "identity",
+      "database",
+      "api"
+    ],
+    "amends": [
+      "0127"
+    ],
+    "amended_by": [],
+    "supersedes": [],
+    "superseded_by": [],
+    "relates": [
+      "0006",
+      "0023",
+      "0065",
+      "0066",
+      "0127"
     ],
     "related_by": []
   }

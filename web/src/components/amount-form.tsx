@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { describeError } from '@/lib/api-error'
 import { amountError } from '@/lib/money'
 
 /**
@@ -45,7 +45,7 @@ export function AmountForm({
       await onSave(value.trim())
       onSaved?.()
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      setError(describeError(err).message)
     } finally {
       setPending(false)
     }

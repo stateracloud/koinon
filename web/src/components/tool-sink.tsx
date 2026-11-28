@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Server, Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import type { McpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { buildSink, isDefaultSink, type ResultLeg, type SinkFormState, sinkClasses, sinkDerivations, sinkFormOf, sinkText, validateSink } from '@/lib/mcp-servers'
 
 const resultLegs: { value: ResultLeg; label: string }[] = [
@@ -48,7 +49,7 @@ export function ToolSink({ server, tool: t, actions }: { server: Server; tool: T
     } catch (e) {
       const err = ConnectError.from(e)
       // Aborted: the server republished the tool after this page read it. The list has been refreshed by now.
-      setError(err.code === Code.Aborted ? `${err.rawMessage} The tool is listed again below with its new text; review it and declare again.` : err.rawMessage)
+      setError(err.code === Code.Aborted ? `${describeError(err).message} The tool is listed again below with its new text; review it and declare again.` : describeError(err).message)
     } finally {
       setPending(false)
     }

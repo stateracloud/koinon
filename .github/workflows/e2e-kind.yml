@@ -69,13 +69,18 @@ on:
         options: [go, web, drill]
         default: go
       backup_restore:
-        description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does.'
+        description: 'Also run the backup-and-restore step (test/e2e/backup-restore.sh, go suite only). The nightly run always does. With driver=substrate: the home restore drill (test/e2e/home_restore_test.go, issue 1090).'
         type: boolean
         default: false
       stories:
         description: 'Also run the run-1 story suite (test/e2e/stories_test.go, go suite only). The nightly run always does; the bisect passes it.'
         type: boolean
         default: false
+      driver:
+        description: 'The execution driver of the quickstart. openshell: the default run. substrate: the Substrate leg (make test-e2e-kind-substrate, gVisor class, issue 1091; advisory, the ref needs that make target). Go suite only.'
+        type: choice
+        options: [openshell, substrate]
+        default: openshell
       commit:
         description: 'Run on this full commit sha instead of the ref (used by hack/e2e-bisect.sh).'
         type: string
@@ -177,7 +182,8 @@ jobs:
     # (S4, the slow run, about 100 seconds); the stories pass has a 15 minute timeout (about 3 times that). A timeout is `cancelled`, which the bisect does not see, so the limit covers the
     # worst case on the schedule and on a dispatch with stories=true; other runs keep 35. The worst case is about 69 minutes
     # (test/e2e/run.sh: set-up 10, quickstart pass 30, stories pass 15, escape 8, backup 1, tear-down 5), so the limit is 75.
-    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories) && 75 || 35 }}
+    # A dispatch with backup_restore=true gets it too: on driver=substrate that step is the home restore drill (#1090, about 15).
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.stories || inputs.backup_restore) && 75 || 35 }}
     outputs:
       stories_red: ${{ steps.storiesverdict.outputs.red }}
     defaults:
@@ -185,9 +191,43 @@ jobs:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
         shell: bash
     steps:
+      # A dispatch with inputs.commit runs that commit's code in the cache scope of the dispatch ref (main for
+      # hack/e2e-bisect.sh). Code in a job can write cache entries without a save step, so an unmerged commit (a
+      # fork's commit is reachable by sha) could poison the caches that main's runs restore (CodeQL
+      # cache-poisoning, issue 1365). So the commit must be a first-parent commit of the dispatch ref: the head
+      # or a merge on it. Any ancestor is not enough: main keeps the inner commits of every merged pull request,
+      # and nobody reviewed those as a tree. hack/e2e-bisect.sh dispatches first-parent commits of main only.
+      # This step runs before the checkout. It fetches the commit graph only (no file of any commit) and runs no
+      # code of the commit. The drill job has the same step.
+      - id: dispatchrev
+        name: The commit input is a first-parent commit of the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          graph="$RUNNER_TEMP/dispatch-ref"
+          git init -q "$graph"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -C "$graph" -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --no-tags --filter=tree:0 \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          # To a file, not a pipe: under pipefail, `grep -q` would end the pipe early and rev-list would fail.
+          git -C "$graph" rev-list --first-parent FETCH_HEAD > "$graph.list"
+          if ! grep -qxF "$COMMIT" "$graph.list"; then
+            echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
+            exit 1
+          fi
+          # The output is the line of the commit graph that matched, not the input string: the checkout below takes a
+          # value that this step validated (a full sha of a first-parent commit), never the raw input.
+          echo "rev=$(grep -xF "$COMMIT" "$graph.list")" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit }} # empty: the event's own ref
+          ref: ${{ steps.dispatchrev.outputs.rev }} # empty: the event's own ref (no commit input)
           persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
@@ -322,6 +362,7 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/e2e
           SUITE: ${{ inputs.suite || 'go' }}
+          E2E_DRIVER: ${{ inputs.driver || 'openshell' }}
           # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
@@ -331,7 +372,7 @@ jobs:
           # Advisory on the schedule event: a red pass leaves the quickstart result alone (hack/release-gate.sh reads it) and
           # sets the job output `stories_red`. A dispatch with stories=true (the bisect) is blocking: it needs pass or fail.
           STORIES_ADVISORY: ${{ github.event_name == 'schedule' && '1' || '0' }}
-          # Also run the escape suite's leak guard case from a sandbox against this install (#348).
+          # Also run the leak guard escape case from a sandbox against this install (#348; on Substrate from the agent's actor, #1428).
           ESCAPE_MCP: ${{ (inputs.suite || 'go') == 'go' && '1' || '0' }}
           # The workflow deletes the cluster in its own step, after collecting resource use.
           KEEP: "1"
@@ -346,7 +387,13 @@ jobs:
           HARNESS_CACHE: ${{ runner.temp }}/harness-cache
           KIND_PROXY_CACHE: ${{ runner.temp }}/kind-proxy-cache
           GITHUB_TOKEN: ${{ github.token }}
-        run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+        run: |
+          if [[ "$E2E_DRIVER" == substrate ]]; then
+            make -n test-e2e-kind-substrate >/dev/null 2>&1 || { echo "this ref has no test-e2e-kind-substrate target" >&2; exit 1; }
+            make test-e2e-kind-substrate 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          else
+            test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+          fi
 
       - name: Story suite verdict
         id: storiesverdict
@@ -525,16 +572,39 @@ jobs:
     # The measured run takes 26 to 28 minutes (#1039); the limits below grow from it: suite 45, step 55, job 60.
     # hack/release-drill-wait.sh waits 75 and the release gate job has 90.
     timeout-minutes: 60
-    env:
-      # The image of web-e2e in ci.yml (the same tag and digest; hack/ci-playwright-image-test.sh checks both).
-      KOINON_DRILL_PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
     defaults:
       run:
         shell: bash
     steps:
+      # Only a first-parent commit of the dispatch ref runs here: the reason is at the same step of the quickstart job.
+      - id: dispatchrev
+        name: The commit input is a first-parent commit of the dispatch ref
+        if: inputs.commit != ''
+        env:
+          COMMIT: ${{ inputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! $COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit input is not a full 40-character sha"
+            exit 1
+          fi
+          graph="$RUNNER_TEMP/dispatch-ref"
+          git init -q "$graph"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -C "$graph" -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --no-tags --filter=tree:0 \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git -C "$graph" rev-list --first-parent FETCH_HEAD > "$graph.list"
+          if ! grep -qxF "$COMMIT" "$graph.list"; then
+            echo "::error::commit $COMMIT is not a first-parent commit of $GITHUB_REF ($GITHUB_SHA); only a merge (or the head) can run here"
+            exit 1
+          fi
+          # The output is the line of the commit graph that matched, not the input string: the checkout below takes a
+          # value that this step validated (a full sha of a first-parent commit), never the raw input.
+          echo "rev=$(grep -xF "$COMMIT" "$graph.list")" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ steps.dispatchrev.outputs.rev }} # empty: the event's own ref (no commit input)
           persist-credentials: false
 
       - name: Tool versions (hack/versions.env)
@@ -563,6 +633,12 @@ jobs:
 
       - name: Install web dependencies (browser sign-in)
         run: pnpm --dir web install --frozen-lockfile
+
+      # The image of web-e2e in ci.yml: both read hack/playwright-image.env (hack/ci-playwright-image-test.sh checks it).
+      - name: Choose the Playwright image (browser sign-in)
+        run: |
+          image=$(hack/playwright-image.sh)
+          echo "KOINON_DRILL_PLAYWRIGHT_IMAGE=$image" >>"$GITHUB_ENV"
 
       - name: Pull the Playwright image (browser sign-in)
         run: docker pull "$KOINON_DRILL_PLAYWRIGHT_IMAGE"

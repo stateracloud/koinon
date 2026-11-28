@@ -14,7 +14,8 @@ if (!process.env.KOINON_API_URL) throw new Error('KOINON_API_URL is not set; run
 export default defineConfig({
   testDir: './e2e-real',
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? 'test-results',
-  // One ordered scenario on one install: it changes the bootstrap password, so no retries.
+  // The specs share one install, one at a time. The first sign-in changes the bootstrap password
+  // (e2e-real/session.ts), so no retries.
   fullyParallel: false,
   workers: 1,
   retries: 0,

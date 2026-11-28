@@ -24,7 +24,7 @@ koinon-api substrate install --substrate-source /path/to/substrate \
 
 ## Platforms
 
-`ate-setup` v1.0.0 has two install routes: GKE (GCS for snapshots, a Google service account, the GKE
+`ate-setup` v1.0.1 has two install routes: GKE (GCS for snapshots, a Google service account, the GKE
 credential provider) and kind. The kind route is mostly "not GCP": it installs an in-cluster object store
 (rustfs) for snapshots and an atelet without the GKE credential-provider hostPaths, which a read-only-root
 node such as Talos cannot create (upstream issue #2669). So Koinon uses it on any Kubernetes flavor and
@@ -94,6 +94,42 @@ pinned commit in `KOINON_SUBSTRATE_SOURCE`, and `kubectl`. Without them it skips
 The storage preflight of `generic` fails, before anything is created, when a named StorageClass does not
 exist, or when a volume has no named class and the cluster has no default class.
 
+## Egress gateway corrections
+
+The egress gateway of Substrate (`atenet-egress`, Envoy) is the same on every platform. The installer edits its
+manifest in the exported tree before `ate-setup` reads it (`internal/substrateinstall/egress.go`). Each edit fails
+the install when the pinned text is not there the expected number of times.
+
+1. **No upstream TLS session reuse** (always on, issue [#1486](https://github.com/stateracloud/koinon/issues/1486)).
+   Envoy keeps one upstream TLS session cache for each forward-proxy cluster. The cache is not keyed by SNI and keeps
+   only the newest session. Cloudflare can resume a session of one host under the SNI of another host. Envoy checks
+   the certificate again and refuses the call with `expected SAN api.anthropic.com, got npmjs.org`. A failed resume
+   stores no new session, so every later call to that host fails for all actors until the pod restarts. The cache is
+   also shared by all actors. The installer sets `max_session_keys: 0` in the `UpstreamTlsContext` of
+   `egress_forward_proxy` and `egress_forward_proxy_grpc`. Exit condition: remove the edit when a Substrate release sets
+   it, or keys the sessions by SNI.
+2. **IPv4-first DNS** (`--egress-dns-v4-preferred`, default off). Substrate resolves with `dns_lookup_family: ALL`.
+   On a cluster without an IPv6 route, a call can fail at random with `503 Network is unreachable`. The option sets
+   `V4_PREFERRED`. It is a setting of the installer: Substrate is not part of the chart, so the chart has no value for it.
+
+`TestEgressCorrectionFitsThePinnedTree` checks the real pinned manifest. It needs a clone of Substrate in
+`KOINON_SUBSTRATE_SOURCE`, like the generic overlay test.
+
+### Koinon's own gateways (issue #1486 item 3)
+
+No Koinon gateway reuses an upstream TLS session across hosts:
+
+- Go gateways (`koinon-gateway`: egress, model and MCP paths): none sets `tls.Config.ClientSessionCache`, and Go
+  resumes a client session only when that field is set. `internal/gateway/egress/egress.go:184` and
+  `internal/gateway/actortoken/substrate.go:293` build the `tls.Config` with `MinVersion` and `RootCAs` only.
+  `internal/mcpgateway/upstream.go:298` and `:315` copy a transport and set roots, `MinVersion` or
+  `InsecureSkipVerify` only. `internal/modelgateway/gateway.go:107` clones `http.DefaultTransport`, which has no
+  `TLSClientConfig` session cache. A test would have to set a cache first: the code has none.
+- agentgateway fallback (v1.7.x): the backend TLS client (`crates/agentgateway/src/http/backendtls.rs:322`) is a
+  rustls `ClientConfig` with default resumption. The rustls session store keys sessions by server name, so a session
+  of one host is never offered to another. This was read in the agentgateway `v1.7.0` source, not run against
+  Cloudflare. agentgateway is deleted in ADR 0097 step 3.
+
 ## Options
 
 Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
@@ -106,6 +142,7 @@ Options passed to `ate-setup` under the names the pinned `ate-setup` defines:
 | `--gcp-project-id`, `--snapshot-transfer-gsa-name` | the same names | `gke` only. |
 | `--setup-csi nfs\|none` | `--setup-csi` | A CSI driver should be installed with Substrate (default `none`). `hostpath` and `both` are for kind only; `generic` refuses them. |
 | `--gvisor-mirror <base-url>` | none (Koinon step) | The installer host cannot reach `storage.googleapis.com`. See [gVisor tarball in the cluster object store](#gvisor-tarball-in-the-cluster-object-store). |
+| `--egress-dns-v4-preferred` | none (Koinon edit) | The cluster has no IPv6 route and egress calls fail at random with 503. See [Egress gateway corrections](#egress-gateway-corrections). |
 | `--expected-jwt-issuer <url>` | `--ateapi-expected-jwt-issuer` | See [Service-account issuer](#service-account-issuer). |
 
 `--kubeconfig` and `--context` are required. The installer uses them for its own API calls and for every
@@ -128,7 +165,7 @@ server image with no tag fails the preflight. The preflight finds the api server
 (`ate-api-server`), not by position.
 
 The images are pinned by tag, not by digest. When Substrate publishes image digests with a release, they
-get pinned in `substratepin.go`. The images live at `ghcr.io/agent-substrate/substrate/<component>:v1.0.0`,
+get pinned in `substratepin.go`. The images live at `ghcr.io/agent-substrate/substrate/<component>:v1.0.1`,
 named by component (`ateapi` for the container `ate-api-server`), not by Deployment. The preflight reads the
 tag of the image of that container and never the image name.
 
@@ -153,7 +190,17 @@ Order of the step:
 7. Wait for the CRDs to be Established (applying a `SandboxConfig` right after the CRDs raced in the lab).
 8. Make sure the router allows `spiffe://cluster.local/ns/<substrate namespace>/sa/atenet-client`. The
    installer finds the router container by name (`atenet-router`), reads the flag in its command and
-   arguments, and retries when the Deployment changed during the update.
+   arguments, and retries when the Deployment changed during the update. It also allows agentd's pod
+   certificate, `spiffe://cluster.local/ns/<koinon namespace>/sa/<agentd service account>` (flags
+   `--koinon-namespace` and `--koinon-release` name them). The router serves TLS on Service port 443 and wants
+   a client certificate on this list, so set `execution.substrate.routerAddress` to
+   `atenet-router.<substrate namespace>.svc:443` (issue #1446, ADR 0120 amendment). The preflight fails when the
+   list lacks the agentd identity or the router Service has no such port.
+   The driver fails a run at once with "TLS identity check with the atenet router failed" when the router sends a
+   TLS alert or the driver rejects the router certificate. Known limit: on a real TCP connection, a router that
+   closes the connection with unread client bytes can send a TCP reset, and the reset can hide the TLS alert. The
+   driver cannot read the alert then. The error stays Unavailable and the driver retries until
+   `GuestReadyTimeout`. If runs wait that long with no error, check the router log and the allow-list.
 9. Stage the gVisor tarball (kind and generic platforms, gvisor class). See "gVisor tarball in the cluster
    object store" below.
 10. Run the full preflight, without the NetworkPolicy probe. That probe starts two pods in the release
@@ -168,6 +215,29 @@ it did not create. How the probe namespace pulls the probe image is part of S2 (
 
 `koinon-api preflight --driver substrate` runs only the checks. It creates and removes the probe namespace in
 the same way, so it also runs after `helm install`.
+
+### Golden snapshots
+
+Golden snapshots are off by default in every tier (issue #1492). The Koinon template sets
+`GOLDEN_SNAPSHOT_MODE_DISABLED`. To turn them on, set `execution.substrate.goldenSnapshots=true` in the chart
+(the reconciler flag is `--substrate-golden-snapshots`). The setting is part of the template hash, so a
+change makes new templates. An upgrade to this version, and each change of the setting, make the reconciler
+recreate every Substrate sandbox, because the sandbox spec hash changes.
+
+Turn it on only with a reason. A golden snapshot clones memory from one sandbox to another. ADR 0120
+section 5.2 forbids that, and an admin who turns it on makes an exception to that rule.
+
+Cost, from the koinon-lab experiment of 2026-11-27 (lab-notes `experiments/2026-11-27-substrate-edges`,
+sections O8 and O8 vm tier). Time from create to the first successful Exec, 20 sandboxes per arm, 0 failures:
+
+| Tier | Golden off p50 / p95 | Golden on p50 / p95 |
+|---|---|---|
+| gVisor | 1.03 s / 1.42 s | 1.05 s / 1.58 s |
+| vm (microVM) | 2.65 s / 2.78 s | 3.50 s / 3.64 s |
+
+- Golden mode was not faster in these runs. On the vm tier it was slower.
+- A golden build takes 36-38 s. It holds a pool slot for about 21-23 s each time a template changes.
+- All runs used the 40 MB/s lab disk cap. The times include an extra chmod call, so they are an upper bound.
 
 ### Permissions of the installer
 
@@ -184,6 +254,9 @@ The kubeconfig of the installer needs these rules:
 - `deployments`: get, update in the Substrate namespace
 - `workerpools` (group `ate.dev`): get in the worker namespace (`--substrate-worker-namespace`)
 - non-resource URL `/.well-known/openid-configuration`: get
+- for the provisioner grant (ADR 0128): `clustertrustbundles` (group `certificates.k8s.io`, cluster scope): list (the CA of
+  the api server); `pods` in the Substrate namespace: list; `serviceaccounts/token`: create for `ate-client` in the
+  Substrate namespace; `pods/portforward`: create in the Substrate namespace
 
 `ate-setup` needs more (it creates the Substrate objects); those rules are those of Substrate.
 
@@ -199,6 +272,10 @@ The kubeconfig of the installer needs these rules:
   the nodes that are Ready, not cordoned and without a `NoSchedule` or `NoExecute` taint (so not the control
   plane), and lists the others as not probed. With the selector it probes the selected nodes that are Ready.
   See "Talos: user namespaces for gVisor".
+- `/var/lib/ate` has a filesystem of its own on each worker node (a read-only probe pod per node, the same
+  node selection as the user-namespace check). The check only warns: a node where `/var/lib/ate` shares the
+  filesystem of the node root or of `/var/lib/kubelet` gets a warning. A node without `/var/lib/ate` gets a
+  warning too. See "Node protection: /var/lib/ate on its own filesystem".
 - Substrate's api server can validate service-account tokens. The probe pod runs in the probe namespace. See below.
 - The Substrate CRDs (`workerpools.ate.dev`, `sandboxconfigs.ate.dev`, `csidriverconfigs.ate.dev`),
   a ready `ate-api-server` of exactly the pinned release, the `atenet-router` allow-list, and per tier a
@@ -217,22 +294,99 @@ With `execution.driver: substrate`, the chart's pre-install and pre-upgrade hook
 It also runs the NetworkPolicy probe in the release namespace when `preflight.networkPolicyProbe.enabled` is
 true, as with the OpenShell driver.
 
-The hook does not run the probe pods (issuer, node devices, user namespaces). These pods need a probe namespace
-with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these three checks as
+The hook does not run the probe pods (issuer, node devices, user namespaces, `/var/lib/ate` filesystem). These pods need a probe namespace
+with Pod Security `privileged`, and a hook must not create a namespace. The hook reports these four checks as
 warnings. `koinon-api substrate install` runs them, and `koinon-api preflight --driver substrate` runs them
 again on request. The hook does not check the WorkerPools: at pre-install the chart's own pool does not exist
 yet.
 
 The ClusterRole of the hook is read-only: `get` on the three Substrate CRDs and on the Deployments
 `ate-api-server` and `atenet-router` by name (a ClusterRole, because Substrate's namespace may not exist yet),
-plus the CNPG and GatewayClass reads of the chosen modes (in kubernetes mode also agentgateway's controller
-Deployment). The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
+plus the CNPG read of the chosen mode. The NetworkPolicy probe adds a Role in the release namespace only: create, get and delete pods,
 get pod logs, and create and delete NetworkPolicies.
+
+## Node protection: /var/lib/ate on its own filesystem
+
+**v0.1 has no hard per-home cap.** A sandbox home has no size limit of its own in v0.1. The tracking issue for
+per-sandbox volumes and a hard cap is [#1495](https://github.com/stateracloud/koinon/issues/1495). Until it is
+done, Koinon protects the node and not the single home: a full home must fill a filesystem that only sandbox
+homes use.
+
+Why the node needs this:
+
+- The gVisor home is a tmpfs that a file under `/var/lib/ate/actors/<uid>` backs. The microVM home is a host
+  directory in the same place. `/var/lib/ate` is a hostPath that kubelet does not see.
+- A write of 3 GiB into a home lands on the node filesystem. Kubelet reports 0 bytes for it in the pod stats of
+  the sandbox. When `/var/lib/ate` shares the node filesystem, kubelet sees the free space fall and sets disk
+  pressure. The sandbox pods report no use for the home, so the eviction does not target the large home.
+- Substrate sets the hostPath of the worker in its own code, and one worker can hold up to 1000 actors. A volume
+  for each worker therefore cannot cap one home.
+
+What to do on each worker node:
+
+1. Mount a separate disk or partition at `/var/lib/ate` before kubelet starts. Then a full home fills that
+   filesystem. The root filesystem and the kubelet filesystem stay free.
+2. You can also mount a separate disk at `/var/lib/ate/snapshots`. Snapshot data then cannot fill the home
+   filesystem. See Substrate `docs/guides/node-storage.md`.
+3. Make the filesystem large enough for the homes that you expect, plus a margin, because no cap limits one home.
+   How you mount it depends on the node OS. On kubeadm nodes, use an `/etc/fstab` entry or a systemd mount unit.
+   There is no tested method for Talos yet. On Talos, `/var` is the only writable filesystem, and a Talos user
+   volume mounts under `/var/mnt`. Do not use a kubelet `extraMounts` entry for this: it changes the mount
+   namespace of the kubelet only, and the data of the home stays on `/var`.
+
+The check compares device numbers. A btrfs subvolume or a ZFS dataset has its own device number, but it shares
+the space of its pool. The preflight does not see this case, so it reports no warning for it.
+
+How Koinon helps you check it:
+
+- **Preflight.** `koinon-api preflight --driver substrate` and `koinon-api substrate install` warn on each node
+  where `/var/lib/ate` is on the same filesystem as the node root or as `/var/lib/kubelet`. The warning does not stop the install.
+  The chart's pre-install hook does not run the probe pod, as for the other probe checks.
+- **Alert.** With `metrics.prometheusRule.enabled` and `execution.driver: substrate`, the rule
+  `KoinonSandboxHomeFilesystemFilling` fires when less than 15 percent of the filesystem at `/var/lib/ate` is free
+  for 10 minutes (`metrics.prometheusRule.ateFilesystem`). It reads the series `node_filesystem_avail_bytes` and
+  `node_filesystem_size_bytes` of node-exporter for the mount point `/var/lib/ate`. So it needs node-exporter on the
+  worker nodes, and it stays silent on a node where `/var/lib/ate` is not a mount point of its own. That is the case
+  that the preflight warns about. The preflight runs at install and on request only. Run
+  `koinon-api preflight --driver substrate` again after you add a worker node.
+- **The leak-guard byte alert does not cover this.** The byte cap of ADR 0091 (issue #1058) counts the bytes of
+  MCP calls that leave a run. It does not see the disk of a node. It cannot fire on a full home, so the node-disk
+  alert above is a separate rule.
+
+## Access in Substrate: the provisioner
+
+Only Substrate's global `owner` role can create an atespace, and Koinon makes one atespace for each org. So a
+small pod of its own, the provisioner, holds that role. The reconciler and agentd hold no global role
+([ADR 0128](../adr/0128-substrate-provisioner.md)).
+
+| Component | Principal | Role |
+| --- | --- | --- |
+| provisioner | `system:serviceaccount:<ns>:<release>-provisioner` | `owner` in the global policy |
+| reconciler | `system:serviceaccount:<ns>:<release>-reconciler` | `editor` in each org atespace |
+| agentd | `system:serviceaccount:<ns>:<release>-agentd` | `viewer` in each org atespace |
+
+- **The installer** adds the provisioner to the global access policy `default` as a revocable member, never as a
+  bootstrap owner. It reads the policy, adds the member and writes it back with the uid and version it read. It
+  keeps every other member. It writes nothing when the member is there, so run `koinon-api substrate install`
+  again on every upgrade: an install from before the provisioner gets the grant and keeps its other members.
+- `--koinon-namespace` (default `koinon`) and `--koinon-release` (default `koinon`) name the provisioner's
+  ServiceAccount. Pass the namespace and the release name of your `helm install`.
+- The installer acts as `ate-client`, the default bootstrap owner: it mints a short-lived token and calls ateapi
+  through a port-forward to the api server pod. If your install names other bootstrap owners, pass a token of a
+  global owner with `--api-token-file`. The installer checks the api server certificate before it sends the token.
+  It reads the CA from the ClusterTrustBundle of Substrate's `servicedns.podcert.ate.dev/identity` signer; give another
+  CA with `--api-ca-file`. When no CA is found, the install stops.
+- **The chart** renders the provisioner (`execution.substrate.provisioner`, on by default): a Deployment of the
+  reconciler image in `provision` mode, its own ServiceAccount, a ClusterRole that only creates TokenReviews, a
+  Service and a NetworkPolicy that admits only the reconciler. The reconciler asks it for an org atespace only when
+  the atespace is missing or its policy does not give the reconciler a role yet.
+- Substrate has no scoped create role. When a Substrate release adds one, check whether the provisioner can be
+  removed (issue #1398).
 
 ## Service-account issuer
 
-The probe repeats what Substrate v1.0.0's api server does to validate a token, from a pod with the default
-ServiceAccount of the probe namespace (source at commit `b34fbee7`). The issuer and the `iss` of a token are the
+The probe repeats what Substrate v1.0.1's api server does to validate a token, from a pod with the default
+ServiceAccount of the probe namespace (source at commit `20778a6d`). The issuer and the `iss` of a token are the
 same in every namespace. The probe pod does not pass the NetworkPolicies of `ate-system`: before the install there
 are none, and after the install they allow the api server's own egress, not the probe's.
 
@@ -268,7 +422,7 @@ Supported fixes, in this order:
    to `https://kubernetes.default.svc/openid/v1/jwks`.
 2. Or set it to a URL that pods reach with a certificate from the system roots.
 
-The real requirement: pods in the Substrate namespace reach the issuer Substrate trusts, because Substrate v1.0.0
+The real requirement: pods in the Substrate namespace reach the issuer Substrate trusts, because Substrate v1.0.1
 has no separate discovery URL (`cmd/ateapi/main.go` line 674 passes the issuer to `HTTPKeySource`). Kubernetes
 signs tokens with the first issuer and writes the same value as `issuer` in the discovery document, so
 `--expected-jwt-issuer` cannot turn an unroutable issuer into a reachable one. It is only an override that must
@@ -499,13 +653,13 @@ and only to the upstreams in `imageCache.upstreams` (default `ghcr.io`, `docker.
 Worker pods run in their own namespace, not in `ate-system` (ADR 0120 section 6). The chart creates it:
 `execution.substrate.workerNamespace`, default `ate-workers`. The default WorkerPool
 (`execution.substrate.workerPool`), its ServiceAccount and the worker NetworkPolicy live there. A
-WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.0): the
+WorkerPool in another namespace needs no Substrate change (checked on kind with Substrate v1.0.1): the
 controller applies the pool Deployment and a per-pool NetworkPolicy in the pool's namespace.
 
 - The chart creates the default WorkerPool (issue #1089). It is on by default with `execution.driver: substrate`.
   `koinon-api substrate install` and ate-setup create no pool. `helm upgrade` changes the pool, and `helm uninstall`
   removes it. The default pool is `koinon-gvisor`: one replica of the pinned worker image
-  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0`. Each replica requests 500m CPU and 1Gi memory (the
+  `ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.1`. Each replica requests 500m CPU and 1Gi memory (the
   idle cost), with limits of 4 CPU and 8704Mi (8.5Gi). The pool needs one node that runs the gvisor class: the node
   scheduler reserves the requests, and the largest sandbox needs 4 CPU and 8.5Gi free on that node. Change the size
   with `workerPool.replicas` and `workerPool.resources` (see "Worker capacity" below). The pool carries the label
@@ -517,11 +671,11 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   (the image follows the class). Set `workerPool.enabled: false` to manage the pools yourself. The WorkerPool CRD must
   exist before `helm install`, so install Substrate first. Only the installer identities write a WorkerPool, so the
   identity that runs helm must be in `workerPolicy.installerIdentities` or `installerGroups` (for example a GitOps
-  ServiceAccount), or set `workerPool.enabled: false`. The default image is the tag `v1.0.0`: the interim digest
+  ServiceAccount), or set `workerPool.enabled: false`. The default image is the tag `v1.0.1`: the interim digest
   exemption (#1140) admits it, and the chart refuses the render when that exemption is gone. If you installed
   Substrate with `--image-repo`, set `workerPool.workerImage` or a registry mirror (`global.registryMirrors`), or the
   pool pulls from `ghcr.io`.
-- **Worker capacity** (Substrate v1.0.0). Read this before you change the pool size.
+- **Worker capacity** (Substrate v1.0.1). Read this before you change the pool size.
   - One worker pod runs many sandboxes. Its pod **limits** are one capacity that all its sandboxes share. The worker
     keeps 64Mi of the memory limit for itself. The pod requests do not add capacity: they only tell the node
     scheduler what to reserve.
@@ -568,6 +722,14 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
   may mount a hostPath there. Set `workerPolicy.nodeAgent.allowedHostPaths` to what your atelet needs.
 - The control-plane NetworkPolicy selects pods by an explicit list of `app` labels
   (`workerNetworkPolicy.controlPlaneApps`). Confirm the list against your Substrate manifests.
+- Each actor gets one Substrate `EgressPolicy` (issue #1444). The driver writes it while the actor is suspended,
+  before each create, restore, start and resume: one `http` rule for each gateway host. Every actor gets the ports
+  of `--gateway-url` and `--gateway-mcp-url`. Only an actor whose agent has a code-host grant also gets the port of
+  `--gateway-egress-url`. When the grant changes, the reconciler changes the policy in place on its next pass, and
+  the sandbox is not replaced. There is no other rule, so an actor reaches the gateway and nothing else. The gateway
+  URLs must be `http://` URLs with a DNS name (no IP address), and the egress listener must not be on the host and
+  port of another gateway URL: the reconciler refuses to start otherwise. `DeleteActor` also deletes the policy.
+  The chart NetworkPolicy of the atenet-egress pods is the second fence.
 - The control-plane namespace has one default-deny egress policy for every pod, and per-app policies allow what each
   pod needs. So no pod of `ate-system` is unfenced. `ate-idp-server`, `postgres` and `rustfs` call nothing and have
   no egress. `apiOnlyApps` (`k8s-credential-provider`) get DNS and the API server ports only (to any address). The `rustfs-bucket-init`
@@ -649,9 +811,71 @@ controller applies the pool Deployment and a per-pool NetworkPolicy in the pool'
 - `kubectl ate proxy` needs the router flag `--ingress-allowed-spiffe-ids`. If Koinon's gateway path needs
   the same, add the gateway's SPIFFE ID to that list.
 
+## Snapshot bucket: encryption, credential, checksums
+
+Substrate stores the snapshot of each sandbox in the snapshot bucket (`--storage-bucket`). Substrate does not
+encrypt these objects. Per-org encryption is planned for v0.2 (ADR 0120 section 5.3). In v0.1 there is no
+install check for any point in this section. The operator must do each point.
+
+1. **Turn on server-side encryption (SSE) for the bucket.** Without it, the plain text of every file in a
+   home, also a file with mode 0600, is readable in the snapshot objects. The lab bucket had no SSE, and the
+   objects `fs/pages.img.zstd` (gVisor), `durable-dir-home.tar.zstd` and `memory-ranges.zstd` (vm tier) held
+   plain data. Set the default encryption of the bucket before the first sandbox starts:
+   - AWS S3: S3 applies `SSE-S3` to new objects by default. To use `SSE-KMS`, set the default encryption of
+     the bucket (`aws s3api put-bucket-encryption`).
+   - Google Cloud Storage: a default customer-managed key on the bucket (`gcloud storage buckets update
+     --default-encryption-key`). Google encrypts at rest with its own key when you set none.
+   - MinIO: bucket encryption with a KMS key (`mc encrypt set`).
+   - rustfs (the bundled store): put the `rustfs-data` volume on an encrypted StorageClass or an encrypted
+     disk. Also check the rustfs documentation for server-side encryption; this page does not verify it.
+
+   Encryption at rest protects the stored object against loss of a disk or a bucket export. It does not
+   protect against a holder of the bucket credential: the store decrypts for that holder (point 2).
+2. **Limit who holds the bucket credential.** The credential reads every home, including 0600 files, and
+   the root key can also write and delete every snapshot. Give the Koinon reconciler its own read-only key
+   (see [What `generic` corrects](#what-generic-corrects)). Keep the root key out of CI, out of sandboxes and
+   out of the Koinon namespace. Limit who can read the Secret `koinon-rustfs-credentials` in the Substrate
+   namespace.
+3. **Substrate has no snapshot checksums.** Substrate does not check a snapshot when it restores it. A
+   damaged or changed object in the bucket is not found. Use the object versioning of your store when you need
+   to find a change. Do not use object lock on the bucket: it can block the deletes that Substrate makes.
+   The snapshot store is therefore trusted. Write access to it gives control of the suspended agents.
+4. **Size the snapshot store.** The default is 10Gi (`--rustfs-storage-size`). That option sizes only the
+   bundled rustfs store. For an external bucket, set the size or the quota in that store. Calculate the sum
+   of the memory in use of all agents that can be suspended at one time, plus the home size of each of these
+   agents. Use the memory limit of each agent as the worst case. Each suspend replaces the old snapshot of
+   that agent, and deleting the agent empties its prefix. A snapshot is about the size of the touched memory
+   that does not compress, plus the home. It is not the limit. A tag adds one more full copy, but Koinon
+   makes no tag in v0.1. Lab values (Substrate v1.0.0, gVisor class, issue #1090): idle 3.4 MB; 0.5 GiB in
+   use, 541 MB; 1 GiB in use, 1.08 GB; 4 GiB in use, about 4.2 GB. The case of a full store is not tested
+   yet. Until it is, make the store larger than the sum from this rule, and keep free space in it.
+
+## Substrate database: not in the Koinon backup
+
+Substrate keeps its own state in its own database: the StatefulSet `ate-system/postgres`, database
+`atepg`. The Koinon CNPG backup does not include this database. The Koinon backup restores homes only from
+kopia, not from the snapshots in the Substrate bucket.
+
+- To keep the Substrate state, the operator must back up `atepg` and the snapshot bucket, and restore
+  them together. A restore of one without the other gives a mismatch between the actors and their
+  snapshots. Use `pg_dump` of `atepg` or a volume snapshot of the `postgres` claim.
+- Without such a backup, a lost Substrate database loses the actors and their snapshots. Koinon can still
+  restore the homes from kopia and create new sandboxes.
+
+### Storage of the Substrate database
+
+Put the Substrate PostgreSQL on storage that does not share a disk with the snapshot store. Substrate ends
+an actor lease when one PostgreSQL commit stalls for more than about 10 s. The lease renews every 10 s and
+has a fixed deadline of 20 s (`lease.go`). A suspend that loses its lease fails after 20.9 s with a
+`Canceled` error and writes no log line. On koinon-lab, the snapshot upload loaded the same disk as the
+PostgreSQL write-ahead log. Commits stalled for 8 to 9.1 s, and the margin was 0.4 s. Use `--postgres-storage-class`
+for a class that maps to a different disk than the class of `rustfs-data` (`--rustfs-storage-class`). A
+class name alone does not prove this: for example, `local-path` can place both claims on one node disk.
+See [Options](#options).
+
 ## Verified and unverified
 
-Verified against the Substrate v1.0.0 source (commit `b34fbee7`), its `ate-setup --help` and
+Verified against the Substrate v1.0.1 source (commit `20778a6d`), its `ate-setup --help` and
 the koinon-lab install notes: the CRD names and the `v1` version, the Deployment names `ate-api-server`
 and `atenet-router`, the router flag `--ingress-allowed-spiffe-ids`, the SPIFFE ID
 `ns/<namespace>/sa/atenet-client`, the WorkerPool status (`replicas`, `readyReplicas`, a `Resolved`

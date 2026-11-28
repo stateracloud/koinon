@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError, createClient } from '@connectrpc/connect'
+import { createClient } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
@@ -19,13 +19,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TokenAge } from '@/components/token-age'
 import { BoundAgentsSchema, ConnectionService, ConnectionStatus, type SetConnectionSecretResponse } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { describeError } from '@/lib/api-error'
 import { isApprover } from '@/lib/approvals'
 import { setSecretRequest } from '@/lib/connection-secret'
 import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
-const route = getRouteApi('/app/connections/$connectionId')
+const route = getRouteApi('/app/org/connections/$connectionId')
 
 /** ConnectionPage shows a connection, its last test by setup-guide step, and runs the test again. */
 export function ConnectionPage() {
@@ -66,7 +67,7 @@ export function ConnectionPage() {
   if (get.isError || !c) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>{get.error ? ConnectError.from(get.error).rawMessage : 'Connection not found'}</AlertDescription>
+        <AlertDescription>{get.error ? describeError(get.error).message : 'Connection not found'}</AlertDescription>
       </Alert>
     )
   }
@@ -196,7 +197,7 @@ export function ConnectionPage() {
           connector={gt ? 'gitea' : 'github'}
           lost={Boolean(c.credentialLostAt)}
           pending={setSecret.pending}
-          error={setSecret.error ? `Could not store the ${gt ? 'tokens' : 'private key'}: ${ConnectError.from(setSecret.error).rawMessage}` : undefined}
+          error={setSecret.error ? `Could not store the ${gt ? 'tokens' : 'private key'}: ${describeError(setSecret.error).message}` : undefined}
           onSubmit={storeSecret}
         />
       )}
@@ -207,7 +208,7 @@ export function ConnectionPage() {
       )}
       {test.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not test the connection: {ConnectError.from(test.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not test the connection: {describeError(test.error).message}</AlertDescription>
         </Alert>
       )}
       {test.isSuccess && (

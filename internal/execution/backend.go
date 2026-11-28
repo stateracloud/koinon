@@ -127,6 +127,136 @@ type Snapshotter interface {
 	RestoreSandbox(ctx context.Context, workspace string, snapshot SnapshotRef, spec SandboxSpec) (Sandbox, error)
 }
 
+// GatewayAccess is what a sandbox may reach at the Koinon gateway in addition to the model and MCP
+// listeners, which every sandbox reaches (issue #1444). It is not part of [SandboxSpec]: a change of
+// access never replaces a sandbox.
+type GatewayAccess struct {
+	// CodeHostEgress lets the sandbox reach the gateway's egress listener. The reconciler sets it
+	// only for an agent with a code-host grant, on an install with an egress listener: the same
+	// condition as the OpenShell policy entry of that listener.
+	CodeHostEgress bool
+}
+
+// GatewayAccessSetter is an optional capability of a driver that keeps a per-sandbox allow list to
+// the gateway (the actor egress policy of Agent Substrate). The OpenShell driver does not implement
+// it: its policy entries carry the same rule.
+type GatewayAccessSetter interface {
+	// SetGatewayAccess records the access of sandbox name and applies it at once to a sandbox that
+	// exists, in place (in the control plane; the data plane can cache the old policy for a short
+	// time). A sandbox that does not exist yet gets it when it is created or restored. A
+	// driver that has no access recorded for a sandbox gives it the zero value: it fails closed.
+	SetGatewayAccess(ctx context.Context, workspace, name string, access GatewayAccess) error
+	// ForgetGatewayAccess drops the access recorded for sandbox name, with no call to the control plane.
+	// The reconciler calls it for a name that no sandbox uses again (an old Substrate actor name, issue
+	// #1386), so that the record does not outlive the name.
+	ForgetGatewayAccess(workspace, name string)
+}
+
+// GatewayAccessSetterOf returns the capability of b, or nil when b has none. It looks through the
+// adapter of [WithoutEgress].
+func GatewayAccessSetterOf(b any) GatewayAccessSetter {
+	if n, ok := b.(noEgress); ok {
+		b = n.Compute
+	}
+	s, _ := b.(GatewayAccessSetter)
+	return s
+}
+
+// ActorNamer is an optional capability of a driver whose sandbox runs as an actor with its own identity (Agent
+// Substrate, issue #1386). Substrate signs a JWT for the actor, and the gateway maps the actor name to an agent run,
+// so a name must never come back for another run: a new actor gets a new name, never a reused one.
+type ActorNamer interface {
+	// NewActorName returns a new, unique name for the actor of sandbox. It is "<sandbox>-<16 hex>" on Substrate.
+	// The driver does not shorten a name that is too long for its backend; the create then fails with ErrInvalid.
+	NewActorName(sandbox string) string
+}
+
+// ActorNamerOf returns the [ActorNamer] of b, or false when b has none (the OpenShell driver has none). It looks
+// through the adapter of [WithoutEgress] and any wrapper with an Unwrap method that returns a [Compute].
+func ActorNamerOf(b Backend) (ActorNamer, bool) {
+	var cur any = b
+	for range 8 { // bounded: a wrapper chain is short, and a cycle must not hang
+		if n, ok := cur.(ActorNamer); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
+// Reverter is an optional capability of a driver: revert a crashed or dead sandbox to its last snapshot
+// and check that its guest front answers (issue #1481). The OpenShell driver does not implement it.
+type Reverter interface {
+	// RevertSandbox reverts a sandbox that is CRASHED, or RUNNING with a dead front, to its last
+	// snapshot and resumes it. RevertActor accepts both states (Substrate cmd/ateapi/internal/controlapi/
+	// workflow_revert.go, revertableStates). It fails with ErrNoSnapshot when the sandbox never
+	// suspended: a revert would give an empty home. It fails with ErrRevertResume for every failure
+	// after the revert worked (the egress policy write and the resume): the sandbox then holds its
+	// snapshot, and the caller must not delete it.
+	RevertSandbox(ctx context.Context, workspace, name string) (Sandbox, error)
+	// CheckFront asks the guest front of a running sandbox to answer. It returns nil when the front
+	// answers and ErrFrontDown when it does not. A slow answer of the control API in the same call is
+	// no verdict on the front and is returned as another error. It never resumes the sandbox. An
+	// ErrFrontDown carries the worker that hosts the sandbox ([FrontWorker]), so the caller can tell one
+	// dead front from silence across the fleet.
+	CheckFront(ctx context.Context, workspace, name string) error
+}
+
+// ReverterOf returns the [Reverter] of b, or false when b has none. It looks through wrappers like
+// [ActorNamerOf].
+func ReverterOf(b Backend) (Reverter, bool) {
+	var cur any = b
+	for range 8 {
+		if n, ok := cur.(Reverter); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
+// Repointer is an optional capability of a driver: give a sandbox another spec and keep its home, with no
+// delete and no restore (issue #1482). The OpenShell driver does not implement it.
+type Repointer interface {
+	// RepointSandbox makes the sandbox run spec. A running sandbox is suspended first, with a durable
+	// snapshot. It fails with ErrRepointRefused, and changes nothing, when the new spec would not keep the
+	// home: the caller then deletes the sandbox and restores the home from a checkpoint. It fails with
+	// ErrRepointResume when the sandbox was repointed and the step after it failed: the caller must not
+	// delete it. On success the sandbox is resumed.
+	RepointSandbox(ctx context.Context, workspace, name string, spec SandboxSpec) (Sandbox, error)
+}
+
+// RepointerOf returns the [Repointer] of b, or false when b has none. It looks through wrappers like
+// [ActorNamerOf].
+func RepointerOf(b Backend) (Repointer, bool) {
+	var cur any = b
+	for range 8 {
+		// The adapter of WithoutEgress drops the fields of the Egress half from a spec before the driver sees it.
+		if ne, ok := cur.(noEgress); ok {
+			if n, ok := ne.Compute.(Repointer); ok {
+				return strippedRepointer{n}, true
+			}
+		}
+		if n, ok := cur.(Repointer); ok {
+			return n, true
+		}
+		u, ok := cur.(interface{ Unwrap() Compute })
+		if !ok {
+			return nil, false
+		}
+		cur = u.Unwrap()
+	}
+	return nil, false
+}
+
 // SnapshotKind says what a snapshot holds.
 type SnapshotKind string
 
@@ -181,12 +311,6 @@ type Provider struct {
 	Config map[string]string
 	// Labels are applied to the provider record.
 	Labels map[string]string
-	// ClaimLegacy lets EnsureProvider claim a record made before the install label existed
-	// (issue 461): labels are immutable, so it deletes the record and creates it again with the
-	// label. Set it only while no sandbox attaches the record (OpenShell may refuse to delete an
-	// attached provider, and a delete would strip a live sandbox of it). Without it, an unlabeled
-	// record is taken as this install's and updated in place.
-	ClaimLegacy bool
 }
 
 // ProviderProfile is the type of a provider: which credentials it holds and where they may
@@ -320,6 +444,11 @@ type Sandbox struct {
 	// Reason and Message describe the latest condition that is not true, if any.
 	Reason  string
 	Message string
+	// NewSnapshot is true only on the sandbox that a suspend (or the first-boot seal) returns: the call
+	// took a new snapshot. The Substrate API gives no snapshot time, and the driver gives none either: the
+	// reconciler records the database clock that it read before the call (one clock for every time the
+	// crash path compares, issue #1481).
+	NewSnapshot bool
 }
 
 // SpecIdentifier is implemented by a backend whose sandboxes carry no labels (Agent Substrate has

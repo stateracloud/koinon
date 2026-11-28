@@ -528,6 +528,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "Whom the agent reports to (SetAgentPlacement); unset for nobody. Holds the stored ID only, also\nof a person who left the org since; AgentSummary gives the name and leaves out such a person."
+            },
+            {
+              "name": "created_by",
+              "number": 31,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user ID of the person who created the agent; empty when no user did. While the agent is a\ndraft that was never activated, this person may change it with the member role (UpdateAgent)."
             }
           ]
         },
@@ -4616,6 +4625,15 @@
               "deprecated": false
             },
             {
+              "name": "ExplainOrgPrices",
+              "description": "ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or\ndefault) prices it now and, for an org price, the price it replaces. It uses the same lookup\nas the gateway. It does not check the provider URL policy or a lost key. Admins and owners.",
+              "requestType": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+              "responseType": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ExplainPlatformPrice",
               "description": "ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its\nprice_ref.",
               "requestType": "koinon.budget.v1alpha1.ExplainPlatformPriceRequest",
@@ -5165,6 +5183,42 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ExplainOrgPricesRequest",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesRequest",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExplainOrgPricesResponse",
+          "fullName": "koinon.budget.v1alpha1.ExplainOrgPricesResponse",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "models",
+              "number": 1,
+              "type": "koinon.budget.v1alpha1.ModelPriceSource",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "models has one row per enabled model, ordered by provider name then model name."
+            }
+          ]
         },
         {
           "name": "ExplainPlatformPriceRequest",
@@ -6188,6 +6242,105 @@
           "description": "",
           "deprecated": false,
           "fields": []
+        },
+        {
+          "name": "ModelPriceSource",
+          "fullName": "koinon.budget.v1alpha1.ModelPriceSource",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ModelPriceSource is the price in use now for one model of an org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "provider_name",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_type",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "source is org, platform or default. It is empty when the model has no usable price."
+            },
+            {
+              "name": "price_ref",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 6,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "platform_version is set for source platform."
+            },
+            {
+              "name": "list_version",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "list_version is set for source default."
+            },
+            {
+              "name": "replaces",
+              "number": 9,
+              "type": "koinon.budget.v1alpha1.ReplacedPrice",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "replaces is set for source org when a lower layer would price the model without the org price."
+            },
+            {
+              "name": "unpriced_reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "unpriced_reason is no_price or unusable_price when source is empty."
+            }
+          ]
         },
         {
           "name": "Notification",
@@ -7512,6 +7665,60 @@
             },
             {
               "name": "reasoning",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ReplacedPrice",
+          "fullName": "koinon.budget.v1alpha1.ReplacedPrice",
+          "file": "koinon/budget/v1alpha1/price.proto",
+          "description": "ReplacedPrice is the price an org price replaces: the next layer down (platform or default).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "source",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "price_ref",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "entry",
+              "number": 3,
+              "type": "koinon.budget.v1alpha1.PriceEntry",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "platform_version",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "list_version",
               "number": 5,
               "type": "string",
               "label": "singular",
@@ -10304,6 +10511,69 @@
           ]
         },
         {
+          "name": "EgressActor",
+          "fullName": "koinon.gateway.v1alpha1.EgressActor",
+          "file": "koinon/gateway/v1alpha1/state.proto",
+          "description": "EgressActor is one Agent Substrate actor of a sandbox that is not deleted or archived. It holds no\ntoken, only names.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "atespace",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "atespace is the org's Substrate workspace, name the actor name and uid the UID that Substrate gave\nthe actor: the three must all be equal to the claims of the token."
+            },
+            {
+              "name": "name",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "uid",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org is the org slug (actortoken.Actor.Org), agent the agent ID and run the run that holds the\nsandbox, empty when the State does not name one."
+            },
+            {
+              "name": "agent",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "run",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "EgressCredential",
           "fullName": "koinon.gateway.v1alpha1.EgressCredential",
           "file": "koinon/gateway/v1alpha1/state.proto",
@@ -10525,6 +10795,15 @@
               "oneof": "",
               "deprecated": false,
               "description": "credentials say where the gateway reads each credential that a route names, and how it sends it\n(#1086 part C). A route whose credential is not here is refused (503 credential_unavailable)."
+            },
+            {
+              "name": "actors",
+              "number": 3,
+              "type": "koinon.gateway.v1alpha1.EgressActor",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "actors are Koinon's record of the Agent Substrate actors (issue #1386, ADR 0120 amendment item 5):\nthe gateway finds the org and the agent of an actor JWT here, never in the token. An actor that is\nnot here, or a UID that is not equal, is refused."
             }
           ]
         },
@@ -13643,6 +13922,15 @@
               "deprecated": false
             },
             {
+              "name": "GetRunLimits",
+              "description": "",
+              "requestType": "koinon.orgsettings.v1alpha1.GetRunLimitsRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.GetRunLimitsResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "SetApproverNotRequester",
               "description": "SetApproverNotRequester turns the optional rule \"the approver must not be the requester\" on or\noff (issue #1175, ADR 0005). Audited as org.approver_not_requester.set.",
               "requestType": "koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest",
@@ -13665,6 +13953,15 @@
               "description": "SetRunContentRetention sets how long a finished run's stored content is kept, or returns it to the\ndefault (30 days) when days is 0. Audited as org.run_content_retention.set.",
               "requestType": "koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest",
               "responseType": "koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "SetRunLimits",
+              "description": "SetRunLimits changes some of the org's run limits (issue #492, ADR 0066). A limit that is not set\nstays as it is; 0 returns it to the default. Runs that are queued but not started get the new\nlimits when they start. Audited as org.run_limits.set.",
+              "requestType": "koinon.orgsettings.v1alpha1.SetRunLimitsRequest",
+              "responseType": "koinon.orgsettings.v1alpha1.SetRunLimitsResponse",
               "clientStreaming": false,
               "serverStreaming": false,
               "deprecated": false
@@ -13782,6 +14079,42 @@
           ]
         },
         {
+          "name": "GetRunLimitsRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.GetRunLimitsRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetRunLimitsResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.GetRunLimitsResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimits",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
           "name": "HomeBackupRetention",
           "fullName": "koinon.orgsettings.v1alpha1.HomeBackupRetention",
           "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
@@ -13868,6 +14201,96 @@
               "oneof": "",
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunLimit",
+          "fullName": "koinon.orgsettings.v1alpha1.RunLimit",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "RunLimit is one run limit of the org. value is the limit in force; it is default_value when the\norg set none.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "value",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_value",
+              "number": 2,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "min",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max",
+              "number": 4,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunLimits",
+          "fullName": "koinon.orgsettings.v1alpha1.RunLimits",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "RunLimits are the org's run limits (DB2, ADR 0066).",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_concurrent_runs",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "max_concurrent_runs is the most runs of the org that start or run at the same time. The other\nruns wait in the queue."
+            },
+            {
+              "name": "trigger_concurrency",
+              "number": 2,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at\nthe same time."
+            },
+            {
+              "name": "trigger_rate_per_minute",
+              "number": 3,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "trigger_rate_per_minute is the most of those items that start in one minute."
+            },
+            {
+              "name": "sandbox_creations_per_minute",
+              "number": 4,
+              "type": "koinon.orgsettings.v1alpha1.RunLimit",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in\none minute."
             }
           ]
         },
@@ -13999,6 +14422,78 @@
               "name": "retention",
               "number": 1,
               "type": "koinon.orgsettings.v1alpha1.RunContentRetention",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetRunLimitsRequest",
+          "fullName": "koinon.orgsettings.v1alpha1.SetRunLimitsRequest",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0\nreturns it to the default.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_concurrent_runs",
+              "number": 2,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "trigger_concurrency",
+              "number": 3,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "trigger_rate_per_minute",
+              "number": 4,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "sandbox_creations_per_minute",
+              "number": 5,
+              "type": "int32",
+              "label": "optional",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "SetRunLimitsResponse",
+          "fullName": "koinon.orgsettings.v1alpha1.SetRunLimitsResponse",
+          "file": "koinon/orgsettings/v1alpha1/orgsettings.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "limits",
+              "number": 1,
+              "type": "koinon.orgsettings.v1alpha1.RunLimits",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -14276,9 +14771,46 @@
     {
       "name": "koinon.platform.v1alpha1",
       "files": [
-        "koinon/platform/v1alpha1/platform.proto"
+        "koinon/platform/v1alpha1/platform.proto",
+        "koinon/platform/v1alpha1/resources.proto"
       ],
       "services": [
+        {
+          "name": "PlatformResourceService",
+          "fullName": "koinon.platform.v1alpha1.PlatformResourceService",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "PlatformResourceService lists the providers, the templates and the MCP servers of every org for the\nplatform console (ADR 0126 section 4, issue #1412). Every call is for a platform admin only; any\nother caller gets PermissionDenied, also for an org where the caller is an owner. It reads only:\nchanges stay with the per-org services (ProviderService, TemplateService, McpServerService), which\na platform admin can call as for any org.\n\nEach list goes org by org, by org slug. A page covers page_size orgs and holds every row of each of\nthem, so a page can hold more rows than page_size. With org_id set, the list holds the rows of that\none org (personal or team) and has one page.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "ListMcpServers",
+              "description": "ListMcpServers lists the remote MCP servers of the orgs.",
+              "requestType": "koinon.platform.v1alpha1.ListMcpServersRequest",
+              "responseType": "koinon.platform.v1alpha1.ListMcpServersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListProviders",
+              "description": "ListProviders lists the model providers of the orgs. A provider never holds its key here either.",
+              "requestType": "koinon.platform.v1alpha1.ListProvidersRequest",
+              "responseType": "koinon.platform.v1alpha1.ListProvidersResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ListTemplates",
+              "description": "ListTemplates lists the org templates of the orgs. Without org_id, the first page also starts\nwith the platform templates, which have no org.",
+              "requestType": "koinon.platform.v1alpha1.ListTemplatesRequest",
+              "responseType": "koinon.platform.v1alpha1.ListTemplatesResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        },
         {
           "name": "PlatformService",
           "fullName": "koinon.platform.v1alpha1.PlatformService",
@@ -14354,6 +14886,78 @@
           ]
         },
         {
+          "name": "ListMcpServersRequest",
+          "fullName": "koinon.platform.v1alpha1.ListMcpServersRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListMcpServersResponse",
+          "fullName": "koinon.platform.v1alpha1.ListMcpServersResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "servers",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgMcpServer",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "servers are by org slug, then in the order of McpServerService.ListServers."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
           "name": "ListOrgsRequest",
           "fullName": "koinon.platform.v1alpha1.ListOrgsRequest",
           "file": "koinon/platform/v1alpha1/platform.proto",
@@ -14422,6 +15026,249 @@
               "oneof": "",
               "deprecated": false,
               "description": "month_start is the start of the calendar month (UTC) that spent_this_month_usd counts from."
+            }
+          ]
+        },
+        {
+          "name": "ListProvidersRequest",
+          "fullName": "koinon.platform.v1alpha1.ListProvidersRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListProvidersResponse",
+          "fullName": "koinon.platform.v1alpha1.ListProvidersResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "providers",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgProvider",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "providers are by org slug, then in the order of ProviderService.ListProviders."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
+          "name": "ListTemplatesRequest",
+          "fullName": "koinon.platform.v1alpha1.ListTemplatesRequest",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "org_id narrows the list to one live org. Empty for every org."
+            },
+            {
+              "name": "include_personal",
+              "number": 2,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "include_personal also lists the rows of the personal orgs. It has no effect with org_id."
+            },
+            {
+              "name": "page_size",
+              "number": 3,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_size is the number of orgs that a page covers: 20 by default and at most 100."
+            },
+            {
+              "name": "page_token",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "page_token is the next_page_token of the previous page, from a request with the same org_id and\ninclude_personal."
+            }
+          ]
+        },
+        {
+          "name": "ListTemplatesResponse",
+          "fullName": "koinon.platform.v1alpha1.ListTemplatesResponse",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "templates",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgTemplate",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "templates are the platform templates by slug (first page only), then the org templates by org\nslug and template slug."
+            },
+            {
+              "name": "next_page_token",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "next_page_token is empty on the last page."
+            }
+          ]
+        },
+        {
+          "name": "OrgMcpServer",
+          "fullName": "koinon.platform.v1alpha1.OrgMcpServer",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgMcpServer is one remote MCP server with the org that owns it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "server",
+              "number": 2,
+              "type": "koinon.mcpserver.v1alpha1.Server",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgProvider",
+          "fullName": "koinon.platform.v1alpha1.OrgProvider",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgProvider is one provider with the org that owns it.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider",
+              "number": 2,
+              "type": "koinon.provider.v1alpha1.Provider",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgRef",
+          "fullName": "koinon.platform.v1alpha1.OrgRef",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgRef names the org that owns a row.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "kind",
+              "number": 4,
+              "type": "koinon.org.v1alpha1.OrgKind",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
             }
           ]
         },
@@ -14517,6 +15364,33 @@
               "name": "created_at",
               "number": 10,
               "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "OrgTemplate",
+          "fullName": "koinon.platform.v1alpha1.OrgTemplate",
+          "file": "koinon/platform/v1alpha1/resources.proto",
+          "description": "OrgTemplate is one template with the org that owns it. org is unset on a platform template.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org",
+              "number": 1,
+              "type": "koinon.platform.v1alpha1.OrgRef",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "template",
+              "number": 2,
+              "type": "koinon.template.v1alpha1.Template",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -16659,6 +17533,115 @@
       ]
     },
     {
+      "name": "koinon.refusal.v1",
+      "files": [
+        "koinon/refusal/v1/refusal.proto"
+      ],
+      "services": [],
+      "messages": [],
+      "enums": [
+        {
+          "name": "Reason",
+          "fullName": "koinon.refusal.v1.Reason",
+          "file": "koinon/refusal/v1/refusal.proto",
+          "description": "Reason is the one list of refusal reasons (ADR 0116 decision 5). A Connect error carries the name of a\nvalue as the `reason` of its google.rpc.ErrorInfo (domain koinon.dev), and a REST error carries the\nsame string in `error.reason`. The value names are the wire strings, so they have no enum prefix.\nA spec proves that this enum, `error.reason` in api/admin/v1/openapi.yaml and the Go code agree.\n\nAdd a value only when a client acts on the reason differently. Values are add-only: never reuse,\nrename or remove one. A client that does not know a reason shows the message of the error.\n\nbuf:lint:ignore ENUM_VALUE_PREFIX",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "REASON_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": "The error has no reason. A server never sends this value."
+            },
+            {
+              "name": "INVALID",
+              "number": 1,
+              "deprecated": false,
+              "description": "The request is not valid. The message says why."
+            },
+            {
+              "name": "NOT_FOUND",
+              "number": 2,
+              "deprecated": false,
+              "description": "The thing does not exist, or the caller may not see it."
+            },
+            {
+              "name": "INSTALL_HELD",
+              "number": 3,
+              "deprecated": false,
+              "description": "The install is held (ADR 0107) and the call reaches outward."
+            },
+            {
+              "name": "ROLE_TOO_LOW",
+              "number": 4,
+              "deprecated": false,
+              "description": "The caller's Role is too low for the field rule of the call (ADR 0116 decision 4)."
+            },
+            {
+              "name": "ADMIN_REQUIRED",
+              "number": 5,
+              "deprecated": false,
+              "description": "Only an org admin or owner may do this."
+            },
+            {
+              "name": "PLATFORM_ADMIN_REQUIRED",
+              "number": 6,
+              "deprecated": false,
+              "description": "Only a platform admin may do this."
+            },
+            {
+              "name": "CHANGED",
+              "number": 7,
+              "deprecated": false,
+              "description": "The destination changed since the caller loaded it."
+            },
+            {
+              "name": "OWNER_ONLY",
+              "number": 8,
+              "deprecated": false,
+              "description": "Only an org owner may choose content level full."
+            },
+            {
+              "name": "OWNER_AT_FULL",
+              "number": 9,
+              "deprecated": false,
+              "description": "The org sends full content, so only an owner may add a destination or change its connection."
+            },
+            {
+              "name": "NOT_MEMBER",
+              "number": 10,
+              "deprecated": false,
+              "description": "The caller is not a member of the org, so may only lower its settings."
+            },
+            {
+              "name": "ABOVE_CEILING",
+              "number": 11,
+              "deprecated": false,
+              "description": "The level is above the platform ceiling."
+            },
+            {
+              "name": "TEST_FAILED",
+              "number": 12,
+              "deprecated": false,
+              "description": "The test trace was not accepted, so nothing was saved."
+            },
+            {
+              "name": "PRICE_REFRESH_OFF",
+              "number": 13,
+              "deprecated": false,
+              "description": "The price refresh is off on this install."
+            },
+            {
+              "name": "CREDENTIAL_TOO_SHORT",
+              "number": 14,
+              "deprecated": false,
+              "description": "The credential of an MCP server is too short."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "koinon.remoteagent.v1alpha1",
       "files": [
         "koinon/remoteagent/v1alpha1/remoteagent.proto"
@@ -18236,7 +19219,8 @@
     {
       "name": "koinon.task.v1alpha1",
       "files": [
-        "koinon/task/v1alpha1/task.proto"
+        "koinon/task/v1alpha1/task.proto",
+        "koinon/task/v1alpha1/timeline.proto"
       ],
       "services": [
         {
@@ -18369,6 +19353,249 @@
               "name": "run",
               "number": 2,
               "type": "koinon.run.v1alpha1.Run",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ApprovalChanged",
+          "fullName": "koinon.task.v1alpha1.ApprovalChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalChanged records a step of an approval after its request.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "approval_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "args_sha256",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "note",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The approver's note."
+            },
+            {
+              "name": "scope",
+              "number": 6,
+              "type": "koinon.task.v1alpha1.ApprovalScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The scope that an approval created."
+            },
+            {
+              "name": "result",
+              "number": 7,
+              "type": "google.protobuf.Struct",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The result of an executed action."
+            },
+            {
+              "name": "error",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the action failed."
+            },
+            {
+              "name": "expires_at",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "When the approval expired."
+            },
+            {
+              "name": "reason",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the approval was canceled."
+            }
+          ]
+        },
+        {
+          "name": "ApprovalRequested",
+          "fullName": "koinon.task.v1alpha1.ApprovalRequested",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalRequested records an action that waits for approval, or one that a scope covered.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "approval_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "tool",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "args_sha256",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "decision",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The policy decision, for example \"ask\" or \"allow\"."
+            },
+            {
+              "name": "risk",
+              "number": 6,
+              "type": "google.protobuf.Value",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The risk card of the action."
+            },
+            {
+              "name": "approvals_required",
+              "number": 7,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The number of approvals that the action needs, when it is more than one."
+            },
+            {
+              "name": "system",
+              "number": 8,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "True when Koinon asks, not the agent."
+            },
+            {
+              "name": "scope",
+              "number": 9,
+              "type": "koinon.task.v1alpha1.ApprovalScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The scope that covered the call."
+            }
+          ]
+        },
+        {
+          "name": "ApprovalScope",
+          "fullName": "koinon.task.v1alpha1.ApprovalScope",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "ApprovalScope is the scoped approval that covered a call.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "kind",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"once\", \"task\" or \"agent\"."
+            },
+            {
+              "name": "expires_at",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "created_by",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_id",
+              "number": 5,
+              "type": "string",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -18548,6 +19775,42 @@
           ]
         },
         {
+          "name": "ExternalActor",
+          "fullName": "koinon.task.v1alpha1.ExternalActor",
+          "file": "koinon/task/v1alpha1/task.proto",
+          "description": "ExternalActor is a person without a linked Koinon account who writes from a chat platform\n(ADR 0130). It holds no display name and no other profile data.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "platform",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"slack\" or \"teams\"."
+            },
+            {
+              "name": "team",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack team ID or the Teams tenant ID of the workspace in which the person wrote."
+            },
+            {
+              "name": "platform_user_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The Slack user ID or the Teams user ID."
+            }
+          ]
+        },
+        {
           "name": "GetTaskRequest",
           "fullName": "koinon.task.v1alpha1.GetTaskRequest",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -18691,6 +19954,510 @@
           "fields": []
         },
         {
+          "name": "QuestionAsked",
+          "fullName": "koinon.task.v1alpha1.QuestionAsked",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionAsked records a question from the agent to a person.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "question",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "target",
+              "number": 3,
+              "type": "koinon.task.v1alpha1.QuestionTarget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to_label",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The recipients as people read them."
+            },
+            {
+              "name": "recipients",
+              "number": 5,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "choices",
+              "number": 6,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "has_draft",
+              "number": 7,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_answer",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The answer that applies when the question expires."
+            },
+            {
+              "name": "expires_at",
+              "number": 9,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionCanceled",
+          "fullName": "koinon.task.v1alpha1.QuestionCanceled",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionCanceled records a question that nobody needs to answer now.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionResolved",
+          "fullName": "koinon.task.v1alpha1.QuestionResolved",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionResolved records the end of a question: answered, dismissed or expired.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answer_kind",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answer",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "default_applied",
+              "number": 4,
+              "type": "bool",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "answered_by_name",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of the person who answered."
+            }
+          ]
+        },
+        {
+          "name": "QuestionRetargeted",
+          "fullName": "koinon.task.v1alpha1.QuestionRetargeted",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionRetargeted records a question that goes to other recipients.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "question_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to_label",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "recipients",
+              "number": 3,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "requested_target",
+              "number": 5,
+              "type": "koinon.task.v1alpha1.QuestionTarget",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The target that was asked for, when a fallback applies."
+            },
+            {
+              "name": "fallback_reason",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "QuestionTarget",
+          "fullName": "koinon.task.v1alpha1.QuestionTarget",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "QuestionTarget names who a question is for.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "kind",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"user\", \"role\" or \"creator\"."
+            },
+            {
+              "name": "user",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "role",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunEnded",
+          "fullName": "koinon.task.v1alpha1.RunEnded",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunEnded records a run that failed or was canceled.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "reason",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A code or a text, for example \"user\", \"wall_clock_cap\" or \"spend_limit\"."
+            },
+            {
+              "name": "failure_class",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The run's failure class, for example \"transient\" or \"loop\"."
+            },
+            {
+              "name": "message",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A text for people."
+            },
+            {
+              "name": "sandbox_cause",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A sandbox that was not available."
+            },
+            {
+              "name": "waited_seconds",
+              "number": 5,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "detail",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cause_seen_ms",
+              "number": 7,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_wall_clock_seconds",
+              "number": 8,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A run stopped at its time limit, and what the agent said last."
+            },
+            {
+              "name": "summary",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "summary_source",
+              "number": 10,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"reply\", \"notes\" or \"none\"."
+            },
+            {
+              "name": "limit",
+              "number": 11,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A run stopped at a spend or request limit."
+            },
+            {
+              "name": "spend_limit_usd",
+              "number": 12,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "spent_usd",
+              "number": 13,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "window_start",
+              "number": 14,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model_requests",
+              "number": 15,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "requeue_reason",
+              "number": 16,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why a newer queued run replaced this one."
+            },
+            {
+              "name": "max_model_requests",
+              "number": 17,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The request limit of a run that stopped at it."
+            }
+          ]
+        },
+        {
+          "name": "RunParked",
+          "fullName": "koinon.task.v1alpha1.RunParked",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunParked records a run that waits for a person.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "reason",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "\"approval\" or \"input_required\"."
+            },
+            {
+              "name": "approval_ids",
+              "number": 2,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The approvals and the questions that the run waits for."
+            },
+            {
+              "name": "question_ids",
+              "number": 3,
+              "type": "string",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunQueued",
+          "fullName": "koinon.task.v1alpha1.RunQueued",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "RunQueued records a run put on the queue with its limits.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "max_wall_clock_seconds",
+              "number": 1,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_model_requests",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "max_spend_usd",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A decimal amount in US dollars; empty when the run has no spend cap."
+            }
+          ]
+        },
+        {
           "name": "SendDirectMessageRequest",
           "fullName": "koinon.task.v1alpha1.SendDirectMessageRequest",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -18786,6 +20553,123 @@
               "oneof": "",
               "deprecated": false,
               "description": "True when this call reopened a completed task as a follow-up."
+            }
+          ]
+        },
+        {
+          "name": "SessionChanged",
+          "fullName": "koinon.task.v1alpha1.SessionChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "SessionChanged records a new harness session.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "previous_session_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "session_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "StatusChanged",
+          "fullName": "koinon.task.v1alpha1.StatusChanged",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "StatusChanged records a move of the task's state.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Task states as the database names them: \"submitted\", \"working\", \"input_required\",\n\"completed\", \"canceled\" or \"failed\". from is empty when the writer did not record it. They are\nstrings, not TaskState, because task.proto imports this file."
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reason",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "A code for the cause, for example \"follow_up\", \"run_succeeded\", \"continuation_limit\"."
+            },
+            {
+              "name": "continuations",
+              "number": 4,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The continuation and spend counts of a task that stopped at a limit."
+            },
+            {
+              "name": "max_continuations",
+              "number": 5,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spent_usd",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "task_spend_cap_usd",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "error",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Why the next continuation could not start, when its agent is not available."
             }
           ]
         },
@@ -18952,6 +20836,60 @@
           ]
         },
         {
+          "name": "TaskCreated",
+          "fullName": "koinon.task.v1alpha1.TaskCreated",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TaskCreated records the start of a task.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "title",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "source",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "What created the task when it is not a person: \"trigger\", \"trigger_manual\" or\n\"direct_message\"."
+            },
+            {
+              "name": "fire",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "How a trigger fired: \"scheduled\" or \"manual\"."
+            },
+            {
+              "name": "fired_by",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user who fired a trigger by hand."
+            },
+            {
+              "name": "trigger_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The trigger of a direct message thread."
+            }
+          ]
+        },
+        {
           "name": "TaskEvent",
           "fullName": "koinon.task.v1alpha1.TaskEvent",
           "file": "koinon/task/v1alpha1/task.proto",
@@ -19019,12 +20957,381 @@
               "label": "singular",
               "oneof": "",
               "deprecated": false,
-              "description": ""
+              "description": "The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old\nrows too."
             },
             {
               "name": "created_at",
               "number": 8,
               "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "actor_display_name",
+              "number": 9,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The display name of actor_user_id, for a person's event; empty for other actors, an unnamed\nuser or a deleted user. Never an email address. Any role that can read the task sees it."
+            },
+            {
+              "name": "event",
+              "number": 10,
+              "type": "koinon.task.v1alpha1.TimelineEvent",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The typed event. It is not set for a kind that this server does not know, or for a payload that\nit cannot read."
+            },
+            {
+              "name": "actor_external",
+              "number": 11,
+              "type": "koinon.task.v1alpha1.ExternalActor",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any\nrole that can read the task sees it."
+            }
+          ]
+        },
+        {
+          "name": "TaskNote",
+          "fullName": "koinon.task.v1alpha1.TaskNote",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TaskNote is a note from Koinon about the task's sandbox or agent.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "TimelineEvent",
+          "fullName": "koinon.task.v1alpha1.TimelineEvent",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TimelineEvent is the typed body of one Timeline event (issue #735). Each member of the oneof is\none event kind; internal/tasks has the table that maps a member to the kind string in\ntask_events.kind. A row with payload_version 1 stores this message as protojson. A row with\npayload_version 0 has the older free-form JSON, which the reader translates to this message.\n\nAdd a kind as a new member with a new field number. Never reuse or renumber a member.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "message",
+              "number": 1,
+              "type": "koinon.task.v1alpha1.TimelineMessage",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"message\": a message from a person, the agent or the system."
+            },
+            {
+              "name": "task_created",
+              "number": 2,
+              "type": "koinon.task.v1alpha1.TaskCreated",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"task.created\"."
+            },
+            {
+              "name": "status_changed",
+              "number": 3,
+              "type": "koinon.task.v1alpha1.StatusChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"status.changed\"."
+            },
+            {
+              "name": "run_queued",
+              "number": 4,
+              "type": "koinon.task.v1alpha1.RunQueued",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.queued\"."
+            },
+            {
+              "name": "run_parked",
+              "number": 5,
+              "type": "koinon.task.v1alpha1.RunParked",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.parked\": the run waits for a person."
+            },
+            {
+              "name": "run_failed",
+              "number": 6,
+              "type": "koinon.task.v1alpha1.RunEnded",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.failed\"."
+            },
+            {
+              "name": "run_canceled",
+              "number": 7,
+              "type": "koinon.task.v1alpha1.RunEnded",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.canceled\"."
+            },
+            {
+              "name": "run_session_reset",
+              "number": 8,
+              "type": "koinon.task.v1alpha1.SessionChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.session_reset\": the harness started a new session."
+            },
+            {
+              "name": "run_session_restarted",
+              "number": 9,
+              "type": "koinon.task.v1alpha1.SessionChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"run.session_restarted\": the harness session started again with a handoff prompt."
+            },
+            {
+              "name": "sandbox_recreated",
+              "number": 10,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"sandbox.recreated\"."
+            },
+            {
+              "name": "sandbox_work_lost",
+              "number": 11,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"sandbox.work_lost\"."
+            },
+            {
+              "name": "agent_unhealthy",
+              "number": 12,
+              "type": "koinon.task.v1alpha1.TaskNote",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"agent.unhealthy\"."
+            },
+            {
+              "name": "approval_requested",
+              "number": 13,
+              "type": "koinon.task.v1alpha1.ApprovalRequested",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.requested\"."
+            },
+            {
+              "name": "approval_first_approved",
+              "number": 14,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.first_approved\": the first of two approvals."
+            },
+            {
+              "name": "approval_approved",
+              "number": 15,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.approved\"."
+            },
+            {
+              "name": "approval_denied",
+              "number": 16,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.denied\"."
+            },
+            {
+              "name": "approval_executed",
+              "number": 17,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.executed\"."
+            },
+            {
+              "name": "approval_failed",
+              "number": 18,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.failed\"."
+            },
+            {
+              "name": "approval_expired",
+              "number": 19,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.expired\"."
+            },
+            {
+              "name": "approval_canceled",
+              "number": 20,
+              "type": "koinon.task.v1alpha1.ApprovalChanged",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"approval.canceled\"."
+            },
+            {
+              "name": "question_asked",
+              "number": 21,
+              "type": "koinon.task.v1alpha1.QuestionAsked",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.asked\"."
+            },
+            {
+              "name": "question_answered",
+              "number": 22,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.answered\"."
+            },
+            {
+              "name": "question_dismissed",
+              "number": 23,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.dismissed\"."
+            },
+            {
+              "name": "question_expired",
+              "number": 24,
+              "type": "koinon.task.v1alpha1.QuestionResolved",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.expired\": the question expired; its default can apply."
+            },
+            {
+              "name": "question_canceled",
+              "number": 25,
+              "type": "koinon.task.v1alpha1.QuestionCanceled",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.canceled\"."
+            },
+            {
+              "name": "question_retargeted",
+              "number": 26,
+              "type": "koinon.task.v1alpha1.QuestionRetargeted",
+              "label": "singular",
+              "oneof": "event",
+              "deprecated": false,
+              "description": "\"question.retargeted\": the question goes to other recipients."
+            }
+          ]
+        },
+        {
+          "name": "TimelineMessage",
+          "fullName": "koinon.task.v1alpha1.TimelineMessage",
+          "file": "koinon/task/v1alpha1/timeline.proto",
+          "description": "TimelineMessage is a message on the task.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "text",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The message as the agent reads it."
+            },
+            {
+              "name": "display",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The text to show to people when it is not text, for example a direct message without the\ntrigger instruction that Koinon put before it."
+            },
+            {
+              "name": "source",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Where a system message or a direct message comes from: \"trigger\", \"trigger_manual\",\n\"direct_message\" or \"continuation\". Empty for a message that a person or the agent wrote."
+            },
+            {
+              "name": "message_id",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The ID of the direct message."
+            },
+            {
+              "name": "fire",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "How a trigger fired: \"scheduled\" or \"manual\"."
+            },
+            {
+              "name": "fired_by",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The user who fired a trigger by hand."
+            },
+            {
+              "name": "continuation",
+              "number": 7,
+              "type": "int32",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "For a continuation: its number, and the most that the task can have."
+            },
+            {
+              "name": "continuation_max",
+              "number": 8,
+              "type": "int32",
               "label": "singular",
               "oneof": "",
               "deprecated": false,
@@ -19064,6 +21371,12 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            },
+            {
+              "name": "ACTOR_KIND_EXTERNAL",
+              "number": 4,
+              "deprecated": false,
+              "description": "A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account\n(ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages."
             }
           ]
         },
@@ -19163,12 +21476,21 @@
           "name": "TemplateService",
           "fullName": "koinon.template.v1alpha1.TemplateService",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "TemplateService lists the agent templates shipped with Koinon (ADR 0020).\nTemplates are platform data: they belong to no org, and every signed-in\nuser can list them.",
+          "description": "TemplateService lists agent templates (ADR 0020). A platform template ships with Koinon, belongs\nto no org and is read-only; an org template belongs to one org, which saved it from an agent\n(ADR 0126 section 5), and no other org sees it.",
           "deprecated": false,
           "methods": [
             {
+              "name": "CreateTemplateFromAgent",
+              "description": "CreateTemplateFromAgent saves the latest version of an agent as an org template (\"save as\ntemplate\"). It needs the member role, as creating an agent does. The template keeps the agent's\ndefinition (instructions, model, grants without their bindings, limits, triggers, settings) and\nnothing the agent is bound to: no connection, repository or run data. Promotion to a platform\ntemplate is not part of this API.",
+              "requestType": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+              "responseType": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
               "name": "ListTemplates",
-              "description": "ListTemplates returns the current content of every template.",
+              "description": "ListTemplates returns the current content of every platform template and, when the request\nnames an org, the org's own templates. Every signed-in user can list the platform templates;\nthe org's templates need membership of the org.",
               "requestType": "koinon.template.v1alpha1.ListTemplatesRequest",
               "responseType": "koinon.template.v1alpha1.ListTemplatesResponse",
               "clientStreaming": false,
@@ -19179,6 +21501,78 @@
         }
       ],
       "messages": [
+        {
+          "name": "CreateTemplateFromAgentRequest",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentRequest",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentRequest saves an agent as a template of its org.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "display_name",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The template's name, 1 to 200 characters."
+            },
+            {
+              "name": "description",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "slug",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. A lowercase slug that is unique in the org. Empty derives the slug from display_name."
+            }
+          ]
+        },
+        {
+          "name": "CreateTemplateFromAgentResponse",
+          "fullName": "koinon.template.v1alpha1.CreateTemplateFromAgentResponse",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "CreateTemplateFromAgentResponse is the new org template.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "template",
+              "number": 1,
+              "type": "koinon.template.v1alpha1.Template",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
         {
           "name": "Grant",
           "fullName": "koinon.template.v1alpha1.Grant",
@@ -19264,15 +21658,25 @@
           "name": "ListTemplatesRequest",
           "fullName": "koinon.template.v1alpha1.ListTemplatesRequest",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesRequest is empty.",
+          "description": "ListTemplatesRequest names the org whose templates to list with the platform ones.",
           "deprecated": false,
-          "fields": []
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Optional. Empty lists the platform templates only. An org ID adds that org's templates and needs\nthe viewer role in the org."
+            }
+          ]
         },
         {
           "name": "ListTemplatesResponse",
           "fullName": "koinon.template.v1alpha1.ListTemplatesResponse",
           "file": "koinon/template/v1alpha1/template.proto",
-          "description": "ListTemplatesResponse lists the templates, sorted by slug.",
+          "description": "ListTemplatesResponse lists the templates, sorted by slug; the platform template comes first when\nan org template has the same slug.",
           "deprecated": false,
           "fields": [
             {
@@ -19544,6 +21948,24 @@
               "oneof": "",
               "deprecated": false,
               "description": "The harness an agent gets when the request names none; one of allowed_harnesses."
+            },
+            {
+              "name": "scope",
+              "number": 19,
+              "type": "koinon.template.v1alpha1.TemplateScope",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "Who owns the template."
+            },
+            {
+              "name": "org_id",
+              "number": 20,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "The owning org of an org template; empty on a platform template."
             }
           ]
         },
@@ -19708,6 +22130,33 @@
               "number": 3,
               "deprecated": false,
               "description": ""
+            }
+          ]
+        },
+        {
+          "name": "TemplateScope",
+          "fullName": "koinon.template.v1alpha1.TemplateScope",
+          "file": "koinon/template/v1alpha1/template.proto",
+          "description": "TemplateScope says who owns a template.",
+          "deprecated": false,
+          "values": [
+            {
+              "name": "TEMPLATE_SCOPE_UNSPECIFIED",
+              "number": 0,
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "TEMPLATE_SCOPE_PLATFORM",
+              "number": 1,
+              "deprecated": false,
+              "description": "Ships with Koinon; read-only; every signed-in user sees it."
+            },
+            {
+              "name": "TEMPLATE_SCOPE_ORG",
+              "number": 2,
+              "deprecated": false,
+              "description": "Saved by an org; only that org sees it."
             }
           ]
         },
@@ -21857,6 +24306,674 @@
           ]
         }
       ]
+    },
+    {
+      "name": "koinon.usage.v1alpha1",
+      "files": [
+        "koinon/usage/v1alpha1/usage.proto"
+      ],
+      "services": [
+        {
+          "name": "UsageService",
+          "fullName": "koinon.usage.v1alpha1.UsageService",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageService is the usage and cost read model of the console home and the \"Usage and cost\" page\n(issue #1268, ADR 0126 section 4). It reads the spend ledger and the runs table in the database,\nnever Prometheus. Amounts are USD decimal strings. A day is a UTC day.\n\nEvery member of an org reads that org's usage and no other org's. The platform-wide calls are for\nplatform admins. The CSV export holds the same rows and the same totals as the matching Get call.",
+          "deprecated": false,
+          "methods": [
+            {
+              "name": "ExportOrgUsage",
+              "description": "ExportOrgUsage returns the rows of GetOrgUsage as CSV. Members and above.",
+              "requestType": "koinon.usage.v1alpha1.ExportOrgUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "ExportPlatformUsage",
+              "description": "ExportPlatformUsage returns the rows of GetPlatformUsage as CSV. Platform admins only.",
+              "requestType": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetOrgUsage",
+              "description": "GetOrgUsage returns the ledger of one org by day, agent, model and provider, with totals and\ntoday's runs. Members and above.",
+              "requestType": "koinon.usage.v1alpha1.GetOrgUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.GetOrgUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            },
+            {
+              "name": "GetPlatformUsage",
+              "description": "GetPlatformUsage returns the ledger of every org by day, org and model, with totals and today's\nruns. Platform admins only.",
+              "requestType": "koinon.usage.v1alpha1.GetPlatformUsageRequest",
+              "responseType": "koinon.usage.v1alpha1.GetPlatformUsageResponse",
+              "clientStreaming": false,
+              "serverStreaming": false,
+              "deprecated": false
+            }
+          ]
+        }
+      ],
+      "messages": [
+        {
+          "name": "ExportOrgUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.ExportOrgUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "range",
+              "number": 2,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportOrgUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportOrgUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "ExportOrgUsageResponse is a CSV file: a header row, one row per row of GetOrgUsage, then a final\nrow with the totals (day \"total\"). The text is UTF-8 and ends in a newline.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "filename",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "csv",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportPlatformUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "range",
+              "number": 1,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "ExportPlatformUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.ExportPlatformUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "ExportPlatformUsageResponse is a CSV file: a header row, one row per row of GetPlatformUsage, then\na final row with the totals (day \"total\"). The text is UTF-8 and ends in a newline. Soft-deleted\norgs stay in the rows, so the totals equal the ledger sums.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "filename",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "csv",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.GetOrgUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "range",
+              "number": 2,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "agent_id, model and provider_id narrow the rows. Empty means all."
+            },
+            {
+              "name": "model",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetOrgUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.GetOrgUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "org_id",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "from",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "from and to are the rounded period of the rows: from (inclusive) up to to (exclusive)."
+            },
+            {
+              "name": "to",
+              "number": 3,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "rows",
+              "number": 4,
+              "type": "koinon.usage.v1alpha1.OrgUsageRow",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "totals",
+              "number": 5,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "totals is the sum of rows."
+            },
+            {
+              "name": "runs",
+              "number": 6,
+              "type": "koinon.usage.v1alpha1.RunCounts",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs counts today's runs of the org, whatever the range and the filters."
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformUsageRequest",
+          "fullName": "koinon.usage.v1alpha1.GetPlatformUsageRequest",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "range",
+              "number": 1,
+              "type": "koinon.usage.v1alpha1.UsageRange",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "GetPlatformUsageResponse",
+          "fullName": "koinon.usage.v1alpha1.GetPlatformUsageResponse",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "rows",
+              "number": 3,
+              "type": "koinon.usage.v1alpha1.PlatformUsageRow",
+              "label": "repeated",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "totals",
+              "number": 4,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "totals is the sum of rows."
+            },
+            {
+              "name": "runs",
+              "number": 5,
+              "type": "koinon.usage.v1alpha1.RunCounts",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs counts today's runs of every org."
+            }
+          ]
+        },
+        {
+          "name": "OrgUsageRow",
+          "fullName": "koinon.usage.v1alpha1.OrgUsageRow",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "OrgUsageRow is the ledger of one org for one day, principal, agent, model and provider.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "day is the UTC day as YYYY-MM-DD."
+            },
+            {
+              "name": "principal",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "principal is \"agent\" or \"system\" (a system check of the org, with no agent)."
+            },
+            {
+              "name": "agent_id",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "agent_name",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "provider_id",
+              "number": 6,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "provider_id is empty when the ledger did not record the provider (older entries, or a provider\nthat is deleted); provider_name is then empty too."
+            },
+            {
+              "name": "provider_name",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "usage",
+              "number": 8,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "PlatformUsageRow",
+          "fullName": "koinon.usage.v1alpha1.PlatformUsageRow",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "PlatformUsageRow is the ledger of one org for one day and model.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day",
+              "number": 1,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_id",
+              "number": 2,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_slug",
+              "number": 3,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "org_name",
+              "number": 4,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "model",
+              "number": 5,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "usage",
+              "number": 6,
+              "type": "koinon.usage.v1alpha1.UsageTotals",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "RunCounts",
+          "fullName": "koinon.usage.v1alpha1.RunCounts",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "RunCounts are the runs created on the current UTC day.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "day_start",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "day_start is the start of today (UTC)."
+            },
+            {
+              "name": "runs_today",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "runs_today counts the runs created since day_start, in any state."
+            },
+            {
+              "name": "failed_runs_today",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "failed_runs_today counts those of them that are in the state failed now."
+            }
+          ]
+        },
+        {
+          "name": "UsageRange",
+          "fullName": "koinon.usage.v1alpha1.UsageRange",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageRange is the period of a query: the UTC days from `from` up to, not including, `to`. Both\nare rounded down to the start of their UTC day. With none set, the period is the month to date\n(the first of the month up to the end of today). A period is at most 366 days.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "from",
+              "number": 1,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "to",
+              "number": 2,
+              "type": "google.protobuf.Timestamp",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            }
+          ]
+        },
+        {
+          "name": "UsageTotals",
+          "fullName": "koinon.usage.v1alpha1.UsageTotals",
+          "file": "koinon/usage/v1alpha1/usage.proto",
+          "description": "UsageTotals are the sums of a set of ledger rows. The token buckets are disjoint: input_tokens\ndoes not count the cache tokens, and reasoning_tokens are part of output_tokens.",
+          "deprecated": false,
+          "fields": [
+            {
+              "name": "requests",
+              "number": 1,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "input_tokens",
+              "number": 2,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "output_tokens",
+              "number": 3,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_read_tokens",
+              "number": 4,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cache_write_tokens",
+              "number": 5,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "reasoning_tokens",
+              "number": 6,
+              "type": "int64",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": ""
+            },
+            {
+              "name": "cost_usd",
+              "number": 7,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "cost_usd is the recorded charge of the requests, estimated usage included."
+            },
+            {
+              "name": "estimated_usd",
+              "number": 8,
+              "type": "string",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "estimated_usd is the part of cost_usd that came from estimated usage."
+            },
+            {
+              "name": "cache_read_share",
+              "number": 9,
+              "type": "double",
+              "label": "singular",
+              "oneof": "",
+              "deprecated": false,
+              "description": "cache_read_share is cache_read_tokens over all the input side\n(input_tokens + cache_read_tokens + cache_write_tokens), from 0 to 1; 0 when there is none."
+            }
+          ]
+        }
+      ],
+      "enums": []
     }
   ]
 }

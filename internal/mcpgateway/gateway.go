@@ -28,6 +28,16 @@ import (
 // sees a workspace and nothing of the agent's sandbox (ADR 0097 decision 5).
 const RootURI = "file:///workspace"
 
+// DefaultCallTimeout is the longest one stage of a tool call runs when Options.CallTimeout is zero. A call
+// has two stages, each bounded by it: the guard check, which may wait for a person's approval, and the
+// upstream call. A call is never retried, so the drain timeout of the process must cover both stages
+// ([MinDrain]): a call in flight at SIGTERM then finishes instead of being cut by a rollout (issue 1347).
+const DefaultCallTimeout = 2 * time.Minute
+
+// MinDrain is the shortest drain timeout that lets a call in flight finish: one wait for approval and one
+// upstream call, each up to [DefaultCallTimeout].
+const MinDrain = 2 * DefaultCallTimeout
+
 // Options configures a [Gateway]. The zero value of every field but Guard is usable.
 type Options struct {
 	// Guard sees every message of every upstream connection. Nil means [AllowGuard]; a deployment
@@ -46,10 +56,16 @@ type Options struct {
 	Metrics *Metrics
 	// Logger gets the gateway's own log lines. They never carry arguments, results or tokens.
 	Logger *slog.Logger
+	// Actors checks a bearer that is not a gateway key as a Substrate actor JWT for the MCP audience
+	// (issue #1489, gateway.IdentifyActor). Nil: only gateway keys are accepted.
+	Actors gateway.ActorIdentifier
 	// IdleTTL is how long an unused upstream session lives. Zero means 5 minutes.
 	IdleTTL time.Duration
-	// CallTimeout bounds one upstream call. Zero means 2 minutes.
+	// CallTimeout bounds one upstream call. Zero means [DefaultCallTimeout].
 	CallTimeout time.Duration
+	// MaxResponseBytes bounds one upstream reply (a JSON reply as a whole, one event of a stream). Zero means
+	// [DefaultMaxResponseBytes]; negative means no bound (for tests).
+	MaxResponseBytes int64
 	// ListTimeout bounds one target's part of a tools/list. Zero means 10 seconds.
 	ListTimeout time.Duration
 	// Builtins are the kinds of built-in target this process can run, by [gateway.MCPTarget.Builtin].
@@ -93,7 +109,10 @@ func New(o Options) *Gateway {
 		o.IdleTTL = 5 * time.Minute
 	}
 	if o.CallTimeout == 0 {
-		o.CallTimeout = 2 * time.Minute
+		o.CallTimeout = DefaultCallTimeout
+	}
+	if o.MaxResponseBytes == 0 {
+		o.MaxResponseBytes = DefaultMaxResponseBytes
 	}
 	if o.ListTimeout == 0 {
 		o.ListTimeout = 10 * time.Second

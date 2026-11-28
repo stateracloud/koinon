@@ -68,7 +68,7 @@ var _ = Describe("the guest API token", func() {
 		cfg := func(s *guestauth.Signer) substrate.Config {
 			return substrate.Config{
 				PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond,
-				DefaultTier: harness.TierDev, GuestSigner: s,
+				DefaultTier: harness.TierDev, GuestSigner: s, GatewayRoutes: gatewayRoutes,
 			}
 		}
 		owner := substrate.New(control, router, cfg(fakeate.Signer()))

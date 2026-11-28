@@ -99,6 +99,9 @@ const (
 	ActorKind_ACTOR_KIND_USER        ActorKind = 1
 	ActorKind_ACTOR_KIND_AGENT       ActorKind = 2
 	ActorKind_ACTOR_KIND_SYSTEM      ActorKind = 3
+	// A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account
+	// (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages.
+	ActorKind_ACTOR_KIND_EXTERNAL ActorKind = 4
 )
 
 // Enum value maps for ActorKind.
@@ -108,12 +111,14 @@ var (
 		1: "ACTOR_KIND_USER",
 		2: "ACTOR_KIND_AGENT",
 		3: "ACTOR_KIND_SYSTEM",
+		4: "ACTOR_KIND_EXTERNAL",
 	}
 	ActorKind_value = map[string]int32{
 		"ACTOR_KIND_UNSPECIFIED": 0,
 		"ACTOR_KIND_USER":        1,
 		"ACTOR_KIND_AGENT":       2,
 		"ACTOR_KIND_SYSTEM":      3,
+		"ACTOR_KIND_EXTERNAL":    4,
 	}
 )
 
@@ -197,6 +202,71 @@ func (CreatorKind) EnumDescriptor() ([]byte, []int) {
 	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{2}
 }
 
+// ExternalActor is a person without a linked Koinon account who writes from a chat platform
+// (ADR 0130). It holds no display name and no other profile data.
+type ExternalActor struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "slack" or "teams".
+	Platform string `protobuf:"bytes,1,opt,name=platform,proto3" json:"platform,omitempty"`
+	// The Slack team ID or the Teams tenant ID of the workspace in which the person wrote.
+	Team string `protobuf:"bytes,2,opt,name=team,proto3" json:"team,omitempty"`
+	// The Slack user ID or the Teams user ID.
+	PlatformUserId string `protobuf:"bytes,3,opt,name=platform_user_id,json=platformUserId,proto3" json:"platform_user_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ExternalActor) Reset() {
+	*x = ExternalActor{}
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalActor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalActor) ProtoMessage() {}
+
+func (x *ExternalActor) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalActor.ProtoReflect.Descriptor instead.
+func (*ExternalActor) Descriptor() ([]byte, []int) {
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ExternalActor) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ExternalActor) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+func (x *ExternalActor) GetPlatformUserId() string {
+	if x != nil {
+		return x.PlatformUserId
+	}
+	return ""
+}
+
 // Creator is who or what created a task. Exactly the field of its kind is set.
 type Creator struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -210,7 +280,7 @@ type Creator struct {
 
 func (x *Creator) Reset() {
 	*x = Creator{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[0]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +292,7 @@ func (x *Creator) String() string {
 func (*Creator) ProtoMessage() {}
 
 func (x *Creator) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[0]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +305,7 @@ func (x *Creator) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Creator.ProtoReflect.Descriptor instead.
 func (*Creator) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{0}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Creator) GetKind() CreatorKind {
@@ -306,7 +376,7 @@ type Task struct {
 
 func (x *Task) Reset() {
 	*x = Task{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[1]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +388,7 @@ func (x *Task) String() string {
 func (*Task) ProtoMessage() {}
 
 func (x *Task) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[1]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +401,7 @@ func (x *Task) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Task.ProtoReflect.Descriptor instead.
 func (*Task) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{1}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Task) GetId() string {
@@ -466,16 +536,27 @@ type TaskEvent struct {
 	ActorUserId  string    `protobuf:"bytes,4,opt,name=actor_user_id,json=actorUserId,proto3" json:"actor_user_id,omitempty"`
 	ActorAgentId string    `protobuf:"bytes,5,opt,name=actor_agent_id,json=actorAgentId,proto3" json:"actor_agent_id,omitempty"`
 	// The run the event is about, if any.
-	RunId         string                 `protobuf:"bytes,6,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	RunId string `protobuf:"bytes,6,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old
+	// rows too.
+	Payload   *structpb.Struct       `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
+	// user or a deleted user. Never an email address. Any role that can read the task sees it.
+	ActorDisplayName string `protobuf:"bytes,9,opt,name=actor_display_name,json=actorDisplayName,proto3" json:"actor_display_name,omitempty"`
+	// The typed event. It is not set for a kind that this server does not know, or for a payload that
+	// it cannot read.
+	Event *TimelineEvent `protobuf:"bytes,10,opt,name=event,proto3" json:"event,omitempty"`
+	// The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any
+	// role that can read the task sees it.
+	ActorExternal *ExternalActor `protobuf:"bytes,11,opt,name=actor_external,json=actorExternal,proto3" json:"actor_external,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskEvent) Reset() {
 	*x = TaskEvent{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[2]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +568,7 @@ func (x *TaskEvent) String() string {
 func (*TaskEvent) ProtoMessage() {}
 
 func (x *TaskEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[2]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +581,7 @@ func (x *TaskEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEvent.ProtoReflect.Descriptor instead.
 func (*TaskEvent) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{2}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TaskEvent) GetSeq() int64 {
@@ -559,6 +640,27 @@ func (x *TaskEvent) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *TaskEvent) GetActorDisplayName() string {
+	if x != nil {
+		return x.ActorDisplayName
+	}
+	return ""
+}
+
+func (x *TaskEvent) GetEvent() *TimelineEvent {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *TaskEvent) GetActorExternal() *ExternalActor {
+	if x != nil {
+		return x.ActorExternal
+	}
+	return nil
+}
+
 // CreateTaskRequest describes the task and its first message. A person creating it through this
 // API is the creator; triggers and agents create tasks inside the control plane.
 type CreateTaskRequest struct {
@@ -575,7 +677,7 @@ type CreateTaskRequest struct {
 
 func (x *CreateTaskRequest) Reset() {
 	*x = CreateTaskRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[3]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -587,7 +689,7 @@ func (x *CreateTaskRequest) String() string {
 func (*CreateTaskRequest) ProtoMessage() {}
 
 func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[3]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -600,7 +702,7 @@ func (x *CreateTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskRequest.ProtoReflect.Descriptor instead.
 func (*CreateTaskRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{3}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CreateTaskRequest) GetOrgId() string {
@@ -642,7 +744,7 @@ type CreateTaskResponse struct {
 
 func (x *CreateTaskResponse) Reset() {
 	*x = CreateTaskResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[4]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -654,7 +756,7 @@ func (x *CreateTaskResponse) String() string {
 func (*CreateTaskResponse) ProtoMessage() {}
 
 func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[4]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +769,7 @@ func (x *CreateTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTaskResponse.ProtoReflect.Descriptor instead.
 func (*CreateTaskResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{4}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CreateTaskResponse) GetTask() *Task {
@@ -696,7 +798,7 @@ type ListTasksRequest struct {
 
 func (x *ListTasksRequest) Reset() {
 	*x = ListTasksRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[5]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +810,7 @@ func (x *ListTasksRequest) String() string {
 func (*ListTasksRequest) ProtoMessage() {}
 
 func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[5]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +823,7 @@ func (x *ListTasksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksRequest.ProtoReflect.Descriptor instead.
 func (*ListTasksRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{5}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListTasksRequest) GetOrgId() string {
@@ -748,7 +850,7 @@ type ListTasksResponse struct {
 
 func (x *ListTasksResponse) Reset() {
 	*x = ListTasksResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[6]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -760,7 +862,7 @@ func (x *ListTasksResponse) String() string {
 func (*ListTasksResponse) ProtoMessage() {}
 
 func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[6]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -773,7 +875,7 @@ func (x *ListTasksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTasksResponse.ProtoReflect.Descriptor instead.
 func (*ListTasksResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{6}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListTasksResponse) GetTasks() []*Task {
@@ -794,7 +896,7 @@ type GetTaskRequest struct {
 
 func (x *GetTaskRequest) Reset() {
 	*x = GetTaskRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[7]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +908,7 @@ func (x *GetTaskRequest) String() string {
 func (*GetTaskRequest) ProtoMessage() {}
 
 func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[7]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +921,7 @@ func (x *GetTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskRequest.ProtoReflect.Descriptor instead.
 func (*GetTaskRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{7}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetTaskRequest) GetOrgId() string {
@@ -848,7 +950,7 @@ type GetTaskResponse struct {
 
 func (x *GetTaskResponse) Reset() {
 	*x = GetTaskResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[8]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -860,7 +962,7 @@ func (x *GetTaskResponse) String() string {
 func (*GetTaskResponse) ProtoMessage() {}
 
 func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[8]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -873,7 +975,7 @@ func (x *GetTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTaskResponse.ProtoReflect.Descriptor instead.
 func (*GetTaskResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{8}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetTaskResponse) GetTask() *Task {
@@ -909,7 +1011,7 @@ type AppendMessageRequest struct {
 
 func (x *AppendMessageRequest) Reset() {
 	*x = AppendMessageRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[9]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +1023,7 @@ func (x *AppendMessageRequest) String() string {
 func (*AppendMessageRequest) ProtoMessage() {}
 
 func (x *AppendMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[9]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +1036,7 @@ func (x *AppendMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendMessageRequest.ProtoReflect.Descriptor instead.
 func (*AppendMessageRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{9}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AppendMessageRequest) GetOrgId() string {
@@ -969,7 +1071,7 @@ type AppendMessageResponse struct {
 
 func (x *AppendMessageResponse) Reset() {
 	*x = AppendMessageResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[10]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1083,7 @@ func (x *AppendMessageResponse) String() string {
 func (*AppendMessageResponse) ProtoMessage() {}
 
 func (x *AppendMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[10]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1096,7 @@ func (x *AppendMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendMessageResponse.ProtoReflect.Descriptor instead.
 func (*AppendMessageResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{10}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AppendMessageResponse) GetEvent() *TaskEvent {
@@ -1022,7 +1124,7 @@ type CancelTaskRequest struct {
 
 func (x *CancelTaskRequest) Reset() {
 	*x = CancelTaskRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[11]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1034,7 +1136,7 @@ func (x *CancelTaskRequest) String() string {
 func (*CancelTaskRequest) ProtoMessage() {}
 
 func (x *CancelTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[11]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1047,7 +1149,7 @@ func (x *CancelTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelTaskRequest.ProtoReflect.Descriptor instead.
 func (*CancelTaskRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{11}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CancelTaskRequest) GetOrgId() string {
@@ -1075,7 +1177,7 @@ type CancelTaskResponse struct {
 
 func (x *CancelTaskResponse) Reset() {
 	*x = CancelTaskResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[12]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1087,7 +1189,7 @@ func (x *CancelTaskResponse) String() string {
 func (*CancelTaskResponse) ProtoMessage() {}
 
 func (x *CancelTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[12]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1100,7 +1202,7 @@ func (x *CancelTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelTaskResponse.ProtoReflect.Descriptor instead.
 func (*CancelTaskResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{12}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CancelTaskResponse) GetTask() *Task {
@@ -1128,7 +1230,7 @@ type NotifyTypingRequest struct {
 
 func (x *NotifyTypingRequest) Reset() {
 	*x = NotifyTypingRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1242,7 @@ func (x *NotifyTypingRequest) String() string {
 func (*NotifyTypingRequest) ProtoMessage() {}
 
 func (x *NotifyTypingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1255,7 @@ func (x *NotifyTypingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyTypingRequest.ProtoReflect.Descriptor instead.
 func (*NotifyTypingRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{13}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NotifyTypingRequest) GetOrgId() string {
@@ -1179,7 +1281,7 @@ type NotifyTypingResponse struct {
 
 func (x *NotifyTypingResponse) Reset() {
 	*x = NotifyTypingResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1191,7 +1293,7 @@ func (x *NotifyTypingResponse) String() string {
 func (*NotifyTypingResponse) ProtoMessage() {}
 
 func (x *NotifyTypingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1204,7 +1306,7 @@ func (x *NotifyTypingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NotifyTypingResponse.ProtoReflect.Descriptor instead.
 func (*NotifyTypingResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{14}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{15}
 }
 
 // SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
@@ -1225,7 +1327,7 @@ type SendDirectMessageRequest struct {
 
 func (x *SendDirectMessageRequest) Reset() {
 	*x = SendDirectMessageRequest{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[15]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1237,7 +1339,7 @@ func (x *SendDirectMessageRequest) String() string {
 func (*SendDirectMessageRequest) ProtoMessage() {}
 
 func (x *SendDirectMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[15]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1250,7 +1352,7 @@ func (x *SendDirectMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendDirectMessageRequest.ProtoReflect.Descriptor instead.
 func (*SendDirectMessageRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{15}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SendDirectMessageRequest) GetOrgId() string {
@@ -1306,7 +1408,7 @@ type SendDirectMessageResponse struct {
 
 func (x *SendDirectMessageResponse) Reset() {
 	*x = SendDirectMessageResponse{}
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[16]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1420,7 @@ func (x *SendDirectMessageResponse) String() string {
 func (*SendDirectMessageResponse) ProtoMessage() {}
 
 func (x *SendDirectMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[16]
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1433,7 @@ func (x *SendDirectMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendDirectMessageResponse.ProtoReflect.Descriptor instead.
 func (*SendDirectMessageResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{16}
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SendDirectMessageResponse) GetTask() *Task {
@@ -1366,7 +1468,11 @@ var File_koinon_task_v1alpha1_task_proto protoreflect.FileDescriptor
 
 const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\n" +
-	"\x1fkoinon/task/v1alpha1/task.proto\x12\x14koinon.task.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\"\x93\x01\n" +
+	"\x1fkoinon/task/v1alpha1/task.proto\x12\x14koinon.task.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\x1a#koinon/task/v1alpha1/timeline.proto\"i\n" +
+	"\rExternalActor\x12\x1a\n" +
+	"\bplatform\x18\x01 \x01(\tR\bplatform\x12\x12\n" +
+	"\x04team\x18\x02 \x01(\tR\x04team\x12(\n" +
+	"\x10platform_user_id\x18\x03 \x01(\tR\x0eplatformUserId\"\x93\x01\n" +
 	"\aCreator\x125\n" +
 	"\x04kind\x18\x01 \x01(\x0e2!.koinon.task.v1alpha1.CreatorKindR\x04kind\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x19\n" +
@@ -1395,7 +1501,7 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x12waiting_on_user_id\x18\x0e \x01(\tB\x02\x18\x01R\x0fwaitingOnUserId\x12&\n" +
 	"\x0fwaiting_on_name\x18\x0f \x01(\tR\rwaitingOnName\x122\n" +
 	"\x15direct_message_thread\x18\x10 \x01(\bR\x13directMessageThread\x12-\n" +
-	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIds\"\xc0\x02\n" +
+	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIds\"\xf5\x03\n" +
 	"\tTaskEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12>\n" +
@@ -1406,7 +1512,11 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x06run_id\x18\x06 \x01(\tR\x05runId\x121\n" +
 	"\apayload\x18\a \x01(\v2\x17.google.protobuf.StructR\apayload\x129\n" +
 	"\n" +
-	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"u\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12,\n" +
+	"\x12actor_display_name\x18\t \x01(\tR\x10actorDisplayName\x129\n" +
+	"\x05event\x18\n" +
+	" \x01(\v2#.koinon.task.v1alpha1.TimelineEventR\x05event\x12J\n" +
+	"\x0eactor_external\x18\v \x01(\v2#.koinon.task.v1alpha1.ExternalActorR\ractorExternal\"u\n" +
 	"\x11CreateTaskRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x14\n" +
@@ -1463,12 +1573,13 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x19TASK_STATE_INPUT_REQUIRED\x10\x03\x12\x18\n" +
 	"\x14TASK_STATE_COMPLETED\x10\x04\x12\x17\n" +
 	"\x13TASK_STATE_CANCELED\x10\x05\x12\x15\n" +
-	"\x11TASK_STATE_FAILED\x10\x06*i\n" +
+	"\x11TASK_STATE_FAILED\x10\x06*\x82\x01\n" +
 	"\tActorKind\x12\x1a\n" +
 	"\x16ACTOR_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fACTOR_KIND_USER\x10\x01\x12\x14\n" +
 	"\x10ACTOR_KIND_AGENT\x10\x02\x12\x15\n" +
-	"\x11ACTOR_KIND_SYSTEM\x10\x03*t\n" +
+	"\x11ACTOR_KIND_SYSTEM\x10\x03\x12\x17\n" +
+	"\x13ACTOR_KIND_EXTERNAL\x10\x04*t\n" +
 	"\vCreatorKind\x12\x1c\n" +
 	"\x18CREATOR_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11CREATOR_KIND_USER\x10\x01\x12\x18\n" +
@@ -1498,77 +1609,81 @@ func file_koinon_task_v1alpha1_task_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_task_v1alpha1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_koinon_task_v1alpha1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_koinon_task_v1alpha1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_koinon_task_v1alpha1_task_proto_goTypes = []any{
 	(TaskState)(0),                    // 0: koinon.task.v1alpha1.TaskState
 	(ActorKind)(0),                    // 1: koinon.task.v1alpha1.ActorKind
 	(CreatorKind)(0),                  // 2: koinon.task.v1alpha1.CreatorKind
-	(*Creator)(nil),                   // 3: koinon.task.v1alpha1.Creator
-	(*Task)(nil),                      // 4: koinon.task.v1alpha1.Task
-	(*TaskEvent)(nil),                 // 5: koinon.task.v1alpha1.TaskEvent
-	(*CreateTaskRequest)(nil),         // 6: koinon.task.v1alpha1.CreateTaskRequest
-	(*CreateTaskResponse)(nil),        // 7: koinon.task.v1alpha1.CreateTaskResponse
-	(*ListTasksRequest)(nil),          // 8: koinon.task.v1alpha1.ListTasksRequest
-	(*ListTasksResponse)(nil),         // 9: koinon.task.v1alpha1.ListTasksResponse
-	(*GetTaskRequest)(nil),            // 10: koinon.task.v1alpha1.GetTaskRequest
-	(*GetTaskResponse)(nil),           // 11: koinon.task.v1alpha1.GetTaskResponse
-	(*AppendMessageRequest)(nil),      // 12: koinon.task.v1alpha1.AppendMessageRequest
-	(*AppendMessageResponse)(nil),     // 13: koinon.task.v1alpha1.AppendMessageResponse
-	(*CancelTaskRequest)(nil),         // 14: koinon.task.v1alpha1.CancelTaskRequest
-	(*CancelTaskResponse)(nil),        // 15: koinon.task.v1alpha1.CancelTaskResponse
-	(*NotifyTypingRequest)(nil),       // 16: koinon.task.v1alpha1.NotifyTypingRequest
-	(*NotifyTypingResponse)(nil),      // 17: koinon.task.v1alpha1.NotifyTypingResponse
-	(*SendDirectMessageRequest)(nil),  // 18: koinon.task.v1alpha1.SendDirectMessageRequest
-	(*SendDirectMessageResponse)(nil), // 19: koinon.task.v1alpha1.SendDirectMessageResponse
-	(*timestamppb.Timestamp)(nil),     // 20: google.protobuf.Timestamp
-	(*v1alpha1.Cost)(nil),             // 21: koinon.run.v1alpha1.Cost
-	(*structpb.Struct)(nil),           // 22: google.protobuf.Struct
-	(*v1alpha1.Run)(nil),              // 23: koinon.run.v1alpha1.Run
+	(*ExternalActor)(nil),             // 3: koinon.task.v1alpha1.ExternalActor
+	(*Creator)(nil),                   // 4: koinon.task.v1alpha1.Creator
+	(*Task)(nil),                      // 5: koinon.task.v1alpha1.Task
+	(*TaskEvent)(nil),                 // 6: koinon.task.v1alpha1.TaskEvent
+	(*CreateTaskRequest)(nil),         // 7: koinon.task.v1alpha1.CreateTaskRequest
+	(*CreateTaskResponse)(nil),        // 8: koinon.task.v1alpha1.CreateTaskResponse
+	(*ListTasksRequest)(nil),          // 9: koinon.task.v1alpha1.ListTasksRequest
+	(*ListTasksResponse)(nil),         // 10: koinon.task.v1alpha1.ListTasksResponse
+	(*GetTaskRequest)(nil),            // 11: koinon.task.v1alpha1.GetTaskRequest
+	(*GetTaskResponse)(nil),           // 12: koinon.task.v1alpha1.GetTaskResponse
+	(*AppendMessageRequest)(nil),      // 13: koinon.task.v1alpha1.AppendMessageRequest
+	(*AppendMessageResponse)(nil),     // 14: koinon.task.v1alpha1.AppendMessageResponse
+	(*CancelTaskRequest)(nil),         // 15: koinon.task.v1alpha1.CancelTaskRequest
+	(*CancelTaskResponse)(nil),        // 16: koinon.task.v1alpha1.CancelTaskResponse
+	(*NotifyTypingRequest)(nil),       // 17: koinon.task.v1alpha1.NotifyTypingRequest
+	(*NotifyTypingResponse)(nil),      // 18: koinon.task.v1alpha1.NotifyTypingResponse
+	(*SendDirectMessageRequest)(nil),  // 19: koinon.task.v1alpha1.SendDirectMessageRequest
+	(*SendDirectMessageResponse)(nil), // 20: koinon.task.v1alpha1.SendDirectMessageResponse
+	(*timestamppb.Timestamp)(nil),     // 21: google.protobuf.Timestamp
+	(*v1alpha1.Cost)(nil),             // 22: koinon.run.v1alpha1.Cost
+	(*structpb.Struct)(nil),           // 23: google.protobuf.Struct
+	(*TimelineEvent)(nil),             // 24: koinon.task.v1alpha1.TimelineEvent
+	(*v1alpha1.Run)(nil),              // 25: koinon.run.v1alpha1.Run
 }
 var file_koinon_task_v1alpha1_task_proto_depIdxs = []int32{
 	2,  // 0: koinon.task.v1alpha1.Creator.kind:type_name -> koinon.task.v1alpha1.CreatorKind
 	0,  // 1: koinon.task.v1alpha1.Task.state:type_name -> koinon.task.v1alpha1.TaskState
-	3,  // 2: koinon.task.v1alpha1.Task.created_by:type_name -> koinon.task.v1alpha1.Creator
-	20, // 3: koinon.task.v1alpha1.Task.created_at:type_name -> google.protobuf.Timestamp
-	20, // 4: koinon.task.v1alpha1.Task.updated_at:type_name -> google.protobuf.Timestamp
-	20, // 5: koinon.task.v1alpha1.Task.finished_at:type_name -> google.protobuf.Timestamp
-	21, // 6: koinon.task.v1alpha1.Task.cost:type_name -> koinon.run.v1alpha1.Cost
-	20, // 7: koinon.task.v1alpha1.Task.agent_summary_at:type_name -> google.protobuf.Timestamp
+	4,  // 2: koinon.task.v1alpha1.Task.created_by:type_name -> koinon.task.v1alpha1.Creator
+	21, // 3: koinon.task.v1alpha1.Task.created_at:type_name -> google.protobuf.Timestamp
+	21, // 4: koinon.task.v1alpha1.Task.updated_at:type_name -> google.protobuf.Timestamp
+	21, // 5: koinon.task.v1alpha1.Task.finished_at:type_name -> google.protobuf.Timestamp
+	22, // 6: koinon.task.v1alpha1.Task.cost:type_name -> koinon.run.v1alpha1.Cost
+	21, // 7: koinon.task.v1alpha1.Task.agent_summary_at:type_name -> google.protobuf.Timestamp
 	1,  // 8: koinon.task.v1alpha1.TaskEvent.actor_kind:type_name -> koinon.task.v1alpha1.ActorKind
-	22, // 9: koinon.task.v1alpha1.TaskEvent.payload:type_name -> google.protobuf.Struct
-	20, // 10: koinon.task.v1alpha1.TaskEvent.created_at:type_name -> google.protobuf.Timestamp
-	4,  // 11: koinon.task.v1alpha1.CreateTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
-	23, // 12: koinon.task.v1alpha1.CreateTaskResponse.run:type_name -> koinon.run.v1alpha1.Run
-	0,  // 13: koinon.task.v1alpha1.ListTasksRequest.state:type_name -> koinon.task.v1alpha1.TaskState
-	4,  // 14: koinon.task.v1alpha1.ListTasksResponse.tasks:type_name -> koinon.task.v1alpha1.Task
-	4,  // 15: koinon.task.v1alpha1.GetTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
-	5,  // 16: koinon.task.v1alpha1.GetTaskResponse.events:type_name -> koinon.task.v1alpha1.TaskEvent
-	23, // 17: koinon.task.v1alpha1.GetTaskResponse.runs:type_name -> koinon.run.v1alpha1.Run
-	5,  // 18: koinon.task.v1alpha1.AppendMessageResponse.event:type_name -> koinon.task.v1alpha1.TaskEvent
-	23, // 19: koinon.task.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
-	4,  // 20: koinon.task.v1alpha1.CancelTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
-	23, // 21: koinon.task.v1alpha1.CancelTaskResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
-	4,  // 22: koinon.task.v1alpha1.SendDirectMessageResponse.task:type_name -> koinon.task.v1alpha1.Task
-	5,  // 23: koinon.task.v1alpha1.SendDirectMessageResponse.event:type_name -> koinon.task.v1alpha1.TaskEvent
-	6,  // 24: koinon.task.v1alpha1.TaskService.CreateTask:input_type -> koinon.task.v1alpha1.CreateTaskRequest
-	8,  // 25: koinon.task.v1alpha1.TaskService.ListTasks:input_type -> koinon.task.v1alpha1.ListTasksRequest
-	10, // 26: koinon.task.v1alpha1.TaskService.GetTask:input_type -> koinon.task.v1alpha1.GetTaskRequest
-	12, // 27: koinon.task.v1alpha1.TaskService.AppendMessage:input_type -> koinon.task.v1alpha1.AppendMessageRequest
-	14, // 28: koinon.task.v1alpha1.TaskService.CancelTask:input_type -> koinon.task.v1alpha1.CancelTaskRequest
-	16, // 29: koinon.task.v1alpha1.TaskService.NotifyTyping:input_type -> koinon.task.v1alpha1.NotifyTypingRequest
-	18, // 30: koinon.task.v1alpha1.TaskService.SendDirectMessage:input_type -> koinon.task.v1alpha1.SendDirectMessageRequest
-	7,  // 31: koinon.task.v1alpha1.TaskService.CreateTask:output_type -> koinon.task.v1alpha1.CreateTaskResponse
-	9,  // 32: koinon.task.v1alpha1.TaskService.ListTasks:output_type -> koinon.task.v1alpha1.ListTasksResponse
-	11, // 33: koinon.task.v1alpha1.TaskService.GetTask:output_type -> koinon.task.v1alpha1.GetTaskResponse
-	13, // 34: koinon.task.v1alpha1.TaskService.AppendMessage:output_type -> koinon.task.v1alpha1.AppendMessageResponse
-	15, // 35: koinon.task.v1alpha1.TaskService.CancelTask:output_type -> koinon.task.v1alpha1.CancelTaskResponse
-	17, // 36: koinon.task.v1alpha1.TaskService.NotifyTyping:output_type -> koinon.task.v1alpha1.NotifyTypingResponse
-	19, // 37: koinon.task.v1alpha1.TaskService.SendDirectMessage:output_type -> koinon.task.v1alpha1.SendDirectMessageResponse
-	31, // [31:38] is the sub-list for method output_type
-	24, // [24:31] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	23, // 9: koinon.task.v1alpha1.TaskEvent.payload:type_name -> google.protobuf.Struct
+	21, // 10: koinon.task.v1alpha1.TaskEvent.created_at:type_name -> google.protobuf.Timestamp
+	24, // 11: koinon.task.v1alpha1.TaskEvent.event:type_name -> koinon.task.v1alpha1.TimelineEvent
+	3,  // 12: koinon.task.v1alpha1.TaskEvent.actor_external:type_name -> koinon.task.v1alpha1.ExternalActor
+	5,  // 13: koinon.task.v1alpha1.CreateTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
+	25, // 14: koinon.task.v1alpha1.CreateTaskResponse.run:type_name -> koinon.run.v1alpha1.Run
+	0,  // 15: koinon.task.v1alpha1.ListTasksRequest.state:type_name -> koinon.task.v1alpha1.TaskState
+	5,  // 16: koinon.task.v1alpha1.ListTasksResponse.tasks:type_name -> koinon.task.v1alpha1.Task
+	5,  // 17: koinon.task.v1alpha1.GetTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
+	6,  // 18: koinon.task.v1alpha1.GetTaskResponse.events:type_name -> koinon.task.v1alpha1.TaskEvent
+	25, // 19: koinon.task.v1alpha1.GetTaskResponse.runs:type_name -> koinon.run.v1alpha1.Run
+	6,  // 20: koinon.task.v1alpha1.AppendMessageResponse.event:type_name -> koinon.task.v1alpha1.TaskEvent
+	25, // 21: koinon.task.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
+	5,  // 22: koinon.task.v1alpha1.CancelTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
+	25, // 23: koinon.task.v1alpha1.CancelTaskResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
+	5,  // 24: koinon.task.v1alpha1.SendDirectMessageResponse.task:type_name -> koinon.task.v1alpha1.Task
+	6,  // 25: koinon.task.v1alpha1.SendDirectMessageResponse.event:type_name -> koinon.task.v1alpha1.TaskEvent
+	7,  // 26: koinon.task.v1alpha1.TaskService.CreateTask:input_type -> koinon.task.v1alpha1.CreateTaskRequest
+	9,  // 27: koinon.task.v1alpha1.TaskService.ListTasks:input_type -> koinon.task.v1alpha1.ListTasksRequest
+	11, // 28: koinon.task.v1alpha1.TaskService.GetTask:input_type -> koinon.task.v1alpha1.GetTaskRequest
+	13, // 29: koinon.task.v1alpha1.TaskService.AppendMessage:input_type -> koinon.task.v1alpha1.AppendMessageRequest
+	15, // 30: koinon.task.v1alpha1.TaskService.CancelTask:input_type -> koinon.task.v1alpha1.CancelTaskRequest
+	17, // 31: koinon.task.v1alpha1.TaskService.NotifyTyping:input_type -> koinon.task.v1alpha1.NotifyTypingRequest
+	19, // 32: koinon.task.v1alpha1.TaskService.SendDirectMessage:input_type -> koinon.task.v1alpha1.SendDirectMessageRequest
+	8,  // 33: koinon.task.v1alpha1.TaskService.CreateTask:output_type -> koinon.task.v1alpha1.CreateTaskResponse
+	10, // 34: koinon.task.v1alpha1.TaskService.ListTasks:output_type -> koinon.task.v1alpha1.ListTasksResponse
+	12, // 35: koinon.task.v1alpha1.TaskService.GetTask:output_type -> koinon.task.v1alpha1.GetTaskResponse
+	14, // 36: koinon.task.v1alpha1.TaskService.AppendMessage:output_type -> koinon.task.v1alpha1.AppendMessageResponse
+	16, // 37: koinon.task.v1alpha1.TaskService.CancelTask:output_type -> koinon.task.v1alpha1.CancelTaskResponse
+	18, // 38: koinon.task.v1alpha1.TaskService.NotifyTyping:output_type -> koinon.task.v1alpha1.NotifyTypingResponse
+	20, // 39: koinon.task.v1alpha1.TaskService.SendDirectMessage:output_type -> koinon.task.v1alpha1.SendDirectMessageResponse
+	33, // [33:40] is the sub-list for method output_type
+	26, // [26:33] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_koinon_task_v1alpha1_task_proto_init() }
@@ -1576,13 +1691,14 @@ func file_koinon_task_v1alpha1_task_proto_init() {
 	if File_koinon_task_v1alpha1_task_proto != nil {
 		return
 	}
+	file_koinon_task_v1alpha1_timeline_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_task_v1alpha1_task_proto_rawDesc), len(file_koinon_task_v1alpha1_task_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

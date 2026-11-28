@@ -77,6 +77,9 @@ const (
 	// PriceServiceExplainPlatformPriceProcedure is the procedure name of the PriceService's
 	// ExplainPlatformPrice RPC.
 	PriceServiceExplainPlatformPriceProcedure = "/koinon.budget.v1alpha1.PriceService/ExplainPlatformPrice"
+	// PriceServiceExplainOrgPricesProcedure is the procedure name of the PriceService's
+	// ExplainOrgPrices RPC.
+	PriceServiceExplainOrgPricesProcedure = "/koinon.budget.v1alpha1.PriceService/ExplainOrgPrices"
 )
 
 var (
@@ -218,6 +221,14 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	priceServiceExplainOrgPricesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_price_proto.Services().ByName("PriceService").Methods().ByName("ExplainOrgPrices"),
+			Procedure:        PriceServiceExplainOrgPricesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 )
 
 // PriceServiceClient is a client for the koinon.budget.v1alpha1.PriceService service.
@@ -266,6 +277,10 @@ type PriceServiceClient interface {
 	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
 	// price_ref.
 	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
+	// ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
+	// default) prices it now and, for an org price, the price it replaces. It uses the same lookup
+	// as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
+	ExplainOrgPrices(context.Context, *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error)
 }
 
 // NewPriceServiceClient constructs a client for the koinon.budget.v1alpha1.PriceService service.
@@ -320,6 +335,10 @@ type PriceServiceHandler interface {
 	// ExplainPlatformPrice shows which layer (platform or default) prices a model now, with its
 	// price_ref.
 	ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error)
+	// ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
+	// default) prices it now and, for an org price, the price it replaces. It uses the same lookup
+	// as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
+	ExplainOrgPrices(context.Context, *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error)
 }
 
 // RegisterPriceServiceHandler registers svc as the koinon.budget.v1alpha1.PriceService
@@ -345,6 +364,7 @@ func RegisterPriceServiceHandler(server *connect.Server, svc PriceServiceHandler
 		connect.Method{Spec: priceServiceGetPriceRefreshSettingsSpec(), Handler: adapter.getPriceRefreshSettings},
 		connect.Method{Spec: priceServiceCheckPriceSourcesSpec(), Handler: adapter.checkPriceSources},
 		connect.Method{Spec: priceServiceExplainPlatformPriceSpec(), Handler: adapter.explainPlatformPrice},
+		connect.Method{Spec: priceServiceExplainOrgPricesSpec(), Handler: adapter.explainOrgPrices},
 	)
 }
 
@@ -421,6 +441,10 @@ func (UnimplementedPriceServiceHandler) CheckPriceSources(context.Context, *v1al
 
 func (UnimplementedPriceServiceHandler) ExplainPlatformPrice(context.Context, *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice is not implemented")
+}
+
+func (UnimplementedPriceServiceHandler) ExplainOrgPrices(context.Context, *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.PriceService.ExplainOrgPrices is not implemented")
 }
 
 type priceServiceClient struct {
@@ -566,6 +590,14 @@ func (c *priceServiceClient) CheckPriceSources(ctx context.Context, req *v1alpha
 func (c *priceServiceClient) ExplainPlatformPrice(ctx context.Context, req *v1alpha1.ExplainPlatformPriceRequest) (*v1alpha1.ExplainPlatformPriceResponse, error) {
 	var res v1alpha1.ExplainPlatformPriceResponse
 	if err := c.client.CallUnary(ctx, priceServiceExplainPlatformPriceSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *priceServiceClient) ExplainOrgPrices(ctx context.Context, req *v1alpha1.ExplainOrgPricesRequest) (*v1alpha1.ExplainOrgPricesResponse, error) {
+	var res v1alpha1.ExplainOrgPricesResponse
+	if err := c.client.CallUnary(ctx, priceServiceExplainOrgPricesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -783,6 +815,18 @@ func (h priceServiceHandler) explainPlatformPrice(ctx context.Context, _ connect
 		return err
 	}
 	res, err := h.svc.ExplainPlatformPrice(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h priceServiceHandler) explainOrgPrices(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ExplainOrgPricesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ExplainOrgPrices(ctx, &req)
 	if err != nil {
 		return err
 	}

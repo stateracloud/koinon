@@ -11,13 +11,51 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_struct, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Cost, Run } from "../../run/v1alpha1/run_pb";
 import { file_koinon_run_v1alpha1_run } from "../../run/v1alpha1/run_pb";
+import type { TimelineEvent } from "./timeline_pb";
+import { file_koinon_task_v1alpha1_timeline } from "./timeline_pb";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/task/v1alpha1/task.proto.
  */
 export const file_koinon_task_v1alpha1_task: GenFile = /*@__PURE__*/
-  fileDesc("Ch9rb2lub24vdGFzay92MWFscGhhMS90YXNrLnByb3RvEhRrb2lub24udGFzay52MWFscGhhMSJxCgdDcmVhdG9yEi8KBGtpbmQYASABKA4yIS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yS2luZBIPCgd1c2VyX2lkGAIgASgJEhAKCGFnZW50X2lkGAMgASgJEhIKCnRyaWdnZXJfaWQYBCABKAkiugQKBFRhc2sSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEi4KBXN0YXRlGAQgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza1N0YXRlEhAKCGFnZW50X2lkGAUgASgJEjEKCmNyZWF0ZWRfYnkYBiABKAsyHS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yEhYKDmxhc3RfZXZlbnRfc2VxGAcgASgDEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GAsgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EhUKDWFnZW50X3N1bW1hcnkYDCABKAkSNAoQYWdlbnRfc3VtbWFyeV9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASHgoSd2FpdGluZ19vbl91c2VyX2lkGA4gASgJQgIYARIXCg93YWl0aW5nX29uX25hbWUYDyABKAkSHQoVZGlyZWN0X21lc3NhZ2VfdGhyZWFkGBAgASgIEhsKE3dhaXRpbmdfb25fdXNlcl9pZHMYESADKAki9AEKCVRhc2tFdmVudBILCgNzZXEYASABKAMSDAoEa2luZBgCIAEoCRIzCgphY3Rvcl9raW5kGAMgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuQWN0b3JLaW5kEhUKDWFjdG9yX3VzZXJfaWQYBCABKAkSFgoOYWN0b3JfYWdlbnRfaWQYBSABKAkSDgoGcnVuX2lkGAYgASgJEigKB3BheWxvYWQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlUKEUNyZWF0ZVRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJImUKEkNyZWF0ZVRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIlCgNydW4YAiABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJSChBMaXN0VGFza3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIuCgVzdGF0ZRgCIAEoDjIfLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2tTdGF0ZSI+ChFMaXN0VGFza3NSZXNwb25zZRIpCgV0YXNrcxgBIAMoCzIaLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2siMQoOR2V0VGFza1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkilAEKD0dldFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCgZldmVudHMYAiADKAsyHy5rb2lub24udGFzay52MWFscGhhMS5UYXNrRXZlbnQSJgoEcnVucxgDIAMoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkUKFEFwcGVuZE1lc3NhZ2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEgwKBHRleHQYAyABKAkibgoVQXBwZW5kTWVzc2FnZVJlc3BvbnNlEi4KBWV2ZW50GAEgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50EiUKA3J1bhgCIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIjQKEUNhbmNlbFRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJIm8KEkNhbmNlbFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCg1jYW5jZWxlZF9ydW5zGAIgAygLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iNgoTTm90aWZ5VHlwaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSIWChROb3RpZnlUeXBpbmdSZXNwb25zZSJvChhTZW5kRGlyZWN0TWVzc2FnZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDAoEdGV4dBgEIAEoCRISCgptZXNzYWdlX2lkGAUgASgJIpgBChlTZW5kRGlyZWN0TWVzc2FnZVJlc3BvbnNlEigKBHRhc2sYASABKAsyGi5rb2lub24udGFzay52MWFscGhhMS5UYXNrEi4KBWV2ZW50GAIgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50Eg8KB2NyZWF0ZWQYAyABKAgSEAoIcmVvcGVuZWQYBCABKAgqwgEKCVRhc2tTdGF0ZRIaChZUQVNLX1NUQVRFX1VOU1BFQ0lGSUVEEAASGAoUVEFTS19TVEFURV9TVUJNSVRURUQQARIWChJUQVNLX1NUQVRFX1dPUktJTkcQAhIdChlUQVNLX1NUQVRFX0lOUFVUX1JFUVVJUkVEEAMSGAoUVEFTS19TVEFURV9DT01QTEVURUQQBBIXChNUQVNLX1NUQVRFX0NBTkNFTEVEEAUSFQoRVEFTS19TVEFURV9GQUlMRUQQBippCglBY3RvcktpbmQSGgoWQUNUT1JfS0lORF9VTlNQRUNJRklFRBAAEhMKD0FDVE9SX0tJTkRfVVNFUhABEhQKEEFDVE9SX0tJTkRfQUdFTlQQAhIVChFBQ1RPUl9LSU5EX1NZU1RFTRADKnQKC0NyZWF0b3JLaW5kEhwKGENSRUFUT1JfS0lORF9VTlNQRUNJRklFRBAAEhUKEUNSRUFUT1JfS0lORF9VU0VSEAESGAoUQ1JFQVRPUl9LSU5EX1RSSUdHRVIQAhIWChJDUkVBVE9SX0tJTkRfQUdFTlQQAzLWBQoLVGFza1NlcnZpY2USXwoKQ3JlYXRlVGFzaxInLmtvaW5vbi50YXNrLnYxYWxwaGExLkNyZWF0ZVRhc2tSZXF1ZXN0Gigua29pbm9uLnRhc2sudjFhbHBoYTEuQ3JlYXRlVGFza1Jlc3BvbnNlEmEKCUxpc3RUYXNrcxImLmtvaW5vbi50YXNrLnYxYWxwaGExLkxpc3RUYXNrc1JlcXVlc3QaJy5rb2lub24udGFzay52MWFscGhhMS5MaXN0VGFza3NSZXNwb25zZSIDkAIBElsKB0dldFRhc2sSJC5rb2lub24udGFzay52MWFscGhhMS5HZXRUYXNrUmVxdWVzdBolLmtvaW5vbi50YXNrLnYxYWxwaGExLkdldFRhc2tSZXNwb25zZSIDkAIBEmgKDUFwcGVuZE1lc3NhZ2USKi5rb2lub24udGFzay52MWFscGhhMS5BcHBlbmRNZXNzYWdlUmVxdWVzdBorLmtvaW5vbi50YXNrLnYxYWxwaGExLkFwcGVuZE1lc3NhZ2VSZXNwb25zZRJfCgpDYW5jZWxUYXNrEicua29pbm9uLnRhc2sudjFhbHBoYTEuQ2FuY2VsVGFza1JlcXVlc3QaKC5rb2lub24udGFzay52MWFscGhhMS5DYW5jZWxUYXNrUmVzcG9uc2USZQoMTm90aWZ5VHlwaW5nEikua29pbm9uLnRhc2sudjFhbHBoYTEuTm90aWZ5VHlwaW5nUmVxdWVzdBoqLmtvaW5vbi50YXNrLnYxYWxwaGExLk5vdGlmeVR5cGluZ1Jlc3BvbnNlEnQKEVNlbmREaXJlY3RNZXNzYWdlEi4ua29pbm9uLnRhc2sudjFhbHBoYTEuU2VuZERpcmVjdE1lc3NhZ2VSZXF1ZXN0Gi8ua29pbm9uLnRhc2sudjFhbHBoYTEuU2VuZERpcmVjdE1lc3NhZ2VSZXNwb25zZUJPWk1naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi90YXNrL3YxYWxwaGExO3Rhc2t2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_run_v1alpha1_run]);
+  fileDesc("Ch9rb2lub24vdGFzay92MWFscGhhMS90YXNrLnByb3RvEhRrb2lub24udGFzay52MWFscGhhMSJJCg1FeHRlcm5hbEFjdG9yEhAKCHBsYXRmb3JtGAEgASgJEgwKBHRlYW0YAiABKAkSGAoQcGxhdGZvcm1fdXNlcl9pZBgDIAEoCSJxCgdDcmVhdG9yEi8KBGtpbmQYASABKA4yIS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yS2luZBIPCgd1c2VyX2lkGAIgASgJEhAKCGFnZW50X2lkGAMgASgJEhIKCnRyaWdnZXJfaWQYBCABKAkiugQKBFRhc2sSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEi4KBXN0YXRlGAQgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza1N0YXRlEhAKCGFnZW50X2lkGAUgASgJEjEKCmNyZWF0ZWRfYnkYBiABKAsyHS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yEhYKDmxhc3RfZXZlbnRfc2VxGAcgASgDEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GAsgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EhUKDWFnZW50X3N1bW1hcnkYDCABKAkSNAoQYWdlbnRfc3VtbWFyeV9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASHgoSd2FpdGluZ19vbl91c2VyX2lkGA4gASgJQgIYARIXCg93YWl0aW5nX29uX25hbWUYDyABKAkSHQoVZGlyZWN0X21lc3NhZ2VfdGhyZWFkGBAgASgIEhsKE3dhaXRpbmdfb25fdXNlcl9pZHMYESADKAkigQMKCVRhc2tFdmVudBILCgNzZXEYASABKAMSDAoEa2luZBgCIAEoCRIzCgphY3Rvcl9raW5kGAMgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuQWN0b3JLaW5kEhUKDWFjdG9yX3VzZXJfaWQYBCABKAkSFgoOYWN0b3JfYWdlbnRfaWQYBSABKAkSDgoGcnVuX2lkGAYgASgJEigKB3BheWxvYWQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhoKEmFjdG9yX2Rpc3BsYXlfbmFtZRgJIAEoCRIyCgVldmVudBgKIAEoCzIjLmtvaW5vbi50YXNrLnYxYWxwaGExLlRpbWVsaW5lRXZlbnQSOwoOYWN0b3JfZXh0ZXJuYWwYCyABKAsyIy5rb2lub24udGFzay52MWFscGhhMS5FeHRlcm5hbEFjdG9yIlUKEUNyZWF0ZVRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJImUKEkNyZWF0ZVRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIlCgNydW4YAiABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJSChBMaXN0VGFza3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIuCgVzdGF0ZRgCIAEoDjIfLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2tTdGF0ZSI+ChFMaXN0VGFza3NSZXNwb25zZRIpCgV0YXNrcxgBIAMoCzIaLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2siMQoOR2V0VGFza1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkilAEKD0dldFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCgZldmVudHMYAiADKAsyHy5rb2lub24udGFzay52MWFscGhhMS5UYXNrRXZlbnQSJgoEcnVucxgDIAMoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkUKFEFwcGVuZE1lc3NhZ2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEgwKBHRleHQYAyABKAkibgoVQXBwZW5kTWVzc2FnZVJlc3BvbnNlEi4KBWV2ZW50GAEgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50EiUKA3J1bhgCIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIjQKEUNhbmNlbFRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJIm8KEkNhbmNlbFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCg1jYW5jZWxlZF9ydW5zGAIgAygLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iNgoTTm90aWZ5VHlwaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSIWChROb3RpZnlUeXBpbmdSZXNwb25zZSJvChhTZW5kRGlyZWN0TWVzc2FnZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDAoEdGV4dBgEIAEoCRISCgptZXNzYWdlX2lkGAUgASgJIpgBChlTZW5kRGlyZWN0TWVzc2FnZVJlc3BvbnNlEigKBHRhc2sYASABKAsyGi5rb2lub24udGFzay52MWFscGhhMS5UYXNrEi4KBWV2ZW50GAIgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50Eg8KB2NyZWF0ZWQYAyABKAgSEAoIcmVvcGVuZWQYBCABKAgqwgEKCVRhc2tTdGF0ZRIaChZUQVNLX1NUQVRFX1VOU1BFQ0lGSUVEEAASGAoUVEFTS19TVEFURV9TVUJNSVRURUQQARIWChJUQVNLX1NUQVRFX1dPUktJTkcQAhIdChlUQVNLX1NUQVRFX0lOUFVUX1JFUVVJUkVEEAMSGAoUVEFTS19TVEFURV9DT01QTEVURUQQBBIXChNUQVNLX1NUQVRFX0NBTkNFTEVEEAUSFQoRVEFTS19TVEFURV9GQUlMRUQQBiqCAQoJQWN0b3JLaW5kEhoKFkFDVE9SX0tJTkRfVU5TUEVDSUZJRUQQABITCg9BQ1RPUl9LSU5EX1VTRVIQARIUChBBQ1RPUl9LSU5EX0FHRU5UEAISFQoRQUNUT1JfS0lORF9TWVNURU0QAxIXChNBQ1RPUl9LSU5EX0VYVEVSTkFMEAQqdAoLQ3JlYXRvcktpbmQSHAoYQ1JFQVRPUl9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRQ1JFQVRPUl9LSU5EX1VTRVIQARIYChRDUkVBVE9SX0tJTkRfVFJJR0dFUhACEhYKEkNSRUFUT1JfS0lORF9BR0VOVBADMtYFCgtUYXNrU2VydmljZRJfCgpDcmVhdGVUYXNrEicua29pbm9uLnRhc2sudjFhbHBoYTEuQ3JlYXRlVGFza1JlcXVlc3QaKC5rb2lub24udGFzay52MWFscGhhMS5DcmVhdGVUYXNrUmVzcG9uc2USYQoJTGlzdFRhc2tzEiYua29pbm9uLnRhc2sudjFhbHBoYTEuTGlzdFRhc2tzUmVxdWVzdBonLmtvaW5vbi50YXNrLnYxYWxwaGExLkxpc3RUYXNrc1Jlc3BvbnNlIgOQAgESWwoHR2V0VGFzaxIkLmtvaW5vbi50YXNrLnYxYWxwaGExLkdldFRhc2tSZXF1ZXN0GiUua29pbm9uLnRhc2sudjFhbHBoYTEuR2V0VGFza1Jlc3BvbnNlIgOQAgESaAoNQXBwZW5kTWVzc2FnZRIqLmtvaW5vbi50YXNrLnYxYWxwaGExLkFwcGVuZE1lc3NhZ2VSZXF1ZXN0Gisua29pbm9uLnRhc2sudjFhbHBoYTEuQXBwZW5kTWVzc2FnZVJlc3BvbnNlEl8KCkNhbmNlbFRhc2sSJy5rb2lub24udGFzay52MWFscGhhMS5DYW5jZWxUYXNrUmVxdWVzdBooLmtvaW5vbi50YXNrLnYxYWxwaGExLkNhbmNlbFRhc2tSZXNwb25zZRJlCgxOb3RpZnlUeXBpbmcSKS5rb2lub24udGFzay52MWFscGhhMS5Ob3RpZnlUeXBpbmdSZXF1ZXN0Gioua29pbm9uLnRhc2sudjFhbHBoYTEuTm90aWZ5VHlwaW5nUmVzcG9uc2USdAoRU2VuZERpcmVjdE1lc3NhZ2USLi5rb2lub24udGFzay52MWFscGhhMS5TZW5kRGlyZWN0TWVzc2FnZVJlcXVlc3QaLy5rb2lub24udGFzay52MWFscGhhMS5TZW5kRGlyZWN0TWVzc2FnZVJlc3BvbnNlQk9aTWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3Rhc2svdjFhbHBoYTE7dGFza3YxYWxwaGExYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_run_v1alpha1_run, file_koinon_task_v1alpha1_timeline]);
+
+/**
+ * ExternalActor is a person without a linked Koinon account who writes from a chat platform
+ * (ADR 0130). It holds no display name and no other profile data.
+ *
+ * @generated from message koinon.task.v1alpha1.ExternalActor
+ */
+export type ExternalActor = Message<"koinon.task.v1alpha1.ExternalActor"> & {
+  /**
+   * "slack" or "teams".
+   *
+   * @generated from field: string platform = 1;
+   */
+  platform: string;
+
+  /**
+   * The Slack team ID or the Teams tenant ID of the workspace in which the person wrote.
+   *
+   * @generated from field: string team = 2;
+   */
+  team: string;
+
+  /**
+   * The Slack user ID or the Teams user ID.
+   *
+   * @generated from field: string platform_user_id = 3;
+   */
+  platformUserId: string;
+};
+
+/**
+ * Describes the message koinon.task.v1alpha1.ExternalActor.
+ * Use `create(ExternalActorSchema)` to create a new message.
+ */
+export const ExternalActorSchema: GenMessage<ExternalActor> = /*@__PURE__*/
+  messageDesc(file_koinon_task_v1alpha1_task, 0);
 
 /**
  * Creator is who or what created a task. Exactly the field of its kind is set.
@@ -51,7 +89,7 @@ export type Creator = Message<"koinon.task.v1alpha1.Creator"> & {
  * Use `create(CreatorSchema)` to create a new message.
  */
 export const CreatorSchema: GenMessage<Creator> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 0);
+  messageDesc(file_koinon_task_v1alpha1_task, 1);
 
 /**
  * Task is one unit of work and its conversation.
@@ -172,7 +210,7 @@ export type Task = Message<"koinon.task.v1alpha1.Task"> & {
  * Use `create(TaskSchema)` to create a new message.
  */
 export const TaskSchema: GenMessage<Task> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 1);
+  messageDesc(file_koinon_task_v1alpha1_task, 2);
 
 /**
  * TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
@@ -218,6 +256,9 @@ export type TaskEvent = Message<"koinon.task.v1alpha1.TaskEvent"> & {
   runId: string;
 
   /**
+   * The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old
+   * rows too.
+   *
    * @generated from field: google.protobuf.Struct payload = 7;
    */
   payload?: JsonObject | undefined;
@@ -226,6 +267,30 @@ export type TaskEvent = Message<"koinon.task.v1alpha1.TaskEvent"> & {
    * @generated from field: google.protobuf.Timestamp created_at = 8;
    */
   createdAt?: Timestamp | undefined;
+
+  /**
+   * The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
+   * user or a deleted user. Never an email address. Any role that can read the task sees it.
+   *
+   * @generated from field: string actor_display_name = 9;
+   */
+  actorDisplayName: string;
+
+  /**
+   * The typed event. It is not set for a kind that this server does not know, or for a payload that
+   * it cannot read.
+   *
+   * @generated from field: koinon.task.v1alpha1.TimelineEvent event = 10;
+   */
+  event?: TimelineEvent | undefined;
+
+  /**
+   * The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any
+   * role that can read the task sees it.
+   *
+   * @generated from field: koinon.task.v1alpha1.ExternalActor actor_external = 11;
+   */
+  actorExternal?: ExternalActor | undefined;
 };
 
 /**
@@ -233,7 +298,7 @@ export type TaskEvent = Message<"koinon.task.v1alpha1.TaskEvent"> & {
  * Use `create(TaskEventSchema)` to create a new message.
  */
 export const TaskEventSchema: GenMessage<TaskEvent> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 2);
+  messageDesc(file_koinon_task_v1alpha1_task, 3);
 
 /**
  * CreateTaskRequest describes the task and its first message. A person creating it through this
@@ -272,7 +337,7 @@ export type CreateTaskRequest = Message<"koinon.task.v1alpha1.CreateTaskRequest"
  * Use `create(CreateTaskRequestSchema)` to create a new message.
  */
 export const CreateTaskRequestSchema: GenMessage<CreateTaskRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 3);
+  messageDesc(file_koinon_task_v1alpha1_task, 4);
 
 /**
  * CreateTaskResponse holds the task and the run queued for it.
@@ -296,7 +361,7 @@ export type CreateTaskResponse = Message<"koinon.task.v1alpha1.CreateTaskRespons
  * Use `create(CreateTaskResponseSchema)` to create a new message.
  */
 export const CreateTaskResponseSchema: GenMessage<CreateTaskResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 4);
+  messageDesc(file_koinon_task_v1alpha1_task, 5);
 
 /**
  * ListTasksRequest names the org and an optional state.
@@ -322,7 +387,7 @@ export type ListTasksRequest = Message<"koinon.task.v1alpha1.ListTasksRequest"> 
  * Use `create(ListTasksRequestSchema)` to create a new message.
  */
 export const ListTasksRequestSchema: GenMessage<ListTasksRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 5);
+  messageDesc(file_koinon_task_v1alpha1_task, 6);
 
 /**
  * ListTasksResponse lists tasks.
@@ -341,7 +406,7 @@ export type ListTasksResponse = Message<"koinon.task.v1alpha1.ListTasksResponse"
  * Use `create(ListTasksResponseSchema)` to create a new message.
  */
 export const ListTasksResponseSchema: GenMessage<ListTasksResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 6);
+  messageDesc(file_koinon_task_v1alpha1_task, 7);
 
 /**
  * GetTaskRequest names a task.
@@ -365,7 +430,7 @@ export type GetTaskRequest = Message<"koinon.task.v1alpha1.GetTaskRequest"> & {
  * Use `create(GetTaskRequestSchema)` to create a new message.
  */
 export const GetTaskRequestSchema: GenMessage<GetTaskRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 7);
+  messageDesc(file_koinon_task_v1alpha1_task, 8);
 
 /**
  * GetTaskResponse holds the task, its whole timeline and its runs.
@@ -394,7 +459,7 @@ export type GetTaskResponse = Message<"koinon.task.v1alpha1.GetTaskResponse"> & 
  * Use `create(GetTaskResponseSchema)` to create a new message.
  */
 export const GetTaskResponseSchema: GenMessage<GetTaskResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 8);
+  messageDesc(file_koinon_task_v1alpha1_task, 9);
 
 /**
  * AppendMessageRequest is a user message on a task.
@@ -423,7 +488,7 @@ export type AppendMessageRequest = Message<"koinon.task.v1alpha1.AppendMessageRe
  * Use `create(AppendMessageRequestSchema)` to create a new message.
  */
 export const AppendMessageRequestSchema: GenMessage<AppendMessageRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 9);
+  messageDesc(file_koinon_task_v1alpha1_task, 10);
 
 /**
  * AppendMessageResponse holds the new event and the queued run, if one was queued by this call.
@@ -447,7 +512,7 @@ export type AppendMessageResponse = Message<"koinon.task.v1alpha1.AppendMessageR
  * Use `create(AppendMessageResponseSchema)` to create a new message.
  */
 export const AppendMessageResponseSchema: GenMessage<AppendMessageResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 10);
+  messageDesc(file_koinon_task_v1alpha1_task, 11);
 
 /**
  * CancelTaskRequest names the task.
@@ -471,7 +536,7 @@ export type CancelTaskRequest = Message<"koinon.task.v1alpha1.CancelTaskRequest"
  * Use `create(CancelTaskRequestSchema)` to create a new message.
  */
 export const CancelTaskRequestSchema: GenMessage<CancelTaskRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 11);
+  messageDesc(file_koinon_task_v1alpha1_task, 12);
 
 /**
  * CancelTaskResponse holds the canceled task and the queued runs the cancel canceled.
@@ -495,7 +560,7 @@ export type CancelTaskResponse = Message<"koinon.task.v1alpha1.CancelTaskRespons
  * Use `create(CancelTaskResponseSchema)` to create a new message.
  */
 export const CancelTaskResponseSchema: GenMessage<CancelTaskResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 12);
+  messageDesc(file_koinon_task_v1alpha1_task, 13);
 
 /**
  * NotifyTypingRequest names the task.
@@ -519,7 +584,7 @@ export type NotifyTypingRequest = Message<"koinon.task.v1alpha1.NotifyTypingRequ
  * Use `create(NotifyTypingRequestSchema)` to create a new message.
  */
 export const NotifyTypingRequestSchema: GenMessage<NotifyTypingRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 13);
+  messageDesc(file_koinon_task_v1alpha1_task, 14);
 
 /**
  * NotifyTypingResponse is empty.
@@ -534,7 +599,7 @@ export type NotifyTypingResponse = Message<"koinon.task.v1alpha1.NotifyTypingRes
  * Use `create(NotifyTypingResponseSchema)` to create a new message.
  */
 export const NotifyTypingResponseSchema: GenMessage<NotifyTypingResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 14);
+  messageDesc(file_koinon_task_v1alpha1_task, 15);
 
 /**
  * SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
@@ -580,7 +645,7 @@ export type SendDirectMessageRequest = Message<"koinon.task.v1alpha1.SendDirectM
  * Use `create(SendDirectMessageRequestSchema)` to create a new message.
  */
 export const SendDirectMessageRequestSchema: GenMessage<SendDirectMessageRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 15);
+  messageDesc(file_koinon_task_v1alpha1_task, 16);
 
 /**
  * SendDirectMessageResponse holds the thread's task.
@@ -622,7 +687,7 @@ export type SendDirectMessageResponse = Message<"koinon.task.v1alpha1.SendDirect
  * Use `create(SendDirectMessageResponseSchema)` to create a new message.
  */
 export const SendDirectMessageResponseSchema: GenMessage<SendDirectMessageResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_task_v1alpha1_task, 16);
+  messageDesc(file_koinon_task_v1alpha1_task, 17);
 
 /**
  * TaskState is where a task stands (ADR 0065, after A2A).
@@ -703,6 +768,14 @@ export enum ActorKind {
    * @generated from enum value: ACTOR_KIND_SYSTEM = 3;
    */
   SYSTEM = 3,
+
+  /**
+   * A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account
+   * (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages.
+   *
+   * @generated from enum value: ACTOR_KIND_EXTERNAL = 4;
+   */
+  EXTERNAL = 4,
 }
 
 /**

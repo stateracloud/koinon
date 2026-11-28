@@ -48,46 +48,48 @@ var fixtureHash = sync.OnceValues(func() (string, error) { return auth.HashPassw
 
 // client is a logged-in user with typed clients for every service.
 type client struct {
-	b            *browser
-	userID       string
-	agents       agentv1alpha1connect.AgentServiceClient
-	tasks        taskv1alpha1connect.TaskServiceClient
-	runs         runv1alpha1connect.RunServiceClient
-	templates    templatev1alpha1connect.TemplateServiceClient
-	conns        connectionv1alpha1connect.ConnectionServiceClient
-	approvals    approvalv1alpha1connect.ApprovalServiceClient
-	tokens       tokenv1alpha1connect.TokenServiceClient
-	providers    providerv1alpha1connect.ProviderServiceClient
-	mcps         mcpserverv1alpha1connect.McpServerServiceClient
-	remoteAgents remoteagentv1alpha1connect.RemoteAgentServiceClient
-	questions    questionv1alpha1connect.QuestionServiceClient
-	leakguard    leakguardv1alpha1connect.LeakGuardServiceClient
-	orgsettings  orgsettingsv1alpha1connect.OrgSettingsServiceClient
-	outward      outwardv1alpha1connect.OutwardServiceClient
-	platform     platformv1alpha1connect.PlatformServiceClient
-	orgs         orgv1alpha1connect.OrgServiceClient
+	b                 *browser
+	userID            string
+	agents            agentv1alpha1connect.AgentServiceClient
+	tasks             taskv1alpha1connect.TaskServiceClient
+	runs              runv1alpha1connect.RunServiceClient
+	templates         templatev1alpha1connect.TemplateServiceClient
+	conns             connectionv1alpha1connect.ConnectionServiceClient
+	approvals         approvalv1alpha1connect.ApprovalServiceClient
+	tokens            tokenv1alpha1connect.TokenServiceClient
+	providers         providerv1alpha1connect.ProviderServiceClient
+	mcps              mcpserverv1alpha1connect.McpServerServiceClient
+	remoteAgents      remoteagentv1alpha1connect.RemoteAgentServiceClient
+	questions         questionv1alpha1connect.QuestionServiceClient
+	leakguard         leakguardv1alpha1connect.LeakGuardServiceClient
+	orgsettings       orgsettingsv1alpha1connect.OrgSettingsServiceClient
+	outward           outwardv1alpha1connect.OutwardServiceClient
+	platform          platformv1alpha1connect.PlatformServiceClient
+	platformResources platformv1alpha1connect.PlatformResourceServiceClient
+	orgs              orgv1alpha1connect.OrgServiceClient
 }
 
 func newClient(b *browser) *client {
 	cc := connect.NewClient(connecthttp.NewTransport(b.http, b.e.srv.URL))
 	return &client{
-		b:            b,
-		agents:       agentv1alpha1connect.NewAgentServiceClient(cc),
-		tasks:        taskv1alpha1connect.NewTaskServiceClient(cc),
-		runs:         runv1alpha1connect.NewRunServiceClient(cc),
-		templates:    templatev1alpha1connect.NewTemplateServiceClient(cc),
-		conns:        connectionv1alpha1connect.NewConnectionServiceClient(cc),
-		approvals:    approvalv1alpha1connect.NewApprovalServiceClient(cc),
-		tokens:       tokenv1alpha1connect.NewTokenServiceClient(cc),
-		providers:    providerv1alpha1connect.NewProviderServiceClient(cc),
-		mcps:         mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
-		remoteAgents: remoteagentv1alpha1connect.NewRemoteAgentServiceClient(cc),
-		questions:    questionv1alpha1connect.NewQuestionServiceClient(cc),
-		leakguard:    leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
-		orgsettings:  orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
-		outward:      outwardv1alpha1connect.NewOutwardServiceClient(cc),
-		platform:     platformv1alpha1connect.NewPlatformServiceClient(cc),
-		orgs:         orgv1alpha1connect.NewOrgServiceClient(cc),
+		b:                 b,
+		agents:            agentv1alpha1connect.NewAgentServiceClient(cc),
+		tasks:             taskv1alpha1connect.NewTaskServiceClient(cc),
+		runs:              runv1alpha1connect.NewRunServiceClient(cc),
+		templates:         templatev1alpha1connect.NewTemplateServiceClient(cc),
+		conns:             connectionv1alpha1connect.NewConnectionServiceClient(cc),
+		approvals:         approvalv1alpha1connect.NewApprovalServiceClient(cc),
+		tokens:            tokenv1alpha1connect.NewTokenServiceClient(cc),
+		providers:         providerv1alpha1connect.NewProviderServiceClient(cc),
+		mcps:              mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
+		remoteAgents:      remoteagentv1alpha1connect.NewRemoteAgentServiceClient(cc),
+		questions:         questionv1alpha1connect.NewQuestionServiceClient(cc),
+		leakguard:         leakguardv1alpha1connect.NewLeakGuardServiceClient(cc),
+		orgsettings:       orgsettingsv1alpha1connect.NewOrgSettingsServiceClient(cc),
+		outward:           outwardv1alpha1connect.NewOutwardServiceClient(cc),
+		platform:          platformv1alpha1connect.NewPlatformServiceClient(cc),
+		platformResources: platformv1alpha1connect.NewPlatformResourceServiceClient(cc),
+		orgs:              orgv1alpha1connect.NewOrgServiceClient(cc),
 	}
 }
 
@@ -293,6 +295,9 @@ type orgFixture struct {
 	trustedHost string
 	// githubLogin is the owner's linked GitHub login on github.com.
 	githubLogin string
+	// template is an org template saved from agent, with its slug (unique across orgs); set by
+	// newIsolationFixture.
+	template, templateSlug string
 	// appSetupState is the state of the owner's guided GitHub App setup, after GitHub created the
 	// App.
 	appSetupState string

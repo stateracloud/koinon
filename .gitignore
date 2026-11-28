@@ -4,6 +4,8 @@
 *.local
 .DS_Store
 coverage.out
+# Screenshots and page snapshots of the Playwright MCP server (browser work by agents; issue 1488).
+.playwright-mcp/
 
 web/node_modules/
 web/dist/

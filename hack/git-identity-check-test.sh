@@ -3,7 +3,8 @@
 #
 # Offline tests of hack/git-identity-check.sh and its hooks on a scratch repository: a worktree with the
 # hooks installed refuses a commit and a merge commit under another identity, accepts the project
-# identity, and `range` (CI) fails a commit whose author or committer is outside the allowed list.
+# identity, and `range` (CI) fails a commit whose author or committer is outside the allowed list, or a
+# non-merge commit without the sign-off of its author.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -87,63 +88,94 @@ check "a merge commit under the project identity succeeds" 0 $? "$out"
 git config --unset core.hooksPath
 setid procoduck coder@procodus.dev
 base=$(git rev-parse HEAD)
-git commit -q --allow-empty -m "feat: fine"
+git commit -q -s --allow-empty -m "feat: fine"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: project identity passes" 0 $? "$out"
 
-GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: foreign author"
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q -s --allow-empty -m "feat: foreign author"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); rc=$?
 check "range: a foreign author fails" 1 $rc "$out"
 [[ $out == *"GitHub noreply address"* && $out == *"Only a maintainer adds lines"* ]] || { echo "FAIL range message lacks the noreply advice"; echo "$out"; fail=1; }
 [[ $out == *"Some Person"* ]] || { echo "FAIL range output does not name the identity"; echo "$out"; fail=1; }
 base=$(git rev-parse HEAD)
 
-GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: foreign committer"
+GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=some.person@example.invalid git commit -q -s --allow-empty -m "feat: foreign committer"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a foreign committer fails" 1 $? "$out"
 base=$(git rev-parse HEAD)
 
 # a foreign merge commit (not only non-merge commits) fails
 git checkout -q -b side2 "$base"
-git commit -q --allow-empty -m "fix: side2"
+git commit -q -s --allow-empty -m "fix: side2"
 git checkout -q main
-git commit -q --allow-empty -m "fix: main2"
+git commit -q -s --allow-empty -m "fix: main2"
 GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=some.person@example.invalid \
 	git merge -q --no-ff -m "Merge branch 'side2'" side2
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a merge commit under another identity fails" 1 $? "$out"
 base=$(git rev-parse HEAD)
 
 GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=12345+someone@users.noreply.github.com GIT_COMMITTER_NAME="Some Person" GIT_COMMITTER_EMAIL=12345+someone@users.noreply.github.com \
-	git commit -q --allow-empty -m "feat: noreply person"
+	git commit -q -s --allow-empty -m "feat: noreply person"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a GitHub noreply author passes" 0 $? "$out"
 base=$(git rev-parse HEAD)
 
 git commit -q --allow-empty -m "Bump x" --author="dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: dependabot passes" 0 $? "$out"
 
+# sign-off (DCO, ADR 0026; moved here from the old dco workflow by #682)
+base=$(git rev-parse HEAD)
+git commit -q --allow-empty -m "feat: no sign-off"
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); rc=$?
+check "range: a commit without a sign-off fails" 1 $rc "$out"
+[[ $out == *"lacks 'Signed-off-by: procoduck <coder@procodus.dev>'"* && $out == *"git commit --amend -s"* ]] || { echo "FAIL sign-off message missing"; echo "$out"; fail=1; }
+[[ $out != *"not in hack/git-identities.allowed"* ]] || { echo "FAIL a sign-off failure reports an identity failure"; echo "$out"; fail=1; }
+git reset -q --hard "$base"
+git commit -q --allow-empty --trailer "Signed-off-by: Some Person <some.person@example.invalid>" -m "feat: another person's sign-off"
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a sign-off of another person fails" 1 $? "$out"
+git reset -q --hard "$base"
+git commit -q --allow-empty -m "feat: sign-off in the body only
+
+Signed-off-by: procoduck <coder@procodus.dev>
+
+A last paragraph, so the line above is not a trailer."
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a sign-off that is not a trailer fails" 1 $? "$out"
+git reset -q --hard "$base"
+git commit -q --allow-empty -m "Bump y" --author="dependabot[bot] <dependabot@example.invalid>"
+rc=0; out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1) || rc=$?
+[[ $rc == 1 ]] || { echo "FAIL the dependabot case with a non-noreply address must exit 1, got $rc"; fail=1; }
+[[ $out == *"lacks 'Signed-off-by: dependabot[bot] <dependabot@example.invalid>'"* ]] || { echo "FAIL the dependabot exemption needs the noreply address"; echo "$out"; fail=1; }
+git reset -q --hard "$base"
+git checkout -q -b side3 "$base"
+git commit -q -s --allow-empty -m "fix: side3"
+git checkout -q main
+git commit -q -s --allow-empty -m "fix: main3"
+git merge -q --no-ff -m "Merge branch 'side3'" side3
+out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a merge commit needs no sign-off" 0 $? "$out"
+
+
 # the list is read from the BASE commit: a head that widens it does not help its own commits
 base=$(git rev-parse HEAD)
 printf 'Some Person <some.person@example.invalid>\n' >>hack/git-identities.allowed
 git add hack/git-identities.allowed
-git commit -q -m "chore: widen the list" --no-verify
-GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: relies on the widened list"
+git commit -q -s -m "chore: widen the list" --no-verify
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q -s --allow-empty -m "feat: relies on the widened list"
 out=$(hack/git-identity-check.sh range "$base" HEAD 2>&1); check "range: a head that widens the list is still refused" 1 $? "$out"
 out=$(KOINON_ALLOWED_IDENTITIES='Some Person <some.person@example.invalid>' hack/git-identity-check.sh range "$base" HEAD 2>&1)
 check "range: KOINON_ALLOWED_IDENTITIES is not honoured" 1 $? "$out"
 # once the widened list is on the base, the next pull request may use it
 base2=$(git rev-parse HEAD)
-GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty -m "feat: uses the merged list"
+GIT_AUTHOR_NAME="Some Person" GIT_AUTHOR_EMAIL=some.person@example.invalid git commit -q --allow-empty --trailer "Signed-off-by: Some Person <some.person@example.invalid>" -m "feat: uses the merged list"
 out=$(hack/git-identity-check.sh range "$base2" HEAD 2>&1); check "range: a line already on the base is allowed" 0 $? "$out"
 
 # first add: the base has no list, so the head's (newly added) list is used
 git checkout -q --orphan firstadd
 cp hack/git-identity-check.sh "$tmp/chk.sh"
 git rm -rq --cached . && rm -rf hack
-git commit -q --allow-empty -m "chore: no list yet" --no-verify
+git commit -q -s --allow-empty -m "chore: no list yet" --no-verify
 nobase=$(git rev-parse HEAD)
 mkdir hack && cp "$repo/hack/git-identities.allowed" hack/
-git add hack && git commit -q -m "chore: add the list" --no-verify
+git add hack && git commit -q -s -m "chore: add the list" --no-verify
 out=$("$tmp/chk.sh" range "$nobase" HEAD 2>&1); check "range: first add falls back to the head's list" 0 $? "$out"
 [[ $out == *"newly added"* ]] || { echo "FAIL fallback not announced"; echo "$out"; fail=1; }
-git rm -q hack/git-identities.allowed && git commit -q -m "chore: no list" --no-verify
+git rm -q hack/git-identities.allowed && git commit -q -s -m "chore: no list" --no-verify
 out=$("$tmp/chk.sh" range "$nobase" HEAD 2>&1); check "range: no list at base or head fails closed" 2 $? "$out"
 git checkout -q -f main
 

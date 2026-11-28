@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -17,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/substrate"
 	"github.com/stateracloud/koinon/internal/guestauth"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/substrateauthz"
 )
 
 // Execution drivers, the values of execution.driver (ADR 0119). OpenShell stays the default until
@@ -29,11 +31,18 @@ const (
 // Substrate is how a binary reaches Agent Substrate: ateapi for the control calls and the atenet
 // router for the guest calls (see [substrate.Endpoint]).
 type Substrate struct {
-	ControlAddress  string
-	RouterAddress   string
-	CAFile          string
-	ServerName      string
-	BearerTokenFile string
+	ControlAddress string
+	RouterAddress  string
+	// RouterCAFile is the CA of the router's serving certificate; empty uses CAFile. RouterServerName is the name
+	// checked against it; empty uses the host of RouterAddress. RouterCertFile is the router client certificate
+	// (key and chain in one PEM file, a podCertificate projection); a binary that makes no router call leaves it
+	// empty (issue #1446).
+	RouterCAFile     string
+	RouterServerName string
+	RouterCertFile   string
+	CAFile           string
+	ServerName       string
+	BearerTokenFile  string
 	// RuntimeClassTiers maps a runtime class to its isolation tier, as "class=tier" entries (ADR 0075;
 	// tiers are vm, hardened and dev). The driver puts the launcher policy of the tier in front of
 	// every command, so a sandbox whose class is not here cannot run one.
@@ -48,6 +57,10 @@ type Substrate struct {
 	// substrate driver without it, so no install gets an unhardened guest by accident. Exit condition:
 	// the overlay's microVM and gVisor probe results are recorded on issue #1087; then the flag and chart value are removed.
 	AllowUnhardened bool
+	// GoldenSnapshots turns on Substrate's golden snapshot of each template. Off by default in every
+	// tier (issue #1492): a golden clone copies memory from one sandbox to another, which ADR 0120
+	// section 5.2 forbids, and a golden build holds a pool slot. Setting it is an admin's exception.
+	GoldenSnapshots bool
 	// ImageMirrors are "host=target" entries: the registry host of an actor image and the image source
 	// of the node agent that replaces it (issue #1170). The path, tag and digest are kept.
 	ImageMirrors []string
@@ -58,10 +71,22 @@ type Substrate struct {
 	// the sandbox cannot use the guest API. The key stays in a Secret outside the sandbox; the actor
 	// template holds only the public key. Required with the substrate driver.
 	GuestKeyFile string
+	// ProvisionerURL and ProvisionerTokenFile reach the provisioner that creates org atespaces (ADR 0128). With
+	// them the driver never calls CreateAtespace: the reconciler holds no global Substrate role. Only the
+	// reconciler sets them. The token's audience is the provisioner's, not ateapi's.
+	ProvisionerURL       string
+	ProvisionerTokenFile string
 	// SnapshotStore is the S3-compatible bucket that holds the snapshots. Its endpoint and bucket
 	// turn on the object content digest of every snapshot; without them snapshots fail closed (issue
 	// #1088 slice e). The keys are files, never flags or values.
 	SnapshotStore SnapshotStore
+	// GatewayRoutes are the gateway listeners that the driver writes into the egress policy of every actor
+	// (issue #1444): the model and MCP listeners. Only the reconciler sets them, from its gateway URLs: it is
+	// the only binary that creates, starts or resumes sandboxes, and without routes those calls fail closed.
+	GatewayRoutes []substrate.GatewayRoute
+	// CodeHostEgressRoute is the gateway's egress listener, or nil. The driver adds it to the policy of an
+	// actor whose agent has a code-host grant only (execution.GatewayAccess).
+	CodeHostEgressRoute *substrate.GatewayRoute
 }
 
 // SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
@@ -109,6 +134,16 @@ func (s Substrate) DriverConfig(logger *slog.Logger) (substrate.Config, error) {
 // checks only that the flag is set, and Dial reads and parses the key.
 func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Config, error) {
 	cfg := substrate.Config{Logger: logger}
+	if len(s.GatewayRoutes) > 0 || s.CodeHostEgressRoute != nil {
+		if err := substrate.ValidateGatewayRoutes(s.GatewayRoutes, s.CodeHostEgressRoute); err != nil {
+			return cfg, fmt.Errorf("substrate egress policy: %w", err)
+		}
+		cfg.GatewayRoutes = slices.Clone(s.GatewayRoutes)
+		if s.CodeHostEgressRoute != nil {
+			e := *s.CodeHostEgressRoute
+			cfg.CodeHostEgressRoute = &e
+		}
+	}
 	if readKey && s.GuestKeyFile != "" {
 		b, err := os.ReadFile(s.GuestKeyFile)
 		if err != nil {
@@ -122,6 +157,7 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 			return cfg, fmt.Errorf("--substrate-guest-key-file: %w", err)
 		}
 	}
+	cfg.GoldenSnapshots = s.GoldenSnapshots
 	if s.SnapshotStore.set() {
 		o, err := s.SnapshotStore.objectStore()
 		if err != nil {
@@ -130,6 +166,12 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 		if cfg.ContentDigest, err = o.ContentDigester(); err != nil {
 			return cfg, err
 		}
+	}
+	if (s.ProvisionerURL == "") != (s.ProvisionerTokenFile == "") {
+		return cfg, errors.New("--substrate-provisioner-url and --substrate-provisioner-token-file go together")
+	}
+	if s.ProvisionerURL != "" {
+		cfg.Provisioner = &substrateauthz.Client{URL: s.ProvisionerURL, TokenFile: s.ProvisionerTokenFile}
 	}
 	if s.DefaultTier != "" {
 		t, err := parseTier(s.DefaultTier)
@@ -199,6 +241,9 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Driver, "execution-driver", DriverOpenShell, "execution.driver: openshell or substrate (ADR 0119)")
 	fs.StringVar(&e.Substrate.ControlAddress, "substrate-control-address", "", "Agent Substrate's control API (ateapi) host:port, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.RouterAddress, "substrate-router-address", "", "Agent Substrate's atenet router host:port, with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.RouterCAFile, "substrate-router-ca-file", "", "CA file of the atenet router's serving certificate (the servicedns signer's trust bundle); empty uses --substrate-ca-file. Read again when it changes")
+	fs.StringVar(&e.Substrate.RouterServerName, "substrate-router-server-name", "", "name checked against the router's certificate; empty uses the host of --substrate-router-address")
+	fs.StringVar(&e.Substrate.RouterCertFile, "substrate-router-cert-file", "", "client certificate of the router connection: one PEM file with the key and the chain (the credential bundle of a podCertificate volume). Read again when it changes; the router refuses a client without one")
 	fs.StringVar(&e.Substrate.CAFile, "substrate-ca-file", "", "CA file that signed ateapi's certificate; empty uses the system roots")
 	fs.StringVar(&e.Substrate.ServerName, "substrate-server-name", "", "name checked against ateapi's certificate")
 	fs.BoolVar(&e.Substrate.AllowUnhardened, "substrate-allow-unhardened", false, "acknowledge that the substrate path may run the harness without the guest launcher until the overlay image of issue #1087 has run in a real actor (the gVisor tiers keep a writable root, issue #1150); required with --execution-driver=substrate")
@@ -208,10 +253,13 @@ func (e *Execution) Flags(fs *pflag.FlagSet) {
 	fs.StringVar(&e.Substrate.SnapshotStore.AccessKeyFile, "substrate-snapshot-access-key-file", "", "file with the read-only access key id of the snapshot bucket")
 	fs.StringVar(&e.Substrate.SnapshotStore.SecretKeyFile, "substrate-snapshot-secret-key-file", "", "file with the read-only secret key of the snapshot bucket")
 	fs.StringSliceVar(&e.Substrate.RuntimeClassTiers, "substrate-runtime-class-tiers", nil, "class=tier entries (tier: vm, hardened or dev) that give each runtime class its isolation tier, with --execution-driver=substrate")
+	fs.BoolVar(&e.Substrate.GoldenSnapshots, "substrate-golden-snapshots", false, "build a golden snapshot for each template, with --execution-driver=substrate. Off by default in every tier: a golden clone copies memory from one sandbox to another (ADR 0120 section 5.2) and a golden build holds a pool slot. Turning it on is an exception to the no-memory-clone rule")
 	fs.StringVar(&e.Substrate.DefaultTier, "substrate-default-tier", "", "isolation tier (vm, hardened or dev) of a sandbox with no runtime class, with --execution-driver=substrate")
 	fs.StringSliceVar(&e.Substrate.ImageMirrors, "substrate-image-mirrors", nil, "host=target entries that rewrite the registry host of an actor image to the one image source of the node agent (the path, tag and digest are kept), with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.ImageRegistry, "substrate-image-registry", "", "registry that replaces the host of an actor image with no --substrate-image-mirrors entry, with --execution-driver=substrate")
 	fs.StringVar(&e.Substrate.GuestKeyFile, "substrate-guest-key-file", "", "file with the hex seed of the Ed25519 key that signs every guest API call (issue #1309); required with --execution-driver=substrate")
+	fs.StringVar(&e.Substrate.ProvisionerURL, "substrate-provisioner-url", "", "base URL of the provisioner that creates org atespaces (ADR 0128); empty makes the driver create them itself, which needs the global owner role")
+	fs.StringVar(&e.Substrate.ProvisionerTokenFile, "substrate-provisioner-token-file", "", "projected ServiceAccount token (the provisioner's audience) sent to the provisioner; read again on every call")
 	fs.StringVar(&e.Substrate.BearerTokenFile, "substrate-token-file", "", "projected ServiceAccount token (ateapi audience) sent as the bearer token; read again on every call")
 }
 
@@ -272,6 +320,7 @@ func (e Execution) Dial() (*Connection, error) {
 		d, err := substrate.Dial(substrate.Endpoint{
 			ControlAddr: e.Substrate.ControlAddress, RouterAddr: e.Substrate.RouterAddress,
 			CAFile: e.Substrate.CAFile, ServerName: e.Substrate.ServerName, BearerTokenFile: e.Substrate.BearerTokenFile,
+			RouterCAFile: e.Substrate.RouterCAFile, RouterServerName: e.Substrate.RouterServerName, RouterCertFile: e.Substrate.RouterCertFile,
 		}, cfg)
 		if err != nil {
 			return nil, err

@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler/gatewayplan"
+	"github.com/stateracloud/koinon/internal/reconciler/leaderterm"
 	"github.com/stateracloud/koinon/internal/remoteagents"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/sandboxres"
@@ -116,6 +116,10 @@ type Config struct {
 
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
+	// Egress is koinon-gateway's egress listener as sandboxes reach it (#1086 part C2). With it, the
+	// sandbox of an agent with a code-host grant gets a rule for the forge routes there (EgressRule).
+	// Nil: no such rule, and git reaches the forge only through the driver's own rule.
+	Egress *Endpoint
 	// MCPGateway is koinon-gateway's MCP listener as sandboxes reach it, when koinon-gateway serves the
 	// agents' MCP path (gateway.mcp.driver=koinon, ADR 0097 decision 5). The sandbox profile then allows
 	// /mcp on it and not on Gateway, and the MCP prober lists tools through it. Zero: agentgateway serves /mcp
@@ -253,15 +257,18 @@ type Config struct {
 
 // Reconciler reconciles agents into OpenShell sandboxes.
 type Reconciler struct {
-	cfg Config
-	log *slog.Logger
-	// lastUnmarked is when the loop last counted unmarked objects; only the leading loop touches it.
-	lastUnmarked time.Time
-	pool         *pgxpool.Pool
-	q            *store.Queries
-	backend      execution.Backend
-	gw           gateway.ModelGateway
-	secrets      SecretStore
+	cfg  Config
+	log  *slog.Logger
+	pool *pgxpool.Pool
+	// db is the pool behind the leader term: the statements of a lead carry its term, and the database
+	// refuses them once a newer leader took the term (issue 635). q runs on it.
+	db      leaderterm.DB
+	q       *store.Queries
+	backend execution.Backend
+	// crash holds the counters of the crash and liveness path (crash.go).
+	crash   crashTracker
+	gw      gateway.ModelGateway
+	secrets SecretStore
 	// states stores the revisions of the gateway State (the State stream, ADR 0097).
 	states staterev.Publisher
 
@@ -273,15 +280,10 @@ type Reconciler struct {
 	// forgeSeals is the sealed code-host token of each agent (under mu), so an unchanged token keeps its
 	// file name between passes.
 	forgeSeals map[agentKey]forgeSeal
-	// draftGitHubDropped holds the GitHub providers claimDraft has dropped (under mu), so a draft agent
+	// draftGitHubDropped holds the GitHub providers dropDraftGitHub has dropped (under mu), so a draft agent
 	// does not cost four gateway calls every pass; reconcileActive clears the entry when it makes the
 	// record again.
 	draftGitHubDropped map[string]bool
-	// harnessProfileSettled holds the harness profiles, by workspace and profile ID (harnessProfileKey),
-	// that claimHarnessProfiles found marked or missing (under mu), so an org whose harnesses no active
-	// agent keeps current does not cost a gateway call per harness every pass. reconcileActive clears
-	// the entry when it imports the profile again; a new workspace is a new key.
-	harnessProfileSettled map[string]bool
 	// clampMu guards clampLogged: the clamps last logged per agent, so a pass that changes nothing
 	// logs nothing.
 	clampMu     sync.Mutex
@@ -315,8 +317,20 @@ type Reconciler struct {
 	keyRevMu    sync.Mutex
 	keyRevs     map[string]int64
 	pendingKeys map[string]bool
-	probeDue    []dueProbe
-	probeWake   chan struct{}
+	// forgeRevs maps each forge credential name in the stored State to the first revision that held it
+	// (noteForge), under keyRevMu. forgeRows is what the database holds for each agent (recordForge,
+	// pass goroutine only).
+	forgeRevs map[string]int64
+	forgeRows map[agentKey]forgeRow
+	// actorRevs maps each Substrate actor in the stored State to the first revision that held it
+	// (noteActors, issue #1386), under keyRevMu.
+	actorRevs map[gatewayplan.Actor]int64
+	probeDue  []dueProbe
+	probeWake chan struct{}
+	// probeParked holds, under probeMu, the servers whose probe was held because no stored revision
+	// held the probe key (the publish failed). The next pass that stores a revision queues them again
+	// (#1260), so they do not wait for the next probe interval.
+	probeParked map[pgtype.UUID]bool
 	// probeAsked holds, per server, the last time a gateway wake (#1173) queued its probe, and
 	// probeHeld the servers with a wake held back until mcpProbeWakeEvery has passed. Both under probeMu.
 	probeAsked map[pgtype.UUID]time.Time
@@ -417,10 +431,11 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 		}
 	}
 	wake := func() { notifySelf(pool, cfg.Logger) }
+	db := leaderterm.DB{Pool: pool}
 	return &Reconciler{
-		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool), states: staterev.Publisher{DB: stateDB(cfg, pool)},
+		cfg: cfg, log: cfg.Logger, pool: pool, db: db, q: store.New(db), states: staterev.Publisher{DB: stateDB(cfg, db)},
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{}, forgeSeals: map[agentKey]forgeSeal{}, draftGitHubDropped: map[string]bool{},
-		harnessProfileSettled: map[string]bool{}, mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
+		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 		remoteAgents: remoteagents.New(pool, nil, cfg.Logger).WithOpener(cfg.Keys).WithURLPolicy(cfg.URLPolicy),
 		plan: gatewayplan.New(gatewayplan.Config{
 			KeyDir: cfg.ProviderKeyDir, MCPKeyDir: cfg.MCPKeyDir, KeySettle: cfg.ProviderKeySettle, ToolServers: cfg.ToolServers,
@@ -430,11 +445,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 }
 
 // stateDB is the database the State stream's revisions go to: the pool, unless the config names one.
-func stateDB(cfg Config, pool *pgxpool.Pool) staterev.DB {
+// Both carry the leader term, so a stale leader cannot publish (issue 635).
+func stateDB(cfg Config, db leaderterm.DB) staterev.DB {
 	if cfg.StateRevisionDB != nil {
-		return cfg.StateRevisionDB
+		return leaderterm.TxDB{DB: cfg.StateRevisionDB}
 	}
-	return pool
+	return db
 }
 
 // statePublishTimeout bounds one attempt of publishState; statePublishAttempts and
@@ -480,6 +496,8 @@ func (r *Reconciler) publishState(ctx context.Context, s gateway.State) (int64, 
 				r.log.Debug("gateway state revision stored", "revision", p.Revision)
 			}
 			r.noteKeys(served.Keys, p.Revision, s.Keys)
+			r.noteForge(served.EgressCredentials, p.Revision)
+			r.noteActors(served.EgressActors, p.Revision)
 			return p.Revision, nil
 		}
 		r.log.Warn("storing the gateway state revision failed", "attempt", attempt+1, "err", err)
@@ -520,8 +538,18 @@ type work struct {
 	// when the agent has none.
 	forge     *gatewayplan.ForgeCredential
 	forgeFile []byte
+	// forgeErr says why an agent with a forge read grant has no credential (recordForge).
+	forgeErr error
+	// forgeExpects says the agent's run start waits for its forge credential (agentEgress).
+	forgeExpects bool
+	// actor is the agent's Substrate actor with its recorded UID, nil when it has none (actorOf). The
+	// pass sets it before it submits the sandbox work, which may change sb meanwhile.
+	actor *gatewayplan.Actor
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
+	// snapFrom is the database clock read just before the last backend call of the pass that can take a
+	// snapshot (snapshotClock). record stores it as the snapshot time when the call took one.
+	snapFrom pgtype.Timestamptz
 
 	// submitted is set by the pass when the item went to the work queue (pass goroutine only).
 	submitted bool
@@ -563,19 +591,24 @@ func (w *work) setRejection(msg string) bool {
 // IDs (they are not recorded: agentd never needs them).
 func (w *work) names() execution.AgentNames {
 	n := execution.AgentObjectNames(w.org.ID.Bytes, w.agent.ID.Bytes)
-	n.Sandbox, n.Provider, n.KeySecret = w.sb.SandboxName, w.sb.ProviderName, w.sb.KeySecretName
+	// Every driver call names the actor: on Agent Substrate a sandbox gets a new actor name for each new
+	// actor (issue #1386, ActorRef); elsewhere it is the sandbox name.
+	n.Sandbox, n.Provider, n.KeySecret = w.sb.ActorRef(), w.sb.ProviderName, w.sb.KeySecretName
 	return n
 }
 
 func (w *work) logAttrs() []any {
-	return []any{"org", w.org.Slug, "agent", execution.UUIDString(w.agent.ID.Bytes), "sandbox", w.sb.SandboxName}
+	attrs := []any{"org", w.org.Slug, "agent", execution.UUIDString(w.agent.ID.Bytes), "sandbox", w.sb.SandboxName}
+	if w.sb.ActorName.Valid {
+		attrs = append(attrs, "actor", w.sb.ActorName.String)
+	}
+	return attrs
 }
 
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
 // could not converge; the others are converged regardless.
 //
-// It also counts the unmarked OpenShell objects (see observeUnmarked). The loop does not call it: it
-// runs [Reconciler.reconcilePass] and counts at most once per resync interval, with its own timeout.
+// The loop does not call it: it runs [Reconciler.reconcilePass].
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	q := r.newWorkQueue(ctx)
 	defer q.Stop()
@@ -583,7 +616,6 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	// The loop leaves the sandbox work to the queue; a caller of ReconcileAll wants it done.
 	err = errors.Join(append([]error{err}, b.wait()...)...)
 	r.observeSandboxes(ctx)
-	r.observeUnmarked(ctx)
 	return err
 }
 
@@ -628,19 +660,6 @@ func (r *Reconciler) reconcilePass(ctx context.Context, q *workQueue) (*jobs, er
 	return b, err
 }
 
-// observeUnmarkedDue counts the unmarked objects when a resync interval has passed since the last
-// count, so a burst of NOTIFY wake-ups does not list the gateway every time. The count has its own
-// timeout (unmarkedTimeout) and never runs inside the pass's. The gauge keeps its values between counts.
-func (r *Reconciler) observeUnmarkedDue(ctx context.Context) {
-	if !r.lastUnmarked.IsZero() && time.Since(r.lastUnmarked) < r.cfg.ResyncInterval {
-		return
-	}
-	r.lastUnmarked = time.Now()
-	uctx, cancel := context.WithTimeout(ctx, unmarkedTimeout)
-	defer cancel()
-	r.observeUnmarked(uctx)
-}
-
 // observeSandboxes sets the sandboxes gauge from the recorded states. A failed read keeps the
 // previous values.
 func (r *Reconciler) observeSandboxes(ctx context.Context) {
@@ -658,48 +677,6 @@ func (r *Reconciler) observeSandboxes(ctx context.Context) {
 	for _, s := range sandboxStates {
 		r.m.Sandboxes.WithLabelValues(string(s)).Set(float64(counts[s]))
 	}
-}
-
-// observeUnmarked sets koinon_openshell_unmarked_objects and
-// koinon_openshell_unmarked_objects_waiting_for_agent from one classified unmarked list (the one
-// koinon-reconciler unmarked list prints: the gateway's sandboxes, providers and profiles, whatever
-// this pass did or failed to do, issue 461, with each object's reason from the database, issue 511).
-// waits-for-agent objects go to the second gauge, every other reason to the first, so the drill gate
-// ("0 and stale 0") means no object without a known owner is left. A list that fails, on the gateway
-// or in the database, keeps the previous values and sets koinon_openshell_unmarked_objects_stale to
-// 1; a complete one sets it to 0. Without an install mark ownership is off, no object can be claimed
-// and nothing is safe: the kinds read 0 and stale reads 1, so the drill condition is not met.
-func (r *Reconciler) observeUnmarked(ctx context.Context) {
-	_, ok := r.backend.(unmarkedLister)
-	if !ok || !r.owns() {
-		for _, k := range unmarkedKinds {
-			r.m.UnmarkedObjects.WithLabelValues(k).Set(0)
-			r.m.UnmarkedWaiting.WithLabelValues(k).Set(0)
-		}
-		r.m.UnmarkedStale.Set(1)
-		return
-	}
-	objs, err := ListUnmarked(ctx, r.q, r.backend, r.cfg.Harnesses)
-	if err != nil {
-		if ctx.Err() == nil {
-			r.log.Warn("listing unmarked OpenShell objects failed; the gauges keep their last values", "err", err)
-		}
-		r.m.UnmarkedStale.Set(1)
-		return
-	}
-	unowned, waiting := map[string]int{}, map[string]int{}
-	for _, o := range objs {
-		if o.Reason == ReasonWaitsForAgent {
-			waiting[o.Kind]++
-		} else {
-			unowned[o.Kind]++
-		}
-	}
-	for _, k := range unmarkedKinds {
-		r.m.UnmarkedObjects.WithLabelValues(k).Set(float64(unowned[k]))
-		r.m.UnmarkedWaiting.WithLabelValues(k).Set(float64(waiting[k]))
-	}
-	r.m.UnmarkedStale.Set(0)
 }
 
 func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) error {
@@ -759,16 +736,6 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 			errs = append(errs, err)
 		}
-		if err := r.claimHarnessProfiles(ctx, org, agents); err != nil {
-			if errors.Is(err, errAbortPass) {
-				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
-				return errors.Join(append(errs, err)...)
-			}
-			// A harness profile is part of what an agent's sandbox converges (reconcileActive and
-			// claimDraft ensure it with the provider record), so its claim counts as a sandbox error.
-			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
-			errs = append(errs, err)
-		}
 	}
 
 	// The org's providers and models (PV1). Without the list an Apply would stop serving every
@@ -812,10 +779,11 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		if w.forge != nil {
 			egressFiles[w.forge.File] = w.forgeFile
 		}
+		w.actor = r.actorOf(w)
 		agents[i] = gatewayplan.Agent{
 			Org: gatewayplan.Org{ID: w.org.ID, Slug: w.org.Slug}, ID: w.agent.ID, Ref: agentRef(w.org, w.agent.ID),
 			Active: w.agent.Status == store.AgentStatusActive, Key: w.key, Tools: w.tools, Egress: w.egress,
-			Forge: w.forge,
+			Forge: w.forge, Actor: w.actor,
 		}
 		if w.key.ID != "" {
 			agents[i].Limit, agents[i].LimitErr = limitFor(ctx, r.q, w.agent, now)
@@ -858,7 +826,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// gateway's 401 or 429 (old issue 188).
 	for _, i := range draft.Stops {
 		w := items[i]
-		if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
+		if n, err := ledger.StopSpent(ctx, r.db, w.agent, now); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
 			errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 		} else if n > 0 {
@@ -914,6 +882,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	// never waits for the queue: a slow call for one agent holds only that agent. koinon-gateway must
 	// serve the key too: an early agent whose key the live copies have not acked waits with the others.
 	early, deferred, _ := r.newKeyGate(ctx, servedKeys).split(ctx, items, plan.Early)
+	// What the run start of each agent waits for on its forge credential (#1086 part C2), before any
+	// sandbox work of this pass: a run must never find no row for an agent that expects one, because
+	// the pass has not written it yet. The rows are marked served at the end of the pass.
+	if err := r.recordForge(ctx, items, false); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	r.submit(q, b, workOf(items, early), workspaces)
 
 	var res gatewayplan.ApplyResult
@@ -958,6 +933,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	outcome := plan.Applied(res)
 	r.probeSoon(outcome.Probe, stateRev)
+	if pubErr == nil {
+		r.probeSoon(r.takeParked(), stateRev)
+	}
 	if !res.Failed {
 		if err := r.recordServed(ctx, outcome.Served); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -1016,6 +994,12 @@ func (r *Reconciler) reconcileAll(ctx context.Context, q *workQueue, b *jobs) er
 		}
 	}
 	r.submit(q, b, workOf(items, run), workspaces)
+	// Mark the forge rows whose revision every live koinon-gateway copy acked. It comes after the submit:
+	// the sandbox work does not wait for it, only the harness start in koinon-agentd does.
+	if err := r.recordForge(ctx, items, true); err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+		errs = append(errs, err)
+	}
 	// Each rejected object is reported on its org's agents, after their own work item has recorded its
 	// state (recordRejection). Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
@@ -1205,8 +1189,13 @@ func (l planLookups) SystemKey(ctx context.Context, secret string, org gatewaypl
 	return l.r.systemKey(ctx, secret, org.ID, ref)
 }
 
+// IssueKey issues a probe key. Until a stored revision holds it, the prober does not use it (#1260).
 func (l planLookups) IssueKey(ctx context.Context, ref gateway.AgentRef) (gateway.IssuedKey, error) {
-	return l.r.gw.IssueKey(ctx, ref)
+	k, err := l.r.gw.IssueKey(ctx, ref)
+	if err == nil {
+		l.r.keyIssued(k.ID)
+	}
+	return k, err
 }
 
 func (l planLookups) SystemLimit(ctx context.Context, org gatewayplan.Org, now time.Time) (*gateway.Limit, error) {
@@ -1269,7 +1258,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if len(r.cfg.ToolServers) > 0 {
 			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
 		}
-		w.egress, w.forge, w.forgeFile = r.agentEgress(ctx, w)
+		w.egress, w.forge, w.forgeFile, w.forgeErr = r.agentEgress(ctx, w)
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err
@@ -1418,24 +1407,18 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names := w.names()
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
-	ensureKey := func(claim bool) error {
+	ensureKey := func() error {
 		return r.backend.EnsureProvider(ctx, ws, execution.Provider{
 			Name:               names.Provider,
 			Profile:            r.profile(w.agent.Harness, harness),
 			Credentials:        map[string]string{keyEnvVar: w.material},
 			CredentialRevision: w.key.ID,
 			Labels:             ownerLabels(w.org.ID, w.agent.ID),
-			ClaimLegacy:        claim,
 		})
 	}
-	if err := ensureKey(false); err != nil {
+	if err := ensureKey(); err != nil {
 		return err
 	}
-	// The ensure imported the harness profile: once no active agent keeps it current, the org pass
-	// looks at it again.
-	r.mu.Lock()
-	delete(r.harnessProfileSettled, harnessProfileKey(ws, r.profile(w.agent.Harness, harness).ID))
-	r.mu.Unlock()
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
 	baseURL, err := r.baseURLOf(ctx, w)
@@ -1449,11 +1432,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	providers := []string{names.Provider}
 	network := map[string]execution.NetworkRule{}
 	if hasRead {
-		if err := r.ensureGitHub(ctx, ws, w, names, harness, read, false); err != nil {
+		if err := r.ensureGitHub(ctx, ws, w, names, harness, read); err != nil {
 			return err
 		}
 		providers = append(providers, names.GitHubProvider)
 		network[githubRule] = GitHubRule(read, r.githubBinaries(harness))
+		if r.cfg.Egress != nil {
+			network[egressRule] = EgressRule(*r.cfg.Egress, read, r.githubBinaries(harness))
+		}
 	}
 	if rule, ok := PluginInstallRule(w.cfg, w.agent.Harness, harness); ok {
 		network[npmRule] = rule
@@ -1470,6 +1456,18 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	names = w.names()
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
+	// The sandbox's gateway access (issue #1444), for a driver with a per-sandbox allow list (Substrate):
+	// the egress listener under the same condition as the egressRule entry above. It is set on every pass,
+	// before this pass creates or starts the sandbox, and the driver applies it in place: a changed grant
+	// never replaces the sandbox, and a removed one takes the listener away at once (within the data plane's
+	// policy cache TTL). It is not in spec or
+	// hash for that reason.
+	access := execution.GatewayAccess{CodeHostEgress: hasRead && r.cfg.Egress != nil}
+	if s := execution.GatewayAccessSetterOf(r.backend); s != nil {
+		if err := s.SetGatewayAccess(ctx, ws, names.Sandbox, access); err != nil {
+			return err
+		}
+	}
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{
 		IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm,
 		SandboxCreationsPerMinute: orgsettings.DefaultSandboxCreationsPerMinute,
@@ -1480,20 +1478,6 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
-		if r.owns() {
-			// No sandbox attaches the providers now, so the ones made before the install label
-			// existed can be claimed (deleted and made again with the label), issue 461. While the
-			// sandbox lived they were taken as this install's, because OpenShell may refuse to delete
-			// an attached provider and a delete must not strip a live sandbox of it.
-			if err := ensureKey(true); err != nil {
-				return err
-			}
-			if hasRead {
-				if err := r.ensureGitHub(ctx, ws, w, names, harness, read, true); err != nil {
-					return err
-				}
-			}
-		}
 		if !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) && !w.keepWarm {
 			// Nothing wants the agent, so no sandbox is created: it starts on demand (old issue 315). A
 			// run, a claimable park, a pre-wake signal or a keep-warm setting creates one. An
@@ -1513,7 +1497,20 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if err != nil || held {
 			return err
 		}
+		// A new Substrate actor gets a new name, recorded before the create and given its gateway access
+		// first (issue #1386): a name never comes back for another actor.
+		if renamed, err := r.nameNewActor(ctx, w, ws, access); err != nil {
+			release()
+			return err
+		} else if renamed {
+			names = w.names()
+			spec, hash = r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
+		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
+		if err := r.snapshotClock(ctx, w); err != nil { // the first-boot seal is a snapshot
+			release()
+			return err
+		}
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			if definiteFailure(err) {
@@ -1586,7 +1583,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 		r.m.SandboxRepairs.Inc()
 		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": names.Sandbox, "reason": w.sb.UnhealthyReason.String, "home_generation": sb.ID},
 		}); err != nil {
@@ -1595,6 +1592,16 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
 	}
+	// A driver that can revert keeps the home of a crashed sandbox, or finds a silent front (issue #1481).
+	if done, err := r.sealRestored(ctx, w, ws, names.Sandbox, sb, hash, act, tune); done || err != nil {
+		return err
+	}
+	if handled, err := r.revertCrashed(ctx, w, ws, names.Sandbox, sb, hash); handled || err != nil {
+		return err
+	}
+	if forced, err := r.checkFront(ctx, w, ws, names.Sandbox, sb, hash); forced || err != nil {
+		return err
+	}
 	if (sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted) && !act.HasRunning && !w.agent.UnhealthyAt.Valid {
 		// The sandbox's main process exited or it failed. A running run has lost it anyway and is
 		// left to fail; a starting run has not started the harness and waits for the new sandbox
@@ -1602,9 +1609,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, homeDirtiedSince(w.sb))
 	}
-	if r.specChanged(ws, spec, sb, hash) {
+	if r.specChanged(ws, spec, sb, hash) || r.unnamedActor(w) {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
-		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
+		// hand, or it is a Substrate actor made before actors had their own names): OpenShell
+		// and Substrate cannot change those in place, so the sandbox is recreated, which
 		// also replaces its home volume. Never while a run holds the agent, parked runs
 		// included: a parked run resumes its harness session, which lives in that volume.
 		// (agentd starts a new session when the volume was replaced anyway, see
@@ -1618,6 +1626,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			// before the home gate, which requests checkpoints and wakes stopped sandboxes: a sandbox
 			// whose gate is still waiting keeps its slot, so at most the cap are in the gate at a time.
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; waiting for a free recreate slot")
+		}
+		// A driver that can repoint keeps the home: no delete, no restore (issue #1482). A refusal falls through.
+		if done, err := r.repoint(ctx, w, ws, spec, sb, hash); done || err != nil {
+			return err
 		}
 		if ok, note, err := r.homeGate(ctx, w, ws, sb, homeDirtiedSince(w.sb)); err != nil || !ok {
 			if err != nil {
@@ -1646,7 +1658,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			} else if !ok {
 				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
 			}
-			if sb, err = r.stopSandbox(ctx, ws, names.Sandbox); err != nil {
+			if sb, err = r.stopSnapshot(ctx, w, ws, names.Sandbox); err != nil {
 				return err
 			}
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
@@ -1655,6 +1667,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
 			release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash)
 			if err != nil || held {
+				return err
+			}
+			if err := r.snapshotClock(ctx, w); err != nil { // a first boot gets its seal
+				release()
 				return err
 			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
@@ -1692,6 +1708,27 @@ func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (executio
 	return seen, nil
 }
 
+// snapshotClock reads the database clock into w.snapFrom just before a backend call that can take a
+// snapshot (a stop, or the first-boot seal of a create or a start). The snapshot holds every write before
+// that time, so it is a lower bound of the snapshot time, on the clock of restored_at and of the
+// checkpoint times (issue #1481). The driver's own clock is never compared with them.
+func (r *Reconciler) snapshotClock(ctx context.Context, w *work) error {
+	at, err := r.q.DatabaseClock(ctx)
+	if err != nil {
+		return fmt.Errorf("read the database clock before the snapshot: %w", err)
+	}
+	w.snapFrom = at
+	return nil
+}
+
+// stopSnapshot is stopSandbox with the snapshot time read first.
+func (r *Reconciler) stopSnapshot(ctx context.Context, w *work, ws, name string) (execution.Sandbox, error) {
+	if err := r.snapshotClock(ctx, w); err != nil {
+		return execution.Sandbox{}, err
+	}
+	return r.stopSandbox(ctx, ws, name)
+}
+
 // holdForCreationRate takes one of the org's sandbox creations per minute (issue #27, ADR 0066
 // amendment 2026-11-12). With none free it records why and reports held: the run stays queued or
 // starting, the sandbox is not touched, and the next pass tries again. A burst larger than the rate
@@ -1700,13 +1737,13 @@ func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (executio
 //
 // release gives the slot back; call it when the backend call that followed failed.
 func (r *Reconciler) holdForCreationRate(ctx context.Context, w *work, tune orgsettings.Settings, kind string, sb *execution.Sandbox, hash string) (release func(), held bool, err error) {
-	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.pool, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
+	res, ok, wait, err := orgsettings.ReserveSandboxCreation(ctx, r.db, w.org.ID, w.agent.ID, kind, tune.SandboxCreationsPerMinute)
 	if err != nil {
 		return nil, false, fmt.Errorf("reserve a sandbox creation: %w", err)
 	}
 	if ok {
 		return func() {
-			if err := res.Release(context.WithoutCancel(ctx), r.pool); err != nil {
+			if err := res.Release(context.WithoutCancel(ctx), r.db); err != nil {
 				r.log.Warn("release a sandbox creation slot", append(w.logAttrs(), "error", err)...)
 			}
 		}, false, nil
@@ -1774,6 +1811,15 @@ func (r *Reconciler) unmarked(sb execution.Sandbox) bool {
 	return r.owns() && sb.Labels[execution.LabelInstall] == ""
 }
 
+// unnamedActor reports a sandbox that runs as an actor under its sandbox name, on a backend that names
+// actors: it was made before issue #1386 gave each actor its own name, so it has no recorded UID and is
+// never in the gateway State, and every token for it is refused. It is recreated like a spec change
+// (issue 461 does the same for an unmarked sandbox), and the create after it names a new actor.
+func (r *Reconciler) unnamedActor(w *work) bool {
+	_, ok := execution.ActorNamerOf(r.backend)
+	return ok && !w.sb.ActorName.Valid
+}
+
 // owns reports whether the backend owns what it makes (an install mark is set).
 func (r *Reconciler) owns() bool {
 	o, ok := r.backend.(interface{ Owner() string })
@@ -1805,7 +1851,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 		}
 		r.m.AgentsUnhealthy.Inc()
 		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
-		if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+		if err := audit.RecordAfter(ctx, r.db, audit.Event{
 			Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
 			After: map[string]any{"sandbox": name, "reason": reason, "recreations_in_24h": n},
 		}); err != nil {
@@ -1824,7 +1870,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	}
 	r.m.SandboxRepairs.Inc()
 	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
-	if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+	if err := audit.RecordAfter(ctx, r.db, audit.Event{
 		Org: w.org.ID, Actor: audit.System("koinon-reconciler:sandbox-repair"), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
 		After: map[string]any{"sandbox": name, "reason": "sandbox " + detail, "phase": string(sb.Phase), "message": truncate(sb.Message, 300), "home_generation": sb.ID},
 	}); err != nil {
@@ -1883,12 +1929,12 @@ func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
 }
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else
-// for its re-activation. Runs cannot be queued for a draft agent. It also claims the agent's
-// provider and harness profile for this install (claimDraft), which no other path does for a draft.
+// for its re-activation. Runs cannot be queued for a draft agent. With no sandbox it drops the
+// agent's GitHub provider and profile (dropDraftGitHub).
 func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
-	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.SandboxName)
+	sb, err := r.backend.GetSandbox(ctx, w.sb.Workspace, w.sb.ActorRef())
 	if errors.Is(err, execution.ErrNotFound) {
-		if err := r.claimDraft(ctx, w, true); err != nil {
+		if err := r.dropDraftGitHub(ctx, w); err != nil {
 			return err
 		}
 		return r.recordState(ctx, w, store.SandboxStatePending, "", "")
@@ -1897,60 +1943,19 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		return err
 	}
 	if sb.Phase == execution.PhaseReady {
-		if sb, err = r.stopSandbox(ctx, w.sb.Workspace, w.sb.SandboxName); err != nil {
+		if sb, err = r.stopSnapshot(ctx, w, w.sb.Workspace, w.sb.ActorRef()); err != nil {
 			return err
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
 	}
-	if err := r.claimDraft(ctx, w, false); err != nil {
-		return err
-	}
 	return r.record(ctx, w, sb, w.sb.SpecHash, "")
 }
 
-// claimDraft marks a draft agent's objects with the install mark (issue 511, ADR 0106 decision 5).
-// Only reconcileActive claimed them before, so the objects of an agent that went back to draft stayed
-// unmarked for good and the unmarked gauge never reached 0.
-//
-// The provider is ensured with the key the agent kept (a draft agent keeps its key for a quick
-// re-activation; without a Secret that still matches it nothing is touched and no key is issued).
-// The ensure imports the harness profile with the mark; without it the org pass marks the profile
-// (claimHarnessProfiles), which needs no key. The provider record itself is recreated with
-// the mark only when noSandbox is set: the stopped sandbox of a draft agent still attaches it, and
-// OpenShell may refuse to delete an attached provider (see Provider.ClaimLegacy), so that record is
-// claimed when the agent is active again and its sandbox is recreated. With no sandbox the GitHub
-// provider and profile are dropped: the agent has no use for them until it is active, and
-// reconcileActive makes them again, marked, before it creates a sandbox.
-func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) error {
-	if !r.owns() || w.key.ID == "" {
-		return nil
-	}
-	harness, ok := r.cfg.Harnesses[w.agent.Harness]
-	if !ok || !harness.rendered() {
-		return nil
-	}
-	_, material, ok, err := r.recordedMaterial(ctx, w)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		r.log.Debug("not claiming the objects of a draft agent: its key Secret does not match the recorded key", w.logAttrs()...)
-		return nil
-	}
+// dropDraftGitHub deletes the GitHub provider and profile of a draft agent with no sandbox: the agent
+// has no use for them until it is active, and reconcileActive makes them again before it creates a
+// sandbox. Once per provider (draftGitHubDropped), so a draft agent does not cost gateway calls every pass.
+func (r *Reconciler) dropDraftGitHub(ctx context.Context, w *work) error {
 	ws, names := w.sb.Workspace, w.names()
-	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
-		Name:               names.Provider,
-		Profile:            r.profile(w.agent.Harness, harness),
-		Credentials:        map[string]string{keyEnvVar: material},
-		CredentialRevision: w.key.ID,
-		Labels:             ownerLabels(w.org.ID, w.agent.ID),
-		ClaimLegacy:        noSandbox,
-	}); err != nil {
-		return err
-	}
-	if !noSandbox {
-		return nil
-	}
 	r.mu.Lock()
 	done := r.draftGitHubDropped[names.GitHubProvider]
 	r.mu.Unlock()
@@ -1970,7 +1975,7 @@ func (r *Reconciler) claimDraft(ctx context.Context, w *work, noSandbox bool) er
 // provider record and key Secret. The key itself was already revoked: the gateway state of
 // this pass left it out.
 func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
-	ws, name := w.sb.Workspace, w.sb.SandboxName
+	ws, name := w.sb.Workspace, w.sb.ActorRef()
 	final := store.SandboxStateDeleted
 	sb, err := r.backend.GetSandbox(ctx, ws, name)
 	switch {
@@ -1979,7 +1984,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		return err
 	case r.cfg.HomeRetention == RetentionRetain:
 		if sb.Phase == execution.PhaseReady {
-			if sb, err = r.stopSandbox(ctx, ws, name); err != nil {
+			if sb, err = r.stopSnapshot(ctx, w, ws, name); err != nil {
 				return err
 			}
 		}
@@ -2023,12 +2028,6 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	return r.recordState(ctx, w, final, phase, "")
 }
 
-// profileClaimer is implemented by a backend that marks an existing provider profile
-// (the OpenShell backend with an owner).
-type profileClaimer interface {
-	ClaimProviderProfile(ctx context.Context, workspace string, p execution.ProviderProfile) (bool, error)
-}
-
 // recordKeepWarmGrants writes the pass's keep-warm decision to agents.keep_warm_granted, so the API and
 // the agent page can say whether the operator's cap granted an admin's request (#100). Only the agents
 // whose recorded decision differs are written.
@@ -2059,69 +2058,6 @@ func (r *Reconciler) recordKeepWarmGrants(ctx context.Context, org pgtype.UUID, 
 	return nil
 }
 
-// claimHarnessProfiles marks, once per org and pass, the harness profiles (koinon-agentgateway-<harness>)
-// that no active agent keeps current (issue 511). A profile belongs to the workspace and the harness, not
-// to an agent: every agent of the harness in the org shares it, and OpenShell refuses to delete one a
-// provider uses. An active agent re-imports it with the mark on every pass, so what is left are the
-// harnesses whose agents are all draft or archived, or that have none. A draft agent does not count as
-// keeping its harness: claimDraft imports the profile only when the agent's key Secret still matches
-// the recorded key, and a draft agent with no key or no sandbox row is never reconciled at all. An
-// archived agent leaves the reconcile list once its cleanup ends, so a claim made only while cleaning
-// it up would miss every agent archived before the mark was on; the org pass sees them all. The mark
-// is the whole claim: archiving keeps the org's data and must not remove what a sibling agent or an
-// un-archive needs. A profile that does not exist is not created, and an org with no recorded
-// workspace has none to claim in. Idempotent: a marked profile is left alone, and one found marked or
-// missing is not asked for again (harnessProfileSettled) until an active agent imports it.
-func (r *Reconciler) claimHarnessProfiles(ctx context.Context, org store.ListOrgsToReconcileRow, agents []store.Agent) error {
-	c, ok := r.backend.(profileClaimer)
-	if !ok || !r.owns() {
-		return nil
-	}
-	kept := map[string]bool{}
-	for _, a := range agents {
-		if a.Status == store.AgentStatusActive {
-			kept[a.Harness] = true
-		}
-	}
-	row, err := r.q.GetOrgWorkspace(ctx, org.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("%w: read workspace of org %s: %w", errAbortPass, org.Slug, err)
-	}
-	var errs []error
-	for _, harness := range slices.Sorted(maps.Keys(r.cfg.Harnesses)) {
-		f := r.cfg.Harnesses[harness]
-		if kept[harness] || !f.rendered() {
-			continue
-		}
-		p := r.profile(harness, f)
-		k := harnessProfileKey(row.Workspace, p.ID)
-		r.mu.Lock()
-		settled := r.harnessProfileSettled[k]
-		r.mu.Unlock()
-		if settled {
-			continue
-		}
-		claimed, err := c.ClaimProviderProfile(ctx, row.Workspace, p)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("reconciler: claim harness profile %s of org %s: %w", harness, org.Slug, err))
-			continue
-		}
-		if claimed {
-			r.log.Info("marked a harness profile no active agent keeps current", "org", org.Slug, "harness", harness)
-		}
-		r.mu.Lock()
-		r.harnessProfileSettled[k] = true
-		r.mu.Unlock()
-	}
-	return errors.Join(errs...)
-}
-
-// harnessProfileKey is the key of a harness profile in harnessProfileSettled.
-func harnessProfileKey(workspace, profileID string) string { return workspace + "/" + profileID }
-
 // record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
 // while stop and start keep both.
@@ -2134,7 +2070,16 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID); err != nil {
+	// A snapshot that the call took gets the database clock read before the call. A snapshot without
+	// that read (snapFrom not set) gets no time: the recorded one stays, which is still a lower bound.
+	var snapshotAt pgtype.Timestamptz
+	if sb.NewSnapshot {
+		snapshotAt = w.snapFrom
+	}
+	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID, snapshotAt); err != nil {
+		return err
+	}
+	if err := r.recordActor(ctx, w, sb); err != nil {
 		return err
 	}
 	return r.recordEnforcement(ctx, w, sb.Enforcement)
@@ -2159,13 +2104,16 @@ func (r *Reconciler) recordState(ctx context.Context, w *work, state store.Sandb
 	if len(hash) > 0 {
 		h = hash[0]
 	}
-	return r.recordRow(ctx, w, state, phase, msg, "", h, "")
+	return r.recordRow(ctx, w, state, phase, msg, "", h, "", pgtype.Timestamptz{})
 }
 
-func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string) error {
+// recordRow stores the observed sandbox. snapshotAt is the database clock before the call that took the
+// newest snapshot, or NULL when this observation took none (the recorded time then stays).
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string, snapshotAt pgtype.Timestamptz) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
 		State: state, Phase: phase, Message: msg, Reason: reason, SpecHash: hash, HomeGeneration: generation,
+		SnapshotAt: snapshotAt,
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)
@@ -2186,7 +2134,7 @@ const ForeignReason = "OwnedByAnotherInstall"
 // guardSandbox in the OpenShell backend, which refuses every call on a sandbox another install owns.
 // So a failed write is logged and the pass goes on.
 func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
-	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, ""); rerr != nil {
+	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "", pgtype.Timestamptz{}); rerr != nil {
 		r.log.Warn("recording the foreign-owned sandbox failed; guardSandbox still refuses it",
 			append(w.logAttrs(), "err", rerr)...)
 	}

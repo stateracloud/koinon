@@ -57,7 +57,7 @@ function setup(opts: { hosts?: string[]; threshold?: number; failAdd?: string; s
       },
     })
   })
-  renderApp(transport, '/servers')
+  renderApp(transport, '/mcp-servers')
   return calls
 }
 

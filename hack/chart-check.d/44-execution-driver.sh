@@ -4,8 +4,8 @@
 # Chart assertions: execution.driver (ADR 0119, #1088). Sourced in order by hack/chart-check.sh; it
 # uses that script's helpers (render, has, lacks, ...).
 
-sub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+sub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
@@ -16,7 +16,8 @@ if render_default >/dev/null 2>"$out/def.err"; then fail "the shipped defaults m
 hit 'allowUnhardened' "$out/def.err" || fail "the default-install error must name execution.substrate.allowUnhardened"
 default_out=$(render_default --set execution.substrate.allowUnhardened=true)
 hit 'driver: substrate' <<<"$default_out" || fail "the default driver is substrate"
-hit 'controlAddress: "api.ate-system.svc.cluster.local:443"' <<<"$default_out" || fail "the default control address is the in-cluster ateapi"
+hit 'controlAddress: "api.ate-system.svc:443"' <<<"$default_out" || fail "the default control address is the ateapi certificate name"
+hit 'audience: "api.ate-system.svc"' <<<"$default_out" || fail "the default token audience is the one ate-setup accepts"
 hit 'defaultTier: "hardened"' <<<"$default_out" || fail "the default tier fits the default gvisor pool (not vm)"
 hit -e '- name: gvisor' <<<"$default_out" || fail "the default worker pool is gvisor"
 if hit 'KOINON_OPENSHELL_ADDRESS' <<<"$default_out"; then fail "the default driver gives no OpenShell address to any component"; fi
@@ -36,12 +37,38 @@ has "substrate driver in the reconciler config" 'driver: substrate' "${sub[@]}" 
 has "substrate control address in the reconciler config" 'controlAddress: "api.ate-system.svc:443"' "${sub[@]}" --show-only templates/config.yaml
 has "substrate token file in the reconciler config" 'tokenFile: "/var/run/koinon/substrate/token"' "${sub[@]}" --show-only templates/config.yaml
 env_is KOINON_EXECUTION_DRIVER substrate "${sub[@]}"
-env_is KOINON_SUBSTRATE_ROUTER_ADDRESS '"atenet-router.ate-system.svc:80"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_ADDRESS '"atenet-router.ate-system.svc:443"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_CERT_FILE '"/etc/koinon/substrate-router/credential-bundle.pem"' "${sub[@]}"
+env_is KOINON_SUBSTRATE_ROUTER_CA_FILE '"/etc/koinon/substrate-router/router-ca.pem"' "${sub[@]}"
 env_is KOINON_SUBSTRATE_TOKEN_FILE '"/var/run/koinon/substrate/token"' "${sub[@]}"
 has "the ateapi token is a projected ServiceAccount token with the configured audience" 'audience: "ateapi"' "${sub[@]}" --show-only templates/deployments.yaml
 lacks "agentd does not get the OpenShell address with substrate" 'KOINON_OPENSHELL_ADDRESS' "${sub[@]}" --show-only templates/deployments.yaml
 has "the install preflight Job runs the Substrate checks with substrate (#1089; details in 95-preflight.sh)" '- --driver=substrate' "${sub[@]}" --show-only templates/preflight.yaml
 has "the install preflight Job stays with openshell" 'component: preflight' 
+# The router leg (#1446): the router serves TLS on 443 and wants a client certificate with an allowed SPIFFE ID. Only
+# koinon-agentd gets the pod certificate and the router CA: the allow-list holds the agentd ServiceAccount and no other
+# Koinon pod, because any allowed ID can reach any actor. The reconciler makes no router call and gets none.
+deployment_doc() { # <name> <helm args...>: the rendered Deployment of one component
+	local want=$1
+	shift
+	render --show-only templates/deployments.yaml "$@" | awk -v want="$want" '
+		/^---$/ { if (buf ~ ("\n  name: " want "\n")) printf "%s", buf; buf = "" }
+		{ buf = buf $0 "\n" }
+		END { if (buf ~ ("\n  name: " want "\n")) printf "%s", buf }'
+}
+agentd_doc=$(deployment_doc koinon-agentd "${sub[@]}")
+for want in 'podidentity.podcert.ate.dev/identity' 'keyType: ECDSAP256' 'credentialBundlePath: credential-bundle.pem' \
+	'servicedns.podcert.ate.dev/identity' 'podcert.ate.dev/canarying: live' 'path: router-ca.pem' 'mountPath: /etc/koinon/substrate-router'; do
+	grep -Fq -- "$want" <<<"$agentd_doc" || fail "koinon-agentd must project the router identity with substrate: missing $want"
+done
+for other in koinon-reconciler koinon-api; do
+	doc=$(deployment_doc "$other" "${sub[@]}")
+	[ -n "$doc" ] || fail "the $other Deployment must render"
+	if grep -Eq 'podCertificate|substrate-router|ROUTER_CERT_FILE' <<<"$doc"; then fail "$other must not get the router identity: only agentd is on the router allow-list"; fi
+done
+lacks "no router identity with the default driver" 'podCertificate' --show-only templates/deployments.yaml
+has "a router server name is passed to agentd" 'KOINON_SUBSTRATE_ROUTER_SERVER_NAME' "${sub[@]}" --set execution.substrate.routerServerName=atenet-router.ate-system.svc --show-only templates/deployments.yaml
+lacks "no router server name by default" 'KOINON_SUBSTRATE_ROUTER_SERVER_NAME' "${sub[@]}" --show-only templates/deployments.yaml
 # The guest API signing key (#1309): the ensure-secrets Job makes it once, the reconciler config and
 # agentd's env name the file, and both components mount the Secret. No sandbox template sees it.
 has "the guest key file is in the reconciler config" 'guestKeyFile: "/secrets/substrate-guest-key/key"' "${sub[@]}" --show-only templates/config.yaml
@@ -66,6 +93,10 @@ if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown dr
 if render "${sub[@]}" --set execution.substrate.allowUnhardened=false >/dev/null 2>"$out/sub.err"; then fail "substrate without allowUnhardened must not render"; fi
 grep -q 'allowUnhardened' "$out/sub.err" || fail "the unhardened error must name execution.substrate.allowUnhardened"
 env_is KOINON_SUBSTRATE_ALLOW_UNHARDENED '"true"' "${sub[@]}"
+
+# Golden snapshots are off by default and an admin turns them on (#1492).
+has "golden snapshots are off by default" 'goldenSnapshots: false' "${sub[@]}" --show-only templates/config.yaml
+has "an admin turns golden snapshots on" 'goldenSnapshots: true' "${sub[@]}" --set execution.substrate.goldenSnapshots=true --show-only templates/config.yaml
 
 # The tiers reach both components: the driver starts no guest process without one (#1088).
 env_is KOINON_SUBSTRATE_DEFAULT_TIER '"dev"' "${sub[@]}"
@@ -94,6 +125,11 @@ for gm in standalone kubernetes; do
 	[ "$gm" = standalone ] || gwargs+=(--set gateway.mcp.driver=agentgateway)
 	has "openshell driver admits OpenShell's namespaces ($gm)" 'openshell.ai/managed-by: openshell' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "openshell driver has no Substrate peer ($gm)" 'ate-system' "${gwargs[@]}" --show-only templates/networkpolicy.yaml
+	if [ "$gm" = kubernetes ]; then
+		# Substrate needs koinon-gateway on the model and MCP paths (issue #1489), and that needs standalone mode.
+		if render "${sub[@]}" "${gwargs[@]}" >/dev/null 2>&1; then fail "substrate must not render in kubernetes mode"; fi
+		continue
+	fi
 	has "substrate admits Substrate's namespace ($gm)" 'kubernetes.io/metadata.name: ate-system' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 	lacks "substrate has no openshell.ai/managed-by peer ($gm)" 'openshell.ai/managed-by' "${sub[@]}" "${gwargs[@]}" --show-only templates/networkpolicy.yaml
 done

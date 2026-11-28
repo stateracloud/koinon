@@ -592,6 +592,41 @@ paths:
                 $ref: "#/components/schemas/HomeBackupRetention"
         default:
           $ref: "#/components/responses/Error"
+  /run-limits:
+    get:
+      tags: [org-settings]
+      operationId: getRunLimits
+      summary: The org's run limits (issue #492, ADR 0066), each with its default and bounds.
+      responses:
+        "200":
+          description: The run limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunLimits"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [org-settings]
+      operationId: setRunLimits
+      summary: >-
+        Change some of the run limits. A limit that is left out stays as it is; 0 returns it to the default. Audited
+        as org.run_limits.set. Runs that are queued but not started get the new limits when they start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunLimitsPatch"
+      responses:
+        "200":
+          description: The run limits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunLimits"
+        default:
+          $ref: "#/components/responses/Error"
   /leak-guard:
     get:
       tags: [leak-guard]
@@ -1232,6 +1267,16 @@ components:
           properties:
             code: {$ref: "#/components/schemas/ErrorCode"}
             message: {type: string}
+            reason:
+              $ref: "#/components/schemas/ErrorReason"
+    ErrorReason:
+      type: string
+      description: |
+        Why the call was refused, when a client acts on the reason differently. The values are the names
+        of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+        strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+        added over time: a client that does not know a reason shows `message`.
+      enum: [INVALID, NOT_FOUND, INSTALL_HELD, ROLE_TOO_LOW, ADMIN_REQUIRED, PLATFORM_ADMIN_REQUIRED, CHANGED, OWNER_ONLY, OWNER_AT_FULL, NOT_MEMBER, ABOVE_CEILING, TEST_FAILED, PRICE_REFRESH_OFF, CREDENTIAL_TOO_SHORT]
     ErrorCode:
       type: string
       enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, unavailable, internal]
@@ -1710,6 +1755,36 @@ components:
         days:
           type: integer
           description: Days to keep an old home backup repository. Leave out for the default (7).
+    RunLimit:
+      type: object
+      required: [value, defaultValue, min, max]
+      description: One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+      properties:
+        value: {type: integer}
+        defaultValue: {type: integer}
+        min: {type: integer}
+        max: {type: integer}
+    RunLimits:
+      type: object
+      required: [maxConcurrentRuns, triggerConcurrency, triggerRatePerMinute, sandboxCreationsPerMinute]
+      description: >-
+        `maxConcurrentRuns` is the most runs of the org that start or run at the same time; the other runs wait in
+        the queue. `triggerConcurrency` is the most trigger, webhook and task-creation items of the org that run at
+        the same time, and `triggerRatePerMinute` the most that start in one minute. `sandboxCreationsPerMinute` is
+        the most sandboxes that Koinon creates or starts for the org in one minute.
+      properties:
+        maxConcurrentRuns: {$ref: "#/components/schemas/RunLimit"}
+        triggerConcurrency: {$ref: "#/components/schemas/RunLimit"}
+        triggerRatePerMinute: {$ref: "#/components/schemas/RunLimit"}
+        sandboxCreationsPerMinute: {$ref: "#/components/schemas/RunLimit"}
+    RunLimitsPatch:
+      type: object
+      description: Leave a limit out to keep it. Set it to 0 to return it to the default.
+      properties:
+        maxConcurrentRuns: {type: integer}
+        triggerConcurrency: {type: integer}
+        triggerRatePerMinute: {type: integer}
+        sandboxCreationsPerMinute: {type: integer}
     LeakGuardSettings:
       type: object
       properties:

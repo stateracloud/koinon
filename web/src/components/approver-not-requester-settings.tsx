@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { OrgSettingsService } from '@/gen/koinon/orgsettings/v1alpha1/orgsettings_pb'
+import { describeError } from '@/lib/api-error'
 
 /**
  * ApproverNotRequesterSettings is where an org admin turns on the optional rule "the approver must not
@@ -21,7 +21,7 @@ export function ApproverNotRequesterSettings({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the approval rule: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the approval rule: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -49,7 +49,7 @@ export function ApproverNotRequesterSettings({ orgId }: { orgId: string }) {
       </p>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
     </section>

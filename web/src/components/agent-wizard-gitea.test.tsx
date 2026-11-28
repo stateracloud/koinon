@@ -26,9 +26,8 @@ function setup(opts: { role?: OrgRole; connected?: boolean } = {}) {
 }
 
 async function chooseTemplate(name: RegExp) {
-  await userEvent.click(await screen.findByRole('radio', { name }))
-  await userEvent.click(screen.getByRole('button', { name: 'Next' }))
-  await userEvent.click(screen.getByRole('radio', { name: /OpenCode/ }))
+  await userEvent.click(await screen.findByRole('link', { name }))
+  await userEvent.click(await screen.findByRole('radio', { name: /OpenCode/ }))
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
 }
 
@@ -65,7 +64,7 @@ describe('AgentWizard on a Gitea connection', () => {
 
   it('does not warn on a GitHub connection', async () => {
     setup()
-    await chooseTemplate(/^Repo helper v/)
+    await chooseTemplate(/^Repo helper(?! \(Gitea\))/)
     expect(screen.getByText('GitHub access')).toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
     expect(screen.queryByText(/Weaker credential/)).not.toBeInTheDocument()

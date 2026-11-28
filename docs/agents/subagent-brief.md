@@ -40,7 +40,14 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - The parent gives you a worktree. Run every command against it: `git -C <worktree> …`, or absolute
   paths. The shell's directory resets between calls.
 - Never call `hack/claim.sh`: the parent owns claims (one lane per subagent, ADR 0104).
-- No cluster: `KUBECONFIG=/dev/null` for every test. CI never calls paid models; neither do you.
+- No shared cluster: `KUBECONFIG=/dev/null` is for unit tests only. The kind gates of `hack/lane-gates.sh` and
+  `make test-e2e-kind` fail with it: give them the kubeconfig file of your own kind cluster, by explicit path.
+  CI never calls paid models; neither do you.
+- The Claude sandbox blocks kind, docker and `make test-e2e-*` (the docker socket and the fetch of the
+  add-on manifests). Run those commands with the sandbox off for that one call, and keep it on for all other
+  commands. A gate or e2e run that never started is NOT RUN (`notrun`): never report it as a pass or a fail.
+- `git fetch` in a worktree under `/private/tmp/kw` fails: the sandbox refuses the write of `FETCH_HEAD`. Use
+  `git fetch --no-write-fetch-head origin <branch>`.
 - Scripts need bash 5 (ADR 0090; the PATH has Homebrew's on a Mac): run them and their tests with `bash` or directly, not `/bin/bash` (3.2, only to prove a guard fires). Use `/bin/ls`, not `ls`.
 - Web: `pnpm --dir <worktree>/web <cmd>`, one command per call, not `cd web && pnpm` and no pipe.
 - A sandboxed `gh` or `git` call that reaches GitHub needs `allowed_domains` `api.github.com` and `github.com`; parents say so in the brief.
@@ -60,14 +67,15 @@ Parents pick the model by the work; it applies to cloud lanes and `SendMessage` 
 - Never `git stash`: it is shared across worktrees. Commit, or leave the change in place.
 
 ## Check and ship
-- `hack/lane-gates.sh` is the blocking form: preflight's gates plus the heavy CI jobs, one `verdict=` line each, `notrun` (not `fail`) when the machine cannot run one. Do not poll logs.
+- `hack/lane-gates.sh` is the blocking form: preflight's gates plus the heavy CI jobs, one `verdict=` line each, `notrun` (not `fail`) when the machine cannot run one. Do not poll logs. A run can take longer than the 600 s tool limit: use `hack/lane-gates.sh --start`, then `hack/lane-gates.sh --wait <file> --max 540` in the foreground, again after each exit 75.
 - `hack/preflight.sh` runs the gates your change touches (lint with gofumpt, vet, tests, tidy,
   generate, migrations, ADRs, docs, chart, web, shellcheck, gitleaks) and prints one line per gate.
   It must pass before you hand back.
 - If the issue names a gate (escape, e2e, chart smoke), run it and hand back its real result. If it
   cannot run here, hand back a static stand-in (`helm template`) and say it is only that.
 - Commit with `git commit -s` using the repository's git identity, in Conventional Commits. Do not
-  push or open pull requests unless the prompt says so; the parent ships with `hack/ship.sh`.
+  push or open pull requests unless the prompt says so; the parent ships with `hack/ship.sh`. When the
+  prompt says to open one, open it ready, not draft: a draft runs no CI (AGENTS.md).
 - Fake secrets in tests are obviously fake from the first commit (`koinon_test_not-a-real-token`).
 
 ## Prior art first

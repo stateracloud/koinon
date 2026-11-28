@@ -16,7 +16,8 @@
 #   keep <job>    <re>   ... except that a path matching this stays a trigger after all
 #   gate <gate>   <re>   a change to this path turns the preflight gate on (gates that have no CI job)
 #   lane <job> <needs> <command...>   how hack/lane-gates.sh runs the local gate of a CI job:
-#                        <needs> is a comma list of tools (docker,helm,go) or `-`; <command> is
+#                        <needs> is a comma list of tools (docker,helm,go) or `-`; `envtest` is the
+#                        envtest binaries, which lane-gates finds once for all gates; <command> is
 #                        `preflight` (the preflight gate of the same name) or a make target line
 #   script-check - inputs=<a>,<b>/ <cmd>   a static check or script test of the quick checks,
 #                        lint-shell and scripts CI jobs: the preflight gate `scripts` runs it when a
@@ -145,6 +146,7 @@ keep scripts \.go$
 
 # --- web ------------------------------------------------------------------------------------------
 job web ^(web/|api/proto/)
+job web ^hack/(playwright-image\.env|playwright-image\.sh)$
 
 # --- generate: every input and output of `make generate` ------------------------------------------
 # hack/ci-changes-test.sh derives them from the Makefile and the generator configs and fails when
@@ -155,7 +157,7 @@ job web ^(web/|api/proto/)
 job generate ^(api/proto/|third_party/openshell/proto/|third_party/substrate/proto/|third_party/agentgateway/proto/|api/admin/v1/(openapi|oapi-codegen)\.yaml$|internal/adminapi/api\.gen\.go$|internal/db/(queries|migrations|store)/|internal/audit/internal/auditstore/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/|docs/reference/proto/|cmd/protoc-gen-koinon-doc/|web/package\.json$|web/pnpm-lock\.yaml$|hack/generate\.sh$|hack/buf\.sh$|hack/tools/buf/|hack/cmd/generatecheck/)
 
 # --- chart: chart-check.sh sources hack/versions.env and every hack/chart-check.d/*.sh -----------
-job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/cmd/vapcheck/|hack/versions\.env$)
+job chart ^(charts/|hack/chart-check\.sh|hack/chart-check\.d/|hack/chartlint/|hack/cmd/vapcheck/|hack/cmd/chartdigest/|hack/versions\.env$)
 
 # --- chartsmoke: the chart's Jobs and Deployments run as containers (up to 35 minutes) ------------
 # The suite renders the chart and builds each cmd/koinon-* binary with `go build ./cmd/<name>` and
@@ -193,11 +195,11 @@ lane go - preflight
 lane web - preflight
 lane generate - preflight
 lane chart - preflight
-lane chartsmoke docker,helm,go test-chart-smoke
+lane chartsmoke docker,helm,go,envtest test-chart-smoke
 # hack/harness-repro-check.sh (two uncached builds, one digest) is the advisory workflow harness-repro.yml, not a ci.yml job; it has no lane.
 lane harnesses docker,go test-harnesses
 lane opencodeplugin pnpm test-opencode-plugin
-lane escape helm,go test-admission
+lane escape helm,go,envtest test-admission
 lane tidy - preflight
 lane vuln - preflight
 lane fuzz - preflight
@@ -246,7 +248,7 @@ script-check - inputs=hack/fetch-pinned-test.sh,hack/fetch-pinned.sh hack/fetch-
 script-check - inputs=hack/e2e-parts-test.sh,test/e2e/kind/parts.sh hack/e2e-parts-test.sh
 script-check - inputs=hack/apt-retries-test.sh hack/apt-retries-test.sh --self-test
 script-check - inputs=guard hack/apt-retries-test.sh
-script-check - inputs=hack/e2e-remote-test.sh,hack/e2e-remote.sh,hack/e2e-status.sh,hack/versions.env,web/package.json,.github/workflows/ci.yml,hack/versions-check.sh hack/e2e-remote-test.sh
+script-check - inputs=hack/e2e-remote-test.sh,hack/e2e-remote.sh,hack/e2e-status.sh,hack/versions.env,hack/playwright-image.env,hack/playwright-image.sh,web/package.json,.github/workflows/ci.yml,hack/versions-check.sh hack/e2e-remote-test.sh
 script-check - inputs=hack/ci-fail-test.sh,hack/ci-fail.sh,hack/testdata/ci-fail/ hack/ci-fail-test.sh
 script-check - inputs=hack/ci-timing-test.sh,hack/ci-timing.sh,hack/testdata/ci-timing/gh/,hack/testdata/ci-timing/records.json hack/ci-timing-test.sh
 script-check - inputs=.github/,hack/ci-go-gate-test.sh,hack/ci-required.txt,hack/govulncheck.sh hack/ci-go-gate-test.sh
@@ -277,11 +279,12 @@ script-check - inputs=hack/hooks/grilling-question-check_test.sh,hack/hooks/gril
 script-check - inputs=hack/hooks/prose-question-stop-check_test.sh,hack/hooks/prose-question-stop-check.sh hack/hooks/prose-question-stop-check_test.sh
 script-check - inputs=hack/hooks/question-checklist-check_test.sh,hack/hooks/question-checklist-check.sh hack/hooks/question-checklist-check_test.sh
 script-check - inputs=hack/agent-state-test.sh,hack/agent-state.sh hack/agent-state-test.sh
+script-check - inputs=hack/backup-restore-mode-test.sh,test/e2e/backup-restore.sh hack/backup-restore-mode-test.sh
 script-check - inputs=hack/dep-age-check-test.sh,hack/dep-age-check.sh,hack/e2e-toolchain/Dockerfile,hack/e2e-toolchain/web.Dockerfile hack/dep-age-check-test.sh
 script-check - inputs=hack/testdata/ubuntu-snapshot/,hack/ubuntu-snapshot-bump_test.sh,hack/ubuntu-snapshot-bump.sh hack/ubuntu-snapshot-bump_test.sh
 script-check - inputs=hack/buf-breaking-against-test.sh,hack/buf-breaking-against.sh hack/buf-breaking-against-test.sh
 script-check - inputs=Makefile,hack/buf-test.sh,hack/buf.sh,hack/generate.sh,hack/preflight.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/versions-check-test.sh,hack/versions-check.sh,hack/versions.env,.github/workflows/ci.yml hack/buf-test.sh
-script-check - inputs=hack/ci-changes.sh,hack/gate-reuse-lib.sh,hack/lane-gates-test.sh,hack/lane-gates.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight.sh hack/lane-gates-test.sh
+script-check - inputs=hack/ci-changes.sh,hack/gate-reuse-lib.sh,hack/gate-state-lib.sh,hack/lane-gates-test.sh,hack/lane-gates.sh,hack/paths-lib.sh,hack/paths.rules,hack/preflight.sh hack/lane-gates-test.sh
 script-check - inputs=hack/board-test.sh,hack/board.sh hack/board-test.sh
 script-check - inputs=api/,docs/reference/proto/,docs/reference/proto/proto-api.md,hack/buf.sh,hack/generate-test.sh,hack/generate.sh,internal/gen/,Makefile,web/src/gen/,web/src/gen/google/rpc/,web/src/gen/google/rpc/error_details_pb.ts hack/generate-test.sh
 script-check - inputs=hack/ci-supersede-test.sh,hack/ci-supersede.sh hack/ci-supersede-test.sh
@@ -290,16 +293,16 @@ script-check - inputs=.github/,.github/workflows/,docs/maintainers/contributor-g
 script-check - inputs=.github/,hack/ci-required.txt,hack/secrets-skip-test.sh,hack/secrets-skip.sh hack/secrets-skip-test.sh
 script-check - inputs=.github/,.github/workflows/ci.yml,hack/ci-required.txt,hack/route-guard-test.sh,hack/route-guard.sh hack/route-guard-test.sh
 script-check - inputs=.github/,.github/workflows/contributor-gate.yml,docs/maintainers/contributor-gate.md,hack/ci-merge-group-test.sh,hack/ci-required-test.sh,hack/ci-required.txt,hack/contributor-gate-test.sh,hack/contributor-gate.sh hack/contributor-gate-test.sh
-script-check - inputs=.github/,.github/actions/setup-go-cache/,docs/dev/ci.md,hack/ci-cache-test.sh,hack/ci-required.txt,hack/ci-stamp-mtime.sh,hack/go-test-cacheable.sh,hack/go-test.sh,harnesses/opencode/plugins/pnpm-lock.yaml,web/pnpm-lock.yaml hack/ci-cache-test.sh
+script-check - inputs=.github/,.github/actions/setup-go-cache/,docs/dev/ci.md,hack/ci-cache-test.sh,hack/ci-required.txt,hack/go-test.sh,harnesses/opencode/plugins/pnpm-lock.yaml,web/pnpm-lock.yaml hack/ci-cache-test.sh
 script-check - inputs=.github/,docs/,hack/ci-required.txt,hack/ci-rules-check-test.sh,hack/ci-rules-check.sh,hack/runner-lint.sh,web/src/ hack/ci-rules-check-test.sh
 script-check - inputs=guard hack/ci-rules-check.sh
 script-check - inputs=guard hack/e2e-commands-check.sh
 script-check - inputs=hack/chart-check-test.sh,hack/chart-check.d/,hack/chart-check.sh,hack/chart-check.d/ hack/chart-check-test.sh
-script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/dco.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/spike/acpdrive/go.mod,hack/spike/acpdrive/go.sum,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
+script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/govulncheck.yml,docs/design.md,docs/dev/ci.md,docs/maintainers/agent-workflow.md,hack/,hack/ci-changes.sh,hack/go-fuzz.sh,hack/go-test.sh,hack/govulncheck-test.sh,hack/govulncheck.sh,hack/tools/buf/,hack/tools/buf/go.mod,hack/needs-e2e.sh,hack/paths-lib.sh,hack/paths-test.sh,hack/paths.rules,hack/ship.sh,hack/versions.env,internal/leakguard/taint.go,internal/mcpguard/result.go,internal/mcpsanitize/mcpsanitize_test.go,internal/tracing/scrub/jsonscrub.go,Makefile,test/e2e/run.sh,web/ hack/paths-test.sh
 script-check - inputs=.github/,.github/workflows/ci.yml,.github/workflows/release.yml,hack/ci-required.txt,hack/README.md,hack/runner-lint-test.sh,hack/runner-lint.sh hack/runner-lint-test.sh
 script-check - inputs=.github/,.github/workflows/,docs/dev/ci.md,hack/ci-required.txt,hack/runner-lint.sh hack/runner-lint.sh
 script-check - inputs=hack/go-test-host-test.sh,hack/go-test-host.sh,hack/go-test.sh,hack/lane-gates.sh,internal/project/ hack/go-test-host-test.sh
-script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
+script-check - inputs=hack/apt-retries-test.sh,hack/ci-playwright-image-test.sh,hack/playwright-image.env,hack/playwright-image.sh,hack/e2e-toolchain/web.Dockerfile,web/package.json,.github/workflows/ci.yml,.github/workflows/e2e-kind.yml hack/ci-playwright-image-test.sh
 # Slow (23 to 85 s; CI runs them): the decision rule's own tests need
 # `go list`, the others start many git repositories.
 script-skip - hack/needs-e2e-test.sh
@@ -348,7 +351,7 @@ script-skip - hack/doc-meta-lint.sh
 # migrate Job lacked). Unit and package tests cannot see those.
 #
 # Go code is not listed by directory: the binaries are the commands test/e2e/kind/images.sh (run.sh and the drill) builds with ko
-# (the three services and the three fakes it deploys; hack/needs-e2e-test.sh checks them against
+# (the services and the fakes it deploys; hack/needs-e2e-test.sh checks them against
 # its `ko build` line). A non-test file in the directory of a package in their dependency graph
 # (`go list -deps`, this module only), or below it (embedded files), is relevant.
 e2e-binary - ./cmd/koinon-api
@@ -357,6 +360,7 @@ e2e-binary - ./cmd/koinon-agentd
 e2e-binary - ./cmd/koinon-gateway
 e2e-binary - ./cmd/koinon-fakemodel
 e2e-binary - ./cmd/koinon-fakegithub
+e2e-binary - ./cmd/koinon-fakegitea
 e2e-binary - ./cmd/koinon-fakemcp
 # run.sh runs this one with `go run` (per-run fake TLS material), not ko: it is still an e2e input.
 e2e-binary - ./cmd/koinon-faketls

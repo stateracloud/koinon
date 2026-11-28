@@ -14,11 +14,18 @@
 #      blocks), check that nothing acts while held, verify the keys, release (issue #462);
 #   5. verify: the marker is gone, the install ID, the task and run counts and the keys are the ones of
 #      step 1, the KEK Secret is back, the key tool reports no warning, and the gateway key Secret is the
-#      backup's and koinon-mcp-gateway is ready with it.
+#      backup's and koinon-mcp-gateway is ready with it, at the replica count that stop noted (2 at least).
 #
-# It needs the kubectl wrapper that run.sh puts in $OUT/bin (pinned to the kind context), and nothing
-# outside the kind cluster. Run by run.sh when BACKUP_RESTORE=1 (the nightly run, and a dispatch that
-# asks for it); by hand against a cluster that run.sh left (KEEP=1): OUT=<run.sh's OUT> test/e2e/backup-restore.sh
+# Before step 1 and after step 5 it runs the restore specs of the Go driver (test/e2e/restore_test.go, issue
+# #1335): before the backup, restore-seal seals a fake MCP credential to the gateway recipient key and calls a tool
+# with it through koinon-mcp-gateway; after the restore, restore-open calls the tool again, so koinon-gateway must
+# open the restored credential with the restored key, and a credential stored after the restore must be in envelope v2.
+#
+# It needs the kubectl wrapper that run.sh puts in $OUT/bin (pinned to the kind context), the Go driver that run.sh
+# builds ($OUT/bin/e2e.test), the KOINON_E2E_* variables that run.sh passes (the admin's password and the fake MCP
+# server's forward and CA), and nothing outside the kind cluster. The install must use gateway.mcp.driver=koinon (the
+# default). Run by run.sh when BACKUP_RESTORE=1 (the nightly run, and a dispatch that asks for it); by hand against a
+# cluster that run.sh left (KEEP=1): OUT=<run.sh's OUT> KOINON_E2E_...=<as run.sh sets them> test/e2e/backup-restore.sh
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -36,17 +43,31 @@ mkdir -p "$work"
 trap 'rm -f "$work/koinon-kek-backup.yaml" "$work/koinon-gateway-key-backup.yaml"' EXIT
 K=("$OUT/bin/kubectl")
 [[ -x ${K[0]} ]] || { echo "$OUT/bin/kubectl is missing: run test/e2e/run.sh first" >&2; exit 2; }
+[[ -x $OUT/bin/e2e.test ]] || { echo "$OUT/bin/e2e.test is missing: run test/e2e/run.sh first (SUITE=go)" >&2; exit 2; }
+for v in KOINON_E2E_API_URL KOINON_E2E_FAKEMCP_URL KOINON_E2E_FAKEMCP_CA KOINON_E2E_PASSWORD KOINON_E2E_NEW_PASSWORD; do
+  [[ -n ${!v:-} ]] || { echo "$v is not set: run.sh passes it to the restore specs" >&2; exit 2; }
+done
 
 t_start=$(date +%s)
 step() { echo "== $(date -u +%H:%M:%SZ) backup/restore: $*"; }
 wait_a_bit() { command sleep "${1:-2}"; }
 fail() { echo "backup/restore FAILED: $*" >&2; exit 1; }
+# file_mode prints the octal mode of a file. GNU stat first, BSD stat (macOS) second, as in hack/agent-state.sh (#1474).
+# hack/backup-restore-mode-test.sh extracts this line by its name.
+file_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 # blk runs one block of the command file, as the guide shows it, in the working directory that holds the
 # dump and the key backup.
 blk() {
   echo "-- guide block $1"
   E1_FILE=$COMMANDS E1_WORKDIR=$work PATH="$OUT/bin:$PATH" "$root/hack/docs-e1.sh" run "$1"
+}
+
+# spec runs one restore spec of the Go driver (label restore-seal or restore-open; test/e2e/restore_test.go).
+spec() {
+  echo "-- restore spec $1"
+  (cd "$root/test/e2e" && KOINON_E2E_KUBECTL="${K[0]}" "$OUT/bin/e2e.test" -test.timeout 20m -ginkgo.v \
+    -ginkgo.label-filter="$1" -ginkgo.junit-report="$work/$1-junit.xml") || fail "the restore spec $1 failed"
 }
 
 primary() { "${K[@]}" -n "$NS" get pod -l cnpg.io/cluster=koinon-pg,cnpg.io/instanceRole=primary -o name; }
@@ -61,6 +82,8 @@ state() {
   echo "migrations=$(sql 'SELECT max(version_id) FROM goose_db_version WHERE is_applied')"
   # The keys with the number of values each wraps (KEK, STATE, VALUES, ..., FINGERPRINT).
   keys_status | awk 'NF >= 5 && $2 ~ /^(active|retained|MISSING)$/ { print "kek=" $1, $2, $3, $NF }'
+  # The stored MCP credentials by envelope: how many in v1, and how many in v2 under each gateway key.
+  keys_status | sed -n 's/^MCP credentials: /mcp=/p'
 }
 
 step "state before the backup"
@@ -69,11 +92,14 @@ step "state before the backup"
 # run to be terminal first; a failure here means the driver left work in flight, not a restore bug.
 inflight=$(sql "SELECT count(*) FROM runs WHERE state NOT IN ('succeeded', 'failed', 'canceled')")
 [[ $inflight == 0 ]] || fail "$inflight run(s) are not in a terminal state: the counts would change between the read and the dump"
+# A credential that the backup holds, sealed to the gateway key, and a tool call through koinon-gateway that opens it.
+spec restore-seal
 state | tee "$work/state.before"
 [[ $(grep -c '^tasks=' "$work/state.before") == 1 ]] || fail "could not read the install's state"
 tasks=$(sed -n 's/^tasks=//p' "$work/state.before")
 (( tasks > 0 )) || fail "the install has no tasks: the quickstart driver should have left some, so a restore would prove nothing"
 grep -q '^kek=' "$work/state.before" || fail "keys status lists no KEK"
+grep -q '^mcp=.* in v2 under gateway key gk-' "$work/state.before" || fail "keys status lists no MCP credential in v2: restore-seal sealed one"
 
 step "back up the keys and the database"
 blk backup-keys
@@ -104,7 +130,8 @@ if "${K[@]}" -n "$NS" get secret "$GWKEY" >/dev/null 2>&1; then
   gwon=1
   gwfile=$work/koinon-gateway-key-backup.yaml
   [[ -s $gwfile ]] || fail "the install has a gateway key Secret and backup-gateway-key wrote no file"
-  [[ $(stat -c %a "$gwfile") == 600 ]] || fail "the gateway key backup is readable by others: $(stat -c %a "$gwfile")"
+  gwmode=$(file_mode "$gwfile") || gwmode=
+  [[ $gwmode == 600 ]] || fail "the gateway key backup is readable by others: ${gwmode:-unknown mode}"
   gw_before=$(gwdigest)
   backup_digest=$("${K[@]}" create -f "$gwfile" --dry-run=client --validate=false -o go-template="$gwdata" | sha256sum)
   [[ $backup_digest == "$gw_before" ]] || fail "the gateway key backup differs from the Secret"
@@ -214,10 +241,23 @@ if (( gwon )); then
   fi
   "${K[@]}" -n "$NS" rollout status deploy/koinon-mcp-gateway --timeout=2m || fail "koinon-mcp-gateway is not ready with the restored gateway keys"
 fi
+# start brought each Deployment back to the replica count that stop noted. koinon-mcp-gateway runs 2 copies at least
+# (the chart refuses fewer), and the MCP credential format gate counts them.
+[[ -s $work/koinon-replicas.txt ]] || fail "stop noted no replica counts"
+while read -r d n; do
+  [[ $d == mcp-gateway ]] && { (( n >= 2 )) || fail "stop noted $n koinon-mcp-gateway replica(s): the chart runs 2 at least"; }
+  got=$("${K[@]}" -n "$NS" get "deploy/koinon-$d" -o jsonpath='{.spec.replicas}')
+  [[ $got == "$n" ]] || fail "koinon-$d runs $got replica(s) after the restore, stop noted $n"
+  ready=$("${K[@]}" -n "$NS" get "deploy/koinon-$d" -o jsonpath='{.status.readyReplicas}')
+  [[ ${ready:-0} == "$n" ]] || fail "koinon-$d has ${ready:-0} ready replica(s) after the restore, stop noted $n"
+done <"$work/koinon-replicas.txt"
+grep -q '^mcp-gateway ' "$work/koinon-replicas.txt" || fail "stop noted no koinon-mcp-gateway: the drill needs gateway.mcp.driver=koinon"
 # The migration role must still own its schema: this is what the next helm upgrade Job runs as.
 sql "SET ROLE koinon_migrate; CREATE TABLE public.e2e_migrate_probe (); DROP TABLE public.e2e_migrate_probe" >/dev/null
 # koinon-api is Ready only with the restored keys and a schema it can read (the start block waited).
 "${K[@]}" -n "$NS" get deploy koinon-api koinon-reconciler koinon-agentd
+# The restored credential opens with the restored gateway key on a tool call, and a new one is sealed in v2.
+spec restore-open
 
 {
   echo "Backup and restore (test/e2e/commands/backup-restore.e1 blocks, kind, cnpg): restore took $(( t_done - t_restore )) s, whole step $(( t_done - t_start )) s."

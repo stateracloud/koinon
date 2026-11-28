@@ -4,14 +4,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/testing/gitenv"
 	"github.com/stateracloud/koinon/internal/testing/testenv"
 )
 
@@ -136,7 +138,12 @@ var _ = Describe("run", func() {
 	It("takes the files from git in a checkout, untracked ones included, ignored ones not", func() {
 		testenv.Require(testenv.Binary("git"))
 		root := GinkgoT().TempDir()
-		Expect(exec.Command("git", "-C", root, "init", "-q").Run()).To(Succeed())
+		// bash5lint starts git itself with the process environment: isolate it for this spec.
+		for _, kv := range gitenv.Env(root) {
+			k, v, _ := strings.Cut(kv, "=")
+			GinkgoT().Setenv(k, v)
+		}
+		Expect(gitenv.Command(context.Background(), root, root, "init", "-q").Run()).To(Succeed())
 		write(root, ".gitignore", "ignored/\n")
 		write(root, "g.sh", "#!/bin/bash\n")
 		write(root, "ignored/h.sh", "#!/bin/bash\n")

@@ -93,6 +93,8 @@ type files struct {
 	// sweep answers the sweep script: its output and exit code. Nil ends nothing.
 	sweep  func() (string, int)
 	sweeps int
+	// sweepsActive is how many sweeps run now, and sweepsMax the most that ran at once.
+	sweepsActive, sweepsMax int
 	// procinfo answers the script that reads the processes the sweep could not end (its lines),
 	// savework the script that reads the workspace's uncommitted work (its output and exit code).
 	procinfo     func() string
@@ -101,6 +103,15 @@ type files struct {
 	saveworkRuns int
 	// tar answers the home checkpoint's tar execs (checkpoint_test.go); nil: no tar.
 	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
+	// gitHistory is every write (the content) and removal (nil) of a git file, by path.
+	gitHistory map[string][][]byte
+}
+
+// history returns the writes and removals (nil) of the git file at path, in order.
+func (f *files) history(path string) [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]byte(nil), f.gitHistory[path]...)
 }
 
 // sweepCount is how many times agentd ran the sweep script.
@@ -108,6 +119,13 @@ func (f *files) sweepCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sweeps
+}
+
+// sweepOverlap is the most sweeps that ran at the same time.
+func (f *files) sweepOverlap() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sweepsMax
 }
 
 func (f *files) get(path string) ([]byte, bool) {
@@ -121,13 +139,19 @@ func (f *files) get(path string) ([]byte, bool) {
 func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 3 && args[0] == "-c" && args[1] == agentd.SweepScript {
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.sweeps++
-		if f.sweep == nil {
-			_, _ = io.WriteString(stdout, "ended: none\n")
-			return 0
+		f.sweepsActive++
+		f.sweepsMax = max(f.sweepsMax, f.sweepsActive)
+		sweep := f.sweep
+		f.mu.Unlock()
+		// The answer is computed outside the lock, so that two sweeps that overlap are seen.
+		out, code := "ended: none\n", 0
+		if sweep != nil {
+			out, code = sweep()
 		}
-		out, code := f.sweep()
+		f.mu.Lock()
+		f.sweepsActive--
+		f.mu.Unlock()
 		if code != 0 {
 			// Like sweep.sh: survivors are printed on stdout, the rest on stderr.
 			for line := range strings.Lines(out) {
@@ -182,11 +206,16 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		// The rendered git configuration and CA file (gitconfig.go); the file is kept by path.
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.gitHistory == nil {
+			f.gitHistory = map[string][][]byte{}
+		}
 		switch {
 		case strings.Contains(args[1], "mktemp"):
 			f.data[args[4]] = in
+			f.gitHistory[args[4]] = append(f.gitHistory[args[4]], in)
 		case len(args) == 5:
 			delete(f.data, args[4])
+			f.gitHistory[args[4]] = append(f.gitHistory[args[4]], nil)
 		}
 		return 0
 	}
@@ -359,7 +388,7 @@ func (e *env) task(ctx context.Context, message string) store.Task {
 func (e *env) message(ctx context.Context, t store.Task, text string) {
 	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
-		ActorUserID: e.user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
+		ActorUserID: e.user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)), Prompt: true,
 	})
 	Expect(err).NotTo(HaveOccurred())
 }

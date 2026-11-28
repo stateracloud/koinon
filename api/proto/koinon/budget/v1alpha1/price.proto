@@ -100,6 +100,13 @@ service PriceService {
   rpc ExplainPlatformPrice(ExplainPlatformPriceRequest) returns (ExplainPlatformPriceResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // ExplainOrgPrices shows, for each enabled model in the org's catalog, which layer (org, platform or
+  // default) prices it now and, for an org price, the price it replaces. It uses the same lookup
+  // as the gateway. It does not check the provider URL policy or a lost key. Admins and owners.
+  rpc ExplainOrgPrices(ExplainOrgPricesRequest) returns (ExplainOrgPricesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Rates are USD per million tokens as decimal strings with at most 6 fraction digits. Empty
@@ -489,4 +496,41 @@ message ExplainPlatformPriceResponse {
   string list_version = 5;
   // provenance is set for layer platform.
   PriceProvenance provenance = 6;
+}
+
+message ExplainOrgPricesRequest {
+  string org_id = 1;
+}
+
+message ExplainOrgPricesResponse {
+  // models has one row per enabled model, ordered by provider name then model name.
+  repeated ModelPriceSource models = 1;
+}
+
+// ModelPriceSource is the price in use now for one model of an org.
+message ModelPriceSource {
+  string provider_name = 1;
+  string provider_type = 2;
+  string model = 3;
+  // source is org, platform or default. It is empty when the model has no usable price.
+  string source = 4;
+  string price_ref = 5;
+  PriceEntry entry = 6;
+  // platform_version is set for source platform.
+  int64 platform_version = 7;
+  // list_version is set for source default.
+  string list_version = 8;
+  // replaces is set for source org when a lower layer would price the model without the org price.
+  ReplacedPrice replaces = 9;
+  // unpriced_reason is no_price or unusable_price when source is empty.
+  string unpriced_reason = 10;
+}
+
+// ReplacedPrice is the price an org price replaces: the next layer down (platform or default).
+message ReplacedPrice {
+  string source = 1;
+  string price_ref = 2;
+  PriceEntry entry = 3;
+  int64 platform_version = 4;
+  string list_version = 5;
 }

@@ -148,6 +148,60 @@ func (e ErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for ErrorReason.
+const (
+	ABOVECEILING          ErrorReason = "ABOVE_CEILING"
+	ADMINREQUIRED         ErrorReason = "ADMIN_REQUIRED"
+	CHANGED               ErrorReason = "CHANGED"
+	CREDENTIALTOOSHORT    ErrorReason = "CREDENTIAL_TOO_SHORT"
+	INSTALLHELD           ErrorReason = "INSTALL_HELD"
+	INVALID               ErrorReason = "INVALID"
+	NOTFOUND              ErrorReason = "NOT_FOUND"
+	NOTMEMBER             ErrorReason = "NOT_MEMBER"
+	OWNERATFULL           ErrorReason = "OWNER_AT_FULL"
+	OWNERONLY             ErrorReason = "OWNER_ONLY"
+	PLATFORMADMINREQUIRED ErrorReason = "PLATFORM_ADMIN_REQUIRED"
+	PRICEREFRESHOFF       ErrorReason = "PRICE_REFRESH_OFF"
+	ROLETOOLOW            ErrorReason = "ROLE_TOO_LOW"
+	TESTFAILED            ErrorReason = "TEST_FAILED"
+)
+
+// Valid indicates whether the value is a known member of the ErrorReason enum.
+func (e ErrorReason) Valid() bool {
+	switch e {
+	case ABOVECEILING:
+		return true
+	case ADMINREQUIRED:
+		return true
+	case CHANGED:
+		return true
+	case CREDENTIALTOOSHORT:
+		return true
+	case INSTALLHELD:
+		return true
+	case INVALID:
+		return true
+	case NOTFOUND:
+		return true
+	case NOTMEMBER:
+		return true
+	case OWNERATFULL:
+		return true
+	case OWNERONLY:
+		return true
+	case PLATFORMADMINREQUIRED:
+		return true
+	case PRICEREFRESHOFF:
+		return true
+	case ROLETOOLOW:
+		return true
+	case TESTFAILED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for McpServerHealth.
 const (
 	Healthy   McpServerHealth = "healthy"
@@ -758,11 +812,23 @@ type Error struct {
 	Error struct {
 		Code    ErrorCode `json:"code"`
 		Message string    `json:"message"`
+
+		// Reason Why the call was refused, when a client acts on the reason differently. The values are the names
+		// of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+		// strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+		// added over time: a client that does not know a reason shows `message`.
+		Reason *ErrorReason `json:"reason,omitempty"`
 	} `json:"error"`
 }
 
 // ErrorCode defines model for ErrorCode.
 type ErrorCode string
+
+// ErrorReason Why the call was refused, when a client acts on the reason differently. The values are the names
+// of the enum `koinon.refusal.v1.Reason` (ADR 0116 decision 5); the Connect API carries the same
+// strings in `google.rpc.ErrorInfo`. A spec checks that the two lists are equal. New values are
+// added over time: a client that does not know a reason shows `message`.
+type ErrorReason string
 
 // FetchTrustedHost defines model for FetchTrustedHost.
 type FetchTrustedHost struct {
@@ -1513,6 +1579,37 @@ type RunContentRetentionSettings struct {
 	Days *int `json:"days,omitempty"`
 }
 
+// RunLimit One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+type RunLimit struct {
+	DefaultValue int `json:"defaultValue"`
+	Max          int `json:"max"`
+	Min          int `json:"min"`
+	Value        int `json:"value"`
+}
+
+// RunLimits `maxConcurrentRuns` is the most runs of the org that start or run at the same time; the other runs wait in the queue. `triggerConcurrency` is the most trigger, webhook and task-creation items of the org that run at the same time, and `triggerRatePerMinute` the most that start in one minute. `sandboxCreationsPerMinute` is the most sandboxes that Koinon creates or starts for the org in one minute.
+type RunLimits struct {
+	// MaxConcurrentRuns One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+	MaxConcurrentRuns RunLimit `json:"maxConcurrentRuns"`
+
+	// SandboxCreationsPerMinute One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+	SandboxCreationsPerMinute RunLimit `json:"sandboxCreationsPerMinute"`
+
+	// TriggerConcurrency One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+	TriggerConcurrency RunLimit `json:"triggerConcurrency"`
+
+	// TriggerRatePerMinute One run limit of the org. `value` is the limit in force; it is `defaultValue` when the org set none.
+	TriggerRatePerMinute RunLimit `json:"triggerRatePerMinute"`
+}
+
+// RunLimitsPatch Leave a limit out to keep it. Set it to 0 to return it to the default.
+type RunLimitsPatch struct {
+	MaxConcurrentRuns         *int `json:"maxConcurrentRuns,omitempty"`
+	SandboxCreationsPerMinute *int `json:"sandboxCreationsPerMinute,omitempty"`
+	TriggerConcurrency        *int `json:"triggerConcurrency,omitempty"`
+	TriggerRatePerMinute      *int `json:"triggerRatePerMinute,omitempty"`
+}
+
 // Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 type Source string
 
@@ -1798,6 +1895,9 @@ type CheckProviderEchoJSONRequestBody = EchoCheckRequest
 // SetRunContentRetentionJSONRequestBody defines body for SetRunContentRetention for application/json ContentType.
 type SetRunContentRetentionJSONRequestBody = RunContentRetentionSettings
 
+// SetRunLimitsJSONRequestBody defines body for SetRunLimits for application/json ContentType.
+type SetRunLimitsJSONRequestBody = RunLimitsPatch
+
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = TokenCreate
 
@@ -1964,6 +2064,12 @@ type ServerInterface interface {
 	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
 	// (PUT /run-content-retention)
 	SetRunContentRetention(w http.ResponseWriter, r *http.Request)
+	// GetRunLimits The org's run limits (issue
+	// (GET /run-limits)
+	GetRunLimits(w http.ResponseWriter, r *http.Request)
+	// SetRunLimits Change some of the run limits. A limit that is left out stays as it is; 0 returns it to the default. Audited as org.run_limits.set. Runs that are queued but not started get the new limits when they start.
+	// (PATCH /run-limits)
+	SetRunLimits(w http.ResponseWriter, r *http.Request)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams)
@@ -3299,6 +3405,34 @@ func (siw *ServerInterfaceWrapper) SetRunContentRetention(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
+// GetRunLimits operation middleware
+func (siw *ServerInterfaceWrapper) GetRunLimits(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRunLimits(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetRunLimits operation middleware
+func (siw *ServerInterfaceWrapper) SetRunLimits(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetRunLimits(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSpendReport operation middleware
 func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
 
@@ -3536,6 +3670,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/run-content-retention", wrapper.SetRunContentRetention)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/home-backup-retention", wrapper.GetHomeBackupRetention)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/home-backup-retention", wrapper.SetHomeBackupRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/run-limits", wrapper.GetRunLimits)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/run-limits", wrapper.SetRunLimits)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/leak-guard", wrapper.GetLeakGuard)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/leak-guard", wrapper.SetLeakGuard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/leak-guard/trusted-hosts", wrapper.AddFetchTrustedHost)
@@ -5610,6 +5746,83 @@ func (response SetRunContentRetentiondefaultJSONResponse) VisitSetRunContentRete
 	return err
 }
 
+type GetRunLimitsRequestObject struct {
+}
+
+type GetRunLimitsResponseObject interface {
+	VisitGetRunLimitsResponse(w http.ResponseWriter) error
+}
+
+type GetRunLimits200JSONResponse RunLimits
+
+func (response GetRunLimits200JSONResponse) VisitGetRunLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRunLimitsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetRunLimitsdefaultJSONResponse) VisitGetRunLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunLimitsRequestObject struct {
+	Body *SetRunLimitsJSONRequestBody
+}
+
+type SetRunLimitsResponseObject interface {
+	VisitSetRunLimitsResponse(w http.ResponseWriter) error
+}
+
+type SetRunLimits200JSONResponse RunLimits
+
+func (response SetRunLimits200JSONResponse) VisitSetRunLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetRunLimitsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetRunLimitsdefaultJSONResponse) VisitSetRunLimitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSpendReportRequestObject struct {
 	Params GetSpendReportParams
 }
@@ -5922,6 +6135,12 @@ type StrictServerInterface interface {
 	// SetRunContentRetention Set the retention in days, or return it to the default (30) by leaving `days` out. Audited.
 	// (PUT /run-content-retention)
 	SetRunContentRetention(ctx context.Context, request SetRunContentRetentionRequestObject) (SetRunContentRetentionResponseObject, error)
+	// GetRunLimits The org's run limits (issue
+	// (GET /run-limits)
+	GetRunLimits(ctx context.Context, request GetRunLimitsRequestObject) (GetRunLimitsResponseObject, error)
+	// SetRunLimits Change some of the run limits. A limit that is left out stays as it is; 0 returns it to the default. Audited as org.run_limits.set. Runs that are queued but not started get the new limits when they start.
+	// (PATCH /run-limits)
+	SetRunLimits(ctx context.Context, request SetRunLimitsRequestObject) (SetRunLimitsResponseObject, error)
 	// GetSpendReport Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(ctx context.Context, request GetSpendReportRequestObject) (GetSpendReportResponseObject, error)
@@ -7455,6 +7674,61 @@ func (sh *strictHandler) SetRunContentRetention(w http.ResponseWriter, r *http.R
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetRunContentRetentionResponseObject); ok {
 		if err := validResponse.VisitSetRunContentRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRunLimits operation middleware
+func (sh *strictHandler) GetRunLimits(w http.ResponseWriter, r *http.Request) {
+	var request GetRunLimitsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRunLimits(ctx, request.(GetRunLimitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRunLimits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRunLimitsResponseObject); ok {
+		if err := validResponse.VisitGetRunLimitsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetRunLimits operation middleware
+func (sh *strictHandler) SetRunLimits(w http.ResponseWriter, r *http.Request) {
+	var request SetRunLimitsRequestObject
+
+	var body SetRunLimitsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetRunLimits(ctx, request.(SetRunLimitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetRunLimits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetRunLimitsResponseObject); ok {
+		if err := validResponse.VisitSetRunLimitsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

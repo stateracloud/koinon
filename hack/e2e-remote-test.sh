@@ -157,7 +157,7 @@ rc=0
 (unset KOINON_E2E_REMOTE; hack/e2e-remote.sh --dry-run >"$tmp/log15" 2>&1) || rc=$?
 check "no mode flag runs the local e2e (git archive plus docker run)" sh -c "test $rc -eq 0 && grep -q 'git archive' '$tmp/log15'"
 
-# 7g. hack/e2e-status.sh on its own (the e2e-lab / go-test-lab commit-status contract). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
+# 7g. hack/e2e-status.sh on its own (the e2e-lab commit-status contract). gh is a recorder; FAKE_GH_FAIL=1 makes the post fail.
 cat >"$tmp/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "gh $*" >>"$FAKE_GH_LOG"
@@ -192,6 +192,9 @@ check "web image: pnpm matches web/package.json" \
   test "pnpm@$(sed -n 's/^ARG PNPM_VERSION=//p' "$wdf")" = "$(jq -r .packageManager "$pkg")"
 check "web image: Playwright matches web/package.json" \
   test "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")" = "$(jq -r '.devDependencies["@playwright/test"] // .dependencies["@playwright/test"]' "$pkg")"
+# shellcheck disable=SC2016 # the script is single-quoted on purpose
+check "web image: Playwright matches the image tag of hack/playwright-image.env" \
+  bash -c '[[ $("$1" "$2") == mcr.microsoft.com/playwright:v"$3"-*@sha256:* ]]' _ "$repo/hack/playwright-image.sh" "$repo/hack/playwright-image.env" "$(sed -n 's/^ARG PLAYWRIGHT_VERSION=//p' "$wdf")"
 
 [[ $fail -eq 0 ]] && echo "e2e-remote tests passed"
 exit "$fail"

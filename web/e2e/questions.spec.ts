@@ -68,7 +68,7 @@ test('an agent asks a question: answer it from the inbox with a choice, an edite
     stream: { 'koinon.run.v1alpha1.RunService/WatchRun': (): Stream => ({ messages: [] }) },
   })
 
-  await page.goto('/')
+  await page.goto('/inbox')
   const waiting = page.getByRole('list', { name: 'Waiting on you' })
   await expect(waiting.getByTestId('inbox-item')).toHaveCount(3)
   await expect(page.getByRole('navigation', { name: 'Main' }).getByTestId('inbox-badge')).toHaveText('3')
@@ -136,7 +136,7 @@ test("a question to the org's admins shows who it waits on and who answered firs
     },
     stream: {},
   })
-  await page.goto('/')
+  await page.goto('/inbox')
   const row = page.getByRole('list', { name: 'Waiting on you' }).getByTestId('inbox-item')
   await expect(row).toContainText("Asked to the org's admins (2 people")
   await expect(row).toContainText('waiting 2 hours')

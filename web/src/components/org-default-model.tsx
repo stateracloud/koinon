@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { ProviderService } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { describeError } from '@/lib/api-error'
 
 /** noDefaultChoice is the select's value for "no default model". */
 const noDefaultChoice = ''
@@ -32,7 +32,7 @@ export function OrgDefaultModel({ orgId }: { orgId: string }) {
   if (query.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the org default model: {ConnectError.from(query.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the org default model: {describeError(query.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -66,7 +66,7 @@ export function OrgDefaultModel({ orgId }: { orgId: string }) {
       </div>
       {save.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not save: {ConnectError.from(save.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not save: {describeError(save.error).message}</AlertDescription>
         </Alert>
       )}
       <div>

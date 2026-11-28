@@ -446,6 +446,21 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
 
 		By("the reconciler-owned LimitRange sized the supervisor and its init containers (#76)")
+		if substrateDriver() {
+			// Substrate has no supervisor pod and no reconciler LimitRange. Its form (issue #1091): the chart makes the worker
+			// namespace with a LimitRange and the default WorkerPool.
+			By("on Substrate: the chart's LimitRange and WorkerPool exist in the worker namespace (the form of #76)")
+			kcs := func(args ...string) string {
+				GinkgoHelper()
+				out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+				return strings.TrimSpace(string(out))
+			}
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "limitrange", "-o", "name")).To(ContainSubstring("worker-limits"))
+			Expect(kcs("-n", substrateWorkerNamespace, "get", "workerpools.ate.dev", "-o", "name")).NotTo(BeEmpty())
+			t.end("4. Task → run streamed → approval pending")
+			return
+		}
 		kc := func(args ...string) string {
 			GinkgoHelper()
 			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
@@ -609,6 +624,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
 		t.begin()
 		mcpServerID = mcpServerE2E(ctx, admin, org, agent.GetId())
+		if substrateEscapeMCP() {
+			// Here, and not in mcpServerE2E's hook: write_item and fetch_url are still auto and undeclared until this
+			// spec ends (leakGuardExfilE2E's DeferCleanup), and the case needs a task.
+			substrateLeakGuardEscapeE2E(ctx, c, org, agent.GetId(), strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/"))
+		}
 
 		By("inside a task, the same kind of call is held for an approval of the exact call, and runs only once approved")
 		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
@@ -823,6 +843,17 @@ var _ = Describe("the quickstart", Ordered, func() {
 		total := time.Since(t.t0)
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
+	})
+
+	It("8. (not part of the quickstart, after its time check) on Substrate, the actor of a run is a gVisor guest with the guest launcher's hardening on (#1428)", func(ctx SpecContext) {
+		if !substrateDriver() {
+			Skip("Substrate only: the OpenShell leg proves its runtime in test/escape (make test-escape-kind)")
+		}
+		substrateGVisorE2E(ctx, c, os.Getenv("KOINON_E2E_KUBECTL"), org, agent.GetId())
+	})
+
+	It("8. (not part of the quickstart, after its time check) an agent with a Gitea connection clones through koinon-gateway's egress listener; its sandbox holds no credential (#1086 part C2)", Label("egress"), func(ctx SpecContext) {
+		egressCloneE2E(ctx, c, org)
 	})
 
 	It("8. (not part of the quickstart, after its time check) explicit thinking on and off crosses the real gateway to the strict fake model (rc.7, old issue 240, old issue 316)", func(ctx SpecContext) {
@@ -1110,6 +1141,15 @@ var _ = Describe("the quickstart", Ordered, func() {
 	// runs, and the spec puts the config back at its end (the story suite runs next in the same cluster).
 	It("8. a harness image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
 		t.begin()
+		if substrateDriver() {
+			// The Substrate driver refuses an image that is not pinned by digest before any pull (internal/execution/substrate/
+			// imageref.go RequireDigest, #1192), so a tag-only broken image fails at a different place than this spec checks. The
+			// pod reason (ErrImagePull) and the sandbox observer metrics are OpenShell-only: sandboxObserver is off on this leg and
+			// the driver reports the cause from the actor (phase.go Observe). Whether the run.failed payload then carries
+			// sandboxCause image_pull on Substrate is not proven. Exit condition: a digest-pinned missing image on Substrate is
+			// proven to reach the sandbox wait with the cause image_pull; then port this spec (issue #1534 keeps it open).
+			Skip("issue #1534: the missing-image spec needs a Substrate form (digest-pinned broken image, actor cause); not ported yet")
+		}
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
 		kc := func(args ...string) string {
@@ -1564,3 +1604,10 @@ func leakGuardURLInTask(ctx context.Context, c *e2eclient.Client, admin func(con
 	Expect(fetches()[before:]).To(HaveLen(1))
 	Expect(refusedURLRule() - refusedBefore).To(BeNumerically("==", 1))
 }
+
+// substrateWorkerNamespace is the chart's default execution.substrate.workerNamespace.
+const substrateWorkerNamespace = "ate-workers"
+
+// substrateDriver is true when test/e2e/run.sh runs with DRIVER=substrate (issue #1091): the OpenShell objects that some
+// steps read do not exist then, and each such step reads its Substrate form instead.
+func substrateDriver() bool { return os.Getenv("DRIVER") == "substrate" }

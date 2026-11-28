@@ -55,6 +55,8 @@ var crossOrgQueries = map[string]string{
 	"api_tokens.sql:GetAPITokenByPrefix":                    "admin API: authenticates a bearer token, which names its org only after it is looked up",
 	"connections.sql:ListConnectionsToMigrate":              "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
 	"connections.sql:ListOrgsWithCodeHostConnections":       "the code-host scope refresh: finds every org that has a live code-host connection, to re-read its repositories' visibility",
+	"usage.sql:PlatformUsageByDay":                          "platform admins: the ledger of every org by day, org and model, read per org through the (org_id, occurred_at) index (issue #1268)",
+	"usage.sql:PlatformUsageRunsSince":                      "platform admins: the runs of every org created since a time, counted per org through the (org_id, created_at) index (issue #1268)",
 	"budget.sql:ListOrgBudgetSummaries":                     "platform admins: lists every org with its cap, ceiling and spend",
 	"catalog.sql:ListModelsToRederiveFormat":                "startup: finds the models whose format follows the table, in every org, to re-derive them (ADR 0069)",
 	"platform_prices.sql:ListPriceModelNames":               "the price refresh: the model names of every org, no org, provider or secret, to diff a public price source against the catalog (ADR 0098)",
@@ -84,11 +86,12 @@ var crossOrgQueries = map[string]string{
 	"audit.sql:ListInstallAnchorHeadsInRange":               "the install export: the org heads each anchor commits to as stream lines; install_audit_anchor_heads.org_id names the anchored org, no org owns the rows",
 	"audit.sql:CheckAnchoredHeads":                          "the audit verifier: compares one anchor's org heads with each org chain (ADR 0100 decision 4.1)",
 	"sandboxes.sql:CountAgentSandboxesByState":              "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
-	"sandboxes.sql:ListAgentsForUnmarked":                   "koinon-reconciler unmarked list (operator, read-only): each live org's agents with status and harness, to give every unmarked OpenShell object of the install a reason",
-	"sandboxes.sql:ListOrgWorkspacesForUnmarked":            "koinon-reconciler unmarked list (operator, read-only): which org of this database owns each OpenShell workspace of the install",
 	"agents.sql:ListActiveAgentVersionsAllOrgs":             "the trigger scheduler: lists the active triggers of every live org's active agents; read-only",
 	"agents.sql:ListAgentActivationsAllOrgs":                "the schedule trigger: when each live org's active agent version was activated; read-only",
 	"trace.sql:LowerOrgTraceLevels":                         "platform ceiling: lowers every org above the new ceiling in one statement; returns the changed orgs for the audit log",
+	"templates.sql:UpsertTemplate":                          "startup sync: records a platform template (org_id NULL) shipped in the binary",
+	"templates.sql:GetTemplate":                             "reads a template by the ID an agent of the caller's org holds; a request's template ID goes through GetTemplateForOrg",
+	"templates.sql:ListCurrentTemplates":                    "lists the platform templates (org_id IS NULL), shared by every org",
 	"auth.sql:ListEffectiveMemberships":                     "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
@@ -98,7 +101,8 @@ var _ = Describe("org scoping", func() {
 		for _, table := range []string{"agents", "agent_versions", "tasks", "task_events", "runs", "run_events"} {
 			Expect(owned).To(HaveKey(table), "expected %s to be detected as org-owned; detection is broken", table)
 		}
-		Expect(owned).NotTo(HaveKey("templates"), "templates is not org-owned; detection is broken")
+		// templates has a nullable org_id since 00110: platform rows have none, org templates have one.
+		Expect(owned).To(HaveKey("templates"), "templates gained org_id in 00110; detection is broken")
 		Expect(owned).NotTo(HaveKey("orgs"), "orgs is not org-owned; detection is broken")
 
 		files, err := filepath.Glob("*.sql")
@@ -156,6 +160,8 @@ var _ = Describe("org scoping", func() {
 	)
 })
 
+var addOrgColumnRE = regexp.MustCompile(`(?is)ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+org_id\b`)
+
 var renameTableRE = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(\w+)\s+RENAME\s+TO\s+(\w+)`)
 
 func orgOwnedTables(dir string) map[string]bool {
@@ -170,6 +176,10 @@ func orgOwnedTables(dir string) map[string]bool {
 			if orgColumnRE.MatchString(m[2]) {
 				owned[strings.ToLower(m[1])] = true
 			}
+		}
+		// A table that gains its owner column later (00110 gives templates an org_id).
+		for _, m := range addOrgColumnRE.FindAllStringSubmatch(string(data), -1) {
+			owned[strings.ToLower(m[1])] = true
 		}
 		// A renamed table keeps its owner column (migration 00020 renames tickets to tasks).
 		for _, m := range renameTableRE.FindAllStringSubmatch(string(data), -1) {

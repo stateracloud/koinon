@@ -64,17 +64,32 @@ func (g *Gateway) Handler() http.Handler {
 			refuse(w, http.StatusUnauthorized, "refused: no gateway key")
 			return
 		}
+		token = strings.TrimSpace(token)
 		snap := g.snap.Load()
-		key, ok := snap.authenticate(strings.TrimSpace(token))
-		if !ok {
-			refuse(w, http.StatusUnauthorized, "refused: unknown gateway key")
-			return
+		var agent gateway.AgentRef
+		if g.o.Actors != nil && !gateway.IsGatewayKey(token) {
+			// A Substrate guest: atenet-egress put the actor JWT here (issue #1489). No fallback to a key.
+			a, refusal := gateway.IdentifyActor(g.o.Actors, token)
+			if refusal != nil {
+				g.o.Logger.Info("refused an MCP request: actor token", "reason", refusal.Reason, "status", refusal.Status)
+				refuseActor(w, refusal)
+				return
+			}
+			agent = a
+		} else {
+			key, ok := snap.authenticate(token)
+			if !ok {
+				refuse(w, http.StatusUnauthorized, "refused: unknown gateway key")
+				return
+			}
+			agent = key.Agent
 		}
-		// The agent's request headers stop here: the upstream requests are built by the SDK client.
-		rctx := context.WithValue(context.WithValue(r.Context(), agentKey{}, key.Agent), reqKey{}, snap)
+		// The agent's request headers stop here: the upstream requests are built by the SDK client, so the
+		// actor JWT never goes upstream.
+		rctx := context.WithValue(context.WithValue(r.Context(), agentKey{}, agent), reqKey{}, snap)
 		// The logs, spans and audit rows of the request belong to the agent's org: they are scrubbed with the
 		// credential values of that org only (#1174).
-		rctx = WithScrubOrg(rctx, key.Agent.Org)
+		rctx = WithScrubOrg(rctx, agent.Org)
 		mcpHandler.ServeHTTP(w, r.WithContext(rctx))
 	})
 }
@@ -98,6 +113,16 @@ func keyInOtherHeader(h http.Header) bool {
 func refuse(w http.ResponseWriter, status int, text string) {
 	w.Header().Set(gateway.DoNotRetryHeader, gateway.DoNotRetryValue)
 	http.Error(w, text, status)
+}
+
+// refuseActor answers an actor JWT that is not accepted. A 503 (no issuer keys) is not final.
+func refuseActor(w http.ResponseWriter, r *gateway.ActorRefusal) {
+	if r.Final {
+		refuse(w, r.Status, r.Text)
+		return
+	}
+	w.Header().Set("Retry-After", "5")
+	http.Error(w, r.Text, r.Status)
 }
 
 // serverFor builds the server of one request. It registers no tool and no prompt: its middleware

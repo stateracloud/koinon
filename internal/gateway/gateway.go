@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/gateway/actortoken"
 	"github.com/stateracloud/koinon/internal/gateway/route"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
@@ -660,6 +661,55 @@ type EgressState struct {
 	// EgressCredentials say where the gateway reads each credential that EgressRoutes name (#1086
 	// part C): a sealed file, never a value. A route whose credential is not here is refused.
 	EgressCredentials []route.Credential
+	// EgressActors are Koinon's record of the Agent Substrate actors of sandboxes that are not deleted or
+	// archived (issue #1386, ADR 0120 amendment item 5). The gateway finds the org and the agent of an actor
+	// JWT here (ActorLookup), never in the token. They hold names only, no token.
+	EgressActors []EgressActor
+}
+
+// EgressActor is one Agent Substrate actor: the workspace (atespace), the actor name and the UID that
+// Substrate gave it, and the org slug, agent and run it acts for. Run is empty when the State names no run.
+type EgressActor struct {
+	Atespace, Name, UID string
+	Org, Agent, Run     string
+}
+
+// ActorLookup returns the actors of e by their Substrate identity, for the gateway's check of an actor
+// JWT. A bad row is skipped and reported, and the other rows stay (issue #1485): an actor that does not
+// name its workspace, name, UID, org and agent is skipped, and an identity that two rows give is dropped
+// with all its rows, because the gateway cannot know which row is right. The result holds the good actors
+// also when the error is not nil. The error joins one error for each bad row; the caller logs it. A token
+// of a skipped actor finds no actor and is refused (fail closed for that actor only).
+func (e EgressState) ActorLookup() (map[actortoken.SubstrateActor]actortoken.Actor, error) {
+	out := make(map[actortoken.SubstrateActor]actortoken.Actor, len(e.EgressActors))
+	var errs []error
+	ambiguous := map[actortoken.SubstrateActor]bool{}
+	for _, a := range e.EgressActors {
+		k := actortoken.SubstrateActor{Atespace: a.Atespace, Name: a.Name, UID: a.UID}
+		if k.Atespace == "" || k.Name == "" || k.UID == "" {
+			errs = append(errs, fmt.Errorf("gateway: egress actor %q of workspace %q names no workspace, name or UID: skipped", a.Name, a.Atespace))
+			continue
+		}
+		actor := actortoken.Actor{Org: a.Org, Agent: a.Agent, Run: a.Run}
+		if err := actor.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("gateway: egress actor %s/%s: %w: skipped", a.Atespace, a.Name, err))
+			// A second claim on a complete identity makes it ambiguous, also when this row is the bad one.
+			delete(out, k)
+			ambiguous[k] = true
+			continue
+		}
+		if ambiguous[k] {
+			continue
+		}
+		if _, dup := out[k]; dup {
+			delete(out, k)
+			ambiguous[k] = true
+			errs = append(errs, fmt.Errorf("gateway: egress actor %s/%s (uid %s) is in the State twice: dropped", a.Atespace, a.Name, a.UID))
+			continue
+		}
+		out[k] = actor
+	}
+	return out, errors.Join(errs...)
 }
 
 // ModelConfig is what the model path is handed: the keys and the model half of a State. A driver

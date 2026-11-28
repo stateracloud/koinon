@@ -61,7 +61,7 @@ function transport(opts: Opts = {}) {
 describe('Inbox chat direct messages', () => {
   it('starts a thread with an agent that takes direct messages and opens it', async () => {
     const sends: SendDirectMessageRequest[] = []
-    renderApp(transport({ sends }), '/')
+    renderApp(transport({ sends }), '/inbox')
     const form = await screen.findByRole('region', { name: 'New thread' })
     await userEvent.type(within(form).getByRole('textbox', { name: 'Message to agent' }), 'What is on fire?')
     await userEvent.click(within(form).getByRole('button', { name: 'Start thread' }))
@@ -71,7 +71,7 @@ describe('Inbox chat direct messages', () => {
   })
 
   it('says that an agent without a direct-message trigger takes no messages, and offers no composer', async () => {
-    renderApp(transport(), '/')
+    renderApp(transport(), '/inbox')
     const form = await screen.findByRole('region', { name: 'New thread' })
     await userEvent.click(within(form).getByRole('combobox', { name: 'Send to' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Quiet bot (no direct messages)' }))
@@ -82,7 +82,7 @@ describe('Inbox chat direct messages', () => {
   it('replies in a thread through the same task, and the thread view shows its state', async () => {
     const sends: SendDirectMessageRequest[] = []
     const appends: AppendMessageRequest[] = []
-    renderApp(transport({ sends, appends }), '/')
+    renderApp(transport({ sends, appends }), '/inbox')
     const chat = await screen.findByRole('region', { name: 'Thread: What changed today?' })
     expect(within(chat).getByText('Working')).toBeInTheDocument()
     await userEvent.type(within(chat).getByRole('textbox', { name: 'Message' }), 'And yesterday?')
@@ -94,7 +94,7 @@ describe('Inbox chat direct messages', () => {
 
   it('reopens a completed thread with a reply, and tells the person so', async () => {
     const sends: SendDirectMessageRequest[] = []
-    renderApp(transport({ sends }), '/')
+    renderApp(transport({ sends }), '/inbox')
     const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Summarise the incident/ }))
     const chat = await screen.findByRole('region', { name: 'Thread: Summarise the incident' })
@@ -108,7 +108,7 @@ describe('Inbox chat direct messages', () => {
   it('keeps canceled threads out of the chat, and plain tasks on the task message path', async () => {
     const sends: SendDirectMessageRequest[] = []
     const appends: AppendMessageRequest[] = []
-    renderApp(transport({ sends, appends }), '/')
+    renderApp(transport({ sends, appends }), '/inbox')
     const list = await screen.findByRole('list', { name: 'Threads' })
     expect(within(list).queryByText(/Dropped thread/)).not.toBeInTheDocument()
     await userEvent.click(within(list).getByRole('button', { name: /Plain task of the chat agent/ }))
@@ -120,7 +120,7 @@ describe('Inbox chat direct messages', () => {
   })
 
   it('shows that the agent no longer takes messages in its thread', async () => {
-    renderApp(transport(), '/')
+    renderApp(transport(), '/inbox')
     const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Thread of an agent that stopped/ }))
     const chat = await screen.findByRole('region', { name: /Thread: Thread of an agent/ })
@@ -129,7 +129,7 @@ describe('Inbox chat direct messages', () => {
   })
 
   it('asks for the pending decision instead of offering a reply while the task is parked', async () => {
-    renderApp(transport(), '/')
+    renderApp(transport(), '/inbox')
     const list = await screen.findByRole('list', { name: 'Threads' })
     await userEvent.click(within(list).getByRole('button', { name: /Waiting for your pick/ }))
     const chat = await screen.findByRole('region', { name: 'Thread: Waiting for your pick' })
@@ -139,7 +139,7 @@ describe('Inbox chat direct messages', () => {
 
   it('resends a failed message under the same message ID', async () => {
     const sends: SendDirectMessageRequest[] = []
-    renderApp(transport({ sends, failFirstSend: true }), '/')
+    renderApp(transport({ sends, failFirstSend: true }), '/inbox')
     const form = await screen.findByRole('region', { name: 'New thread' })
     await userEvent.type(within(form).getByRole('textbox', { name: 'Message to agent' }), 'Hello?')
     await userEvent.click(within(form).getByRole('button', { name: 'Start thread' }))

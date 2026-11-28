@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ApprovalService, ScopeKind, type ApprovalScope } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { describeError } from '@/lib/api-error'
 import { targetRepo } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
@@ -37,7 +37,7 @@ export function AgentApprovalScopes({ agentId, canRevoke }: { agentId: string; c
         <p role="status">Loading scoped approvals…</p>
       ) : list.isError ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not load scoped approvals: {ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not load scoped approvals: {describeError(list.error).message}</AlertDescription>
         </Alert>
       ) : scopes.length === 0 ? (
         <p className="text-muted-foreground">None. Every call that needs approval asks first.</p>
@@ -71,7 +71,7 @@ export function AgentApprovalScopes({ agentId, canRevoke }: { agentId: string; c
       )}
       {revoke.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>Could not revoke: {ConnectError.from(revoke.error).rawMessage}</AlertDescription>
+          <AlertDescription>Could not revoke: {describeError(revoke.error).message}</AlertDescription>
         </Alert>
       )}
     </section>

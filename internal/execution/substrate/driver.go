@@ -5,7 +5,7 @@
 // [execution.Egress] half, because Substrate's atenet is default-deny and L7 rules and credentials
 // belong to the Koinon gateway (ADR 0097).
 //
-// The mapping, with the version of Substrate it was written against (v1.0.0, protos in
+// The mapping, with the version of Substrate it was written against (v1.0.1, protos in
 // third_party/substrate):
 //
 //   - a workspace is an atespace (ADR 0002: an org is an atespace);
@@ -14,8 +14,8 @@
 //   - StopSandbox and SuspendSandbox are one operation, SuspendActor: Substrate has no stopped
 //     state that is not a suspended one. Both report [execution.PhaseSuspended];
 //   - Exec has no control-API call (upstream issue 185), so it runs over the in-guest
-//     ProcessService, and Upload over FileSystemService, both through the atenet router with the
-//     header ate-target-actor;
+//     ProcessService, and so does Upload (a tar stream on the stdin of a process), both through the
+//     atenet router with the header ate-target-actor. The guest has no FileSystemService (#1478);
 //   - a snapshot is a Substrate tag on a suspended actor, with a Koinon-side SHA-256 digest that
 //     RestoreSandbox verifies (Substrate has no digest of its own; upstream T-25).
 //
@@ -35,11 +35,13 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -54,8 +56,19 @@ import (
 // "<atespace>/<actor>" (Substrate env client, internal/ate TargetActorHeader).
 const TargetActorHeader = "ate-target-actor"
 
+// Provisioner creates the org atespace and its access policy. The caller of the driver holds no right to
+// create an atespace (ADR 0128): only the provisioner does.
+type Provisioner interface {
+	// EnsureAtespace makes sure the atespace name exists and that the caller may use it. It is idempotent.
+	EnsureAtespace(ctx context.Context, name string) error
+}
+
 // Config tunes the driver. The zero value is usable: every field has a default.
 type Config struct {
+	// Provisioner, when set, creates the atespace of an org. EnsureWorkspace then never calls CreateAtespace:
+	// the reconciler holds no global owner role (ADR 0128). Nil keeps the old behaviour, for a caller that is
+	// itself a global owner (a test, a single-principal lab).
+	Provisioner Provisioner
 	// PollInterval is how long the driver waits between reads of an actor's state while it waits
 	// for it to run. Default 250 ms; the wait backs off to eight times that.
 	PollInterval time.Duration
@@ -65,9 +78,16 @@ type Config struct {
 	// GuestReadyTimeout is how long Exec and Upload retry a guest that is not reachable yet. An
 	// actor is running before its guest daemon listens. Default 30 s.
 	GuestReadyTimeout time.Duration
+	// FrontCheckTimeout is how long CheckFront waits for the guest front to answer. The front is a local
+	// process of the guest: a longer wait is a front that does not run. Default 5 s.
+	FrontCheckTimeout time.Duration
 	// SnapshotStorageLocation is the ActorTemplate's snapshot storage location, as Substrate's
 	// install names it. Empty leaves the template's field unset, which Substrate's default fills.
 	SnapshotStorageLocation string
+	// GoldenSnapshots turns on Substrate's golden snapshot of each template. The zero value is off:
+	// the template sets GOLDEN_SNAPSHOT_MODE_DISABLED (issue #1492). A golden clone copies memory from
+	// one sandbox to another, which ADR 0120 section 5.2 forbids; true is an admin's exception to it.
+	GoldenSnapshots bool
 	// SnapshotFidelity is the fidelity templates ask for. The zero value is memory, which D5 wants
 	// (disk and memory from the first release).
 	SnapshotFidelity ateapiv1.SnapshotFidelity
@@ -109,6 +129,16 @@ type Config struct {
 	// GuestVerifyKeys are more public keys that templates give the guest front next to the signer's,
 	// for a key rotation. They are part of the template hash.
 	GuestVerifyKeys []ed25519.PublicKey
+	// GatewayRoutes are the gateway listeners that every guest calls: the model and MCP listeners (issue
+	// #1444). The driver writes them as the actor's egress policy before every create, restore, start
+	// and resume, and the actor reaches nothing else. Required: without them each of these calls fails
+	// with [execution.ErrFailedPrecondition]. Check them with [ValidateGatewayRoutes].
+	GatewayRoutes []GatewayRoute
+	// CodeHostEgressRoute is the gateway's egress listener, or nil when the install has none. Only an
+	// actor whose [execution.GatewayAccess] has CodeHostEgress gets it in its policy
+	// ([Driver.SetGatewayAccess]). It must not be one of GatewayRoutes: then every actor would reach
+	// it. Check it with [ValidateGatewayRoutes].
+	CodeHostEgressRoute *GatewayRoute
 }
 
 func (c Config) withDefaults() Config {
@@ -120,6 +150,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.GuestReadyTimeout <= 0 {
 		c.GuestReadyTimeout = 30 * time.Second
+	}
+	if c.FrontCheckTimeout <= 0 {
+		c.FrontCheckTimeout = 5 * time.Second
 	}
 	if c.SnapshotFidelity == ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED {
 		c.SnapshotFidelity = ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY
@@ -137,20 +170,35 @@ func (c Config) withDefaults() Config {
 type Driver struct {
 	control ateapiv1.ControlClient
 	process ateenvv1alpha.ProcessServiceClient
-	files   ateenvv1alpha.FileSystemServiceClient
 	router  grpc.ClientConnInterface // signs every call (signedConn)
-	cfg     Config
-	closers []io.Closer
-	lineage lineages
+	// routerState reports the state of the router connection, or is nil when the connection has none to
+	// report (a test double). routerDown reads it.
+	routerState func() connectivity.State
+	// routerSeen is set once the router connection was READY in this process. After that, a connection
+	// failure is an outage that may pass, not an install error.
+	routerSeen atomic.Bool
+	// routerRefusal returns the identity refusal (TLS alert, x509 error) that a router call error carries, or
+	// nil. It is nil when the connection is not a Dial connection.
+	routerRefusal func(error) error
+	cfg           Config
+	closers       []io.Closer
+	lineage       lineages
 
 	mu    sync.Mutex
 	gates map[key]*gate
 	// owed holds the actors that SnapshotSandbox suspended and could not resume. A retry of the
 	// snapshot resumes them, because the seam says the sandbox keeps running.
 	owed map[key]bool
+	// sealOwed holds the actors that a repoint changed and that did not get the synchronous suspend of the new
+	// template yet (issue #1482). The next resume takes it. The mark lives in memory: a restart of the driver loses it.
+	sealOwed map[key]bool
 	// tiers caches the tier of a template by atespace and name. A template name is a hash of its
 	// content, so the entry never goes stale.
 	tiers map[key]harness.Tier
+	// access holds the gateway access the reconciler set for each sandbox (SetGatewayAccess). It is not
+	// stored anywhere else: a sandbox without an entry gets the zero access, so the driver fails closed
+	// after a restart until the reconciler sets it again.
+	access map[key]execution.GatewayAccess
 
 	resuspends *prometheus.CounterVec
 }
@@ -160,6 +208,8 @@ var (
 	_ execution.Compute     = (*Driver)(nil)
 	_ execution.Suspender   = (*Driver)(nil)
 	_ execution.Snapshotter = (*Driver)(nil)
+
+	_ execution.GatewayAccessSetter = (*Driver)(nil)
 )
 
 // key names an actor.
@@ -177,13 +227,17 @@ func New(control, router grpc.ClientConnInterface, cfg Config) *Driver {
 		cfg:        cfg.withDefaults(),
 		gates:      map[key]*gate{},
 		owed:       map[key]bool{},
+		sealOwed:   map[key]bool{},
 		tiers:      map[key]harness.Tier{},
+		access:     map[key]execution.GatewayAccess{},
 		lineage:    lineages{m: map[string]lineage{}},
 		resuspends: newResuspends(),
 	}
 	d.router = signedConn{cc: router, d: d}
+	if cc, ok := router.(interface{ GetState() connectivity.State }); ok {
+		d.routerState = cc.GetState
+	}
 	d.process = ateenvv1alpha.NewProcessServiceClient(d.router)
-	d.files = ateenvv1alpha.NewFileSystemServiceClient(d.router)
 	return d
 }
 
@@ -219,6 +273,23 @@ func (d *Driver) setOwed(k key, owed bool) {
 	}
 }
 
+// setSealOwed records whether a repoint owes k a synchronous suspend of its new template.
+func (d *Driver) setSealOwed(k key, owed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if owed {
+		d.sealOwed[k] = true
+	} else {
+		delete(d.sealOwed, k)
+	}
+}
+
+func (d *Driver) isSealOwed(k key) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sealOwed[k]
+}
+
 func (d *Driver) isOwed(k key) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -245,12 +316,21 @@ func ref(atespace, name string) *ateapiv1.ObjectRef {
 	return &ateapiv1.ObjectRef{Atespace: atespace, Name: name}
 }
 
-// EnsureWorkspace implements execution.Compute. Substrate v1.0.0 gives an atespace no labels, so
+// EnsureWorkspace implements execution.Compute. Substrate v1.0.1 gives an atespace no labels, so
 // labels are dropped and the returned workspace has none.
 func (d *Driver) EnsureWorkspace(ctx context.Context, name string, _ map[string]string) (execution.Workspace, error) {
 	const op = "EnsureWorkspace"
 	as, err := d.control.GetAtespace(ctx, &ateapiv1.GetAtespaceRequest{Atespace: ref("", name)})
-	if isCode(err, codeNotFound) {
+	if p := d.cfg.Provisioner; p != nil {
+		// A caller without a role on a missing atespace gets PermissionDenied, not NotFound (the check runs
+		// before the handler), and one whose policy is not written yet gets it too. Both go to the provisioner.
+		if isCode(err, codeNotFound) || isCode(err, codes.PermissionDenied) {
+			if perr := p.EnsureAtespace(ctx, name); perr != nil {
+				return execution.Workspace{}, fail(op, execution.ErrUnavailable, "the provisioner could not ensure atespace %s: %v", name, perr)
+			}
+			as, err = d.control.GetAtespace(ctx, &ateapiv1.GetAtespaceRequest{Atespace: ref("", name)})
+		}
+	} else if isCode(err, codeNotFound) {
 		as, err = d.control.CreateAtespace(ctx, &ateapiv1.CreateAtespaceRequest{
 			Atespace: &ateapiv1.Atespace{Metadata: &ateapiv1.ResourceMetadata{Name: name}},
 		})
@@ -277,6 +357,9 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 	if err := d.requireSigner(op); err != nil {
 		return execution.Sandbox{}, err
 	}
+	if err := d.requireGatewayRoutes(op); err != nil {
+		return execution.Sandbox{}, err
+	}
 	tmpl, err := renderTemplate(workspace, spec, d.cfg)
 	if err != nil {
 		return execution.Sandbox{}, fail(op, execution.ErrInvalid, "%v", err)
@@ -291,11 +374,22 @@ func (d *Driver) CreateSandbox(ctx context.Context, workspace string, spec execu
 		Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
 		ActorTemplate: ref(workspace, tmpl.GetMetadata().GetName()),
 	}})
+	created := err == nil
 	if isCode(err, codeAlreadyExists) {
 		actor, err = d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, spec.Name)})
 	}
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
+	}
+	// Substrate creates an actor suspended (v1.0.0), and the Compute contract says a created sandbox
+	// becomes ready: the driver resumes the actor it made (issue #1092). A sandbox that already
+	// existed keeps its state; the reconciler stops and starts it.
+	if created && actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED {
+		return d.resume(ctx, op, workspace, spec.Name)
+	}
+	// An actor that already exists gets the policy too: it may come from a driver without issue #1444.
+	if err := d.ensureEgressPolicy(ctx, op, key{workspace, spec.Name}); err != nil {
+		return execution.Sandbox{}, err
 	}
 	return sandboxFrom(workspace, actor), nil
 }
@@ -379,6 +473,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 		d.forget(k)
 		d.setOwed(k, false)
 		d.forgetLineage(k)
+		d.forgetAccess(k)
 		return execution.DeleteAbsent, nil
 	case err != nil:
 		return "", execution.GRPCError(op, err)
@@ -389,6 +484,7 @@ func (d *Driver) DeleteSandbox(ctx context.Context, workspace, name string) (exe
 	d.forget(k)
 	d.setOwed(k, false)
 	d.forgetLineage(k)
+	d.forgetAccess(k)
 	if actor.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_DELETING {
 		return execution.DeleteAccepted, nil
 	}
@@ -454,7 +550,9 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 		}
 		switch actor.GetStatus().GetState() {
 		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
-			return sandboxFrom(workspace, actor), sent, nil
+			sb := sandboxFrom(workspace, actor)
+			sb.NewSnapshot = true
+			return sb, sent, nil
 		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		default:
 			return execution.Sandbox{}, sent, fail(op, execution.ErrFailedPrecondition, "sandbox %s is %s after suspend", k, phaseOf(actor))
@@ -476,7 +574,12 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 // DrainTimeout. It reads the control API only, which never resumes the actor. When the bound ends,
 // during a read or between two, it fails with ErrUnavailable.
 func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor, error) {
-	ctx, cancel := context.WithTimeout(ctx, d.cfg.DrainTimeout)
+	return d.settledWithin(ctx, op, k, d.cfg.DrainTimeout)
+}
+
+// settledWithin is settled with another bound.
+func (d *Driver) settledWithin(ctx context.Context, op string, k key, bound time.Duration) (*ateapiv1.Actor, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	for {
 		actor, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(k.atespace, k.actor)})
@@ -499,13 +602,75 @@ func (d *Driver) settled(ctx context.Context, op string, k key) (*ateapiv1.Actor
 	}
 }
 
+// resume writes the actor's egress policy and then resumes the actor. When the policy write fails, the
+// actor stays suspended: it does not run with a policy the driver did not write (issue #1444).
 func (d *Driver) resume(ctx context.Context, op, workspace, name string) (execution.Sandbox, error) {
-	resp, err := d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+	if err := d.ensureEgressPolicy(ctx, op, key{workspace, name}); err != nil {
+		return execution.Sandbox{}, err
+	}
+	k := key{workspace, name}
+	// An actor with no snapshot boots for the first time. A revert of it would give an empty home, so
+	// it gets one synchronous suspend as soon as it runs (issue #1481, decision 8).
+	first := d.isSealOwed(k)
+	if before, err := d.control.GetActor(ctx, &ateapiv1.GetActorRequest{Actor: ref(workspace, name)}); err != nil {
+		// Without this read the driver cannot tell a first boot. The actor then runs without the seal, and a
+		// revert of it would give an empty home: say so.
+		d.cfg.Logger.Warn("substrate: could not read the actor to detect a first boot; no seal is taken", "op", op, "sandbox", k.String(), "err", err)
+	} else {
+		first = first || (before.GetStatus().GetState() == ateapiv1.ActorState_ACTOR_STATE_SUSPENDED && len(before.GetStatus().GetSnapshots()) == 0)
+	}
+	resp, err := d.retryResume(ctx, workspace, name)
 	if err != nil {
 		return execution.Sandbox{}, execution.GRPCError(op, err)
 	}
-	d.setOwed(key{workspace, name}, false)
+	d.setOwed(k, false)
+	if first && resp.GetResumed() {
+		if sb, ok := d.sealFirstBoot(ctx, op, k); ok {
+			d.setSealOwed(k, false)
+			return sb, nil
+		}
+	}
 	return sandboxFrom(workspace, resp.GetActor()), nil
+}
+
+// retryResume sends ResumeActor, again with a growing wait while Substrate answers ResourceExhausted.
+func (d *Driver) retryResume(ctx context.Context, workspace, name string) (resp *ateapiv1.ResumeActorResponse, err error) {
+	err = d.retryExhausted(ctx, func() error {
+		var rerr error
+		resp, rerr = d.control.ResumeActor(ctx, &ateapiv1.ResumeActorRequest{Actor: ref(workspace, name)})
+		return rerr
+	})
+	return resp, err
+}
+
+// sealFirstBoot waits for a first boot to finish, takes one synchronous suspend, and resumes the actor.
+// It is best effort. ok is false when nothing changed (the boot did not finish in GuestReadyTimeout, the
+// actor crashed, or the suspend failed): the caller then reports the actor as the first resume left it.
+// When ok is true, sb is the state the actor really has. That is the resumed actor, or the suspended one
+// when the second resume failed (it holds its snapshot, and the next resume starts it). An actor that is
+// not sealed reverts to an empty home, so every failure here is logged.
+func (d *Driver) sealFirstBoot(ctx context.Context, op string, k key) (sb execution.Sandbox, ok bool) {
+	actor, err := d.settledWithin(ctx, op, k, d.cfg.GuestReadyTimeout)
+	if err != nil || actor.GetStatus().GetState() != ateapiv1.ActorState_ACTOR_STATE_RUNNING {
+		d.cfg.Logger.Warn("substrate: the first boot did not reach running; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	sealed, _, err := d.suspend(ctx, op, k.atespace, k.actor)
+	if err != nil {
+		d.cfg.Logger.Warn("substrate: the suspend after the first boot failed; the actor has no snapshot", "op", op, "sandbox", k.String(), "err", err)
+		return execution.Sandbox{}, false
+	}
+	resp, err := d.retryResume(ctx, k.atespace, k.actor)
+	if err != nil {
+		// The actor is suspended and holds its snapshot: report that, so the caller does not record a
+		// running sandbox. The next resume starts it.
+		d.cfg.Logger.Warn("substrate: the resume after the first suspend failed", "op", op, "sandbox", k.String(), "err", err)
+		d.setOwed(k, true)
+		return sealed, true
+	}
+	out := sandboxFrom(k.atespace, resp.GetActor())
+	out.NewSnapshot = sealed.NewSnapshot
+	return out, true
 }
 
 // requireRunning reads the actor from the control API, which never resumes it, and fails unless it
@@ -540,4 +705,36 @@ func (d *Driver) requireSigner(op string) error {
 // fail builds an *execution.Error of a given kind.
 func fail(op string, kind error, format string, args ...any) error {
 	return &execution.Error{Op: op, Kind: kind, Err: fmt.Errorf(format, args...)}
+}
+
+// noteRouter records that the router connection is READY. signedConn calls it before and after every call.
+func (d *Driver) noteRouter() {
+	if d.routerState != nil && d.routerState() == connectivity.Ready {
+		d.routerSeen.Store(true)
+	}
+}
+
+// routerDown maps an Unavailable error of a router call that never reached a guest to
+// [execution.ErrUnreachable]; it returns nil for any other error. A guest that does not listen yet answers through a
+// working connection, which is why the callers retry Unavailable. A connection that has never been READY in
+// this process and that the router or the driver refused on identity (a TLS alert, a client certificate the
+// router refuses, a router certificate the driver does not trust) is in TRANSIENT_FAILURE and no retry fixes
+// it, so the caller fails with the TLS error at once instead of waiting out the guest's start-up time
+// (issue #1446). Connection refused and timeouts stay Unavailable, also in a new agentd process: a router
+// outage that passes must not fail the runs that this process picks up (issue #1454). Once the connection has
+// been READY, a failure is an outage (a router rollout, an eviction, a node drain): it stays Unavailable and
+// the callers retry and resume.
+//
+// Known limit: the state check is a sample, not a watcher. A connection that goes READY and fails inside one
+// call is still seen as a startup failure if the failure is an identity refusal.
+func (d *Driver) routerDown(op string, err error) error {
+	if status.Code(err) != codes.Unavailable || d.routerState == nil || d.routerRefusal == nil ||
+		d.routerState() != connectivity.TransientFailure || d.routerSeen.Load() {
+		return nil
+	}
+	refused := d.routerRefusal(err)
+	if refused == nil {
+		return nil
+	}
+	return &execution.Error{Op: op, Kind: execution.ErrUnreachable, Err: fmt.Errorf("TLS identity check with the atenet router failed: %w", refused)}
 }

@@ -24,10 +24,6 @@ const (
 	errKindSandbox         = "sandbox"          // converging an agent's sandbox, its provider record or its harness profile failed
 )
 
-// unmarkedKinds are the label values of koinon_openshell_unmarked_objects and
-// koinon_openshell_unmarked_objects_waiting_for_agent.
-var unmarkedKinds = []string{"sandbox", "provider", "profile"}
-
 // sandboxStates are the label values of koinon_reconciler_sandboxes: the enum of the
 // agent_sandboxes.state column.
 var sandboxStates = []store.SandboxState{
@@ -49,15 +45,8 @@ type Metrics struct {
 	GatewayConfigRejected prometheus.Gauge
 	Sandboxes             *prometheus.GaugeVec
 	AgentsHeldBack        prometheus.Gauge
-	// UnmarkedObjects counts the OpenShell objects in this install's workspaces without the install
-	// mark and without a known owner, from the gateway at most once per resync interval, by kind: every
-	// reason of the unmarked list except waits-for-agent. UnmarkedWaiting counts the waits-for-agent
-	// ones from the same list (issue 511). UnmarkedStale is 1 until a list has succeeded completely
-	// and after one has failed (both gauges then keep the last good values).
-	UnmarkedObjects *prometheus.GaugeVec
-	UnmarkedWaiting *prometheus.GaugeVec
-	UnmarkedStale   prometheus.Gauge
-	SandboxRepairs  prometheus.Counter
+	SandboxRepairs        prometheus.Counter
+	SandboxRepoints       *prometheus.CounterVec
 	// SandboxCreationsHeld counts creations deferred by an org's creation rate (issue #27). No org label (ADR 0023).
 	SandboxCreationsHeld prometheus.Counter
 	AgentsUnhealthy      prometheus.Counter
@@ -73,6 +62,17 @@ type Metrics struct {
 	// GatewayIDMismatch is 1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId,
 	// which leaves the sandbox admission policies matching none of its namespaces (old issue 475).
 	GatewayIDMismatch prometheus.Gauge
+	// MCPProbesSkipped counts the MCP probes held back because a live koinon-gateway copy did not ack the
+	// revision they need, or no stored revision holds their key yet (#1260, #1347). A copy whose apply
+	// keeps failing makes this grow every probe interval.
+	// No labels: no copy, org or revision is a label (ADR 0023).
+	MCPProbesSkipped prometheus.Counter
+	// FrontBreakerOpen is 1 while the fleet breaker of the front check is open (issue #1481): the guest
+	// fronts are silent on more than one worker, or on a large share of the fleet, so no sandbox is
+	// reverted for a silent front. FrontBreakerTrips counts the openings. No labels: no org, agent,
+	// sandbox or worker is a label (ADR 0023).
+	FrontBreakerOpen  prometheus.Gauge
+	FrontBreakerTrips prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered, for tests that
@@ -105,18 +105,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AgentsHeldBack: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_agents_waiting_for_gateway_key", Help: "Agents whose sandbox work was held back in the last pass because the gateway does not serve their new key yet.",
 		}),
-		UnmarkedObjects: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects", Help: "OpenShell sandboxes, providers and profiles in this install's workspaces without its install mark and without a known owner, from the gateway at most once per resync interval, by kind (sandbox, provider or profile): every line of koinon-reconciler unmarked list except waits-for-agent. Read with koinon_openshell_unmarked_objects_stale: 0 for every kind and stale 0 means no object without a known owner is left; waits-for-agent objects are counted apart and do not block (ADR 0106).",
-		}, []string{"kind"}),
-		UnmarkedWaiting: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects_waiting_for_agent", Help: "OpenShell objects in this install's workspaces without its install mark that wait for their agent's status to change (the waits-for-agent lines of koinon-reconciler unmarked list: a draft agent's stopped sandbox and the providers it attaches, an archived agent's retained sandbox), by kind, from the same list as koinon_openshell_unmarked_objects. They do not block the drill gate (ADR 0106).",
-		}, []string{"kind"}),
-		UnmarkedStale: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "koinon_openshell_unmarked_objects_stale", Help: "1 until the list behind koinon_openshell_unmarked_objects and koinon_openshell_unmarked_objects_waiting_for_agent has succeeded completely, after a list that failed (the object gauges then show the last good values), and when ownership is off (no install mark: nothing can be claimed, so nothing is safe); 0 after a good count.",
-		}),
 		SandboxRepairs: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_repairs_total", Help: "Stuck, failed or completed sandboxes deleted to be recreated (ADR 0054).",
 		}),
+		SandboxRepoints: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_reconciler_sandbox_repoints_total",
+			Help: "Sandboxes given a changed spec in place, with the home kept (issue #1482), by result (repointed, refused or resume_failed). A refused repoint goes on with a delete and a restore.",
+		}, []string{"result"}),
 		SandboxCreationsHeld: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_sandbox_creations_held_total", Help: "Reconciler passes that deferred a sandbox creation or start (counted per pass, not per sandbox) because the org was at its sandbox creations per minute (issue #27, ADR 0066).",
 		}),
@@ -135,9 +130,20 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_sandbox_network_policy_errors_total",
 			Help: "Failed Applies of the sandbox default-deny NetworkPolicy (#993), by reason (forbidden, not_found or other).",
 		}, []string{"reason"}),
+		MCPProbesSkipped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_mcp_probes_skipped_total", Help: "MCP probes held back because a live koinon-gateway copy did not ack the State revision they need in time, or no stored revision holds their key yet (the State could not be stored). A count that keeps growing means a copy cannot apply the revision and serves an old one (the copy turns unready after its stale bound), or the State store fails.",
+		}),
 		GatewayIDMismatch: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_openshell_gateway_id_mismatch",
 			Help: "1 while the OpenShell gateway's gateway_id differs from openshell.gatewayId, so the sandbox admission policies match none of its namespaces and fail open, else 0.",
+		}),
+		FrontBreakerOpen: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_reconciler_front_breaker_open",
+			Help: "1 while the guest fronts of the sandboxes are silent on more than one worker, or on a large share of the fleet, in one window, so the reconciler reverts no sandbox for a silent front (a router or network failure is the likely cause), else 0.",
+		}),
+		FrontBreakerTrips: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_reconciler_front_breaker_trips_total",
+			Help: "Times the fleet breaker of the front check opened because guest fronts were silent across the fleet.",
 		}),
 	}
 	for _, k := range []string{"ok", "error"} {
@@ -154,17 +160,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.LimitRangeErrors.WithLabelValues(k)
 		m.NetworkPolicyErrors.WithLabelValues(k)
 	}
-	for _, k := range unmarkedKinds {
-		m.UnmarkedObjects.WithLabelValues(k)
-		m.UnmarkedWaiting.WithLabelValues(k)
-	}
-	m.UnmarkedStale.Set(1) // nothing has been counted yet
 	for _, s := range sandboxStates {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack, m.UnmarkedObjects, m.UnmarkedWaiting, m.UnmarkedStale,
-			m.SandboxRepairs, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch)
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.StateRevisions, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
+			m.SandboxRepairs, m.SandboxRepoints, m.SandboxCreationsHeld, m.AgentsUnhealthy, m.ObserverErrors, m.LimitRangeErrors, m.NetworkPolicyErrors, m.GatewayIDMismatch, m.MCPProbesSkipped,
+			m.FrontBreakerOpen, m.FrontBreakerTrips)
 	}
 	return m
 }

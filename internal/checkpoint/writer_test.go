@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	kfs "github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/object"
 	. "github.com/onsi/ginkgo/v2"
@@ -73,13 +75,136 @@ var _ = Describe("Writer", func() {
 		Expect(r2.SnapshotID).NotTo(Equal(r1.SnapshotID))
 
 		var newest, older bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &newest)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &newest)).To(Succeed())
 		Expect(readTar(newest.Bytes())).To(HaveKeyWithValue("notes/b.md", "second"))
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", r1.SnapshotID, &older)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", r1.SnapshotID, "", &older)).To(Succeed())
 		got := readTar(older.Bytes())
 		Expect(got).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(got).NotTo(HaveKey("notes/b.md"))
 		Expect(w.Verify(ctx, prefix, "koinon_test_not-a-real-token", r2.SnapshotID)).To(Succeed())
+	})
+
+	It("records a content digest and restores only a snapshot that matches it (issue #1090)", func() {
+		pw := "koinon_test_not-a-real-token"
+		r1, err := w.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(checkpoint.ValidDigest(r1.Digest)).To(BeTrue(), r1.Digest)
+		again, err := w.Backup(ctx, prefix, pw, home(), checkpoint.Meta{CheckpointID: "c2"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again.Digest).To(Equal(r1.Digest), "the same home has the same digest")
+		r2, err := w.Backup(ctx, prefix, pw, home(entry{name: "./notes/b.md", body: "second"}), checkpoint.Meta{CheckpointID: "c3"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r2.Digest).NotTo(Equal(r1.Digest), "a changed home has another digest")
+
+		var ok bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r1.SnapshotID, r1.Digest, &ok)).To(Succeed())
+		Expect(readTar(ok.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
+
+		// The record of another snapshot, or any other value, refuses the restore and sends nothing.
+		for _, wrong := range []string{r2.Digest, "sha256:" + strings.Repeat("0", 64)} {
+			var out bytes.Buffer
+			err := w.Restore(ctx, prefix, pw, r1.SnapshotID, wrong, &out)
+			Expect(err).To(MatchError(checkpoint.ErrDigestMismatch))
+			Expect(out.Len()).To(BeZero(), "no byte reaches the sandbox")
+		}
+	})
+
+	It("keeps a file that changed with its size and time unchanged since the last checkpoint (issue #1090)", func() {
+		// An hourly checkpoint reads a file while the harness writes it; the harness writes it again in
+		// the same second with the same length (a JSON timestamp, a status flag). The tar stream has
+		// whole-second times, so the stop checkpoint sees the same name, mode, size and time with other
+		// bytes. The snapshot must hold the new bytes, or no restore matches the recorded digest.
+		pw := "koinon_test_not-a-real-token"
+		at := time.Date(2026, 11, 28, 9, 23, 20, 0, time.UTC)
+		session := func(body string) *bytes.Buffer {
+			var b bytes.Buffer
+			tw := tar.NewWriter(&b)
+			Expect(tw.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755, ModTime: at})).To(Succeed())
+			Expect(tw.WriteHeader(&tar.Header{Name: "./s1.json", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body)), ModTime: at})).To(Succeed())
+			_, err := tw.Write([]byte(body))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tw.Close()).To(Succeed())
+			return &b
+		}
+		_, err := w.Backup(ctx, prefix, pw, session(`{"status":"busy"}`), checkpoint.Meta{CheckpointID: "hourly"})
+		Expect(err).NotTo(HaveOccurred())
+		stop, err := w.Backup(ctx, prefix, pw, session(`{"status":"idle"}`), checkpoint.Meta{CheckpointID: "stop"})
+		Expect(err).NotTo(HaveOccurred())
+
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, stop.SnapshotID, stop.Digest, &out)).To(Succeed())
+		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("s1.json", `{"status":"idle"}`))
+	})
+
+	It("digests a home with unreadable modes and links, and ignores times", func() {
+		pw := "koinon_test_not-a-real-token"
+		odd := home(
+			entry{name: "./secret.txt", body: "shh", mode: 0o200},
+			entry{name: "./locked/", typ: tar.TypeDir, mode: 0o500},
+			entry{name: "./locked/inner.txt", body: "inner"},
+			entry{name: "./ln", typ: tar.TypeSymlink, link: "notes/a.md"},
+		)
+		r, err := w.Backup(ctx, prefix, pw, odd, checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
+		// The data of a file that its owner cannot read is kept: the snapshot makes it readable.
+		names := map[string]bool{}
+		tr := tar.NewReader(&out)
+		for {
+			hd, err := tr.Next()
+			if err != nil {
+				break
+			}
+			names[hd.Name] = true
+		}
+		Expect(names).To(HaveKey("secret.txt"))
+	})
+
+	It("names the entries kopia could not read (issue #1090)", func() {
+		Expect(checkpoint.SkippedEntries(0, 0)).To(Succeed())
+		err := checkpoint.SkippedEntries(1, 1, kfs.EntryWithError{EntryPath: "locked/secret.txt", Error: "permission denied"})
+		Expect(err).To(MatchError(ContainSubstring("locked/secret.txt")))
+		Expect(err).To(MatchError(ContainSubstring("2 entries")))
+	})
+
+	It("fails the checkpoint, and saves no snapshot, when an entry stays unreadable (issue #1090)", func() {
+		if os.Geteuid() == 0 {
+			Skip("root reads every file, so nothing stays unreadable")
+		}
+		checkpoint.SkipMakeReadable()
+		pw := "koinon_test_not-a-real-token"
+		_, err := w.Backup(ctx, prefix, pw, home(entry{name: "./secret.txt", body: "shh", mode: 0o200}), checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).To(MatchError(ContainSubstring("secret.txt")))
+		snaps, err := w.Snapshots(ctx, prefix, pw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(snaps).To(BeEmpty())
+	})
+
+	It("keeps a home that holds a .kopiaignore file or a cache directory marker, and restores it with its digest (issue #1090)", func() {
+		pw := "koinon_test_not-a-real-token"
+		sig := "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag.\n"
+		h := home(
+			entry{name: "./.kopiaignore", body: "*.log\n"},
+			entry{name: "./a.log", body: "log"},
+			entry{name: "./proj/target/CACHEDIR.TAG", body: sig},
+			entry{name: "./proj/target/v", body: "built"},
+		)
+		r, err := w.Backup(ctx, prefix, pw, h, checkpoint.Meta{CheckpointID: "c1"})
+		Expect(err).NotTo(HaveOccurred())
+		var out bytes.Buffer
+		Expect(w.Restore(ctx, prefix, pw, r.SnapshotID, r.Digest, &out)).To(Succeed())
+		names := map[string]bool{}
+		tr := tar.NewReader(&out)
+		for {
+			hd, err := tr.Next()
+			if err != nil {
+				break
+			}
+			names[hd.Name] = true
+		}
+		Expect(names).To(HaveKey("a.log"))
+		Expect(names).To(HaveKey("proj/target/v"))
 	})
 
 	It("writes nothing to the bucket in restore-only mode (#940)", func() {
@@ -106,7 +231,7 @@ var _ = Describe("Writer", func() {
 
 		ro := &checkpoint.Writer{Storage: checkpoint.Dir(bucket), Scratch: GinkgoT().TempDir(), ReadOnly: true}
 		var out bytes.Buffer
-		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, &out)).To(Succeed())
+		Expect(ro.Restore(ctx, prefix, pw, r.SnapshotID, "", &out)).To(Succeed())
 		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/a.md", "first note"))
 		Expect(ro.Verify(ctx, prefix, pw, r.SnapshotID)).To(Succeed())
 		snaps, err := ro.Snapshots(ctx, prefix, pw)
@@ -143,7 +268,7 @@ var _ = Describe("Writer", func() {
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_wrong", "", "", &out)).NotTo(Succeed())
 		_, err = w.Backup(ctx, prefix, "koinon_test_wrong", home(), checkpoint.Meta{})
 		Expect(err).To(HaveOccurred())
 	})
@@ -190,7 +315,7 @@ var _ = Describe("Writer", func() {
 		_, err := w.Backup(ctx, prefix, "koinon_test_not-a-real-token", home(), checkpoint.Meta{})
 		Expect(err).NotTo(HaveOccurred())
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, other, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, other, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed())
 	})
 
 	It("deletes a retired repository's blobs and leaves the later epoch under it readable", func() {
@@ -206,11 +331,11 @@ var _ = Describe("Writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(BeNumerically(">", 0))
 		var gone bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &gone)).NotTo(Succeed(), "epoch 0 is deleted")
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &gone)).NotTo(Succeed(), "epoch 0 is deleted")
 
 		By("epoch 1 still opens and restores")
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, e1, "koinon_test_not-a-real-token-1", "", &out)).To(Succeed())
+		Expect(w.Restore(ctx, e1, "koinon_test_not-a-real-token-1", "", "", &out)).To(Succeed())
 		Expect(readTar(out.Bytes())).To(HaveKeyWithValue("notes/b.md", "epoch one"))
 		Expect(w.Verify(ctx, e1, "koinon_test_not-a-real-token-1", s1.SnapshotID)).To(Succeed())
 
@@ -245,7 +370,7 @@ var _ = Describe("Writer", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, pass, "", &out)).To(Succeed())
+		Expect(w.Restore(ctx, prefix, pass, "", "", &out)).To(Succeed())
 		last, err := w.Backup(ctx, prefix, pass, home(), checkpoint.Meta{CheckpointID: "last"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(w.Verify(ctx, prefix, pass, last.SnapshotID)).To(Succeed())
@@ -268,7 +393,7 @@ var _ = Describe("Writer", func() {
 
 	It("restores from a repository that has no snapshot as an error", func() {
 		var out bytes.Buffer
-		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", &out)).NotTo(Succeed())
+		Expect(w.Restore(ctx, prefix, "koinon_test_not-a-real-token", "", "", &out)).NotTo(Succeed())
 	})
 
 	It("refuses a home over the limit and leaves no snapshot", func() {

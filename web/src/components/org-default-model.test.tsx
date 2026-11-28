@@ -30,7 +30,7 @@ function setup(opts: { model?: string; failSet?: string } = {}) {
       },
     })
   })
-  renderApp(transport, '/settings/providers')
+  renderApp(transport, '/settings/org')
   return { sets }
 }
 

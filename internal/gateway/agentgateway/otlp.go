@@ -96,9 +96,9 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				cacheRead, _ := intValue(attrs[LogFieldCacheRead])
 				cacheWrite, _ := intValue(attrs[LogFieldCacheWrite])
 				// The split is absent, not 0, when the gateway had none to log (agentgateway v1.7.0
-				// on Anthropic Messages, #78): the entry then records it as unknown. Interim until
-				// agentgateway sets llm.reasoningTokens from Messages usage; #78 links the upstream
-				// issue, and the exit condition is that field logged on a Messages call.
+				// on Anthropic Messages, #1464): the entry then records it as unknown. Interim until
+				// agentgateway sets llm.reasoningTokens from Messages usage; #1464 tracks it, and
+				// the exit condition is that field logged on a Messages call.
 				reasoning, reasoningOK := intValue(attrs[LogFieldReasoning])
 				// agentgateway reports totals (input includes cache reads and writes, output includes
 				// reasoning); the usage record carries disjoint buckets (ADR 0097 decision 3), so the

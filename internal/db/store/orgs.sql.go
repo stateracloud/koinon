@@ -218,6 +218,64 @@ func (q *Queries) ListOrgMembers(ctx context.Context, arg ListOrgMembersParams) 
 	return items, nil
 }
 
+const listOrgRefs = `-- name: ListOrgRefs :many
+SELECT o.id AS org_id, o.slug, o.display_name, o.kind
+FROM orgs o
+WHERE o.deleted_at IS NULL
+  AND ($1::uuid IS NULL OR o.id = $1::uuid)
+  AND ($2::bool OR $1::uuid IS NOT NULL OR o.kind = 'team')
+  AND o.slug > $3::text
+ORDER BY o.slug
+LIMIT $4
+`
+
+type ListOrgRefsParams struct {
+	OnlyOrgID       pgtype.UUID
+	IncludePersonal bool
+	AfterSlug       string
+	RowLimit        int32
+}
+
+type ListOrgRefsRow struct {
+	OrgID       pgtype.UUID
+	Slug        string
+	DisplayName string
+	Kind        OrgKind
+}
+
+// The live orgs by slug after @after_slug, without counts, for the platform console's lists of org
+// resources (PlatformResourceService, ADR 0126). Platform admins only. @only_org_id narrows the list
+// to one org; personal orgs are left out unless @include_personal or @only_org_id is set.
+func (q *Queries) ListOrgRefs(ctx context.Context, arg ListOrgRefsParams) ([]ListOrgRefsRow, error) {
+	rows, err := q.db.Query(ctx, listOrgRefs,
+		arg.OnlyOrgID,
+		arg.IncludePersonal,
+		arg.AfterSlug,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgRefsRow
+	for rows.Next() {
+		var i ListOrgRefsRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Slug,
+			&i.DisplayName,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgSummaries = `-- name: ListOrgSummaries :many
 SELECT o.id AS org_id, o.slug, o.display_name, o.kind, o.created_at,
        (SELECT count(DISTINCT om.user_id)

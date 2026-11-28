@@ -96,7 +96,7 @@ describe('authentication', () => {
       service(AgentService, { listAgents: () => ({ agents: [] }) })
       service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
-    renderApp(transport, '/')
+    renderApp(transport, '/inbox')
     expect(await screen.findByRole('heading', { name: 'Choose a new password' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Inbox' })).not.toBeInTheDocument()
 
@@ -117,7 +117,7 @@ describe('authentication', () => {
     expect(changes[0]).toMatchObject({ currentPassword: 'bootstrap-pw', newPassword: 'a-much-longer-password' })
   })
 
-  it('logs out', async () => {
+  it('signs out from the user menu', async () => {
     const calls = stubFetch({ password: true, oidc: false })
     let signedIn = true
     const transport = createRouterTransport(({ service }) => {
@@ -131,7 +131,8 @@ describe('authentication', () => {
       service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
     const { history } = renderApp(transport, '/')
-    await userEvent.click(await screen.findByRole('button', { name: 'Log out' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'User menu: Admin' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Sign out' }))
     signedIn = false
     await waitFor(() => expect(history.location.pathname).toBe('/login'))
     expect(calls.some((c) => c.url === '/auth/logout' && c.init?.method === 'POST')).toBe(true)

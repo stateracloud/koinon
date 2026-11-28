@@ -32,6 +32,8 @@ func (s signedConn) Invoke(ctx context.Context, method string, args, reply any, 
 	if err != nil {
 		return err
 	}
+	s.d.noteRouter()
+	defer s.d.noteRouter()
 	return s.cc.Invoke(ctx, method, args, reply, opts...)
 }
 
@@ -40,6 +42,8 @@ func (s signedConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method
 	if err != nil {
 		return nil, err
 	}
+	s.d.noteRouter()
+	defer s.d.noteRouter()
 	return s.cc.NewStream(ctx, desc, method, opts...)
 }
 
@@ -144,6 +148,9 @@ func (d *Driver) bind(ctx context.Context, op string, k key, uid string) error {
 	var err error
 	for {
 		err = d.router.Invoke(route(bctx, k), guestauth.BindMethod, &emptypb.Empty{}, &emptypb.Empty{})
+		if derr := d.routerDown(op, err); derr != nil {
+			return derr
+		}
 		if status.Code(err) != codes.Unavailable || time.Now().After(deadline) {
 			break
 		}

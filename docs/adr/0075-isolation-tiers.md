@@ -405,3 +405,11 @@ maintainer decided on 2026-11-17 to drop the Kata requirement.
   replaced by "A microVM, as defined above, stays required for the `vm` tier". The other lines hold.
 
 AGENTS.md's hard rule is reworded to match.
+
+## Amendment (2026-11-27): root in the `vm` guest in v0.1 (issue #1496)
+
+The payload may run as uid 0 in the microVM guest of the `vm` tier in v0.1. The separate guest kernel under hardware
+virtualisation is the boundary to the host. The tier requirements above do not change. Inside the guest the launcher
+removes every capability from the payload, sets `no_new_privs` and keeps the payload from signalling or tracing the
+Koinon processes of the guest. The details are in ADR 0120, amendment of 2026-11-27. The gVisor tiers require a
+non-root payload (ADR 0120, amendment of 2026-11-26).

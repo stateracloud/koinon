@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
+	refusalv1 "github.com/stateracloud/koinon/internal/gen/koinon/refusal/v1"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/project"
@@ -105,8 +106,8 @@ func traceSettingsProto(v tracedest.Settings) *tracev1alpha1.Settings {
 
 // withReason attaches a machine-readable reason (google.rpc.ErrorInfo) to err, so a client can tell
 // apart errors that share a code. The message stays for people and logs.
-func withReason(err *connect.Error, reason string, extra ...proto.Message) *connect.Error {
-	info := &errdetails.ErrorInfo{Reason: reason, Domain: project.Domain}
+func withReason(err *connect.Error, reason refusalv1.Reason, extra ...proto.Message) *connect.Error {
+	info := &errdetails.ErrorInfo{Reason: reason.String(), Domain: project.Domain}
 	for _, m := range append([]proto.Message{info}, extra...) {
 		if d, derr := connectproto.NewErrorDetail(m); derr == nil {
 			err = err.WithDetail(d)
@@ -124,22 +125,22 @@ func (a traceAPI) traceError(err error) error {
 		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
 	case errors.As(err, &failed):
 		// The whole message is for API users; the outcome alone, as a TestResult, is for a UI.
-		return withReason(connect.NewError(connect.CodeFailedPrecondition, failed.Error()), "TEST_FAILED",
+		return withReason(connect.NewError(connect.CodeFailedPrecondition, failed.Error()), refusalv1.Reason_TEST_FAILED,
 			&tracev1alpha1.TestResult{Ok: false, Message: failed.Outcome.Message})
 	case errors.Is(err, tracedest.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, "not found")
 	case errors.Is(err, tracedest.ErrConflict):
 		return connect.NewError(connect.CodeAlreadyExists, "a destination with this name already exists")
 	case errors.Is(err, tracedest.ErrChanged):
-		return withReason(connect.NewError(connect.CodeAborted, err.Error()), "CHANGED")
+		return withReason(connect.NewError(connect.CodeAborted, err.Error()), refusalv1.Reason_CHANGED)
 	case errors.Is(err, tracedest.ErrOwnerOnly):
-		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), "OWNER_ONLY")
+		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), refusalv1.Reason_OWNER_ONLY)
 	case errors.Is(err, tracedest.ErrOwnerAtFull):
-		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), "OWNER_AT_FULL")
+		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), refusalv1.Reason_OWNER_AT_FULL)
 	case errors.Is(err, tracedest.ErrNotMember):
-		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), "NOT_MEMBER")
+		return withReason(connect.NewError(connect.CodePermissionDenied, err.Error()), refusalv1.Reason_NOT_MEMBER)
 	case errors.Is(err, tracedest.ErrAboveCeiling):
-		return withReason(connect.NewError(connect.CodeFailedPrecondition, err.Error()), "ABOVE_CEILING")
+		return withReason(connect.NewError(connect.CodeFailedPrecondition, err.Error()), refusalv1.Reason_ABOVE_CEILING)
 	case errors.Is(err, tracedest.ErrNoKeys):
 		return connect.NewError(connect.CodeUnavailable, err.Error())
 	}
@@ -159,7 +160,7 @@ func (a traceAPI) orgCaller(ctx context.Context, orgID string) (caller, error) {
 	if err != nil {
 		var ce *connect.Error
 		if errors.As(err, &ce) && ce.Code() == connect.CodePermissionDenied {
-			return caller{}, withReason(ce, "ADMIN_REQUIRED")
+			return caller{}, withReason(ce, refusalv1.Reason_ADMIN_REQUIRED)
 		}
 		return caller{}, err
 	}
@@ -171,12 +172,9 @@ func (a traceAPI) orgCaller(ctx context.Context, orgID string) (caller, error) {
 
 // platformCaller authorizes a platform admin. Platform changes are audited in the install audit chain (ADR 0100).
 func (a traceAPI) platformCaller(ctx context.Context) (*auth.Principal, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), "PLATFORM_ADMIN_REQUIRED")
+	p, err := requirePlatformAdmin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if a.s.traces == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, "run traces are not configured")

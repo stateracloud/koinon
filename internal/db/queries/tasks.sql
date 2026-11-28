@@ -76,9 +76,10 @@ WITH task AS (
     RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
 )
 INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
-                           actor_agent_id, run_id, payload)
+                           actor_agent_id, actor_external_id, run_id, payload, payload_version, prompt)
 SELECT task.org_id, task.id, task.last_event_seq, @kind, @actor_kind,
-       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(run_id), @payload
+       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(actor_external_id),
+       sqlc.narg(run_id), @payload, @payload_version::smallint, @prompt::boolean
 FROM task
 RETURNING *;
 
@@ -89,14 +90,37 @@ WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @max_events;
 
+-- name: ListEventActorNames :many
+-- Display names of the people who wrote events of this org, by user id: what a task read shows beside
+-- each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+-- inside the org whose events name the user; a deleted user has no name.
+SELECT u.id, u.display_name
+FROM users u
+WHERE u.id = ANY(@user_ids::uuid[]) AND u.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = @org_id);
+
+-- name: EnsureExternalActor :one
+-- The row of a person without a Koinon account who writes from a chat platform (ADR 0130): it
+-- creates the row the first time and returns the same row after that. The update on a conflict
+-- changes nothing; it only makes the statement return the row that a concurrent writer committed.
+INSERT INTO external_actors (org_id, platform, team, platform_user_id)
+VALUES (@org_id, @platform, @team, @platform_user_id)
+ON CONFLICT (org_id, platform, team, platform_user_id) DO UPDATE SET platform = EXCLUDED.platform
+RETURNING *;
+
+-- name: ListExternalActors :many
+-- The external actors that the events of a task name, by ID (ADR 0130): what a task read shows
+-- beside each of their messages. The rows hold no name and no profile data.
+SELECT * FROM external_actors
+WHERE org_id = @org_id AND id = ANY(@ids::uuid[]);
+
 -- name: ListTaskMessagesAfter :many
--- The users' messages on the task after a timeline seq, in order: what
--- agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
--- payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
+-- The events on the task after a timeline seq that are part of a run's prompt, in order: what
+-- agentd sends the harness. The writer marks them (task_events.prompt): the users' messages, and a
+-- system message with a source, such as a trigger's instruction, so a scheduled run sees what it
+-- was scheduled to do.
 SELECT * FROM task_events
-WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
-  AND kind = 'message'
-  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
+WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq AND prompt
 ORDER BY seq;
 
 -- name: LatestUserMessageActor :one

@@ -144,3 +144,62 @@ spec:
     - {name: http, port: 8080, targetPort: http}
     # Plain HTTP, for the server that asks for OAuth (it has no credential, so ADR 0120 allows http).
     - {name: plain, port: 8081, targetPort: plain}
+---
+# A Gitea over HTTPS with git smart HTTP (internal/testing/fakegitea), for the clone through koinon-gateway's
+# egress listener (#1086 part C2). It accepts the write token (the default) and a read-only token; the agent's
+# sandbox holds neither, the gateway attaches the read token. run.sh gives it the certificate of the fakemcp run
+# CA as the Secret fakegitea-tls. GET /_fake/git lists the git requests it served (never their headers).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakegitea
+  namespace: koinon-e2e-fakes
+  labels: {app: fakegitea}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakegitea}
+  template:
+    metadata:
+      labels: {app: fakegitea}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fakegitea
+          image: localhost:5001/koinon-fakegitea:e2e
+          imagePullPolicy: Always
+          args: ["-addr", ":8080", "-owner", "koinon-demo", "-repos", "hello",
+                 "-read-token", "koinon_test_not-a-real-gitea-read-token",
+                 "-tls-cert-file", "/tls/tls.crt", "-tls-key-file", "/tls/tls.key"]
+          # The fake keeps its repositories as bare git repositories under TMPDIR.
+          env:
+            - {name: TMPDIR, value: /tmp}
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+          ports:
+            - {name: https, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /api/v1/version, port: https, scheme: HTTPS}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: tls
+          secret: {secretName: fakegitea-tls}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakegitea
+  namespace: koinon-e2e-fakes
+spec:
+  selector: {app: fakegitea}
+  # Port 443, so the clone URL names no port, as for a real forge.
+  ports:
+    - {name: https, port: 443, targetPort: https}

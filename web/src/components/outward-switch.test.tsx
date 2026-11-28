@@ -19,7 +19,6 @@ function setup(opts: { off?: boolean; declared?: boolean; held?: boolean } = {})
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({}) })
     service(ProviderService, {
-      getDefaultModel: () => ({ model: '', available: [] }),
       listModels: () => ({ models: [] }),
       listProviders: () => ({
         providers: [

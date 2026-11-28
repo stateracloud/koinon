@@ -1,30 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState } from 'react'
-import { ConfirmAction } from '@/components/confirm-action'
-import { RequireAdmin } from '@/components/require-admin'
+import { Link } from '@tanstack/react-router'
+import { ServerIcon } from 'lucide-react'
+import { useMemo } from 'react'
 import { LeakGuardSettings } from '@/components/leak-guard-settings'
-import { ServerClass } from '@/components/server-class'
-import { ToolSink } from '@/components/tool-sink'
-import { ServerForm } from '@/components/server-form'
 import { OutwardSwitch } from '@/components/outward-switch'
-import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { RequireAdmin } from '@/components/require-admin'
+import { HealthBadge, ServerStateBadges } from '@/components/server-tools'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Health, McpServerService, Tier, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
-import { useMcpActions, type McpActions } from '@/hooks/use-mcp-actions'
-import { closeOnly } from '@/lib/editing'
+import { DataTable } from '@/components/ui/data-table'
+import { EmptyState } from '@/components/ui/empty-state'
+import { QueryError } from '@/components/ui/inline-error'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { McpServerService, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
+import { OutwardTargetKind } from '@/gen/koinon/outward/v1alpha1/outward_pb'
+import { dataTableColumns, type DataTableColumn } from '@/lib/data-table'
+import { sourceLabel, summarizeTools, summaryText, tierExplanation, toolsOf, waitingNotice } from '@/lib/mcp-servers'
 import { useOrg } from '@/lib/org-context'
-import { availabilityMinutes, formatTime } from '@/lib/providers'
-import { absentUnreviewed, healthLabel, serverDeletable, serverEditable, sourceLabel, suggestsAuto, summarizeTools, summaryText, tierExplanation, tiers, toolsOf, transportLabel, waitsForReview } from '@/lib/mcp-servers'
+import { availabilityMinutes } from '@/lib/providers'
 
-/** ServersPage is where org admins and owners manage the org's remote MCP servers and their tools' tiers (ADR 0057). */
+const col = dataTableColumns<ServerRow>()
+
+/** ServerRow is one server of the list with the tools that belong to it. */
+type ServerRow = { server: Server; tools: Tool[] | undefined }
+
+/** ServersPage lists the org's remote MCP servers (ADR 0057, ADR 0126 section 6). Org admins and owners only. */
 export function ServersPage() {
   return (
-    <div className="mx-auto grid max-w-3xl gap-4">
+    <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)] gap-4">
       <RequireAdmin what="remote MCP servers">
         <ServersContent />
       </RequireAdmin>
@@ -32,448 +38,110 @@ export function ServersPage() {
   )
 }
 
-type Editing = { kind: 'new' } | { kind: 'server'; id: string }
-
 function ServersContent() {
   const { org } = useOrg()
   const orgId = org.orgId
   const servers = useQuery(McpServerService.method.listServers, { orgId })
   const tools = useQuery(McpServerService.method.listTools, { orgId, serverId: '' })
-  const actions = useMcpActions(orgId)
-  const [editing, setEditing] = useState<Editing>()
-  const [notice, setNotice] = useState<string>()
-  const [refused, setRefused] = useState<string>()
-  const saved = () => {
-    setRefused(undefined)
-    setNotice(`Saved. A new credential reaches the gateway within about ${availabilityMinutes} minutes.`)
-  }
-  const failed = servers.error ?? tools.error
-  const list = servers.data?.servers ?? []
-  const allTools = tools.data?.tools ?? []
+  const rows = useMemo<ServerRow[]>(() => {
+    const all = tools.data?.tools
+    return (servers.data?.servers ?? []).map((server) => ({ server, tools: all && toolsOf(all, server.id) }))
+  }, [servers.data, tools.data])
 
+  const columns = useMemo<DataTableColumn<ServerRow>[]>(
+    () => [
+      col.accessor((r) => r.server.name, {
+        id: 'name',
+        header: 'Name',
+        sortFn: 'text',
+        meta: { rowHeader: true },
+        cell: (c) => (
+          <Link to="/mcp-servers/$serverId" params={{ serverId: c.row.original.server.id }} className="font-medium underline-offset-4 hover:underline">
+            {c.getValue()}
+          </Link>
+        ),
+      }),
+      col.display({
+        id: 'state',
+        header: 'State',
+        cell: (c) => (
+          <div className="flex flex-wrap gap-1">
+            <HealthBadge health={c.row.original.server.health} />
+            <ServerStateBadges server={c.row.original.server} />
+          </div>
+        ),
+      }),
+      col.display({
+        id: 'tools',
+        header: 'Tools',
+        cell: (c) => {
+          const { server, tools: list } = c.row.original
+          // Without the tool list, a count would be wrong: the error above the table says why it is missing.
+          if (!list) return null
+          const waiting = waitingNotice(server, list)
+          return (
+            <div className="grid gap-1">
+              <span className="text-sm">{summaryText(summarizeTools(list))}</span>
+              {waiting && (
+                // The review is on the server page ("Review all" or one tool at a time, ADR 0125 decision 10).
+                <Badge asChild variant="outline" className="w-fit">
+                  <Link to="/mcp-servers/$serverId" params={{ serverId: server.id }} aria-label={`${waiting}: review the tools of ${server.name}`}>
+                    {waiting}
+                  </Link>
+                </Badge>
+              )}
+            </div>
+          )
+        },
+      }),
+      col.accessor((r) => sourceLabel(r.server), { id: 'source', header: 'Source', sortFn: 'text' }),
+      col.display({
+        id: 'outward',
+        header: 'Outward calls',
+        cell: (c) => {
+          const s = c.row.original.server
+          return <OutwardSwitch compact kind={OutwardTargetKind.MCP_SERVER} targetId={s.id} subject={`server ${s.name}`} disabled={s.adminDisabled} />
+        },
+      }),
+    ],
+    [],
+  )
+
+  const failed = servers.error ?? tools.error
   return (
     <>
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">MCP servers</h1>
-        <Button size="sm" className="ml-auto" onClick={() => setEditing({ kind: 'new' })} disabled={editing?.kind === 'new'}>
-          Add server
-        </Button>
-      </div>
-      <p className="text-muted-foreground text-sm">
-        A server is a remote MCP server your agents can call through the gateway, such as a docs or issue-tracker server. Koinon keeps its credential encrypted and hands it only to the gateway; sandboxes never see it. Servers can also be declared with a Kubernetes Secret, which are read-only here (their tools&apos; tiers can still be set). The tools of a new server start in the Ask tier. A new or changed credential takes about {availabilityMinutes} minutes to reach the gateway.
-      </p>
-      <p className="text-muted-foreground text-sm">{tierExplanation} A server that stops answering is Unhealthy and its tools are withdrawn from agents until it recovers.</p>
-      {editing?.kind === 'new' && <ServerForm actions={actions} onDone={closeOnly(setEditing, { kind: 'new' })} onSaved={saved} />}
-      {refused && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{refused}</AlertDescription>
-        </Alert>
-      )}
-      {notice && (
-        <p role="status" className="text-sm">
-          {notice}
-        </p>
-      )}
-      {failed && (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
-        </Alert>
-      )}
+      <PageHeader
+        title="MCP servers"
+        description={
+          <>
+            <p>
+              A server is a remote MCP server your agents call through the gateway, such as a docs or issue-tracker server. Koinon keeps its credential encrypted and gives it only to the gateway; sandboxes never see it. A new or changed credential reaches the gateway in about {availabilityMinutes} minutes.
+            </p>
+            <p className="mt-1">
+              {tierExplanation} A new tool is hidden from agents until an admin reviews its text. Switch off outward calls to stop all calls to a server at once; write the reason for the audit log.
+            </p>
+          </>
+        }
+        actions={
+          <Button asChild size="sm">
+            <Link to="/mcp-servers/new">Connect a remote server</Link>
+          </Button>
+        }
+      />
+      <QueryError error={failed ?? undefined} />
       {servers.isPending || tools.isPending ? (
-        <p role="status">Loading servers…</p>
-      ) : list.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No servers yet. Add a remote MCP server so agents can use its tools.</p>
-      ) : (
-        <ul className="grid gap-4" aria-label="Servers">
-          {list.map((s) => (
-            <li key={s.id}>
-              <ServerCard
-                server={s}
-                tools={toolsOf(allTools, s.id)}
-                editing={editing?.kind === 'server' && editing.id === s.id}
-                edit={() => setEditing({ kind: 'server', id: s.id })}
-                done={closeOnly(setEditing, { kind: 'server', id: s.id })}
-                actions={actions}
-                onSaved={saved}
-                onNotice={(m) => {
-                  setRefused(undefined)
-                  setNotice(m)
-                }}
-                onRefused={(m) => {
-                  setNotice(undefined)
-                  setRefused(m)
-                }}
-              />
-            </li>
-          ))}
-        </ul>
+        <SkeletonRows label="Loading servers…" />
+      ) : failed && !servers.data ? null : (
+        <DataTable
+          caption="MCP servers"
+          columns={columns}
+          data={rows}
+          getRowId={(r) => r.server.id}
+          initialSorting={[{ id: 'name', desc: false }]}
+          empty={<EmptyState icon={ServerIcon} title="No servers yet." description="Connect a remote MCP server so agents can use its tools." />}
+        />
       )}
       <LeakGuardSettings orgId={orgId} />
     </>
-  )
-}
-
-function HealthBadge({ health }: { health: Health }) {
-  const label = healthLabel(health)
-  return <Badge variant={health === Health.UNHEALTHY ? 'destructive' : health === Health.HEALTHY ? 'secondary' : 'outline'}>{label}</Badge>
-}
-
-function ServerCard({
-  server: s,
-  tools,
-  editing,
-  edit,
-  done,
-  actions,
-  onSaved,
-  onNotice,
-  onRefused,
-}: {
-  server: Server
-  tools: Tool[]
-  editing: boolean
-  edit: () => void
-  done: () => void
-  actions: McpActions
-  onSaved: () => void
-  onNotice: (m: string) => void
-  onRefused: (m: string) => void
-}) {
-  const editable = serverEditable(s)
-  const summary = summarizeTools(tools)
-  return (
-    <section aria-labelledby={`server-${s.id}`} className="bg-card grid gap-3 rounded-md border p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 id={`server-${s.id}`} className="text-base font-semibold">
-          {s.name}
-        </h2>
-        <HealthBadge health={s.health} />
-        {s.removed && <Badge variant="destructive">Removed</Badge>}
-        {!s.removed && s.disabledReason && <Badge variant="destructive">Disabled</Badge>}
-        {!s.removed && s.credentialLostAt && <Badge variant="destructive">Credential lost</Badge>}
-        <span className="text-muted-foreground ml-auto text-sm">{sourceLabel(s)}</span>
-      </div>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">URL</dt>
-        <dd className="break-all">{s.url}</dd>
-        <dt className="text-muted-foreground">Transport</dt>
-        <dd>{transportLabel(s.transport)}</dd>
-        <dt className="text-muted-foreground">Credential</dt>
-        <dd>{s.credentialLostAt ? 'Lost; enter it again' : s.hasCredential ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
-        <dt className="text-muted-foreground">Certificate</dt>
-        <dd>
-          {s.insecureSkipVerify ? (
-            <span className="text-destructive font-medium">Not verified: the server&apos;s identity is not checked (insecure)</span>
-          ) : s.caBundle ? (
-            'Only the CA given for this server is trusted'
-          ) : (
-            'Verified against the public roots'
-          )}
-        </dd>
-        <dt className="text-muted-foreground">Gateway target</dt>
-        <dd className="break-all">
-          <code>{s.gatewayTarget}</code>
-        </dd>
-        <dt className="text-muted-foreground">Health checked</dt>
-        <dd>{formatTime(s.healthCheckedAt, 'Not yet')}</dd>
-      </dl>
-      {s.health === Health.UNHEALTHY && (
-        <Alert variant="destructive" role="note">
-          <AlertDescription>
-            Unhealthy{s.healthReason ? `: ${s.healthReason}` : ''}. Its tools are withdrawn from agents until it recovers.
-          </AlertDescription>
-        </Alert>
-      )}
-      {(s.removed || s.disabledReason) && (
-        <Alert variant="destructive" role="note">
-          <AlertDescription>
-            {s.removed ? 'Removed' : 'Disabled'}: {s.disabledReason || 'its Kubernetes Secret was deleted'}.
-          </AlertDescription>
-        </Alert>
-      )}
-      {s.credentialLostAt && !s.removed && (
-        <Alert variant="destructive" role="note">
-          <AlertDescription>
-            {editable
-              ? 'The stored credential was lost with a key-encryption key, so agents cannot use this server. Edit it and enter the credential again.'
-              : `The stored credential was lost with a key-encryption key, so agents cannot use this server. Koinon reads it again from the Secret ${s.managedBySecret} on its next sync.`}
-          </AlertDescription>
-        </Alert>
-      )}
-      {!editable && !s.removed && (
-        <p className="text-muted-foreground text-xs">
-          This server is declared by the Secret {s.managedBySecret}. Change or delete that Secret to change it here. You can still set its tools&apos; tiers.
-        </p>
-      )}
-      <OutwardSwitch kind={OutwardTargetKind.MCP_SERVER} targetId={s.id} subject={`server ${s.name}`} disabled={s.adminDisabled} />
-      {!s.removed && <ServerClass key={`${s.kind}/${s.dataClass.join()}`} server={s} actions={actions} />}
-      {editing ? (
-        <ServerForm server={s} actions={actions} onDone={done} onSaved={onSaved} />
-      ) : (
-        (editable || serverDeletable(s)) && (
-          <div className="flex flex-wrap gap-2">
-            {editable && (
-              <Button variant="outline" size="sm" aria-label={`Edit server ${s.name}`} onClick={edit}>
-                Edit
-              </Button>
-            )}
-            {serverDeletable(s) && (
-              <ConfirmAction
-                label="Delete"
-                subject={`server ${s.name}`}
-                consequence={`Delete ${s.name} with its ${tools.length} ${tools.length === 1 ? 'tool' : 'tools'}? Agents that were allowed to use it lose it.`}
-                confirmLabel="Delete server"
-                onConfirm={async () => {
-                  await actions.deleteServer(s.id)
-                  onNotice(`Deleted server ${s.name}.`)
-                }}
-                onError={onRefused}
-              />
-            )}
-          </div>
-        )
-      )}
-
-      <div className="grid gap-2 border-t pt-3">
-        <h3 className="text-sm font-semibold">Tools</h3>
-        <p className="text-muted-foreground text-xs">{summaryText(summary)}</p>
-        <ToolsWaiting server={s} tools={tools} actions={actions} onNotice={onNotice} onRefused={onRefused} />
-        {tools.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No tools yet. They appear after Koinon first reaches the server.</p>
-        ) : (
-          <ul className="grid gap-2" aria-label={`Tools of ${s.name}`}>
-            {tools.map((t) => (
-              <li key={t.name} className="rounded-md border p-3">
-                <ToolRow server={s} tool={t} actions={actions} onRefused={onRefused} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
-  )
-}
-
-/**
- * ToolsWaiting is the notice of the tools that wait for an admin, with the action that reviews them all
- * (#1216, ADR 0125). The action approves the text shown here, at the hashes shown: a tool whose text
- * changed since makes the server refuse the whole action, and the list refreshes. It also deletes the
- * rows of tools that the server no longer lists and that no admin reviewed.
- */
-function ToolsWaiting({
-  server: s,
-  tools,
-  actions,
-  onNotice,
-  onRefused,
-}: {
-  server: Server
-  tools: Tool[]
-  actions: McpActions
-  onNotice: (m: string) => void
-  onRefused: (m: string) => void
-}) {
-  const waiting = tools.filter(waitsForReview)
-  const absent = tools.filter(absentUnreviewed)
-  if (waiting.length === 0 && absent.length === 0 && !s.unreviewedToolsCappedAt) return null
-  const parts: string[] = []
-  if (waiting.length) parts.push(`approves the current text of ${waiting.length} ${waiting.length === 1 ? 'tool' : 'tools'} (${waiting.map((t) => t.name).join(', ')}) without changing a tier`)
-  if (absent.length) parts.push(`deletes ${absent.length} ${absent.length === 1 ? 'tool' : 'tools'} that the server no longer lists and that no admin reviewed`)
-  return (
-    <Alert role="note" aria-label={`Tools waiting for review: ${s.name}`}>
-      <AlertDescription className="grid gap-2">
-        {waiting.length > 0 && (
-          <p>
-            {waiting.length} {waiting.length === 1 ? 'tool waits' : 'tools wait'} for review. Agents do not get the text of a tool that waits for review until an admin approves it.
-          </p>
-        )}
-        {s.unreviewedToolsCappedAt && <p>This server is at the limit of tools that no admin reviewed. Koinon stores no new tool of it until you review its tools.</p>}
-        {parts.length > 0 && (
-          <div>
-            <ConfirmAction
-              label="Review all"
-              subject={`tools of ${s.name}`}
-              consequence={`This ${parts.join(', and ')}.`}
-              confirmLabel="Review all"
-              onConfirm={async () => {
-                const res = await actions.reviewAllTools(
-                  s.id,
-                  waiting.map((t) => ({ tool: t.name, toolHash: t.toolHash })),
-                )
-                onNotice(`Reviewed ${res.tools.length} ${res.tools.length === 1 ? 'tool' : 'tools'} of ${s.name}. Deleted ${res.removed}.`)
-              }}
-              onError={onRefused}
-            />
-          </div>
-        )}
-      </AlertDescription>
-    </Alert>
-  )
-}
-
-function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool: Tool; actions: McpActions; onRefused: (m: string) => void }) {
-  const [pending, setPending] = useState(false)
-  async function run(p: Promise<unknown>) {
-    setPending(true)
-    try {
-      await p
-    } catch (e) {
-      onRefused(ConnectError.from(e).rawMessage)
-    } finally {
-      setPending(false)
-    }
-  }
-  const idBase = `tool-${server.id}-${t.name}`
-  const askTier = t.tier === Tier.ASK || t.tier === Tier.UNSPECIFIED
-  return (
-    <div className="grid gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="text-sm font-medium break-all">{t.name}</code>
-        {t.reviewReason && <Badge variant="outline">Review</Badge>}
-        {!t.present && <span className="text-muted-foreground text-xs">no longer listed</span>}
-        {t.unavailable && <Badge variant="outline">Not offered</Badge>}
-      </div>
-      {t.unavailable && (
-        <p role="note" className="text-sm text-warning">
-          {t.unavailable}. Agents are not offered this tool, whatever its tier.
-        </p>
-      )}
-      {t.description && <p className="text-muted-foreground text-sm">{t.description}</p>}
-      {(t.descriptionCapped || t.descriptionCleaned) && <SanitisedNote tool={t} />}
-      {pendingApproval(t) && <PendingText tool={t} />}
-      <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1" disabled={pending}>
-        <legend className="sr-only">Decision for {t.name}</legend>
-        {tiers.map((x) => (
-          <label key={x.value} className="flex items-center gap-1.5 text-sm" title={x.help}>
-            <input
-              type="radio"
-              name={`${idBase}-tier`}
-              value={x.value}
-              checked={t.tier === x.value || (t.tier === Tier.UNSPECIFIED && x.value === Tier.ASK)}
-              onChange={() => void run(actions.setToolTier(server.id, t.name, x.value, t.toolHash))}
-            />
-            {x.label}
-          </label>
-        ))}
-      </fieldset>
-      <div className="grid gap-0.5">
-        <label className="flex items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
-            checked={t.requiresTwoApprovers}
-            disabled={pending || !askTier}
-            aria-describedby={`${idBase}-two-help`}
-            onChange={(e) => void run(actions.setToolTwoApprovers(server.id, t.name, e.target.checked))}
-          />
-          Require two approvers
-        </label>
-        <p id={`${idBase}-two-help`} className="text-muted-foreground text-xs">
-          Two distinct admins or owners must approve, neither the person who created the task.
-          {!askTier && ' This only applies in the Ask tier.'}
-        </p>
-      </div>
-      {!server.removed && <ToolSink key={`${t.sink?.sinkClass}/${t.sink?.derivation}/${t.sink?.addressArgs.join()}`} server={server} tool={t} actions={actions} />}
-      {suggestsAuto(t) && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set to Allow: ${t.name}`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO, t.toolHash))}>
-            Set to Allow
-          </Button>
-        </div>
-      )}
-      {t.reviewReason && (
-        <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
-          <span>Review: {t.reviewReason}.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark reviewed: ${t.name}`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name, t.toolHash))}>
-            Mark reviewed
-          </Button>
-          <p className="text-muted-foreground w-full text-xs">Reviewing keeps the tool in Ask; set it back to Allow yourself if you trust the new version.</p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** pendingApproval reports a tool whose observed text nobody approved yet (#1132, #1173). */
-function pendingApproval(t: Tool): boolean {
-  return t.toolHash !== '' && t.toolHash !== t.approvedHash
-}
-
-type PinnedText = { name?: string; title?: string; description?: string; annotations?: unknown; inputSchema?: unknown; outputSchema?: unknown }
-
-function parsePinned(raw: string): PinnedText | undefined {
-  try {
-    const v: unknown = JSON.parse(raw)
-    return v && typeof v === 'object' ? (v as PinnedText) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * PendingText shows the exact text a decision approves: every field the hash covers (name, title,
- * description, annotations, input and output schema) as the sync observed it, and the hash (#1173). A decision sends that hash, and the server refuses it when the
- * text changed in the meantime, so an admin never approves text they did not see.
- */
-function PendingText({ tool }: { tool: Tool }) {
-  const pinned = parsePinned(tool.toolJson)
-  return (
-    <div className="grid gap-1 rounded-md border p-2 text-sm" role="group" aria-label={`Text waiting for approval: ${tool.name}`}>
-      <p className="font-medium">Text waiting for approval</p>
-      <p className="text-muted-foreground text-xs">A decision on this tool approves this text. If the server changes it before you decide, Koinon refuses the decision and shows the new text.</p>
-      {pinned ? (
-        <dl className="grid gap-1">
-          <dt className="text-muted-foreground text-xs">Name</dt>
-          <dd>
-            <code className="break-all">{pinned.name ?? tool.name}</code>
-          </dd>
-          {pinned.title && (
-            <>
-              <dt className="text-muted-foreground text-xs">Title</dt>
-              <dd className="break-words">{pinned.title}</dd>
-            </>
-          )}
-          <dt className="text-muted-foreground text-xs">Description</dt>
-          <dd className="break-words whitespace-pre-wrap">{pinned.description || '(none)'}</dd>
-          <PinnedJSON label="Annotations" value={pinned.annotations} />
-          <PinnedJSON label="Input schema" value={pinned.inputSchema} />
-          <PinnedJSON label="Output schema" value={pinned.outputSchema} />
-        </dl>
-      ) : (
-        <p className="text-muted-foreground text-xs">The text could not be read.</p>
-      )}
-      <p className="text-xs">
-        Hash: <code className="break-all">{tool.toolHash}</code>
-      </p>
-    </div>
-  )
-}
-
-function PinnedJSON({ label, value }: { label: string; value: unknown }) {
-  return (
-    <>
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd>
-        <pre className="bg-muted max-h-64 overflow-auto rounded p-2 text-xs">{value === undefined ? '(none)' : JSON.stringify(value, null, 2)}</pre>
-      </dd>
-    </>
-  )
-}
-
-/** SanitisedNote says Koinon changed what the server published before showing it to agents (ADR 0057, #52). */
-function SanitisedNote({ tool }: { tool: Tool }) {
-  const parts: string[] = []
-  if (tool.descriptionCleaned) parts.push('hidden characters removed or lookalike tags escaped')
-  if (tool.descriptionCapped) {
-    parts.push(
-      tool.descriptionOriginalLength > 0n
-        ? `cut to its length cap (the server published ${tool.descriptionOriginalLength} characters)`
-        : 'cut to its length cap',
-    )
-  }
-  return (
-    <p role="note" className="text-muted-foreground text-xs">
-      Koinon sanitised this tool's text: {parts.join('; ')}. Agents see the text shown here.
-    </p>
   )
 }

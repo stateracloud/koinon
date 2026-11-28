@@ -4,7 +4,7 @@
 # Conventional Commits subject check over a pull request's commits (CONTRIBUTING, AGENTS.md
 # "Conventions"). Usage: hack/commit-subject-check.sh <base> <head>
 #
-# Checks every non-merge commit of <base>..<head> (same loop and fix-it message as the dco workflow).
+# Checks every non-merge commit of <base>..<head> (the same loop as the sign-off check in hack/git-identity-check.sh range).
 # Exempt: merge commits (--no-merges), commits authored by `dependabot[bot]` with a
 # `@users.noreply.github.com` email, and the subject `git revert` writes (`Revert "..."`).
 # Exit 0 when every subject conforms, 1 when one does not, 2 on misuse or when the commits cannot be

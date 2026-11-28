@@ -2,7 +2,10 @@
 
 package substrate
 
-import "github.com/prometheus/client_golang/prometheus/testutil"
+import (
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"google.golang.org/grpc"
+)
 
 // GateCount is the number of suspend gates the driver holds, for the tests that check they do not leak.
 func (d *Driver) GateCount() int {
@@ -38,3 +41,29 @@ var (
 
 // RenderTemplateForTest renders the ActorTemplate of a spec.
 var RenderTemplateForTest = renderTemplate
+
+// RouterCredentials builds the TLS credentials of the router connection.
+var RouterCredentials = routerCredentials
+
+// CheckActorTokenEffects is checkActorTokenEffects, for the spec that the actor JWT goes only to the egress rule.
+var CheckActorTokenEffects = checkActorTokenEffects
+
+// RulesEqual is rulesEqual, for the spec that the same routes give the same rules.
+var RulesEqual = rulesEqual
+
+// DialRouter is dialRouter, for the specs of a router that refuses the identity of the driver.
+var DialRouter = dialRouter
+
+// NewWithRouterRefusal is New with the refusal reader of a dialRouter connection.
+func NewWithRouterRefusal(control, router grpc.ClientConnInterface, refusal func(error) error, cfg Config) *Driver {
+	d := New(control, router, cfg)
+	d.routerRefusal = refusal
+	return d
+}
+
+// FrontUnreachable is frontUnreachable, for the specs of the router's two reports of a guest it could not
+// reach.
+var FrontUnreachable = frontUnreachable
+
+// RepointInvariants is repointInvariants, for the specs of the template invariants of issue #1482.
+var RepointInvariants = repointInvariants

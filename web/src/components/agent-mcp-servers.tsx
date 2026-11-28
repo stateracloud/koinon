@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -9,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Health, McpServerService, type Server, type Tool } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { useMcpActions } from '@/hooks/use-mcp-actions'
+import { describeError } from '@/lib/api-error'
 import { allowStateFrom, allowlistProblem, buildAllowlist, healthLabel, tierExplanation, tierLabel, toolsOf, type AllowState } from '@/lib/mcp-servers'
 import { useOrg } from '@/lib/org-context'
 
@@ -27,7 +27,7 @@ export function AgentMcpServers({ agentId }: { agentId: string }) {
       </h2>
       {failed ? (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       ) : !servers.data || !tools.data || !allowed.data ? (
         <p role="status">Loading MCP servers…</p>
@@ -65,7 +65,7 @@ function Editor({ agentId, servers, tools, initial }: { agentId: string; servers
       await actions.setAgentServers(agentId, buildAllowlist(servers, state))
       setSaved(true)
     } catch (e) {
-      setError(ConnectError.from(e).rawMessage)
+      setError(describeError(e).message)
     } finally {
       setPending(false)
     }
@@ -75,8 +75,8 @@ function Editor({ agentId, servers, tools, initial }: { agentId: string; servers
     return (
       <p className="text-muted-foreground">
         The org has no remote MCP servers. Add one on the{' '}
-        <Link to="/servers" className="underline">
-          Servers page
+        <Link to="/mcp-servers" className="underline">
+          MCP servers page
         </Link>
         .
       </p>

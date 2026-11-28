@@ -17,15 +17,17 @@
 # 2. Candidates: those whose changed files hack/needs-e2e.sh --stdin says need the e2e. At most
 #    MAX_CANDIDATES (5), the newest; older ones are listed as untested.
 # 3. Opens the issue first, listing the candidates, so a timeout still leaves a record.
-# 4. Dispatches the e2e-kind workflow on every candidate (inputs `commit`, `bisect_id`, `backup_restore`, and `stories` only when STORIES_RED=1; this
-#    run's id, which the dispatched run's name carries), in parallel, and polls each once a minute
+# 4. Dispatches the e2e-kind workflow on every candidate with hack/e2e-dispatch.sh (inputs `commit`, `bisect_id`, `backup_restore`, and
+#    `stories` only when STORIES_RED=1; this run's id, which the dispatched run's name carries), which prints each run's id, and polls each once a minute
 #    (never `gh run watch`: its polling spends the 1000 requests/hour token budget). An outcome is
 #    pass, fail, or unknown (cancelled, timed out, not found).
 # 5. Updates the issue. Only a `fail` can name a culprit; with one candidate that is a confirming
 #    re-run of exactly it, and anything but fail leaves it "suspected: re-run before reverting".
 #
 # --dry-run calls no GitHub API: it prints what it would do and takes outcomes from --results
-# (default pass). Environment: GH (the gh command), GH_REPO, GITHUB_RUN_ID, GITHUB_RUN_URL.
+# (default pass). Environment: GH (the gh command), GH_REPO, GITHUB_RUN_ID, GITHUB_RUN_URL, E2E_DISPATCH (the
+# dispatch command, default hack/e2e-dispatch.sh beside this script), DISPATCH_TIMEOUT (default 5m: the
+# dispatches run one after the other, so a candidate whose run does not show up costs up to that long).
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
 [ "${BASH_VERSINFO:-0}" -ge 5 ] || { echo "Koinon's scripts need bash 5 or newer (this is $BASH_VERSION); on macOS: brew install bash" >&2; exit 2; }
@@ -52,6 +54,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 GH=${GH:-gh}
+# The dispatch tool, by absolute path: the script changes to the top of the checkout below.
+E2E_DISPATCH=${E2E_DISPATCH:-$(cd "$(dirname "$0")" && pwd)/e2e-dispatch.sh}
 RUN_ID=${GITHUB_RUN_ID:-0}
 cd "$(git rev-parse --show-toplevel)"
 head=$(git rev-parse "$head")
@@ -181,9 +185,9 @@ else
   issue=$("$GH" issue create --title "$title" --body "$body" --label e2e-regression)
 fi
 
-# outcome <sha>: pass|fail|unknown for the run dispatched on it.
+# outcome <sha> <run id>: pass|fail|unknown for the run dispatched on it (no id: the dispatch found no run).
 outcome() {
-  local sha=$1 r
+  local sha=$1 id=${2:-} r
   if [[ $dry == 1 ]]; then
     for r in ${results//,/ }; do
       if [[ $r == "${sha:0:7}"*=* ]]; then echo "${r#*=}"; return; fi
@@ -191,16 +195,8 @@ outcome() {
     echo pass
     return
   fi
-  local id="" waited=0 st
-  # The dispatched run's name carries the commit and this run's id.
-  while ((waited < CANDIDATE_TIMEOUT)); do
-    id=$("$GH" run list --workflow e2e-kind.yml --event workflow_dispatch --limit 30 --json databaseId,displayTitle \
-      --jq ".[] | select(.displayTitle | contains(\"$sha\") and contains(\"bisect $RUN_ID\")) | .databaseId" | head -1)
-    [[ -n $id ]] && break
-    sleep "$POLL_SECONDS"
-    waited=$((waited + POLL_SECONDS))
-  done
   [[ -n $id ]] || { echo unknown; return; }
+  local waited=0 st
   while ((waited < CANDIDATE_TIMEOUT)); do
     st=$("$GH" run view "$id" --json status,conclusion --jq '.status + " " + .conclusion')
     case $st in
@@ -220,17 +216,22 @@ if ((${#candidates[@]} == 0)); then
 else
   wd=$(mktemp -d "${TMPDIR:-/tmp}/e2e-bisect.XXXXXX")
   stories_args=()
-  [[ $STORIES_RED != 1 ]] || stories_args=(-f stories=true)
+  [[ $STORIES_RED != 1 ]] || stories_args=(--stories)
+  # The bisect runs only for push and schedule, so the backup-restore step (#90) is always in
+  # scope: without it a nightly that went red there could never reproduce on a candidate.
+  # hack/e2e-dispatch.sh finds the run by its name (the commit and this run's id) and prints its id.
+  declare -A run_of=()
   for c in "${candidates[@]}"; do
+    dargs=(--ref main --suite go --backup-restore "${stories_args[@]}" --commit "$c" --bisect-id "$RUN_ID")
     if [[ $dry == 1 ]]; then
-      echo "would dispatch: gh workflow run e2e-kind.yml -f commit=$c -f bisect_id=$RUN_ID -f backup_restore=true${stories_args[*]:+ ${stories_args[*]}}"
+      "$E2E_DISPATCH" --dry-run "${dargs[@]}"
+    elif line=$(GH=$GH "$E2E_DISPATCH" --timeout "${DISPATCH_TIMEOUT:-5m}" "${dargs[@]}"); then
+      run_of[$c]=$(sed -E 's/^run=([0-9]+) .*/\1/' <<<"$line")
     else
-      # The bisect runs only for push and schedule, so the backup-restore step (#90) is always in
-      # scope: without it a nightly that went red there could never reproduce on a candidate.
-      "$GH" workflow run e2e-kind.yml --ref main -f "commit=$c" -f "bisect_id=$RUN_ID" -f backup_restore=true "${stories_args[@]}"
+      echo "e2e-bisect: no run found for ${c:0:12}; its outcome is unknown" >&2
     fi
   done
-  for c in "${candidates[@]}"; do (outcome "$c" >"$wd/$c") & done
+  for c in "${candidates[@]}"; do (outcome "$c" "${run_of[$c]:-}" >"$wd/$c") & done
   wait
   culprit="" unknowns=()
   for c in "${candidates[@]}"; do

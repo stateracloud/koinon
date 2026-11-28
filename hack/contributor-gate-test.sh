@@ -127,7 +127,7 @@ mkdir -p "$sim/hack" "$sim/.github"
 cp -R "$root/.github/workflows" "$sim/.github/workflows"
 cp "$root/hack/ci-merge-group-test.sh" "$sim/hack/"
 sed "s/^    if: false \&\& (/    if: true \&\& (/" "$workflow" >"$sim/.github/workflows/contributor-gate.yml"
-awk '{ print } /^#   claim / { print "#   contributor gate   .github/workflows/contributor-gate.yml" } /^external claim$/ { print "external contributor gate" }' "$root/hack/ci-required.txt" >"$sim/hack/ci-required.txt"
+awk '{ print } /^#   e2e result / { print "#   contributor gate   .github/workflows/contributor-gate.yml" } /^external e2e result$/ { print "external contributor gate" }' "$root/hack/ci-required.txt" >"$sim/hack/ci-required.txt"
 out=""
 if grep -qxF -- "$on" "$sim/.github/workflows/contributor-gate.yml" && grep -qxF "external contributor gate" "$sim/hack/ci-required.txt" &&
 	out=$("$sim/hack/ci-merge-group-test.sh" 2>&1) && grep -qF "ok: required 'contributor gate' reports on merge_group" <<<"$out" &&

@@ -215,6 +215,7 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 	ev, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 		OrgID: in.Org, TaskID: task.ID, Kind: KindMessage, ActorKind: store.TaskActorKindUser, ActorUserID: in.User,
 		Payload: jsonPayload(payload),
+		Prompt:  true,
 	})
 	if err != nil {
 		return pgtype.UUID{}, err
@@ -278,7 +279,11 @@ func (a taskAPI) SendDirectMessage(ctx context.Context, req *taskv1alpha1.SendDi
 	}
 	out := &taskv1alpha1.SendDirectMessageResponse{Task: taskProto(res.Task), Created: res.Created, Reopened: res.Reopened}
 	if res.Event != nil {
-		out.Event = taskEventProto(*res.Event)
+		actors, err := loadEventActors(ctx, a.q, c.org, []store.TaskEvent{*res.Event})
+		if err != nil {
+			return nil, a.dbError(err, "agent")
+		}
+		out.Event = taskEventProto(*res.Event, actors)
 	}
 	return out, nil
 }

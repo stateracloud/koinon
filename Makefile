@@ -176,10 +176,7 @@ env-guest: ## Build the static Substrate guest server (ate-env-guest) for linux/
 SUBSTRATE_HARNESSES := $(addprefix harness-substrate-,$(HARNESSES))
 .PHONY: $(SUBSTRATE_HARNESSES) harness-substrate-%
 $(SUBSTRATE_HARNESSES): harness-substrate-%: harness-% guest-launcher ## Build a harness image with the guest front and launcher (koinon/sandbox:<tag>-substrate)
-	docker buildx build --load $(if $(HARNESS_PLATFORMS),--platform $(HARNESS_PLATFORMS)) \
-		--build-arg FLAVOR_IMAGE=koinon/sandbox:$(call harness_tag,$*) \
-		--build-context launcher=build/guest-launcher \
-		--tag koinon/sandbox:$(call harness_tag,$*)-substrate cmd/koinon-guest-launcher
+	hack/harness-substrate-build.sh koinon/sandbox:$(call harness_tag,$*) koinon/sandbox:$(call harness_tag,$*)-substrate $(HARNESS_PLATFORMS)
 
 .PHONY: harnesses-substrate
 harnesses-substrate: $(SUBSTRATE_HARNESSES) ## Build the substrate overlay of every harness image
@@ -206,7 +203,7 @@ harness-suite: ## Run the harness contract suite against built images
 
 .PHONY: test-opencode-plugin
 test-opencode-plugin: ## Type-check and unit-test Koinon's OpenCode plugins (ADR 0093; needs pnpm, no Docker)
-	cd harnesses/opencode/plugins && $(PNPM) install --frozen-lockfile && $(PNPM) run typecheck && $(PNPM) run test
+	cd harnesses/opencode/plugins && $(PNPM) install --frozen-lockfile $(if $(KOINON_PNPM_STORE),--store-dir "$(KOINON_PNPM_STORE)") && $(PNPM) run typecheck && $(PNPM) run test
 
 # The commands of the quickstart and of the backup guide are plain files that test/e2e runs (ADR 0108).
 # The docs site is in stateracloud/koinon-docs.
@@ -217,6 +214,10 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 .PHONY: test-e2e-kind
 test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	STORIES=1 test/e2e/run.sh
+
+.PHONY: test-e2e-kind-substrate
+test-e2e-kind-substrate: ## Quickstart e2e on kind with execution.driver substrate on the gVisor class (issue #1091; KEEP=1 keeps the cluster; docs/dev/ci.md)
+	DRIVER=substrate ESCAPE_OPENSHELL=0 test/e2e/run.sh
 
 .PHONY: test-fence-kind
 test-fence-kind: ## Prove the Substrate fence on its own throwaway kind cluster (API server ports rule; needs Docker, kind, helm 4; KEEP_CLUSTER=1 keeps it)
@@ -233,6 +234,10 @@ test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install o
 # (test/e2e/escape-openshell.sh, #109).
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
+# KOINON_ENVTEST_ASSETS=<dir> skips setup-envtest: hack/lane-gates.sh finds the assets once with
+# `make envtest-assets` and gives the directory to each envtest gate (#1296). The name is Koinon's
+# own, so a KUBEBUILDER_ASSETS of another version in your shell never replaces the pin above.
+envtest_assets       = $${KOINON_ENVTEST_ASSETS:-$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)}
 
 .PHONY: envtest-assets
 envtest-assets: ## Download (or find) the envtest API server binaries and print their directory
@@ -240,7 +245,7 @@ envtest-assets: ## Download (or find) the envtest API server binaries and print 
 
 .PHONY: test-admission
 test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
-	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
+	assets="$(envtest_assets)" && test -n "$$assets" && \
 		KOINON_REQUIRE=$${KOINON_REQUIRE:-envtest,substrate-policy} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
 
 # The install modes run in shards (issue #1303): CI runs one process per shard, each with the 15 minute
@@ -260,7 +265,7 @@ endif
 
 .PHONY: test-chart-smoke
 test-chart-smoke: ## Start the chart's rendered Jobs and Deployments as containers (needs Docker, helm, Go). One shard of the install modes: CHART_SMOKE_SHARD=core|external|kms (default: all, serial)
-	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
+	assets="$(envtest_assets)" && test -n "$$assets" && \
 		mkdir -p reports/chartsmoke && rm -f reports/chartsmoke/*.json && \
 		{ rc=0; \
 		KOINON_CHARTSMOKE_SHARD=$${KOINON_CHARTSMOKE_SHARD:-$(CHART_SMOKE_SHARD)} KOINON_REQUIRE=$${KOINON_REQUIRE:-docker,envtest} KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -timeout $(CHART_SMOKE_GO_TIMEOUT) -v ./test/chartsmoke/ -ginkgo.timeout=$(CHART_SMOKE_BUDGET) -ginkgo.json-report=$(CURDIR)/reports/chartsmoke/report.json || rc=1; \
@@ -274,7 +279,8 @@ test-escape: ## Run the escape suite's OpenShell cases against a gateway you poi
 
 .PHONY: test-escape-substrate
 test-escape-substrate: ## Qualify one Substrate isolation tier (default hardened = gVisor) on a cluster you point it at (KOINON_ESCAPE_SUBSTRATE_*; runbook: docs/dev/escape-substrate.md)
-	KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:+$$KOINON_REQUIRE,}escape-cluster-ips,host-kernel,substrate-targets,substrate-snapshots \
+	assets="$(envtest_assets)" && test -n "$$assets" && \
+		KOINON_ESCAPE_DRIVER=substrate KOINON_REQUIRE=$${KOINON_REQUIRE:+$$KOINON_REQUIRE,}escape-cluster-ips,host-kernel,substrate-targets,substrate-snapshots,envtest KUBEBUILDER_ASSETS="$$assets" \
 		$(GO) test -count=1 -v -timeout 45m ./test/escape/ -ginkgo.label-filter=substrate -ginkgo.timeout=40m
 
 .PHONY: test-escape-kind

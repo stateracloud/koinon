@@ -58,7 +58,7 @@ func substrateCRD(name string) *unstructured.Unstructured {
 	return crd(name, "v1")
 }
 
-// workerPool is a WorkerPool of Substrate v1.0.0: status carries replicas and readyReplicas, not conditions.
+// workerPool is a WorkerPool of Substrate v1.0.1: status carries replicas and readyReplicas, not conditions.
 // ready is "True" (all workers ready), "False" (none) or "" (no status yet).
 func workerPool(name string, ready string) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{Object: map[string]any{
@@ -93,6 +93,7 @@ type substrateCluster struct {
 	probe   *fakeIssuerProbe
 	devices fakeDevices
 	userns  preflight.UserNamespacesProber
+	atefs   preflight.AteFSProber
 	config  preflight.Config
 }
 
@@ -101,10 +102,11 @@ func healthySubstrate() *substrateCluster {
 		minor:  "37",
 		issuer: fakeIssuer{issuer: "https://issuer.example.com"},
 		probe:  &fakeIssuerProbe{res: IssuerResult{Reachable: true, TokenIssuer: "https://issuer.example.com", Detail: "HTTP 200 OK"}},
+		atefs:  fakeAteFS{nodes: []preflight.NodeAteFS{{Node: "w"}}},
 	}
 	c.kube = []runtime.Object{
-		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.0", nil, 1),
-		deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
+		deployment("ate-api-server", "ghcr.io/agent-substrate/substrate/ateapi:v1.0.1", nil, 1),
+		deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1),
 	}
 	for _, name := range preflight.SubstrateCRDs {
 		c.dynamic = append(c.dynamic, substrateCRD(name))
@@ -124,7 +126,7 @@ func (c *substrateCluster) run(ctx context.Context) []preflight.Result {
 		map[schema.GroupVersionResource]string{crdGVR: "CustomResourceDefinitionList", workerPoolGVR: "WorkerPoolList"}, c.dynamic...)
 	checker := &preflight.Checker{
 		Kube: kube, Dynamic: dyn, Config: c.config,
-		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices, UserNS: c.userns,
+		Issuer: c.issuer, IssuerProbe: c.probe, Devices: c.devices, UserNS: c.userns, AteFS: c.atefs,
 	}
 	return checker.Run(ctx)
 }
@@ -133,7 +135,7 @@ var _ = Describe("Substrate checks", func() {
 	It("passes on a complete cluster and runs no OpenShell or Agent Sandbox check", func(ctx SpecContext) {
 		results := healthySubstrate().run(ctx)
 		Expect(checks(results)).To(Equal([]string{
-			"Kubernetes version", "Substrate node devices", "Substrate gVisor user namespaces", "Service-account issuer", "Agent Substrate", "Substrate router",
+			"Kubernetes version", "Substrate node devices", "Substrate gVisor user namespaces", "Substrate /var/lib/ate filesystem", "Service-account issuer", "Agent Substrate", "Substrate router",
 			"Substrate worker pool (vm tier)", "NetworkPolicy enforcement",
 		}))
 		for _, r := range results {
@@ -168,11 +170,11 @@ var _ = Describe("Substrate checks", func() {
 		c.kube = c.kube[1:]
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("not found"))
 		c = healthySubstrate()
-		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 0)
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 0)
 		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("no ready replica"))
 		c = healthySubstrate()
-		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
-		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.1 is not the pinned release v1.0.0"))
+		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1)
+		Expect(find(c.run(ctx), "Agent Substrate").Message).To(ContainSubstring("v1.0.0 is not the pinned release v1.0.1"))
 		c = healthySubstrate()
 		c.kube[0] = deployment("ate-api-server", "example.com/ate/api-server", nil, 1)
 		untagged := find(c.run(ctx), "Agent Substrate")
@@ -180,7 +182,7 @@ var _ = Describe("Substrate checks", func() {
 		Expect(untagged.Message).To(ContainSubstring("no tag"))
 		// The api server is found by container name, not by position: a sidecar first does not hide it.
 		c = healthySubstrate()
-		d := deployment("ate-api-server", "example.com/ate/api-server:v1.0.0", nil, 1)
+		d := deployment("ate-api-server", "example.com/ate/api-server:v1.0.1", nil, 1)
 		d.Spec.Template.Spec.Containers = append([]corev1.Container{{Name: "objectstore-plugin", Image: "example.com/ate/plugin:v9"}}, d.Spec.Template.Spec.Containers...)
 		c.kube[0] = d
 		Expect(find(c.run(ctx), "Agent Substrate").Status).To(Equal(preflight.Pass))
@@ -188,7 +190,7 @@ var _ = Describe("Substrate checks", func() {
 
 	It("fails when the router does not allow the atenet client", func(ctx SpecContext) {
 		c := healthySubstrate()
-		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.0", nil, 1)
+		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.1", nil, 1)
 		r := find(c.run(ctx), "Substrate router")
 		Expect(r.Status).To(Equal(preflight.Fail))
 		Expect(r.Fix).To(ContainSubstring("--ingress-allowed-spiffe-ids="))
@@ -198,12 +200,52 @@ var _ = Describe("Substrate checks", func() {
 		c := healthySubstrate()
 		Expect(find(c.run(ctx), "Substrate router").Message).To(ContainSubstring("ns/ate-system/sa/atenet-client"))
 		c.config.Substrate.Namespace = "substrate-prod"
-		moved := deployment("atenet-router", "example.com/ate/router:v1.0.0", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1)
+		moved := deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" + preflight.SubstrateRouterSPIFFEID("ate-system")}, 1)
 		moved.Namespace = "substrate-prod"
 		c.kube = append(c.kube, moved)
 		r := find(c.run(ctx), "Substrate router")
 		Expect(r.Status).To(Equal(preflight.Fail))
 		Expect(r.Fix).To(ContainSubstring("ns/substrate-prod/sa/atenet-client"))
+	})
+
+	It("fails when the router does not allow agentd's identity", func(ctx SpecContext) {
+		c := healthySubstrate()
+		c.config.Substrate.AgentdNamespace, c.config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+		r := find(c.run(ctx), "Substrate router")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring("ns/koinon/sa/koinon-agentd"))
+		Expect(r.Fix).To(ContainSubstring(preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")))
+
+		c = healthySubstrate()
+		c.config.Substrate.AgentdNamespace, c.config.Substrate.AgentdServiceAccount = "koinon", "koinon-agentd"
+		c.kube[1] = deployment("atenet-router", "example.com/ate/router:v1.0.1", []string{"--ingress-allowed-spiffe-ids=" +
+			preflight.SubstrateRouterSPIFFEID("ate-system") + "," + preflight.SubstrateAgentdSPIFFEID("koinon", "koinon-agentd")}, 1)
+		Expect(find(c.run(ctx), "Substrate router").Status).To(Equal(preflight.Pass))
+	})
+
+	It("fails when the router Service does not serve the port of routerAddress", func(ctx SpecContext) {
+		svc := func(port int32) *corev1.Service {
+			return &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: "atenet-router", Namespace: "ate-system"},
+				Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "https", Port: port}}},
+			}
+		}
+		c := healthySubstrate()
+		c.config.Substrate.RouterPort = 80
+		c.kube = append(c.kube, svc(443))
+		r := find(c.run(ctx), "Substrate router")
+		Expect(r.Status).To(Equal(preflight.Fail))
+		Expect(r.Message).To(ContainSubstring("no port 80"))
+		Expect(r.Fix).To(ContainSubstring("443"))
+
+		c = healthySubstrate()
+		c.config.Substrate.RouterPort = 443
+		c.kube = append(c.kube, svc(443))
+		Expect(find(c.run(ctx), "Substrate router").Status).To(Equal(preflight.Pass))
+
+		c = healthySubstrate()
+		c.config.Substrate.RouterPort = 443
+		Expect(find(c.run(ctx), "Substrate router").Message).To(ContainSubstring("Service ate-system/atenet-router not found"))
 	})
 
 	It("fails on a worker pool that is missing or not ready", func(ctx SpecContext) {

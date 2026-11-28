@@ -3355,6 +3355,294 @@ func (x *ExplainPlatformPriceResponse) GetProvenance() *PriceProvenance {
 	return nil
 }
 
+type ExplainOrgPricesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainOrgPricesRequest) Reset() {
+	*x = ExplainOrgPricesRequest{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainOrgPricesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainOrgPricesRequest) ProtoMessage() {}
+
+func (x *ExplainOrgPricesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainOrgPricesRequest.ProtoReflect.Descriptor instead.
+func (*ExplainOrgPricesRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *ExplainOrgPricesRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type ExplainOrgPricesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// models has one row per enabled model, ordered by provider name then model name.
+	Models        []*ModelPriceSource `protobuf:"bytes,1,rep,name=models,proto3" json:"models,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainOrgPricesResponse) Reset() {
+	*x = ExplainOrgPricesResponse{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainOrgPricesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainOrgPricesResponse) ProtoMessage() {}
+
+func (x *ExplainOrgPricesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainOrgPricesResponse.ProtoReflect.Descriptor instead.
+func (*ExplainOrgPricesResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *ExplainOrgPricesResponse) GetModels() []*ModelPriceSource {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
+// ModelPriceSource is the price in use now for one model of an org.
+type ModelPriceSource struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ProviderName string                 `protobuf:"bytes,1,opt,name=provider_name,json=providerName,proto3" json:"provider_name,omitempty"`
+	ProviderType string                 `protobuf:"bytes,2,opt,name=provider_type,json=providerType,proto3" json:"provider_type,omitempty"`
+	Model        string                 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	// source is org, platform or default. It is empty when the model has no usable price.
+	Source   string      `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
+	PriceRef string      `protobuf:"bytes,5,opt,name=price_ref,json=priceRef,proto3" json:"price_ref,omitempty"`
+	Entry    *PriceEntry `protobuf:"bytes,6,opt,name=entry,proto3" json:"entry,omitempty"`
+	// platform_version is set for source platform.
+	PlatformVersion int64 `protobuf:"varint,7,opt,name=platform_version,json=platformVersion,proto3" json:"platform_version,omitempty"`
+	// list_version is set for source default.
+	ListVersion string `protobuf:"bytes,8,opt,name=list_version,json=listVersion,proto3" json:"list_version,omitempty"`
+	// replaces is set for source org when a lower layer would price the model without the org price.
+	Replaces *ReplacedPrice `protobuf:"bytes,9,opt,name=replaces,proto3" json:"replaces,omitempty"`
+	// unpriced_reason is no_price or unusable_price when source is empty.
+	UnpricedReason string `protobuf:"bytes,10,opt,name=unpriced_reason,json=unpricedReason,proto3" json:"unpriced_reason,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ModelPriceSource) Reset() {
+	*x = ModelPriceSource{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelPriceSource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelPriceSource) ProtoMessage() {}
+
+func (x *ModelPriceSource) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelPriceSource.ProtoReflect.Descriptor instead.
+func (*ModelPriceSource) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *ModelPriceSource) GetProviderName() string {
+	if x != nil {
+		return x.ProviderName
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetProviderType() string {
+	if x != nil {
+		return x.ProviderType
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetPriceRef() string {
+	if x != nil {
+		return x.PriceRef
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetEntry() *PriceEntry {
+	if x != nil {
+		return x.Entry
+	}
+	return nil
+}
+
+func (x *ModelPriceSource) GetPlatformVersion() int64 {
+	if x != nil {
+		return x.PlatformVersion
+	}
+	return 0
+}
+
+func (x *ModelPriceSource) GetListVersion() string {
+	if x != nil {
+		return x.ListVersion
+	}
+	return ""
+}
+
+func (x *ModelPriceSource) GetReplaces() *ReplacedPrice {
+	if x != nil {
+		return x.Replaces
+	}
+	return nil
+}
+
+func (x *ModelPriceSource) GetUnpricedReason() string {
+	if x != nil {
+		return x.UnpricedReason
+	}
+	return ""
+}
+
+// ReplacedPrice is the price an org price replaces: the next layer down (platform or default).
+type ReplacedPrice struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Source          string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	PriceRef        string                 `protobuf:"bytes,2,opt,name=price_ref,json=priceRef,proto3" json:"price_ref,omitempty"`
+	Entry           *PriceEntry            `protobuf:"bytes,3,opt,name=entry,proto3" json:"entry,omitempty"`
+	PlatformVersion int64                  `protobuf:"varint,4,opt,name=platform_version,json=platformVersion,proto3" json:"platform_version,omitempty"`
+	ListVersion     string                 `protobuf:"bytes,5,opt,name=list_version,json=listVersion,proto3" json:"list_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ReplacedPrice) Reset() {
+	*x = ReplacedPrice{}
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplacedPrice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplacedPrice) ProtoMessage() {}
+
+func (x *ReplacedPrice) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_price_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplacedPrice.ProtoReflect.Descriptor instead.
+func (*ReplacedPrice) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_price_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *ReplacedPrice) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ReplacedPrice) GetPriceRef() string {
+	if x != nil {
+		return x.PriceRef
+	}
+	return ""
+}
+
+func (x *ReplacedPrice) GetEntry() *PriceEntry {
+	if x != nil {
+		return x.Entry
+	}
+	return nil
+}
+
+func (x *ReplacedPrice) GetPlatformVersion() int64 {
+	if x != nil {
+		return x.PlatformVersion
+	}
+	return 0
+}
+
+func (x *ReplacedPrice) GetListVersion() string {
+	if x != nil {
+		return x.ListVersion
+	}
+	return ""
+}
+
 var File_koinon_budget_v1alpha1_price_proto protoreflect.FileDescriptor
 
 const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
@@ -3651,7 +3939,29 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\flist_version\x18\x05 \x01(\tR\vlistVersion\x12G\n" +
 	"\n" +
 	"provenance\x18\x06 \x01(\v2'.koinon.budget.v1alpha1.PriceProvenanceR\n" +
-	"provenance2\xbc\x12\n" +
+	"provenance\"0\n" +
+	"\x17ExplainOrgPricesRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"\\\n" +
+	"\x18ExplainOrgPricesResponse\x12@\n" +
+	"\x06models\x18\x01 \x03(\v2(.koinon.budget.v1alpha1.ModelPriceSourceR\x06models\"\x9b\x03\n" +
+	"\x10ModelPriceSource\x12#\n" +
+	"\rprovider_name\x18\x01 \x01(\tR\fproviderName\x12#\n" +
+	"\rprovider_type\x18\x02 \x01(\tR\fproviderType\x12\x14\n" +
+	"\x05model\x18\x03 \x01(\tR\x05model\x12\x16\n" +
+	"\x06source\x18\x04 \x01(\tR\x06source\x12\x1b\n" +
+	"\tprice_ref\x18\x05 \x01(\tR\bpriceRef\x128\n" +
+	"\x05entry\x18\x06 \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\x05entry\x12)\n" +
+	"\x10platform_version\x18\a \x01(\x03R\x0fplatformVersion\x12!\n" +
+	"\flist_version\x18\b \x01(\tR\vlistVersion\x12A\n" +
+	"\breplaces\x18\t \x01(\v2%.koinon.budget.v1alpha1.ReplacedPriceR\breplaces\x12'\n" +
+	"\x0funpriced_reason\x18\n" +
+	" \x01(\tR\x0eunpricedReason\"\xcc\x01\n" +
+	"\rReplacedPrice\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x1b\n" +
+	"\tprice_ref\x18\x02 \x01(\tR\bpriceRef\x128\n" +
+	"\x05entry\x18\x03 \x01(\v2\".koinon.budget.v1alpha1.PriceEntryR\x05entry\x12)\n" +
+	"\x10platform_version\x18\x04 \x01(\x03R\x0fplatformVersion\x12!\n" +
+	"\flist_version\x18\x05 \x01(\tR\vlistVersion2\xb8\x13\n" +
 	"\fPriceService\x12h\n" +
 	"\n" +
 	"ListPrices\x12).koinon.budget.v1alpha1.ListPricesRequest\x1a*.koinon.budget.v1alpha1.ListPricesResponse\"\x03\x90\x02\x01\x12]\n" +
@@ -3671,7 +3981,8 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\x16RollbackPlatformPrices\x125.koinon.budget.v1alpha1.RollbackPlatformPricesRequest\x1a6.koinon.budget.v1alpha1.RollbackPlatformPricesResponse\x12\x8f\x01\n" +
 	"\x17GetPriceRefreshSettings\x126.koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest\x1a7.koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse\"\x03\x90\x02\x01\x12x\n" +
 	"\x11CheckPriceSources\x120.koinon.budget.v1alpha1.CheckPriceSourcesRequest\x1a1.koinon.budget.v1alpha1.CheckPriceSourcesResponse\x12\x86\x01\n" +
-	"\x14ExplainPlatformPrice\x123.koinon.budget.v1alpha1.ExplainPlatformPriceRequest\x1a4.koinon.budget.v1alpha1.ExplainPlatformPriceResponse\"\x03\x90\x02\x01BSZQgithub.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1b\x06proto3"
+	"\x14ExplainPlatformPrice\x123.koinon.budget.v1alpha1.ExplainPlatformPriceRequest\x1a4.koinon.budget.v1alpha1.ExplainPlatformPriceResponse\"\x03\x90\x02\x01\x12z\n" +
+	"\x10ExplainOrgPrices\x12/.koinon.budget.v1alpha1.ExplainOrgPricesRequest\x1a0.koinon.budget.v1alpha1.ExplainOrgPricesResponse\"\x03\x90\x02\x01BSZQgithub.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1b\x06proto3"
 
 var (
 	file_koinon_budget_v1alpha1_price_proto_rawDescOnce sync.Once
@@ -3685,7 +3996,7 @@ func file_koinon_budget_v1alpha1_price_proto_rawDescGZIP() []byte {
 	return file_koinon_budget_v1alpha1_price_proto_rawDescData
 }
 
-var file_koinon_budget_v1alpha1_price_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_koinon_budget_v1alpha1_price_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_koinon_budget_v1alpha1_price_proto_goTypes = []any{
 	(*Rates)(nil),                             // 0: koinon.budget.v1alpha1.Rates
 	(*PriceTier)(nil),                         // 1: koinon.budget.v1alpha1.PriceTier
@@ -3736,8 +4047,12 @@ var file_koinon_budget_v1alpha1_price_proto_goTypes = []any{
 	(*CheckPriceSourcesResponse)(nil),         // 46: koinon.budget.v1alpha1.CheckPriceSourcesResponse
 	(*ExplainPlatformPriceRequest)(nil),       // 47: koinon.budget.v1alpha1.ExplainPlatformPriceRequest
 	(*ExplainPlatformPriceResponse)(nil),      // 48: koinon.budget.v1alpha1.ExplainPlatformPriceResponse
-	nil,                                       // 49: koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
-	(*timestamppb.Timestamp)(nil),             // 50: google.protobuf.Timestamp
+	(*ExplainOrgPricesRequest)(nil),           // 49: koinon.budget.v1alpha1.ExplainOrgPricesRequest
+	(*ExplainOrgPricesResponse)(nil),          // 50: koinon.budget.v1alpha1.ExplainOrgPricesResponse
+	(*ModelPriceSource)(nil),                  // 51: koinon.budget.v1alpha1.ModelPriceSource
+	(*ReplacedPrice)(nil),                     // 52: koinon.budget.v1alpha1.ReplacedPrice
+	nil,                                       // 53: koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
+	(*timestamppb.Timestamp)(nil),             // 54: google.protobuf.Timestamp
 }
 var file_koinon_budget_v1alpha1_price_proto_depIdxs = []int32{
 	0,  // 0: koinon.budget.v1alpha1.PriceTier.rates:type_name -> koinon.budget.v1alpha1.Rates
@@ -3747,88 +4062,94 @@ var file_koinon_budget_v1alpha1_price_proto_depIdxs = []int32{
 	2,  // 4: koinon.budget.v1alpha1.PriceVersion.match:type_name -> koinon.budget.v1alpha1.PriceMatch
 	0,  // 5: koinon.budget.v1alpha1.PriceVersion.rates:type_name -> koinon.budget.v1alpha1.Rates
 	1,  // 6: koinon.budget.v1alpha1.PriceVersion.tiers:type_name -> koinon.budget.v1alpha1.PriceTier
-	50, // 7: koinon.budget.v1alpha1.PriceVersion.valid_from:type_name -> google.protobuf.Timestamp
-	50, // 8: koinon.budget.v1alpha1.PriceVersion.retired_at:type_name -> google.protobuf.Timestamp
-	50, // 9: koinon.budget.v1alpha1.PriceVersion.created_at:type_name -> google.protobuf.Timestamp
+	54, // 7: koinon.budget.v1alpha1.PriceVersion.valid_from:type_name -> google.protobuf.Timestamp
+	54, // 8: koinon.budget.v1alpha1.PriceVersion.retired_at:type_name -> google.protobuf.Timestamp
+	54, // 9: koinon.budget.v1alpha1.PriceVersion.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 10: koinon.budget.v1alpha1.ListPricesResponse.prices:type_name -> koinon.budget.v1alpha1.PriceVersion
 	2,  // 11: koinon.budget.v1alpha1.SetPriceRequest.match:type_name -> koinon.budget.v1alpha1.PriceMatch
 	0,  // 12: koinon.budget.v1alpha1.SetPriceRequest.rates:type_name -> koinon.budget.v1alpha1.Rates
 	1,  // 13: koinon.budget.v1alpha1.SetPriceRequest.tiers:type_name -> koinon.budget.v1alpha1.PriceTier
-	50, // 14: koinon.budget.v1alpha1.SetPriceRequest.valid_from:type_name -> google.protobuf.Timestamp
+	54, // 14: koinon.budget.v1alpha1.SetPriceRequest.valid_from:type_name -> google.protobuf.Timestamp
 	4,  // 15: koinon.budget.v1alpha1.SetPriceResponse.price:type_name -> koinon.budget.v1alpha1.PriceVersion
 	3,  // 16: koinon.budget.v1alpha1.GetDefaultPricesResponse.entries:type_name -> koinon.budget.v1alpha1.PriceEntry
 	3,  // 17: koinon.budget.v1alpha1.PriceChange.before:type_name -> koinon.budget.v1alpha1.PriceEntry
 	3,  // 18: koinon.budget.v1alpha1.PriceChange.after:type_name -> koinon.budget.v1alpha1.PriceEntry
 	14, // 19: koinon.budget.v1alpha1.GetDefaultPriceChangesResponse.changes:type_name -> koinon.budget.v1alpha1.PriceChange
-	50, // 20: koinon.budget.v1alpha1.FlaggedPrice.last_seen:type_name -> google.protobuf.Timestamp
-	50, // 21: koinon.budget.v1alpha1.ListFlaggedPricesRequest.since:type_name -> google.protobuf.Timestamp
+	54, // 20: koinon.budget.v1alpha1.FlaggedPrice.last_seen:type_name -> google.protobuf.Timestamp
+	54, // 21: koinon.budget.v1alpha1.ListFlaggedPricesRequest.since:type_name -> google.protobuf.Timestamp
 	16, // 22: koinon.budget.v1alpha1.ListFlaggedPricesResponse.flagged:type_name -> koinon.budget.v1alpha1.FlaggedPrice
-	50, // 23: koinon.budget.v1alpha1.PriceProvenance.fetched_at:type_name -> google.protobuf.Timestamp
-	50, // 24: koinon.budget.v1alpha1.PriceProvenance.committed_at:type_name -> google.protobuf.Timestamp
-	50, // 25: koinon.budget.v1alpha1.PriceProvenance.approved_at:type_name -> google.protobuf.Timestamp
+	54, // 23: koinon.budget.v1alpha1.PriceProvenance.fetched_at:type_name -> google.protobuf.Timestamp
+	54, // 24: koinon.budget.v1alpha1.PriceProvenance.committed_at:type_name -> google.protobuf.Timestamp
+	54, // 25: koinon.budget.v1alpha1.PriceProvenance.approved_at:type_name -> google.protobuf.Timestamp
 	3,  // 26: koinon.budget.v1alpha1.PriceProposal.current:type_name -> koinon.budget.v1alpha1.PriceEntry
 	3,  // 27: koinon.budget.v1alpha1.PriceProposal.proposed:type_name -> koinon.budget.v1alpha1.PriceEntry
 	20, // 28: koinon.budget.v1alpha1.PriceProposal.changes:type_name -> koinon.budget.v1alpha1.PriceRateChange
 	19, // 29: koinon.budget.v1alpha1.PriceProposal.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
-	50, // 30: koinon.budget.v1alpha1.PriceProposal.created_at:type_name -> google.protobuf.Timestamp
-	50, // 31: koinon.budget.v1alpha1.PriceProposal.decided_at:type_name -> google.protobuf.Timestamp
+	54, // 30: koinon.budget.v1alpha1.PriceProposal.created_at:type_name -> google.protobuf.Timestamp
+	54, // 31: koinon.budget.v1alpha1.PriceProposal.decided_at:type_name -> google.protobuf.Timestamp
 	21, // 32: koinon.budget.v1alpha1.ListPriceProposalsResponse.proposals:type_name -> koinon.budget.v1alpha1.PriceProposal
 	21, // 33: koinon.budget.v1alpha1.GetPriceProposalResponse.proposal:type_name -> koinon.budget.v1alpha1.PriceProposal
-	50, // 34: koinon.budget.v1alpha1.PriceSourceFetch.fetched_at:type_name -> google.protobuf.Timestamp
+	54, // 34: koinon.budget.v1alpha1.PriceSourceFetch.fetched_at:type_name -> google.protobuf.Timestamp
 	30, // 35: koinon.budget.v1alpha1.ListPriceSourceFetchesResponse.fetches:type_name -> koinon.budget.v1alpha1.PriceSourceFetch
 	3,  // 36: koinon.budget.v1alpha1.PlatformPriceEntry.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
 	19, // 37: koinon.budget.v1alpha1.PlatformPriceEntry.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
-	50, // 38: koinon.budget.v1alpha1.PlatformPriceVersion.created_at:type_name -> google.protobuf.Timestamp
-	50, // 39: koinon.budget.v1alpha1.PlatformPriceVersion.valid_from:type_name -> google.protobuf.Timestamp
+	54, // 38: koinon.budget.v1alpha1.PlatformPriceVersion.created_at:type_name -> google.protobuf.Timestamp
+	54, // 39: koinon.budget.v1alpha1.PlatformPriceVersion.valid_from:type_name -> google.protobuf.Timestamp
 	33, // 40: koinon.budget.v1alpha1.PlatformPriceVersion.entries:type_name -> koinon.budget.v1alpha1.PlatformPriceEntry
 	34, // 41: koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse.versions:type_name -> koinon.budget.v1alpha1.PlatformPriceVersion
 	34, // 42: koinon.budget.v1alpha1.GetPlatformPriceVersionResponse.version:type_name -> koinon.budget.v1alpha1.PlatformPriceVersion
 	14, // 43: koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse.changes:type_name -> koinon.budget.v1alpha1.PriceChange
-	50, // 44: koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse.updated_at:type_name -> google.protobuf.Timestamp
-	49, // 45: koinon.budget.v1alpha1.CheckPriceSourcesResponse.failed:type_name -> koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
+	54, // 44: koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse.updated_at:type_name -> google.protobuf.Timestamp
+	53, // 45: koinon.budget.v1alpha1.CheckPriceSourcesResponse.failed:type_name -> koinon.budget.v1alpha1.CheckPriceSourcesResponse.FailedEntry
 	3,  // 46: koinon.budget.v1alpha1.ExplainPlatformPriceResponse.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
 	19, // 47: koinon.budget.v1alpha1.ExplainPlatformPriceResponse.provenance:type_name -> koinon.budget.v1alpha1.PriceProvenance
-	5,  // 48: koinon.budget.v1alpha1.PriceService.ListPrices:input_type -> koinon.budget.v1alpha1.ListPricesRequest
-	7,  // 49: koinon.budget.v1alpha1.PriceService.SetPrice:input_type -> koinon.budget.v1alpha1.SetPriceRequest
-	9,  // 50: koinon.budget.v1alpha1.PriceService.RetirePrice:input_type -> koinon.budget.v1alpha1.RetirePriceRequest
-	11, // 51: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:input_type -> koinon.budget.v1alpha1.GetDefaultPricesRequest
-	13, // 52: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:input_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
-	17, // 53: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:input_type -> koinon.budget.v1alpha1.ListFlaggedPricesRequest
-	22, // 54: koinon.budget.v1alpha1.PriceService.ListPriceProposals:input_type -> koinon.budget.v1alpha1.ListPriceProposalsRequest
-	24, // 55: koinon.budget.v1alpha1.PriceService.GetPriceProposal:input_type -> koinon.budget.v1alpha1.GetPriceProposalRequest
-	26, // 56: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:input_type -> koinon.budget.v1alpha1.AcceptPriceProposalRequest
-	28, // 57: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:input_type -> koinon.budget.v1alpha1.DismissPriceProposalRequest
-	31, // 58: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:input_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesRequest
-	35, // 59: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest
-	37, // 60: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:input_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionRequest
-	39, // 61: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest
-	41, // 62: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:input_type -> koinon.budget.v1alpha1.RollbackPlatformPricesRequest
-	43, // 63: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:input_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest
-	45, // 64: koinon.budget.v1alpha1.PriceService.CheckPriceSources:input_type -> koinon.budget.v1alpha1.CheckPriceSourcesRequest
-	47, // 65: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:input_type -> koinon.budget.v1alpha1.ExplainPlatformPriceRequest
-	6,  // 66: koinon.budget.v1alpha1.PriceService.ListPrices:output_type -> koinon.budget.v1alpha1.ListPricesResponse
-	8,  // 67: koinon.budget.v1alpha1.PriceService.SetPrice:output_type -> koinon.budget.v1alpha1.SetPriceResponse
-	10, // 68: koinon.budget.v1alpha1.PriceService.RetirePrice:output_type -> koinon.budget.v1alpha1.RetirePriceResponse
-	12, // 69: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:output_type -> koinon.budget.v1alpha1.GetDefaultPricesResponse
-	15, // 70: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:output_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
-	18, // 71: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:output_type -> koinon.budget.v1alpha1.ListFlaggedPricesResponse
-	23, // 72: koinon.budget.v1alpha1.PriceService.ListPriceProposals:output_type -> koinon.budget.v1alpha1.ListPriceProposalsResponse
-	25, // 73: koinon.budget.v1alpha1.PriceService.GetPriceProposal:output_type -> koinon.budget.v1alpha1.GetPriceProposalResponse
-	27, // 74: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:output_type -> koinon.budget.v1alpha1.AcceptPriceProposalResponse
-	29, // 75: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:output_type -> koinon.budget.v1alpha1.DismissPriceProposalResponse
-	32, // 76: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:output_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesResponse
-	36, // 77: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse
-	38, // 78: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:output_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionResponse
-	40, // 79: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse
-	42, // 80: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:output_type -> koinon.budget.v1alpha1.RollbackPlatformPricesResponse
-	44, // 81: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:output_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse
-	46, // 82: koinon.budget.v1alpha1.PriceService.CheckPriceSources:output_type -> koinon.budget.v1alpha1.CheckPriceSourcesResponse
-	48, // 83: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:output_type -> koinon.budget.v1alpha1.ExplainPlatformPriceResponse
-	66, // [66:84] is the sub-list for method output_type
-	48, // [48:66] is the sub-list for method input_type
-	48, // [48:48] is the sub-list for extension type_name
-	48, // [48:48] is the sub-list for extension extendee
-	0,  // [0:48] is the sub-list for field type_name
+	51, // 48: koinon.budget.v1alpha1.ExplainOrgPricesResponse.models:type_name -> koinon.budget.v1alpha1.ModelPriceSource
+	3,  // 49: koinon.budget.v1alpha1.ModelPriceSource.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
+	52, // 50: koinon.budget.v1alpha1.ModelPriceSource.replaces:type_name -> koinon.budget.v1alpha1.ReplacedPrice
+	3,  // 51: koinon.budget.v1alpha1.ReplacedPrice.entry:type_name -> koinon.budget.v1alpha1.PriceEntry
+	5,  // 52: koinon.budget.v1alpha1.PriceService.ListPrices:input_type -> koinon.budget.v1alpha1.ListPricesRequest
+	7,  // 53: koinon.budget.v1alpha1.PriceService.SetPrice:input_type -> koinon.budget.v1alpha1.SetPriceRequest
+	9,  // 54: koinon.budget.v1alpha1.PriceService.RetirePrice:input_type -> koinon.budget.v1alpha1.RetirePriceRequest
+	11, // 55: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:input_type -> koinon.budget.v1alpha1.GetDefaultPricesRequest
+	13, // 56: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:input_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesRequest
+	17, // 57: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:input_type -> koinon.budget.v1alpha1.ListFlaggedPricesRequest
+	22, // 58: koinon.budget.v1alpha1.PriceService.ListPriceProposals:input_type -> koinon.budget.v1alpha1.ListPriceProposalsRequest
+	24, // 59: koinon.budget.v1alpha1.PriceService.GetPriceProposal:input_type -> koinon.budget.v1alpha1.GetPriceProposalRequest
+	26, // 60: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:input_type -> koinon.budget.v1alpha1.AcceptPriceProposalRequest
+	28, // 61: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:input_type -> koinon.budget.v1alpha1.DismissPriceProposalRequest
+	31, // 62: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:input_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesRequest
+	35, // 63: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsRequest
+	37, // 64: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:input_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionRequest
+	39, // 65: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:input_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsRequest
+	41, // 66: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:input_type -> koinon.budget.v1alpha1.RollbackPlatformPricesRequest
+	43, // 67: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:input_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsRequest
+	45, // 68: koinon.budget.v1alpha1.PriceService.CheckPriceSources:input_type -> koinon.budget.v1alpha1.CheckPriceSourcesRequest
+	47, // 69: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:input_type -> koinon.budget.v1alpha1.ExplainPlatformPriceRequest
+	49, // 70: koinon.budget.v1alpha1.PriceService.ExplainOrgPrices:input_type -> koinon.budget.v1alpha1.ExplainOrgPricesRequest
+	6,  // 71: koinon.budget.v1alpha1.PriceService.ListPrices:output_type -> koinon.budget.v1alpha1.ListPricesResponse
+	8,  // 72: koinon.budget.v1alpha1.PriceService.SetPrice:output_type -> koinon.budget.v1alpha1.SetPriceResponse
+	10, // 73: koinon.budget.v1alpha1.PriceService.RetirePrice:output_type -> koinon.budget.v1alpha1.RetirePriceResponse
+	12, // 74: koinon.budget.v1alpha1.PriceService.GetDefaultPrices:output_type -> koinon.budget.v1alpha1.GetDefaultPricesResponse
+	15, // 75: koinon.budget.v1alpha1.PriceService.GetDefaultPriceChanges:output_type -> koinon.budget.v1alpha1.GetDefaultPriceChangesResponse
+	18, // 76: koinon.budget.v1alpha1.PriceService.ListFlaggedPrices:output_type -> koinon.budget.v1alpha1.ListFlaggedPricesResponse
+	23, // 77: koinon.budget.v1alpha1.PriceService.ListPriceProposals:output_type -> koinon.budget.v1alpha1.ListPriceProposalsResponse
+	25, // 78: koinon.budget.v1alpha1.PriceService.GetPriceProposal:output_type -> koinon.budget.v1alpha1.GetPriceProposalResponse
+	27, // 79: koinon.budget.v1alpha1.PriceService.AcceptPriceProposal:output_type -> koinon.budget.v1alpha1.AcceptPriceProposalResponse
+	29, // 80: koinon.budget.v1alpha1.PriceService.DismissPriceProposal:output_type -> koinon.budget.v1alpha1.DismissPriceProposalResponse
+	32, // 81: koinon.budget.v1alpha1.PriceService.ListPriceSourceFetches:output_type -> koinon.budget.v1alpha1.ListPriceSourceFetchesResponse
+	36, // 82: koinon.budget.v1alpha1.PriceService.ListPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.ListPlatformPriceVersionsResponse
+	38, // 83: koinon.budget.v1alpha1.PriceService.GetPlatformPriceVersion:output_type -> koinon.budget.v1alpha1.GetPlatformPriceVersionResponse
+	40, // 84: koinon.budget.v1alpha1.PriceService.DiffPlatformPriceVersions:output_type -> koinon.budget.v1alpha1.DiffPlatformPriceVersionsResponse
+	42, // 85: koinon.budget.v1alpha1.PriceService.RollbackPlatformPrices:output_type -> koinon.budget.v1alpha1.RollbackPlatformPricesResponse
+	44, // 86: koinon.budget.v1alpha1.PriceService.GetPriceRefreshSettings:output_type -> koinon.budget.v1alpha1.GetPriceRefreshSettingsResponse
+	46, // 87: koinon.budget.v1alpha1.PriceService.CheckPriceSources:output_type -> koinon.budget.v1alpha1.CheckPriceSourcesResponse
+	48, // 88: koinon.budget.v1alpha1.PriceService.ExplainPlatformPrice:output_type -> koinon.budget.v1alpha1.ExplainPlatformPriceResponse
+	50, // 89: koinon.budget.v1alpha1.PriceService.ExplainOrgPrices:output_type -> koinon.budget.v1alpha1.ExplainOrgPricesResponse
+	71, // [71:90] is the sub-list for method output_type
+	52, // [52:71] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_koinon_budget_v1alpha1_price_proto_init() }
@@ -3842,7 +4163,7 @@ func file_koinon_budget_v1alpha1_price_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_budget_v1alpha1_price_proto_rawDesc), len(file_koinon_budget_v1alpha1_price_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   50,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

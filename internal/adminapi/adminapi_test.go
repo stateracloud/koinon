@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -178,6 +179,31 @@ var _ = Describe("the admin API", func() {
 		Expect(resp.StatusCode).To(Equal(200))
 		Expect(string(b)).To(HavePrefix("# SPDX"))
 		Expect(string(b)).To(ContainSubstring("openapi: 3.1.0"))
+		Expect(resp.Header.Get("X-Content-Type-Options")).To(Equal("nosniff"))
+	})
+
+	// Issue 1365 (CodeQL go/reflected-xss): a request value that comes back in an error message is
+	// JSON-escaped in the documented error shape, never raw text that a browser could render.
+	It("escapes a request value it echoes in an invalid-request error", func(ctx SpecContext) {
+		const payload = `<img src=x onerror=alert(1)>`
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			e.srv.URL+"/admin/v1/agents/"+url.PathEscape(payload)+"/budget", nil)
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+e.token)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = resp.Body.Close() }()
+		raw, _ := io.ReadAll(resp.Body)
+
+		Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
+		Expect(resp.Header.Get("Content-Type")).To(Equal("application/json"))
+		Expect(resp.Header.Get("X-Content-Type-Options")).To(Equal("nosniff"))
+		Expect(string(raw)).NotTo(ContainSubstring("<img"))
+		Expect(string(raw)).To(ContainSubstring(`\` + `u003cimg`)) // encoding/json escapes <, > and &
+		var body adminapi.Error
+		Expect(json.Unmarshal(raw, &body)).To(Succeed())
+		Expect(body.Error.Code).To(Equal(adminapi.InvalidRequest))
+		Expect(body.Error.Message).To(ContainSubstring(payload)) // the client still sees what it sent
 	})
 
 	Describe("authentication", func() {

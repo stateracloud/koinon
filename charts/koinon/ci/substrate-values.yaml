@@ -6,9 +6,9 @@
 execution:
   driver: substrate
   substrate:
-    controlAddress: api.ate-system.svc.cluster.local:443
-    routerAddress: atenet-router.ate-system.svc.cluster.local:80
-    tokenAudience: ateapi
+    controlAddress: api.ate-system.svc:443
+    routerAddress: atenet-router.ate-system.svc:443
+    tokenAudience: api.ate-system.svc
     allowUnhardened: true
     # The worker namespace objects (issue #1089): the policies guard the Substrate objects too, the
     # NetworkPolicy fences the Substrate namespaces.
@@ -22,8 +22,13 @@ sandboxNetworkPolicy:
   enabled: false
 sandboxLimitRange:
   enabled: false
+# Substrate needs koinon-gateway on the model and MCP paths: only it checks the actor JWT (issue #1489).
 gateway:
   mode: standalone
+  model:
+    driver: koinon
+  mcp:
+    driver: koinon
 postgres:
   cnpg:
     instances: 1

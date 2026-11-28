@@ -162,15 +162,32 @@ spec:
             {{- if eq $component "agentd" }}
             {{- include "koinon.otlpTracesTokenVolumeMount" $ | nindent 12 }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
+            {{- /* Not on substrate: atenet-egress adds the actor token there, and agentd signs nothing (issue #1386). */}}
+            {{- if include "koinon.ed25519ActorToken" $ }}
+            # The actor token seed only (#1086 part C2): koinon-agentd signs, the gateway verifies.
+            - name: actor-token-key
+              mountPath: /secrets/actor-token
+              readOnly: true
+            {{- end }}
             {{- if $.Values.checkpoints.enabled }}
             - name: checkpoints
               mountPath: /var/lib/koinon/checkpoints
+            {{- end }}
+            {{- end }}
+            {{- if eq $component "reconciler" }}
+            {{- with include "koinon.provisionerVolumeMount" $ | trim }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- end }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
             {{- with include "koinon.substrateVolumeMount" $ | trim }}
             {{- . | nindent 12 }}
+            {{- end }}
+            {{- if eq $component "agentd" }}
+            {{- with include "koinon.substrateRouterVolumeMount" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- else }}
             {{- with include "koinon.apiSecretVolumeMounts" $ | trim }}
@@ -198,16 +215,35 @@ spec:
         {{- if eq $component "agentd" }}
         {{- include "koinon.otlpTracesTokenVolume" $ | nindent 8 }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
+        {{- if include "koinon.ed25519ActorToken" $ }}
+        - name: actor-token-key
+          secret:
+            secretName: {{ include "koinon.actorTokenKeyName" $ }}
+            defaultMode: 0440
+            items:
+              - key: key
+                path: key
+        {{- end }}
         {{- if $.Values.checkpoints.enabled }}
         - name: checkpoints
           emptyDir:
             sizeLimit: {{ $.Values.checkpoints.scratchSize | quote }}
         {{- end }}
         {{- end }}
+        {{- if eq $component "reconciler" }}
+        {{- with include "koinon.provisionerVolume" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- end }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
         {{- with include "koinon.substrateVolume" $ | trim }}
         {{- . | nindent 8 }}
+        {{- end }}
+        {{- if eq $component "agentd" }}
+        {{- with include "koinon.substrateRouterVolume" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- end }}
         {{- else }}
         {{- with include "koinon.apiSecretVolumes" $ | trim }}

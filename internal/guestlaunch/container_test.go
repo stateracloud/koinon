@@ -52,8 +52,12 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 		var buf bytes.Buffer
 		tw := tar.NewWriter(&buf)
-		for _, d := range []string{"tmp", "sandbox", "etc", "usr", "var", "bin"} {
+		for _, d := range []string{"tmp", "sandbox", "etc", "usr", "var", "bin", "run"} {
 			Expect(tw.WriteHeader(&tar.Header{Name: d + "/", Typeflag: tar.TypeDir, Mode: 0o1777})).To(Succeed())
+		}
+		// Issue #1516: the job log directory exists and is readable by anyone, so Landlock alone is the control.
+		for _, d := range []string{"run/koinon", "run/koinon/ate-jobs"} {
+			Expect(tw.WriteHeader(&tar.Header{Name: d + "/", Typeflag: tar.TypeDir, Mode: 0o755})).To(Succeed())
 		}
 		add := func(name, from string, mode int64) {
 			b, err := os.ReadFile(from)
@@ -66,8 +70,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		add("bin/probe", filepath.Join(dir, "probe"), 0o755)
 		policy := []byte(`{
   "capabilities": {"allow": ["CAP_SYS_ADMIN", "CAP_SYS_PTRACE"]},
-  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"]},
-  "seccomp": {"mode": "require"}
+  "landlock": {"mode": "require", "read_exec": ["/bin", "/etc", "/usr", "/var", "/proc"], "read_write": ["/sandbox", "/tmp"], "devices": ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/tty", "/dev/ptmx", "/dev/pts", "/dev/shm"], "list_dirs": ["/dev"], "scoped": ["signal"]},
+  "seccomp": {"mode": "require"},
+  "user": {"mode": "require", "uid": 1000, "gid": 1000}
 }`)
 		// The image policies, as the overlay carries them (cmd/koinon-guest-launcher).
 		images := map[string][]byte{}
@@ -146,6 +151,8 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	fdAttempts := []string{
 		"inherited_fd", "proc_reopen_own_socket", "proc_fd_open_other",
 		"process_vm_readv_other", "ptrace_other", "pidfd_getfd_other",
+		// Issue #1496: no signal reaches a process outside the payload, the guest front among them.
+		"kill_other", "pidfd_signal_other",
 	}
 	// procReadAttempts read another process's /proc entries without taking a descriptor. A payload
 	// that holds CAP_SYS_PTRACE (policy.json keeps it on purpose) passes the kernel's access check;
@@ -156,7 +163,13 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	attempts := append([]string{
 		"ptrace", "mount", "bpf", "keyctl", "perf_event_open", "unshare_newuser", "unshare_newns",
 		"clone_newuser", "clone3", "io_uring_setup", "socket_vsock",
+		// Issue #1496: loading a module, a reboot and a raw socket (CAP_SYS_MODULE, CAP_SYS_BOOT, CAP_NET_RAW).
+		"finit_module", "reboot", "socket_raw",
 		"write:/etc/koinon-probe", "write:/usr/koinon-probe", "write:/var/koinon-probe",
+		// Issue #1503: the job log directory of the guest front is under /run, read-only for the payload.
+		"write:/run/koinon-probe", "symlink:/run/koinon-link",
+		// Issue #1516: nor may it read the job logs (the image policies list /run/koinon as hidden).
+		"read:/run/koinon/ate-jobs",
 		"dev_create:/dev/koinon-probe", "dev_mknod_block", "dev_open_unlisted:/dev/koinon-unlisted",
 	}, fdAttempts...)
 	// inherit runs argv after the probe has played the guest server: a socket at fd 7 without
@@ -167,8 +180,9 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 	// skipWithoutLandlock turns the one outcome that means "this Docker host has no Landlock of the
 	// ABI the policy needs" into a skip; every other failure stays a failure.
 	skipWithoutLandlock := func(out string, code int) {
-		if code == 70 && strings.Contains(out, "landlock required but the kernel") {
-			Skip("the Docker host kernel has no Landlock of ABI 5 or newer")
+		if code == 70 && (strings.Contains(out, "landlock required but the kernel") ||
+			strings.Contains(out, "landlock signal scope required but the kernel")) {
+			Skip("the Docker host kernel has no Landlock of the ABI the policy needs")
 		}
 	}
 
@@ -179,6 +193,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		for _, a := range []string{
 			"ptrace", "mount", "unshare_newns", "write:/etc/koinon-probe", "dev_create:/dev/koinon-probe", "dev_mknod_block", "clone3",
 			"inherited_fd", "proc_fd_list_other", "proc_environ_other", "ptrace_other", "pidfd_getfd_other",
+			"kill_other", "pidfd_signal_other", "socket_raw", "write:/run/koinon-probe", "symlink:/run/koinon-link", "read:/run/koinon/ate-jobs",
 		} {
 			Expect(v).To(HaveKeyWithValue(a, "open"), out)
 		}
@@ -189,6 +204,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 	It("blocks the escape attempts and keeps the allowed paths writable", func() {
 		// SYS_ADMIN and SYS_PTRACE stay in the allowlist so only seccomp and Landlock can be the cause.
+		// The drop to uid 1000 is required: a policy that can leave the payload root refuses them (issue #1496).
 		out, code := run(inherit("/launcher", "--policy", "/policy.json", "--", "/bin/probe")...)
 		skipWithoutLandlock(out, code)
 		Expect(code).To(Equal(0), out)
@@ -209,14 +225,18 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 
 	// The two image policies of ADR 0120 section 4.2 and 4.3.
 	Describe("the image policies in the shape the Substrate guest gives a payload", func() {
-		// Root with only CAP_KILL, CAP_NET_BIND_SERVICE and CAP_AUDIT_WRITE (phase 0 result, issue #1087).
+		// vm tier: root with only CAP_KILL, CAP_NET_BIND_SERVICE and CAP_AUDIT_WRITE (phase 0 result,
+		// issue #1087; the Substrate default set, until issue #1462).
 		substrate := []string{"--cap-drop=ALL", "--cap-add=KILL", "--cap-add=NET_BIND_SERVICE", "--cap-add=AUDIT_WRITE"}
+		// gVisor tiers: root with the set of the actor template (substrate.GVisorCapAdd, issue #1387).
+		gvisor := []string{"--cap-drop=ALL", "--cap-add=KILL", "--cap-add=SETGID", "--cap-add=SETPCAP", "--cap-add=SETUID"}
 
 		DescribeTable("leave the payload no capability and set no_new_privs",
-			func(policy string) {
-				out, code := runWith(substrate, inherit("/launcher", "--policy", "/"+policy, "--", "/bin/probe")...)
+			func(policy string, shape []string, uid string) {
+				out, code := runWith(shape, inherit("/launcher", "--policy", "/"+policy, "--", "/bin/probe")...)
 				skipWithoutLandlock(out, code)
 				Expect(code).To(Equal(0), out)
+				Expect(out).To(ContainSubstring("uid "+uid+"\n"), out)
 				for _, f := range []string{"CapPrm", "CapEff", "CapAmb"} {
 					Expect(out).To(MatchRegexp(`status `+f+`: 0+\b`), f+"\n"+out)
 				}
@@ -228,20 +248,40 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 				if bv, ok := v["dev_write_blockdev"]; ok {
 					Expect(bv).To(Equal("blocked"), out)
 				}
+				Expect(v).To(HaveKeyWithValue("kill_own_child", "open"), "the payload signals its own processes\n"+out)
 			},
-			Entry("vm tier", "policy-vm.json"),
-			Entry("gVisor tiers", "policy-gvisor.json"),
+			Entry("vm tier", "policy-vm.json", substrate, "0"),
+			Entry("gVisor tiers", "policy-gvisor.json", gvisor, "10001"),
 		)
 
+		It("shrinks the bounding set to nothing on the gVisor tiers", func() {
+			out, code := runWith(gvisor, inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
+			skipWithoutLandlock(out, code)
+			Expect(code).To(Equal(0), out)
+			Expect(out).To(MatchRegexp(`status CapBnd: 0+\b`), out)
+			Expect(out).To(ContainSubstring("status NoNewPrivs: 1"))
+		})
+
+		// Issue #1387: a gVisor sandbox whose guest cannot drop to the non-root user does not start.
+		// The vm shape (no CAP_SETUID or CAP_SETGID) is such a guest.
+		It("refuses to start the payload on the gVisor tiers when the guest cannot drop to non-root", func() {
+			out, code := runWith(substrate, "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
+			Expect(code).To(Equal(70), out)
+			Expect(out).To(ContainSubstring("user drop to 10001:10001 required but failed"))
+			Expect(out).NotTo(ContainSubstring("ptrace"), "the payload never started")
+		})
+
 		// A host without a syscall is simulated by a Docker seccomp profile that answers it ENOSYS.
-		hideWith := func(syscall string, errno int) []string {
+		hideWithIn := func(shape []string, syscall string, errno int) []string {
 			prof := fmt.Sprintf(`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":[%q],"action":"SCMP_ACT_ERRNO","errnoRet":%d}]}`, syscall, errno)
 			path := filepath.Join(dir, fmt.Sprintf("no-%s-%d.json", syscall, errno))
 			Expect(os.WriteFile(path, []byte(prof), 0o600)).To(Succeed())
-			return append([]string{"--security-opt=seccomp=" + path}, substrate...)
+			return append([]string{"--security-opt=seccomp=" + path}, shape...)
 		}
+		hideWith := func(syscall string, errno int) []string { return hideWithIn(substrate, syscall, errno) }
 		hide := func(syscall string) []string { return hideWith(syscall, 38) }
 		noLandlock := func() []string { return hide("landlock_create_ruleset") }
+		noLandlockGVisor := func() []string { return hideWithIn(gvisor, "landlock_create_ruleset", 38) }
 
 		It("closes inherited descriptors through /proc/self/fd when close_range is missing", func() {
 			out, code := runWith(hide("close_range"), inherit("/launcher", "--policy", "/policy-vm.json", "--", "/bin/probe")...)
@@ -257,12 +297,13 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 			Expect(verdicts(out)).To(HaveKeyWithValue("inherited_fd", "blocked"), out)
 		})
 
-		It("keeps the outside process's descriptors closed to a root payload without Landlock", func() {
-			// No Landlock domain: the kernel's capability rule (the target's permitted set is not a
-			// subset of the payload's empty one) is what refuses the access.
-			out, code := runWith(noLandlock(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
+		It("keeps the outside process's descriptors closed to the payload without Landlock", func() {
+			// No Landlock domain. The launcher closes the inherited descriptors before it starts the
+			// payload. The kernel's ptrace access check refuses the /proc reads: the payload has another
+			// uid than the outside process and no CAP_SYS_PTRACE.
+			out, code := runWith(noLandlockGVisor(), inherit("/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")...)
 			Expect(code).To(Equal(0), out)
-			Expect(out).To(ContainSubstring("uid 0"))
+			Expect(out).To(ContainSubstring("uid 10001\n"))
 			v := verdicts(out)
 			for _, a := range slices.Concat(fdAttempts, procReadAttempts) {
 				Expect(v).To(HaveKeyWithValue(a, "blocked"), a+"\n"+out)
@@ -277,7 +318,7 @@ var _ = Describe("the launcher in a container", Label("docker"), Ordered, func()
 		})
 
 		It("starts on the gVisor tiers when Landlock is unavailable and says what the control is", func() {
-			out, code := runWith(noLandlock(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
+			out, code := runWith(noLandlockGVisor(), "/launcher", "--policy", "/policy-gvisor.json", "--", "/bin/probe")
 			Expect(code).To(Equal(0), out)
 			Expect(out).To(ContainSubstring("filesystem rules NOT applied"))
 			Expect(out).To(ContainSubstring("writable root by decision"))

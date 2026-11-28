@@ -1,0 +1,283 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.task.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1;taskv1alpha1";
+
+// TimelineEvent is the typed body of one Timeline event (issue #735). Each member of the oneof is
+// one event kind; internal/tasks has the table that maps a member to the kind string in
+// task_events.kind. A row with payload_version 1 stores this message as protojson. A row with
+// payload_version 0 has the older free-form JSON, which the reader translates to this message.
+//
+// Add a kind as a new member with a new field number. Never reuse or renumber a member.
+message TimelineEvent {
+  oneof event {
+    // "message": a message from a person, the agent or the system.
+    TimelineMessage message = 1;
+    // "task.created".
+    TaskCreated task_created = 2;
+    // "status.changed".
+    StatusChanged status_changed = 3;
+    // "run.queued".
+    RunQueued run_queued = 4;
+    // "run.parked": the run waits for a person.
+    RunParked run_parked = 5;
+    // "run.failed".
+    RunEnded run_failed = 6;
+    // "run.canceled".
+    RunEnded run_canceled = 7;
+    // "run.session_reset": the harness started a new session.
+    SessionChanged run_session_reset = 8;
+    // "run.session_restarted": the harness session started again with a handoff prompt.
+    SessionChanged run_session_restarted = 9;
+    // "sandbox.recreated".
+    TaskNote sandbox_recreated = 10;
+    // "sandbox.work_lost".
+    TaskNote sandbox_work_lost = 11;
+    // "agent.unhealthy".
+    TaskNote agent_unhealthy = 12;
+    // "approval.requested".
+    ApprovalRequested approval_requested = 13;
+    // "approval.first_approved": the first of two approvals.
+    ApprovalChanged approval_first_approved = 14;
+    // "approval.approved".
+    ApprovalChanged approval_approved = 15;
+    // "approval.denied".
+    ApprovalChanged approval_denied = 16;
+    // "approval.executed".
+    ApprovalChanged approval_executed = 17;
+    // "approval.failed".
+    ApprovalChanged approval_failed = 18;
+    // "approval.expired".
+    ApprovalChanged approval_expired = 19;
+    // "approval.canceled".
+    ApprovalChanged approval_canceled = 20;
+    // "question.asked".
+    QuestionAsked question_asked = 21;
+    // "question.answered".
+    QuestionResolved question_answered = 22;
+    // "question.dismissed".
+    QuestionResolved question_dismissed = 23;
+    // "question.expired": the question expired; its default can apply.
+    QuestionResolved question_expired = 24;
+    // "question.canceled".
+    QuestionCanceled question_canceled = 25;
+    // "question.retargeted": the question goes to other recipients.
+    QuestionRetargeted question_retargeted = 26;
+  }
+}
+
+// TimelineMessage is a message on the task.
+message TimelineMessage {
+  // The message as the agent reads it.
+  string text = 1;
+  // The text to show to people when it is not text, for example a direct message without the
+  // trigger instruction that Koinon put before it.
+  string display = 2;
+  // Where a system message or a direct message comes from: "trigger", "trigger_manual",
+  // "direct_message" or "continuation". Empty for a message that a person or the agent wrote.
+  string source = 3;
+  // The ID of the direct message.
+  string message_id = 4;
+  // How a trigger fired: "scheduled" or "manual".
+  string fire = 5;
+  // The user who fired a trigger by hand.
+  string fired_by = 6;
+  // For a continuation: its number, and the most that the task can have.
+  int32 continuation = 7;
+  int32 continuation_max = 8;
+}
+
+// TaskCreated records the start of a task.
+message TaskCreated {
+  string title = 1;
+  // What created the task when it is not a person: "trigger", "trigger_manual" or
+  // "direct_message".
+  string source = 2;
+  // How a trigger fired: "scheduled" or "manual".
+  string fire = 3;
+  // The user who fired a trigger by hand.
+  string fired_by = 4;
+  // The trigger of a direct message thread.
+  string trigger_id = 5;
+}
+
+// StatusChanged records a move of the task's state.
+message StatusChanged {
+  // Task states as the database names them: "submitted", "working", "input_required",
+  // "completed", "canceled" or "failed". from is empty when the writer did not record it. They are
+  // strings, not TaskState, because task.proto imports this file.
+  string from = 1;
+  string to = 2;
+  // A code for the cause, for example "follow_up", "run_succeeded", "continuation_limit".
+  string reason = 3;
+  // The continuation and spend counts of a task that stopped at a limit.
+  int32 continuations = 4;
+  int32 max_continuations = 5;
+  string task_spent_usd = 6;
+  string task_spend_cap_usd = 7;
+  // Why the next continuation could not start, when its agent is not available.
+  string error = 8;
+}
+
+// RunQueued records a run put on the queue with its limits.
+message RunQueued {
+  int32 max_wall_clock_seconds = 1;
+  int64 max_model_requests = 2;
+  // A decimal amount in US dollars; empty when the run has no spend cap.
+  string max_spend_usd = 3;
+}
+
+// RunParked records a run that waits for a person.
+message RunParked {
+  // "approval" or "input_required".
+  string reason = 1;
+  // The approvals and the questions that the run waits for.
+  repeated string approval_ids = 2;
+  repeated string question_ids = 3;
+}
+
+// RunEnded records a run that failed or was canceled.
+message RunEnded {
+  // A code or a text, for example "user", "wall_clock_cap" or "spend_limit".
+  string reason = 1;
+  // The run's failure class, for example "transient" or "loop".
+  string failure_class = 2;
+  // A text for people.
+  string message = 3;
+  // A sandbox that was not available.
+  string sandbox_cause = 4;
+  int64 waited_seconds = 5;
+  string detail = 6;
+  int64 cause_seen_ms = 7;
+  // A run stopped at its time limit, and what the agent said last.
+  int32 max_wall_clock_seconds = 8;
+  string summary = 9;
+  // "reply", "notes" or "none".
+  string summary_source = 10;
+  // A run stopped at a spend or request limit.
+  string limit = 11;
+  string spend_limit_usd = 12;
+  string spent_usd = 13;
+  string window_start = 14;
+  int64 model_requests = 15;
+  // Why a newer queued run replaced this one.
+  string requeue_reason = 16;
+  // The request limit of a run that stopped at it.
+  int64 max_model_requests = 17;
+}
+
+// SessionChanged records a new harness session.
+message SessionChanged {
+  string message = 1;
+  string previous_session_id = 2;
+  string session_id = 3;
+}
+
+// TaskNote is a note from Koinon about the task's sandbox or agent.
+message TaskNote {
+  string message = 1;
+}
+
+// ApprovalScope is the scoped approval that covered a call.
+message ApprovalScope {
+  string id = 1;
+  // "once", "task" or "agent".
+  string kind = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string created_by = 4;
+  string task_id = 5;
+}
+
+// ApprovalRequested records an action that waits for approval, or one that a scope covered.
+message ApprovalRequested {
+  string approval_id = 1;
+  string tool = 2;
+  string target = 3;
+  string args_sha256 = 4;
+  // The policy decision, for example "ask" or "allow".
+  string decision = 5;
+  // The risk card of the action.
+  google.protobuf.Value risk = 6;
+  // The number of approvals that the action needs, when it is more than one.
+  int32 approvals_required = 7;
+  // True when Koinon asks, not the agent.
+  bool system = 8;
+  // The scope that covered the call.
+  ApprovalScope scope = 9;
+}
+
+// ApprovalChanged records a step of an approval after its request.
+message ApprovalChanged {
+  string approval_id = 1;
+  string tool = 2;
+  string target = 3;
+  string args_sha256 = 4;
+  // The approver's note.
+  string note = 5;
+  // The scope that an approval created.
+  ApprovalScope scope = 6;
+  // The result of an executed action.
+  google.protobuf.Struct result = 7;
+  // Why the action failed.
+  string error = 8;
+  // When the approval expired.
+  google.protobuf.Timestamp expires_at = 9;
+  // Why the approval was canceled.
+  string reason = 10;
+}
+
+// QuestionTarget names who a question is for.
+message QuestionTarget {
+  // "user", "role" or "creator".
+  string kind = 1;
+  string user = 2;
+  string role = 3;
+}
+
+// QuestionAsked records a question from the agent to a person.
+message QuestionAsked {
+  string question_id = 1;
+  string question = 2;
+  QuestionTarget target = 3;
+  // The recipients as people read them.
+  string to_label = 4;
+  repeated string recipients = 5;
+  repeated string choices = 6;
+  bool has_draft = 7;
+  // The answer that applies when the question expires.
+  string default_answer = 8;
+  google.protobuf.Timestamp expires_at = 9;
+}
+
+// QuestionResolved records the end of a question: answered, dismissed or expired.
+message QuestionResolved {
+  string question_id = 1;
+  string answer_kind = 2;
+  string answer = 3;
+  bool default_applied = 4;
+  // The display name of the person who answered.
+  string answered_by_name = 5;
+}
+
+// QuestionCanceled records a question that nobody needs to answer now.
+message QuestionCanceled {
+  string question_id = 1;
+  string reason = 2;
+}
+
+// QuestionRetargeted records a question that goes to other recipients.
+message QuestionRetargeted {
+  string question_id = 1;
+  string to_label = 2;
+  repeated string recipients = 3;
+  string reason = 4;
+  // The target that was asked for, when a fallback applies.
+  QuestionTarget requested_target = 5;
+  string fallback_reason = 6;
+}

@@ -32,10 +32,10 @@ test('direct messages: start a thread, reply in it, reopen a completed one, and 
   ]
   const events: Record<string, unknown[]> = {
     't-1': [
-      { seq: '1', kind: 'task.created', actorKind: 'ACTOR_KIND_SYSTEM', payload: { title: 'What changed in the repos today?' }, createdAt: now() },
-      { seq: '2', kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text: 'Answer briefly.\n\nWhat changed in the repos today?', display: 'What changed in the repos today?' }, createdAt: now() },
+      { seq: '1', kind: 'task.created', actorKind: 'ACTOR_KIND_SYSTEM', event: { taskCreated: { title: 'What changed in the repos today?' } }, createdAt: now() },
+      { seq: '2', kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text: 'Answer briefly.\n\nWhat changed in the repos today?', display: 'What changed in the repos today?' } }, createdAt: now() },
     ],
-    't-2': [{ seq: '1', kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text: 'Summarise last night’s incident' }, createdAt: now() }],
+    't-2': [{ seq: '1', kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text: 'Summarise last night’s incident' } }, createdAt: now() }],
   }
 
   await mockApi(page, {
@@ -61,19 +61,19 @@ test('direct messages: start a thread, reply in it, reopen a completed one, and 
           const reopened = t.state === 'TASK_STATE_COMPLETED'
           if (reopened) t.state = 'TASK_STATE_SUBMITTED'
           const list = events[String(req.taskId)]
-          list.push({ seq: String(list.length + 1), kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text }, createdAt: now() })
+          list.push({ seq: String(list.length + 1), kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text } }, createdAt: now() })
           return { task: t, reopened }
         }
         const t = thread('t-3', text, 'TASK_STATE_SUBMITTED', 1)
         tasks.unshift(t)
-        events['t-3'] = [{ seq: '1', kind: 'message', actorKind: 'ACTOR_KIND_USER', payload: { text: `Answer briefly.\n\n${text}`, display: text }, createdAt: now() }]
+        events['t-3'] = [{ seq: '1', kind: 'message', actorKind: 'ACTOR_KIND_USER', event: { message: { text: `Answer briefly.\n\n${text}`, display: text } }, createdAt: now() }]
         return { task: t, created: true }
       },
     },
     stream: { 'koinon.run.v1alpha1.RunService/WatchRun': (): Stream => ({ messages: [] }) },
   })
 
-  await page.goto('/')
+  await page.goto('/inbox')
   const chat = page.getByRole('region', { name: 'Thread: What changed in the repos today?' })
   await expect(chat.getByText('What changed in the repos today?', { exact: true }).first()).toBeVisible()
   await expect(chat.getByText('Answer briefly.')).toHaveCount(0)

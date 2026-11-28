@@ -33,6 +33,7 @@ NetworkPolicy ignores all of it (the preflight's NetworkPolicy probe reports it)
 {{- $ns := $s.namespace }}
 {{- $wns := $s.workerNamespace }}
 {{- if eq $ns $wns }}{{- fail "execution.substrate.workerNamespace must differ from execution.substrate.namespace" }}{{- end }}
+{{- if not $np.koinonIngressPorts }}{{- fail "execution.substrate.workerNetworkPolicy.koinonIngressPorts is empty: Koinon's pods would reach neither ateapi nor the router" }}{{- end }}
 {{- if not $np.controlPlaneApps }}{{- fail "execution.substrate.workerNetworkPolicy.controlPlaneApps is empty: the control-plane policy would select no pod" }}{{- end }}
 {{- if not (or $np.atenetEgressSelector.matchLabels $np.atenetEgressSelector.matchExpressions) }}{{- fail "execution.substrate.workerNetworkPolicy.atenetEgressSelector needs matchLabels or matchExpressions: an empty selector would let workers reach every pod in the control-plane namespace" }}{{- end }}
 {{- $gwNS := dig "matchLabels" "kubernetes.io/metadata.name" $ns $s.gatewayClientNamespaceSelector }}
@@ -93,20 +94,28 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
+    # Koinon's pods reach two things in this namespace: ateapi (the control calls of the reconciler, agentd and the
+    # provisioner) and the atenet router (agentd's guest calls). Only their container ports are open to Koinon's
+    # namespace, not every port of every control-plane pod: atelet's gRPC port and ate-api-server's internal
+    # port stay closed to it (issue #1446; Substrate admits them only from named pods of its own namespace).
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+      ports:
+        {{- range $np.koinonIngressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
   egress:
     - to:
         - podSelector: {}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $wns | quote }}
-        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database. With
-        # gateway.mcp.driver=koinon also koinon-gateway's MCP pods: the actors' MCP calls go there (#1239).
-        {{- $targets := list "gateway" "api" }}
-        {{- if include "koinon.mcpKoinon" . }}{{ $targets = append $targets "mcp-gateway" }}{{ end }}
-        {{- range $targets }}
+        # Koinon's gateway and API only (the model route and the callers of ateapi), not its database. In kubernetes
+        # mode the gateway is not a chart pod: see the proxy rule below.
+        {{- range (eq .Values.gateway.mode "standalone" | ternary (list "gateway" "api") (list "api")) }}
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ $.Release.Namespace | quote }}
@@ -114,6 +123,55 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list $ .) | nindent 14 }}
         {{- end }}
+{{- if eq .Values.gateway.mode "kubernetes" }}
+    # Kubernetes mode (issue #1469): the agentgateway controller runs the proxy of Koinon's Gateway. Its pods have the
+    # label gateway.networking.k8s.io/gateway-name, not Koinon's selector labels (ADR 0058). atenet-egress sends the
+    # actors' model and MCP calls there. Only the Gateway's listener port, the port that the proxy policy admits
+    # (networkpolicy.yaml); the stats port (15020) stays closed (issue #1372). The port is a number: the controller,
+    # not the chart, names the proxy's container ports.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
+      ports:
+        - {port: {{ .Values.gateway.kubernetes.port }}, protocol: TCP}
+{{- end }}
+{{- if include "koinon.mcpKoinon" . }}
+    # With gateway.mcp.driver=koinon also koinon-gateway's MCP pods: the actors' MCP calls go there (#1239). Only the
+    # ports that an actor needs, by the container port names (not numbers): "mcp" and, with the egress listener, "egress".
+    # The stats port (15020) and the health port stay closed: the metrics of the gateway cover all agents (issue #1372).
+    # The ports match the ingress rules of the mcp-gateway policy (networkpolicy.yaml).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "mcp-gateway") | nindent 14 }}
+      ports:
+        - {port: mcp, protocol: TCP}
+        {{- if include "koinon.egressListener" . }}
+        - {port: egress, protocol: TCP}
+        {{- end }}
+{{- end }}
+{{- if include "koinon.modelKoinon" . }}
+    # With gateway.model.driver=koinon also koinon-gateway's model pods: the actors' model calls go there (issue #1523;
+    # Substrate requires this driver, issue #1489). Only the container port "model", by name. The stats port (15020)
+    # stays closed. The port matches the ingress rule of the model-gateway policy (networkpolicy.yaml), which admits
+    # atenet-egress.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "model-gateway") | nindent 14 }}
+      ports:
+        - {port: model, protocol: TCP}
+{{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
@@ -149,7 +207,7 @@ spec:
 ---
 # The pods that call the Kubernetes API server (ADR 0120 amendment 10, issue 1172): TCP on apiServerPorts to any
 # address. A separate policy with its own app list, so atenet-egress is not selected: it has no API server client
-# (Substrate v1.0.0 b34fbee7: atenet-egress.yaml:30-38 binds no RBAC, cmd/atenet/internal/router/router.go:75-79 builds
+# (Substrate v1.0.1 20778a6d: atenet-egress.yaml:30-38 binds no RBAC, cmd/atenet/internal/router/router.go:75-79 builds
 # no client in egress mode). atenet-router IS selected: its ingress mode watches EndpointSlices (router.go:73-95,
 # atenet-router.yaml:16-50 ServiceAccount, Role and RoleBinding). Egress rules add up with the control policy. The policy
 # lists no Ingress type.

@@ -15,26 +15,30 @@ const appendTaskEvent = `-- name: AppendTaskEvent :one
 WITH task AS (
     UPDATE tasks
     SET last_event_seq = last_event_seq + 1
-    WHERE tasks.org_id = $7 AND tasks.id = $8
+    WHERE tasks.org_id = $10 AND tasks.id = $11
     RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
 )
 INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
-                           actor_agent_id, run_id, payload)
+                           actor_agent_id, actor_external_id, run_id, payload, payload_version, prompt)
 SELECT task.org_id, task.id, task.last_event_seq, $1, $2,
-       $3, $4, $5, $6
+       $3, $4, $5,
+       $6, $7, $8::smallint, $9::boolean
 FROM task
-RETURNING org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at
+RETURNING org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt, actor_external_id
 `
 
 type AppendTaskEventParams struct {
-	Kind         string
-	ActorKind    TaskActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	OrgID        pgtype.UUID
-	TaskID       pgtype.UUID
+	Kind            string
+	ActorKind       TaskActorKind
+	ActorUserID     pgtype.UUID
+	ActorAgentID    pgtype.UUID
+	ActorExternalID pgtype.UUID
+	RunID           pgtype.UUID
+	Payload         []byte
+	PayloadVersion  int16
+	Prompt          bool
+	OrgID           pgtype.UUID
+	TaskID          pgtype.UUID
 }
 
 func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error) {
@@ -43,8 +47,11 @@ func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams
 		arg.ActorKind,
 		arg.ActorUserID,
 		arg.ActorAgentID,
+		arg.ActorExternalID,
 		arg.RunID,
 		arg.Payload,
+		arg.PayloadVersion,
+		arg.Prompt,
 		arg.OrgID,
 		arg.TaskID,
 	)
@@ -61,6 +68,9 @@ func (q *Queries) AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams
 		&i.RunID,
 		&i.Payload,
 		&i.CreatedAt,
+		&i.PayloadVersion,
+		&i.Prompt,
+		&i.ActorExternalID,
 	)
 	return i, err
 }
@@ -242,6 +252,42 @@ func (q *Queries) EndTaskFrom(ctx context.Context, arg EndTaskFromParams) (Task,
 	return i, err
 }
 
+const ensureExternalActor = `-- name: EnsureExternalActor :one
+INSERT INTO external_actors (org_id, platform, team, platform_user_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (org_id, platform, team, platform_user_id) DO UPDATE SET platform = EXCLUDED.platform
+RETURNING org_id, id, platform, team, platform_user_id, created_at
+`
+
+type EnsureExternalActorParams struct {
+	OrgID          pgtype.UUID
+	Platform       string
+	Team           string
+	PlatformUserID string
+}
+
+// The row of a person without a Koinon account who writes from a chat platform (ADR 0130): it
+// creates the row the first time and returns the same row after that. The update on a conflict
+// changes nothing; it only makes the statement return the row that a concurrent writer committed.
+func (q *Queries) EnsureExternalActor(ctx context.Context, arg EnsureExternalActorParams) (ExternalActor, error) {
+	row := q.db.QueryRow(ctx, ensureExternalActor,
+		arg.OrgID,
+		arg.Platform,
+		arg.Team,
+		arg.PlatformUserID,
+	)
+	var i ExternalActor
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Platform,
+		&i.Team,
+		&i.PlatformUserID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getTask = `-- name: GetTask :one
 SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id, notify_kind, notify_user_id, notify_role, notify_channel_id, continuation_count FROM tasks
 WHERE org_id = $1 AND id = $2
@@ -350,8 +396,87 @@ func (q *Queries) LatestUserMessageActor(ctx context.Context, arg LatestUserMess
 	return actor_user_id, err
 }
 
+const listEventActorNames = `-- name: ListEventActorNames :many
+SELECT u.id, u.display_name
+FROM users u
+WHERE u.id = ANY($1::uuid[]) AND u.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.user_id = u.id AND om.org_id = $2)
+`
+
+type ListEventActorNamesParams struct {
+	UserIds []pgtype.UUID
+	OrgID   pgtype.UUID
+}
+
+type ListEventActorNamesRow struct {
+	ID          pgtype.UUID
+	DisplayName string
+}
+
+// Display names of the people who wrote events of this org, by user id: what a task read shows beside
+// each message (#1031). Only the id and the display name, never an email. The org join keeps a name
+// inside the org whose events name the user; a deleted user has no name.
+func (q *Queries) ListEventActorNames(ctx context.Context, arg ListEventActorNamesParams) ([]ListEventActorNamesRow, error) {
+	rows, err := q.db.Query(ctx, listEventActorNames, arg.UserIds, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEventActorNamesRow
+	for rows.Next() {
+		var i ListEventActorNamesRow
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExternalActors = `-- name: ListExternalActors :many
+SELECT org_id, id, platform, team, platform_user_id, created_at FROM external_actors
+WHERE org_id = $1 AND id = ANY($2::uuid[])
+`
+
+type ListExternalActorsParams struct {
+	OrgID pgtype.UUID
+	Ids   []pgtype.UUID
+}
+
+// The external actors that the events of a task name, by ID (ADR 0130): what a task read shows
+// beside each of their messages. The rows hold no name and no profile data.
+func (q *Queries) ListExternalActors(ctx context.Context, arg ListExternalActorsParams) ([]ExternalActor, error) {
+	rows, err := q.db.Query(ctx, listExternalActors, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalActor
+	for rows.Next() {
+		var i ExternalActor
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Platform,
+			&i.Team,
+			&i.PlatformUserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskEvents = `-- name: ListTaskEvents :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt, actor_external_id FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
 ORDER BY seq
 LIMIT $4
@@ -391,6 +516,9 @@ func (q *Queries) ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) 
 			&i.RunID,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.PayloadVersion,
+			&i.Prompt,
+			&i.ActorExternalID,
 		); err != nil {
 			return nil, err
 		}
@@ -403,10 +531,8 @@ func (q *Queries) ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) 
 }
 
 const listTaskMessagesAfter = `-- name: ListTaskMessagesAfter :many
-SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
-WHERE org_id = $1 AND task_id = $2 AND seq > $3
-  AND kind = 'message'
-  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at, payload_version, prompt, actor_external_id FROM task_events
+WHERE org_id = $1 AND task_id = $2 AND seq > $3 AND prompt
 ORDER BY seq
 `
 
@@ -416,9 +542,10 @@ type ListTaskMessagesAfterParams struct {
 	AfterSeq int64
 }
 
-// The users' messages on the task after a timeline seq, in order: what
-// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
-// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
+// The events on the task after a timeline seq that are part of a run's prompt, in order: what
+// agentd sends the harness. The writer marks them (task_events.prompt): the users' messages, and a
+// system message with a source, such as a trigger's instruction, so a scheduled run sees what it
+// was scheduled to do.
 func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error) {
 	rows, err := q.db.Query(ctx, listTaskMessagesAfter, arg.OrgID, arg.TaskID, arg.AfterSeq)
 	if err != nil {
@@ -440,6 +567,9 @@ func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessage
 			&i.RunID,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.PayloadVersion,
+			&i.Prompt,
+			&i.ActorExternalID,
 		); err != nil {
 			return nil, err
 		}

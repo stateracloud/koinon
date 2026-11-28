@@ -3,7 +3,7 @@
 import { create } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
@@ -21,6 +21,7 @@ import {
   type DeleteServerRequest,
   type ReviewAllToolsRequest,
   type Server,
+  type Tool,
   type SetAgentServersRequest,
   type SetServerClassRequest,
   type SetToolSinkRequest,
@@ -30,6 +31,7 @@ import {
 } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { githubConnectorType } from '@/test-fixtures'
 import { renderApp, whoAmI } from '@/test-utils'
+import { OutwardService, OutwardTargetKind, type SetOutwardTargetDisabledRequest } from '@/gen/koinon/outward/v1alpha1/outward_pb'
 
 const checked = timestampFromMs(Date.now() - 60_000)
 const docs = create(ServerSchema, {
@@ -93,7 +95,7 @@ const tools = [
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
-function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; failTier?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
+function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; failTier?: string; failCreate?: string; failDelete?: string; failSink?: string; extraServers?: Server[]; extraTools?: Tool[]; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
     twos: [] as SetToolTwoApproversRequest[],
@@ -105,9 +107,10 @@ function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; fa
     allowSets: [] as SetAgentServersRequest[],
     classes: [] as SetServerClassRequest[],
     sinks: [] as SetToolSinkRequest[],
+    outward: [] as SetOutwardTargetDisabledRequest[],
     listed: 0,
   }
-  const current = new Map(tools.map((t) => [`${t.serverId}/${t.name}`, t]))
+  const current = new Map([...tools, ...(opts.extraTools ?? [])].map((t) => [`${t.serverId}/${t.name}`, t]))
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, {
@@ -120,6 +123,12 @@ function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; fa
       listConnectorTypes: () => ({ connectorTypes: [githubConnectorType()] }),
     })
     service(AgentService, { getAgent: () => ({ agent: create(AgentSchema, { id: 'a-1', orgId: 'org-1', displayName: 'Helper', status: AgentStatus.ACTIVE, latestVersion: 1, activeVersion: 1 }) }) })
+    service(OutwardService, {
+      setOutwardTargetDisabled: (req) => {
+        calls.outward.push(req)
+        return {}
+      },
+    })
     service(LeakGuardService, {
       getLeakGuard: () => ({ leakGuard: { matchThreshold: 24, defaultMatchThreshold: 24, minMatchThreshold: 12, maxMatchThreshold: 256, trustedHosts: [] } }),
     })
@@ -202,43 +211,112 @@ function setup(opts: { role?: OrgRole; path?: string; failReviewAll?: string; fa
       },
     })
   })
-  renderApp(transport, opts.path ?? '/servers')
+  renderApp(transport, opts.path ?? '/mcp-servers/s-docs')
   return calls
 }
 
+/** serverPage waits for the detail page of one server and returns queries over it. */
+async function serverPage(name = 'docs') {
+  await screen.findByRole('heading', { name, level: 1 })
+  return within(document.body)
+}
+
 describe('Servers page', () => {
-  it('lists servers with source, health as text, credential state and gateway target', async () => {
+  it('lists servers in a table with state, tools waiting, source and the outward switch', async () => {
+    setup({ path: '/mcp-servers' })
+    const table = await screen.findByRole('table', { name: 'MCP servers' })
+    const row = (name: string) => within(within(table).getByRole('link', { name }).closest('tr') as HTMLElement)
+    expect(row('docs').getByText('Healthy')).toBeInTheDocument()
+    expect(row('docs').getByText('UI')).toBeInTheDocument()
+    expect(row('docs').getByRole('link', { name: '1 tool waits for review: review the tools of docs' })).toHaveAttribute('href', '/mcp-servers/s-docs')
+    expect(row('docs').getByRole('button', { name: 'Switch off outward calls of server docs' })).toBeInTheDocument()
+    expect(row('issues').getByText('Unhealthy', { selector: '[data-slot=badge]' })).toBeInTheDocument()
+    expect(row('wiki').getByText('Managed by Secret wiki-secret')).toBeInTheDocument()
+    expect(row('old').getByText('Removed')).toBeInTheDocument()
+    expect(within(table).getByRole('link', { name: 'docs' })).toHaveAttribute('href', '/mcp-servers/s-docs')
+    expect(screen.getByRole('link', { name: 'Connect a remote server' })).toHaveAttribute('href', '/mcp-servers/new')
+  })
+
+  it('switches off the outward calls of a server from its row and records the reason (ADR 0110)', async () => {
+    const calls = setup({ path: '/mcp-servers' })
+    const table = await screen.findByRole('table', { name: 'MCP servers' })
+    const row = within(within(table).getByRole('link', { name: 'issues' }).closest('tr') as HTMLElement)
+    await userEvent.type(row.getByRole('textbox', { name: 'Reason for switching off server issues' }), 'leaks ticket text')
+    await userEvent.click(row.getByRole('button', { name: 'Switch off outward calls of server issues' }))
+    await waitFor(() => expect(calls.outward).toHaveLength(1))
+    expect(calls.outward[0]).toMatchObject({ orgId: 'org-1', kind: OutwardTargetKind.MCP_SERVER, targetId: 's-issues', disabled: true, note: 'leaks ticket text' })
+  })
+
+  it('shows a switched-off server in its row with who and why', async () => {
+    const off = create(ServerSchema, { id: 's-off', name: 'halted', url: 'https://halted.example/mcp', source: 'ui', adminDisabled: { by: 'admin@example.com', note: 'incident 42' } })
+    setup({ path: '/mcp-servers', extraServers: [off] })
+    const table = await screen.findByRole('table', { name: 'MCP servers' })
+    const row = within(within(table).getByRole('link', { name: 'halted' }).closest('tr') as HTMLElement)
+    expect(row.getByRole('note')).toHaveTextContent('Switched off by admin@example.com: incident 42')
+    expect(row.getByRole('button', { name: 'Enable outward calls of server halted' })).toBeInTheDocument()
+  })
+
+  it('shows a new tool as waiting for review and lets an admin review it (#1216)', async () => {
+    const fresh = create(ServerSchema, { id: 's-fresh', name: 'fresh', url: 'https://fresh.example/mcp', source: 'ui', health: Health.HEALTHY })
+    const newTool = create(ToolSchema, { serverId: 's-fresh', name: 'write_item', description: 'Write an item', tier: Tier.ASK, present: true, toolHash: 'hash-write-item', toolJson: '{"name":"write_item","description":"Write an item"}' })
+    const calls = setup({ path: '/mcp-servers/s-fresh', extraServers: [fresh], extraTools: [newTool] })
+    const tl = within(await screen.findByRole('list', { name: 'Tools of fresh' }))
+    const row = within(tl.getAllByText('write_item')[0].closest('li')!)
+    expect(row.getByText('Waits for review', { selector: '[data-slot=badge]' })).toBeInTheDocument()
+    expect(row.getByText(/New tool: agents do not get it until an admin reviews its text/)).toBeInTheDocument()
+    await userEvent.click(row.getByRole('button', { name: 'Mark reviewed: write_item' }))
+    await waitFor(() => expect(calls.acks).toHaveLength(1))
+    expect(calls.acks[0]).toMatchObject({ orgId: 'org-1', serverId: 's-fresh', tool: 'write_item', toolHash: 'hash-write-item' })
+    await waitFor(() => expect(row.queryByText('Waits for review')).not.toBeInTheDocument())
+  })
+
+  it('shows one server with health as text, credential state and gateway target', async () => {
     setup()
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    const d = await serverPage()
     expect(d.getByText('Healthy')).toBeInTheDocument()
     expect(d.getByText('UI')).toBeInTheDocument()
     expect(d.getByText('https://mcp.example.com/mcp')).toBeInTheDocument()
     expect(d.getByText('Streamable HTTP')).toBeInTheDocument()
     expect(d.getByText('Stored encrypted; it cannot be shown')).toBeInTheDocument()
     expect(d.getByText('default-docs')).toBeInTheDocument()
+    expect(d.getByText(/public roots/)).toBeInTheDocument()
     expect(d.getByRole('button', { name: 'Edit server docs' })).toBeInTheDocument()
+  })
 
-    const i = within(within(list).getByRole('region', { name: 'issues' }))
+  it('says why an unhealthy server has no tools for agents', async () => {
+    setup({ path: '/mcp-servers/s-issues' })
+    const i = await serverPage('issues')
     expect(i.getByText('Unhealthy', { selector: '[data-slot=badge]' })).toBeInTheDocument()
     expect(i.getByText(/connection refused/)).toBeInTheDocument()
     expect(i.getByText(/withdrawn from agents/)).toBeInTheDocument()
+  })
 
-    const m = within(within(list).getByRole('region', { name: 'wiki' }))
+  it('does not offer edit or delete for a server that a Secret declares', async () => {
+    setup({ path: '/mcp-servers/s-sec' })
+    const m = await serverPage('wiki')
     expect(m.getByText('Unknown')).toBeInTheDocument()
     expect(m.getByText('Managed by Secret wiki-secret')).toBeInTheDocument()
     expect(m.queryByRole('button', { name: /Edit server/ })).not.toBeInTheDocument()
     expect(m.queryByRole('button', { name: /Delete server/ })).not.toBeInTheDocument()
+  })
 
-    const r = within(within(list).getByRole('region', { name: 'old' }))
-    expect(r.getByText('Removed')).toBeInTheDocument()
+  it('offers only delete for a removed server', async () => {
+    setup({ path: '/mcp-servers/s-gone' })
+    const r = await serverPage('old')
+    expect(r.getAllByText('Removed')[0]).toBeInTheDocument()
     expect(r.getByRole('button', { name: 'Delete server old' })).toBeInTheDocument()
     expect(r.queryByRole('button', { name: /Edit server/ })).not.toBeInTheDocument()
   })
 
+  it('says when a server does not exist', async () => {
+    setup({ path: '/mcp-servers/s-none' })
+    expect(await screen.findByRole('heading', { name: 'Server not found', level: 1 })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to MCP servers' })).toHaveAttribute('href', '/mcp-servers')
+  })
+
   it('never renders a credential value', async () => {
     setup()
-    await screen.findByRole('list', { name: 'Servers' })
+    await serverPage()
     await userEvent.click(screen.getByRole('button', { name: 'Edit server docs' }))
     const form = screen.getByRole('form', { name: 'Edit server docs' })
     expect(within(form).getByLabelText('Token')).toHaveValue('')
@@ -249,7 +327,7 @@ describe('Servers page', () => {
 
   it('shows the tools that wait for review and reviews them all at the hashes shown (#1216)', async () => {
     const calls = setup()
-    const docsCard = within(within(await screen.findByRole('list', { name: 'Servers' })).getByRole('region', { name: 'docs' }))
+    const docsCard = await serverPage()
     const note = within(docsCard.getByRole('note', { name: 'Tools waiting for review: docs' }))
     expect(note.getByText(/1 tool waits for review/)).toBeInTheDocument()
     await userEvent.click(note.getByRole('button', { name: 'Review all tools of docs' }))
@@ -259,16 +337,19 @@ describe('Servers page', () => {
     expect(calls.reviewAlls[0]).toMatchObject({ orgId: 'org-1', serverId: 's-docs', tools: [{ tool: 'edit', toolHash: 'hash-edit-new' }] })
     expect(await screen.findByText('Reviewed 1 tool of docs. Deleted 1.')).toBeInTheDocument()
     await waitFor(() => expect(docsCard.queryByRole('note', { name: 'Tools waiting for review: docs' })).not.toBeInTheDocument())
-    // A server with nothing waiting shows no notice.
-    expect(screen.queryByRole('note', { name: 'Tools waiting for review: wiki' })).not.toBeInTheDocument()
   })
 
   it('says when a server is at the limit of unreviewed tools, and shows a refused review', async () => {
     const capped = create(ServerSchema, { id: 's-cap', name: 'junk', url: 'https://junk.example.com/mcp', source: 'ui', health: Health.HEALTHY, unreviewedToolsCappedAt: checked })
-    setup({ extraServers: [capped], failReviewAll: 'the tool changed since it was read; read it again and review the new description' })
+    setup({ path: '/mcp-servers/s-cap', extraServers: [capped] })
     const note = within(await screen.findByRole('note', { name: 'Tools waiting for review: junk' }))
     expect(note.getByText(/at the limit of tools that no admin reviewed/)).toBeInTheDocument()
     expect(note.queryByRole('button', { name: /Review all/ })).not.toBeInTheDocument()
+  })
+
+  it('shows a refused review of all tools', async () => {
+    setup({ failReviewAll: 'the tool changed since it was read; read it again and review the new description' })
+    await serverPage()
     const docsNote = within(screen.getByRole('note', { name: 'Tools waiting for review: docs' }))
     await userEvent.click(docsNote.getByRole('button', { name: 'Review all tools of docs' }))
     await userEvent.click(docsNote.getByRole('button', { name: 'Review all' }))
@@ -285,7 +366,7 @@ describe('Servers page', () => {
     expect(publish.getByRole('radio', { name: 'Deny' })).toBeChecked()
     expect(tl.getByText('no longer listed')).toBeInTheDocument()
     const edit = within(tl.getAllByText('edit')[0].closest('li')!)
-    expect(edit.getByText('Review', { selector: '[data-slot=badge]' })).toBeInTheDocument()
+    expect(edit.getByText('Waits for review', { selector: '[data-slot=badge]' })).toBeInTheDocument()
     expect(edit.getByText(/the description changed/)).toBeInTheDocument()
   })
 
@@ -298,7 +379,7 @@ describe('Servers page', () => {
   })
 
   it('sets the tier of a tool on a Secret-managed server', async () => {
-    const calls = setup()
+    const calls = setup({ path: '/mcp-servers/s-sec' })
     const tl = within(await screen.findByRole('list', { name: 'Tools of wiki' }))
     await userEvent.click(tl.getByRole('radio', { name: 'Deny' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ serverId: 's-sec', tool: 'read', tier: Tier.NEVER })]))
@@ -404,105 +485,98 @@ describe('Servers page', () => {
   })
 
   it('adds a server with a bearer token and clears the secret from the page', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     expect(within(form).getByText(/start in the Ask tier/)).toBeInTheDocument()
     await userEvent.type(within(form).getByLabelText('Name'), 'newone')
     await userEvent.type(within(form).getByLabelText('URL'), 'https://new.example.com/mcp')
     await userEvent.selectOptions(within(form).getByLabelText('Credential'), 'bearer')
     await userEvent.type(within(form).getByLabelText('Token'), 'not-a-real-token')
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     await waitFor(() => expect(calls.creates).toHaveLength(1))
     expect(calls.creates[0]).toMatchObject({ name: 'newone', url: 'https://new.example.com/mcp', transport: 'streamable-http', credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', credentialValue: 'not-a-real-token' })
-    await waitFor(() => expect(screen.queryByRole('form', { name: 'Add server' })).not.toBeInTheDocument())
+    // After the save, the page of the new server opens.
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Connect a remote server' })).not.toBeInTheDocument())
+    expect(await screen.findByText('Connected server newone. Its tools show on its page after the first sync.')).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('not-a-real-token')
   })
 
   it('adds a server with a private CA certificate', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     const pem = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'
     await userEvent.type(within(form).getByLabelText('Name'), 'private')
     await userEvent.type(within(form).getByLabelText('URL'), 'https://mcp.internal.example/mcp')
     await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
     await userEvent.paste(pem)
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     await waitFor(() => expect(calls.creates).toHaveLength(1))
     expect(calls.creates[0]).toMatchObject({ name: 'private', url: 'https://mcp.internal.example/mcp', caBundle: pem })
   })
 
   it('refuses a CA certificate on an http URL before it sends anything', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     await userEvent.type(within(form).getByLabelText('Name'), 'private')
     await userEvent.type(within(form).getByLabelText('URL'), 'http://mcp.internal.example/mcp')
     await userEvent.click(within(form).getByLabelText('CA certificate (optional)'))
     await userEvent.paste('-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----')
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     expect(await within(form).findByText('A CA certificate needs an https URL.')).toBeInTheDocument()
     expect(calls.creates).toHaveLength(0)
   })
 
   it('adds a server that skips certificate verification, with a warning', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     await userEvent.type(within(form).getByLabelText('Name'), 'scratch')
     await userEvent.type(within(form).getByLabelText('URL'), 'https://scratch.example/mcp')
     expect(within(form).queryByText(/impostor/)).not.toBeInTheDocument()
     await userEvent.click(within(form).getByLabelText('Skip certificate verification (insecure)'))
     expect(within(form).getByText(/can be sent to an impostor/)).toBeInTheDocument()
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     await waitFor(() => expect(calls.creates).toHaveLength(1))
     expect(calls.creates[0]).toMatchObject({ name: 'scratch', insecureSkipVerify: true, caBundle: '' })
   })
 
   it('refuses skipped verification on an http URL, and with a CA certificate, before it sends anything', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     await userEvent.type(within(form).getByLabelText('Name'), 'scratch')
     await userEvent.type(within(form).getByLabelText('URL'), 'http://scratch.example/mcp')
     await userEvent.click(within(form).getByLabelText('Skip certificate verification (insecure)'))
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     expect(await within(form).findByText('Skipping verification needs an https URL.')).toBeInTheDocument()
     expect(calls.creates).toHaveLength(0)
   })
 
-  it('shows on the server list when verification is off, and when only one CA is trusted', async () => {
+  it('shows when verification is off, and when only one CA is trusted', async () => {
     const off = create(ServerSchema, { id: 's-off', name: 'scratch', url: 'https://scratch.example/mcp', source: 'ui', insecureSkipVerify: true })
     const pinned = create(ServerSchema, { id: 's-ca', name: 'private', url: 'https://private.example/mcp', source: 'ui', caBundle: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----' })
-    setup({ extraServers: [off, pinned] })
-    const offCard = (await screen.findByRole('heading', { name: 'scratch' })).closest('li') as HTMLElement
-    expect(within(offCard).getByText(/Not verified/)).toBeInTheDocument()
-    const caCard = (await screen.findByRole('heading', { name: 'private' })).closest('li') as HTMLElement
-    expect(within(caCard).getByText(/Only the CA given for this server is trusted/)).toBeInTheDocument()
-    const docsCard = (await screen.findByRole('heading', { name: 'docs' })).closest('li') as HTMLElement
-    expect(within(docsCard).getByText(/public roots/)).toBeInTheDocument()
+    setup({ path: '/mcp-servers/s-off', extraServers: [off, pinned] })
+    expect((await serverPage('scratch')).getByText(/Not verified/)).toBeInTheDocument()
+    cleanup()
+    setup({ path: '/mcp-servers/s-ca', extraServers: [off, pinned] })
+    expect((await serverPage('private')).getByText(/Only the CA given for this server is trusted/)).toBeInTheDocument()
   })
 
   it('shows the OAuth refusal at the URL field and keeps the form', async () => {
     const msg = 'this server asks each user to sign in with OAuth, which Koinon does not support yet; use a server that takes a token'
-    setup({ failCreate: msg })
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    setup({ failCreate: msg, path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     await userEvent.type(within(form).getByLabelText('Name'), 'oauthy')
     await userEvent.type(within(form).getByLabelText('URL'), 'https://oauth.example.com/mcp')
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     const alert = await within(form).findByRole('alert')
     expect(alert).toHaveTextContent('does not support yet')
     expect(within(form).getByLabelText('URL')).toHaveAccessibleDescription(/does not support yet/)
   })
 
   it('validates the name before sending', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = screen.getByRole('form', { name: 'Add server' })
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = await screen.findByRole('form', { name: 'Connect a remote server' })
     await userEvent.type(within(form).getByLabelText('Name'), 'Bad Name')
-    await userEvent.click(within(form).getByRole('button', { name: 'Add server' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Connect server' }))
     expect(within(form).getByText(/lowercase letters, digits and dashes/, { selector: '#server-name-error' })).toBeInTheDocument()
     expect(calls.creates).toHaveLength(0)
   })
@@ -581,8 +655,7 @@ describe('Agent MCP allowlist', () => {
   })
   it('shows the data class of each server and changes it', async () => {
     const calls = setup()
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    const d = await serverPage()
     expect(d.getByText(/Data class: Other; legs: returns untrusted input, reads private data/)).toBeInTheDocument()
     await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
     await userEvent.selectOptions(d.getByLabelText('Kind'), 'fetch')
@@ -593,31 +666,28 @@ describe('Agent MCP allowlist', () => {
   })
 
   it('lets a class be set on a server declared by a Secret', async () => {
-    setup()
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const w = within(within(list).getByRole('region', { name: 'wiki' }))
+    setup({ path: '/mcp-servers/s-sec' })
+    const w = await serverPage('wiki')
     expect(w.getByRole('button', { name: 'Change data class of wiki' })).toBeInTheDocument()
   })
 
   it('creates a server with the class chosen in the form, unclassified by default', async () => {
-    const calls = setup()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add server' }))
-    const form = within(screen.getByRole('form', { name: 'Add server' }))
+    const calls = setup({ path: '/mcp-servers/new' })
+    const form = within(await screen.findByRole('form', { name: 'Connect a remote server' }))
     expect(form.getByLabelText('Kind')).toHaveValue('other')
     for (const l of ['Returns untrusted input', 'Reads private data']) expect(form.getByLabelText(l)).toBeChecked()
     await userEvent.type(form.getByLabelText('Name'), 'fetcher')
     await userEvent.type(form.getByLabelText('URL'), 'https://f.example.com/mcp')
     await userEvent.selectOptions(form.getByLabelText('Kind'), 'fetch')
     await userEvent.click(form.getByLabelText('Reads private data'))
-    await userEvent.click(form.getByRole('button', { name: 'Add server' }))
+    await userEvent.click(form.getByRole('button', { name: 'Connect server' }))
     await waitFor(() => expect(calls.creates).toHaveLength(1))
     expect(calls.creates[0].class).toMatchObject({ kind: 'fetch', dataClass: ['untrusted_input'] })
   })
 
   it('shows where the calls of a tool go and declares a derived class from the address arguments', async () => {
     const calls = setup()
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    const d = await serverPage()
     expect(d.getAllByText(/Where calls go: External, free text \(not declared\)/).length).toBeGreaterThan(0)
     await userEvent.click(d.getAllByRole('button', { name: 'Declare sink class of search' })[0])
     const form = within(d.getByRole('form', { name: 'Sink class of search' }))
@@ -637,8 +707,7 @@ describe('Agent MCP allowlist', () => {
 
   it('links a server to a code-host connection', async () => {
     const calls = setup()
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    const d = await serverPage()
     expect(d.getByText(/No code-host connection: its code-host tools count as external, free text/)).toBeInTheDocument()
     await userEvent.click(d.getByRole('button', { name: 'Change data class of docs' }))
     const select = await d.findByLabelText('Code-host connection')
@@ -653,8 +722,7 @@ describe('Agent MCP allowlist', () => {
 
   it('says the tool changed when the declaration is refused as aborted', async () => {
     const calls = setup({ failSink: 'the tool changed since it was read; read it again and review the new description' })
-    const list = await screen.findByRole('list', { name: 'Servers' })
-    const d = within(within(list).getByRole('region', { name: 'docs' }))
+    const d = await serverPage()
     await userEvent.click(d.getAllByRole('button', { name: 'Declare sink class of search' })[0])
     const form = within(d.getByRole('form', { name: 'Sink class of search' }))
     await userEvent.selectOptions(form.getByLabelText('Sink class'), 'none')

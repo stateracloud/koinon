@@ -3,6 +3,7 @@
 import { ConnectError } from '@connectrpc/connect'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { describeError } from '@/lib/api-error'
 
 export type ConfirmActionProps = {
   /** The button that opens the confirmation, for example "Delete". */
@@ -61,7 +62,7 @@ export function ConfirmAction({ label, subject, consequence, confirmLabel, onOpe
       returnFocus.current = true
       setAsking(false)
       const err = ConnectError.from(e)
-      onError?.(err.rawMessage, err)
+      onError?.(describeError(err).message, err)
     } finally {
       setPending(false)
     }

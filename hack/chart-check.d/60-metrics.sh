@@ -16,7 +16,7 @@ n=$(render --show-only templates/metrics.yaml | grep -c '^kind: Service$' || tru
 lacks "no ServiceMonitor by default" 'kind: ServiceMonitor'
 sm=(--set metrics.serviceMonitor.enabled=true --api-versions monitoring.coreos.com/v1/ServiceMonitor)
 n=$(render "${sm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
-[ "$n" = 4 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 4 (api, reconciler, agentd, gateway)"
+[ "$n" = 5 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 5 (api, reconciler, agentd, gateway, mcp-gateway)"
 has "gateway ServiceMonitor scrapes the stats port" 'port: stats$' "${sm[@]}" --show-only templates/metrics.yaml
 has "gateway ServiceMonitor is named for the gateway" 'name: koinon-gateway$' "${sm[@]}" --show-only templates/metrics.yaml
 # The gateway ServiceMonitor selects by component: exactly one Service carries component=gateway,
@@ -25,6 +25,16 @@ gwsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /app
 [ "$gwsvc" = "1 1" ] || fail "Services matching the gateway ServiceMonitor (count, of which the gateway Service with a stats port): $gwsvc, want 1 1"
 gwsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: gateway\n/ {n++} END{print n+0}')
 [ "$gwsel" = 1 ] || fail "gateway ServiceMonitor must select app.kubernetes.io/component=gateway"
+# The mcp-gateway ServiceMonitor (#1452), with gateway.mcp.driver=koinon (the default): it selects by
+# component, exactly one Service carries component=mcp-gateway in its metadata labels (a ServiceMonitor
+# matches those, not spec.selector), and that Service has the "stats" port
+# (15020) the monitor scrapes.
+mcpsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /\n  labels:\n(    [^\n]*\n)*    app\.kubernetes\.io\/component: mcp-gateway\n(    [^\n]*\n)*spec:\n/ {n++; if (/name: koinon-mcp-gateway\n/ && /- name: stats\n +port: 15020\n +targetPort: stats\n/) s++} END{print n+0, s+0}')
+[ "$mcpsvc" = "1 1" ] || fail "Services matching the mcp-gateway ServiceMonitor (count, of which the mcp-gateway Service with a stats port): $mcpsvc, want 1 1"
+mcpsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-mcp-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: mcp-gateway\n/ && /endpoints:\n +- port: stats\n +path: \/metrics\n/ {n++} END{print n+0}')
+[ "$mcpsel" = 1 ] || fail "mcp-gateway ServiceMonitor must select app.kubernetes.io/component=mcp-gateway and scrape port stats at /metrics"
+lacks "no mcp-gateway ServiceMonitor with the agentgateway MCP driver" 'name: koinon-mcp-gateway$' "${sm[@]}" --set gateway.mcp.driver=agentgateway --show-only templates/metrics.yaml
+lacks "no mcp-gateway ServiceMonitor with monitoring off" 'name: koinon-mcp-gateway$' --show-only templates/metrics.yaml
 smk=("${sm[@]}" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway)
 lacks "no PodMonitor in standalone mode" 'kind: PodMonitor' "${sm[@]}"
 pm=(--api-versions monitoring.coreos.com/v1/PodMonitor)
@@ -43,7 +53,7 @@ if render --set metrics.serviceMonitor.enabled=true >/dev/null 2>&1; then
 	fail "metrics.serviceMonitor.enabled=true must fail without the ServiceMonitor CRD"
 fi
 n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true | grep -c '^kind: ServiceMonitor$' || true)
-[ "$n" = 4 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 4"
+[ "$n" = 5 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 5"
 lacks "metrics port closed by default" 'port: metrics$' --show-only templates/networkpolicy.yaml
 scrape=(--set 'metrics.allowFrom[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=monitoring')
 n=$(render "${scrape[@]}" --show-only templates/networkpolicy.yaml | grep -c 'port: metrics$' || true)

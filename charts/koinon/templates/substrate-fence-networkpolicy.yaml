@@ -9,7 +9,7 @@ Same switch as substrate-networkpolicy.yaml: workerNetworkPolicy.enabled.
   --in-cluster=true (line 149) and it resolves no name (dnsPolicy Default, line 205). It only signs for
   --postgres-client-namespace=ate-system (line 159); it does not connect to that postgres.
 - otel-system: default deny for ingress and egress, then one policy per app (kind/otel-collector.yaml and
-  kind/prometheus.yaml of Substrate v1.0.0, b34fbee7). The collector receives OTLP on 4317 and 4318 from the
+  kind/prometheus.yaml of Substrate v1.0.1, 20778a6d). The collector receives OTLP on 4317 and 4318 from the
   control-plane namespace (containerPort at kind/otel-collector.yaml:186-190) and its two read ports from
   Prometheus (8889 and 8888, lines 192-194; the scrape job otel-collector-self in kind/prometheus.yaml:125). It
   sends traces to Jaeger on 4317 (kind/otel-collector.yaml:93). Jaeger takes OTLP from the collector only.

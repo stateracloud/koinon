@@ -98,6 +98,22 @@ var _ = Describe("continuation runs", func() {
 		Expect(next.TaskID).To(Equal(first.TaskID))
 	})
 
+	It("gives the continuation run its continuation message as a prompt", func(ctx SpecContext) {
+		member.createTask(ctx, org, agentI, "long job")
+		first := ad.mustClaim(ctx, org)
+		timeCap(ctx, first)
+		Expect(queued(ctx, first)).To(BeTrue())
+
+		// The query that agentd builds a run's prompt from (#735: it reads task_events.prompt).
+		msgs, err := store.New(e.pool).ListTaskMessagesAfter(ctx, store.ListTaskMessagesAfterParams{OrgID: orgID(), TaskID: first.TaskID})
+		Expect(err).NotTo(HaveOccurred())
+		sources := make([]any, 0, len(msgs))
+		for _, m := range msgs {
+			sources = append(sources, payloadMap(m.Payload)["source"])
+		}
+		Expect(sources).To(ContainElement("continuation"))
+	})
+
 	It("stops after 3 continuations and blocks the task on its owner", func(ctx SpecContext) {
 		member.createTask(ctx, org, agentI, "endless job")
 		run := ad.mustClaim(ctx, org)

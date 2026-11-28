@@ -81,6 +81,17 @@ var _ = Describe("koinon-gateway's startup", func() {
 		Expect(cli.Check(NewRootCommand(), []string{"--state-url", stateURL, "--state-token-file", tokenFile, "--shutdown-delay", "-1s"}, nil)).NotTo(Succeed())
 	})
 
+	It("refuses a drain shorter than twice the MCP call timeout, and accepts it on a model-only pod", func() {
+		base := []string{"--state-url", stateURL, "--state-token-file", tokenFile}
+		err := cli.Check(NewRootCommand(), append(base, "--drain-timeout", "3m"), nil)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("call timeout twice"))
+		Expect(cli.Check(NewRootCommand(), append(base, "--drain-timeout", "4m"), nil)).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), base, nil)).To(Succeed(), "the default drain covers a call")
+		model := append(base, "--mcp-path=false", "--model-path", "--drain-timeout", "30s")
+		Expect(cli.Check(NewRootCommand(), model, nil)).To(Succeed())
+	})
+
 	It("takes the guard's database login from --database-url-file, and refuses an empty or missing file before it serves anything", func() {
 		dsn := filepath.Join(GinkgoT().TempDir(), "dsn")
 		Expect(os.WriteFile(dsn, []byte("postgres://koinon_gateway@db.example/koinon\n"), 0o600)).To(Succeed())
@@ -226,6 +237,45 @@ var _ = Describe("koinon-gateway, served", func() {
 		_, err = sess.ListTools(specCtx, nil)
 		Expect(err).To(HaveOccurred(), "a request after the drain is refused")
 	}, SpecTimeout(40*time.Second))
+})
+
+var _ = Describe("koinon-gateway, restore hold", func() {
+	It("is ready with no State revision and refuses every call (ADR 0107, issue #1358)", func(specCtx SpecContext) {
+		// The State stream never answers with a revision: a held reconciler publishes none.
+		api := httptest.NewServer(http.NotFoundHandler())
+		DeferCleanup(api.Close)
+		tokenFile := filepath.Join(GinkgoT().TempDir(), "token")
+		Expect(os.WriteFile(tokenFile, []byte(fakeStreamToken+"\n"), 0o600)).To(Succeed())
+		cfg := config{
+			listenAddr: freeAddr(), healthAddr: freeAddr(), stateURL: api.URL, stateTokenFile: tokenFile, mcpPath: true,
+			restoreHold: true, podName: "koinon-gateway-2", drain: 5 * time.Second, shutdownDelay: 50 * time.Millisecond,
+		}
+		ctx, term := context.WithCancel(context.Background())
+		DeferCleanup(term)
+		go func() { _ = run(ctx, cfg) }()
+		Eventually(func() int {
+			resp, err := http.Get("http://" + cfg.healthAddr + "/readyz")
+			if err != nil {
+				return 0
+			}
+			_ = resp.Body.Close()
+			return resp.StatusCode
+		}, 10*time.Second, 50*time.Millisecond).Should(Equal(http.StatusOK))
+
+		req, err := http.NewRequestWithContext(specCtx, http.MethodPost, fmt.Sprintf("http://%s%s", cfg.listenAddr, mcpPath), strings.NewReader("{}"))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Authorization", "Bearer "+fakeKey)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
+		Expect(string(body)).To(ContainSubstring("held"))
+	}, SpecTimeout(30*time.Second))
+
+	It("is not ready without a revision when not held", func() {
+		Expect(config{}.restoreHold).To(BeFalse())
+	})
 })
 
 var _ = Describe("koinon-gateway, model path", func() {

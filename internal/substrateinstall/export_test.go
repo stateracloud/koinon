@@ -5,6 +5,7 @@ package substrateinstall
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 )
 
@@ -12,6 +13,12 @@ import (
 // git archive and extractTar), so a test sees the tree the installer sees.
 func (i *Installer) ExportPin(ctx context.Context, tmp, dst string) error {
 	return i.exportPin(ctx, tmp, dst)
+}
+
+// ExportCommit is exportCommit for the tests: the same export for a commit that a test creates (the pin is a
+// constant, so no test repository can hold it).
+func (i *Installer) ExportCommit(ctx context.Context, tmp, dst, commit string) error {
+	return i.exportCommit(ctx, tmp, dst, commit)
 }
 
 // PinGVisorForTest makes the pinned digest of each architecture the SHA-256 of body for the test, so a fake
@@ -56,3 +63,8 @@ func GVisorSource(mirror, goArch string) string {
 
 // ArchiveSuffix is archiveSuffix for the tests.
 func ArchiveSuffix(head []byte) (string, error) { return archiveSuffix(head) }
+
+// APIServerTLS is apiServerTLS for the tests.
+func (i *Installer) APIServerTLS(ctx context.Context, ns string) (*tls.Config, error) {
+	return i.apiServerTLS(ctx, ns)
+}

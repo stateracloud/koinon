@@ -21,52 +21,15 @@ test, so the suite reads "partly run" when only that test ran. A plain test that
 in a package under `-p` fails the verdict (the ginkgo CLI emits no `go test` events): make it a spec. One package: `go test ./internal/x` (serial) or
 `GOFLAGS=-tags=testing go tool ginkgo -p ./internal/x` (the `testing` tag gives kopia an instant test key derivation; without it kopia specs are several times slower under `-race`; `hack/go-test.sh` sets it). `test/harnesses` needs the harness images: `make test-harnesses`.
 
-### Test result reuse (#43)
+### No test result reuse (#682)
 
-In CI (`CI` set) every package runs with `-count=1`, so main and the merge queue run everything every
-time. Locally (`CI` unset) `make test` stays as it was: serial Ginkgo suites run with `-count=1`, plain
-packages as Go decides, so they may print `(cached)`. A pull request run sets `KOINON_GO_TEST_CACHE=1`
-(the `go-test` job, `pull_request` events only) and the
-packages listed by `hack/go-test-cacheable.sh` then run without `-count=1`: Go reuses a result when the
-test binary, the command line, the environment variables the test read and the size, mode and mtime of
-the files it opened are the same (Go does not hash file content), and prints `(cached)`. Go's key does not cover Docker or testcontainers state, a database server,
-the network, a cluster or a binary the test starts, so the three kinds of package split like this:
-
-| Kind | Reuse on a pull request | Why |
-| --- | --- | --- |
-| Plain `func Test` packages | yes, when cacheable | `go test` through `gotestsum` |
-| Serial Ginkgo suites | yes, when cacheable | they run as plain `go test` packages then: any `-ginkgo.*` flag after `-args` (report flags, `fail-on-empty`) switches Go's cache off, and a report file written into the package directory changes a file the test is hashed with. A reused suite has one test row in `ginkgo-cached.xml`, no per-spec report and no verdict line. In place of `fail-on-empty`, `go-test.sh` fails the run when the suite's output (replayed on a `(cached)` result too) has no `Ran N of M Specs` line with N > 0. |
-| Parallel Ginkgo suites (`PARALLEL_SUITES`) | never | `ginkgo -p` has its own runner and does not use Go's result cache; they also need Postgres |
-
-A package is not cacheable when its test binary links `internal/testing/*` (pgtest, testenv,
-containerhost, agentgatewayimage, cfgdeliver, fakegitea, policycheck, racescale; `fakemodel` is an
-in-process fake and allowed), testcontainers-go or envtest, or when the package or its tests import
-`os/exec`. So every Postgres, Docker, envtest, git or helm package keeps `-count=1` on pull requests
-too. The rule leans to "not cacheable"; a wrongly excluded package loses a hit, a wrongly included one
-could show a stale pass. `hack/go-test-test.sh` pins it.
-
-Where the results come from: the `warm-caches` job on main runs
-`KOINON_GO_TEST_CACHE=1 hack/go-test.sh "$pkgs"` (`pkgs` is the output of `hack/go-test-cacheable.sh`) in its
-own step, after the `go-ci` save, with `continue-on-error`: a failing test loses hits and never costs the
-build cache, and an empty list fails the step instead of running `./...`. It saves `~/.cache/go-build` as
-`go-testres-<os>-<arch>-<go version>-<commit sha>` on every push to main; the `go-test` job of a pull
-request restores the newest entry by the `go-testres-` prefix. The script and flags are the same (they are
-part of Go's key), so results match. To check it works, open the `go-test` log of a pull request run and
-look for `(cached)` on lines such as `internal/money (cached)`.
-
-Why the mtime step: `actions/checkout` stamps every file and directory with the checkout time, so a package
-that opens a file (testdata, golden files, the chart, templates) or lists a directory (`filepath.Glob`,
-`os.ReadDir`, `WalkDir`: Go hashes an opened directory's stat and the stat of each entry) would never hit
-on a CI run. The `go-test` and `warm-caches` jobs therefore run `hack/ci-stamp-mtime.sh` after checkout. It
-sets each tracked file's mtime from its git blob id and each tracked directory's from its tree id, so the
-same content has the same mtime on main and on a pull request, and a changed file (even one of the same
-size) gets another mtime, as does every directory above it. A fixed epoch would show a stale pass for a
-same-size edit. A directory that gets untracked entries (the root: `.git`, `reports/`) still differs, so a
-package that lists it only misses. The script is for a throw-away checkout only. Retention: every
-`go-testres-` entry holds the whole build cache (a few hundred MB), so `warm-caches` deletes the
-`go-testres-` entries created before the one it just saved (`actions: write`, `continue-on-error`; by
-`createdAt`, which follows the save order, not the commit order: a prune keeps the entries saved at or after its own, and the worst case is a lost cache hit, never a stale pass) and the repository
-keeps about one, away from the 10 GB quota that go-ci, envtest and the pnpm stores share.
+Every Go test runs every time, locally and in CI. Serial Ginkgo suites and plain packages run with
+`-count=1`, so `go-test` never prints `(cached)`. Parallel Ginkgo suites (`PARALLEL_SUITES`) run through
+`ginkgo -p`, which never uses Go's test result cache. Issue #682 removed the old reuse of test results on
+pull requests (#43): the `go-testres-` cache, `hack/go-test-cacheable.sh` and `hack/ci-stamp-mtime.sh`.
+Reason: issue #682 (decision D4): these steps cost CI time and give little value.
+`hack/go-test-test.sh` and `hack/ci-cache-test.sh` check that it stays
+removed.
 
 `hack/go-test.sh` also exports one `TESTCONTAINERS_SESSION_ID` for the whole run, before `hack/pgserver`
 starts, so pgserver and every test process share one testcontainers session and one Ryuk reaper.
@@ -287,7 +250,11 @@ Both use only the fake MCP server (`koinon-fakemcp`) as the receiver, and canari
   the port-forwarded fake server; a skip is a failure there. No extra job and no model call, so
   `hack/ci-required.txt` is unchanged (the `e2e result` status covers it). `make test-escape-kind`
   alone still skips the case (`make dev-kind-up` installs OpenShell only). Locally:
-  `ESCAPE_MCP=1 test/e2e/run.sh`.
+  `ESCAPE_MCP=1 test/e2e/run.sh`. With `DRIVER=substrate` the hook is not set: `run.sh` sets
+  `KOINON_E2E_ESCAPE_SUBSTRATE=1`, and step 6b runs the same attack from a raw MCP client in the agent's own actor,
+  inside a task (the fake model's `raw mcp exfil` turn). The gateway knows an actor only by the JWT that atenet-egress
+  adds, so a probe sandbox is not the agent. Inside a task the guard holds the sends for approval; the case denies them
+  and checks that the fake server saw the read and no `write_item` or `fetch_url` (#1428).
 
 Both fail when the guard is bypassed: make `write_item` pass the guard (declare its sink class `none`)
 and the call reaches the server. The escape case sends the canary in `title`, the one argument the fake
@@ -321,11 +288,61 @@ e2e (`test/e2e`, ~12-15 min) runs on a PR only when the PR carries the `e2e` lab
 amendment, issue #572), fork PRs included once a maintainer adds the label. The merge queue applies
 `hack/needs-e2e.sh` to every entry and is the only e2e proof. A PR without the label does not run it. It also runs batched on main (each push that changed something
 e2e-relevant, one running and the newest pending) and nightly, always, to catch drift no commit
-explains. The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
+explains. To start a run by hand, use `hack/e2e-dispatch.sh --ref <branch or tag> [--suite go|web|drill] [--backup-restore]`:
+it dispatches, finds the new run on that ref and prints `run=<id> url=<url>` (issue 1488). Do not chain `gh workflow run`, a
+sleep and `gh run list`: the sleep hook refuses that chain, and the list can return another person's run.
+The nightly run (and a dispatch with `backup_restore: true`) also runs `test/e2e/backup-restore.sh`
 after the driver: it runs the commands of `test/e2e/commands/backup-restore.e1` (key export,
 `pg_dump`, stop, restore, start, `checkpoints resync`) and checks the install is the one that was backed up
 (ADR 0085 decision 18). `hack/e2e-commands-check.sh` (in the `scripts` job) checks that the file parses and that the script runs exactly its blocks; the docs repository compares its guide with the file (ADR 0108). `go test ./internal/declarative -run TestDocumented` is the entry point for the docs repository: with `KOINON_PAGES_DIR` set to a directory of pages it parses their manifests; it skips without it. The docs repository uses it from the first release that has it (#505, ADR 0108). The bold UI labels in `web/e2e-real/*.spec.ts`, the chart values and the tool version pins that the pages show are checked in `koinon-docs` (`hack/pages-check.sh`) against each release tag, so a rename here shows up there at the next release; a feature's page change goes to the `docs/next-release` branch of `koinon-docs`. Locally:
 `BACKUP_RESTORE=1 make test-e2e-kind`.
+
+### The Substrate leg of the kind e2e (issue #1091)
+
+`make test-e2e-kind-substrate` (`DRIVER=substrate test/e2e/run.sh`) runs the quickstart pass with `execution.driver:
+substrate` on kind, on the gVisor class (tier `dev`; a standard runner has no KVM, ADR 0119 D10). What differs from the
+OpenShell run:
+
+- `kind/up.sh` leaves out Agent Sandbox, the `runc` RuntimeClass and OpenShell.
+- `kind/substrate.sh harness` builds the substrate overlay of the harness image (guest front and launcher) and pushes it as
+  `<registry>/<cluster>/sandbox-substrate:e2e`; its digest goes into `values.yaml` (Substrate runs only an image pinned by
+  digest, #1192).
+- `kind/substrate.sh install` runs `koinon-api substrate install --platform kind --sandbox-classes gvisor` from a clone
+  at the pinned commit (`SUBSTRATE_SOURCE`, else a shallow fetch into `~/.cache/koinon/substrate`). `GVISOR_MIRROR`
+  is for a host that cannot reach `storage.googleapis.com`.
+- The values are `kind/substrate-values.yaml`. The OpenShell client certificate block and the OpenShell escape cases are not run.
+
+What the leg proves: Substrate installs on kind, the provisioner creates the atespace of an org, an actor of the gVisor class
+starts from the digest-pinned overlay through the image cache, and the quickstart reaches an approved pull request (the
+gateway routes and the actor token of #1086 are merged). The image cache is the one image source on this leg too: the
+registry of the kind cluster is its upstream (`imageCache.upstreams` with `allowHTTP`, and `imageCache.egress.extra` for
+the range of the docker network `kind`, which run.sh reads with `docker network inspect`). `kind/values-rewrite.sh` fills the
+placeholders of `kind/substrate-values.yaml`; the registry host `localhost:5001` of the cache upstream stays as it is.
+
+The harness contract tests (`make harness-suite`, `./test/harnesses/...`) are a step of this leg: after
+`kind/substrate.sh harness`, `test/e2e/run.sh` runs them with `KOINON_HARNESS_IMAGE_OPENCODE` set to the Substrate overlay
+image, so the leg tests the image the actors run. The suite needs no cluster and starts its containers with its own
+entrypoint, so the overlay's guest-front entrypoint does not get in the way. The OpenShell leg does not run them. The
+`harnesses` job of `ci.yml` (required, merge queue and main) still runs them against the plain OpenCode image.
+
+The leg is advisory (a comment in `hack/ci-required.txt`, not a listed name: it is a driver of the `quickstart` job and
+runs on dispatch only). Issue #1091 is done when the quickstart and the contract suite on the overlay image are green on
+this leg, the `harnesses` job is green and the leg is listed as advisory. Not covered here: the missing-image step
+(skipped until its Substrate form is proven). Two specs cover the security of the actor (#1428, `test/e2e/substrate_test.go`):
+step 8 checks that every WorkerPool runs the `gvisor` class only, and that the agent's shell in the actor of a run reads a
+gVisor kernel (`uname -r` ends in `-gvisor`) and the launcher's controls (uid 10001, `NoNewPrivs` 1, `Seccomp` 2, `CapEff` 0);
+step 6b runs the leak guard escape case as a raw MCP client in that actor (`ESCAPE_MCP=1`, see the escape suite above). The CI wiring is already in `e2e-kind.yml` as the `driver` dispatch input; the leg
+becomes a required leg at the switch (#1093, no soak).
+
+The restore drill of this leg is the home restore drill (#1090 part 3): `BACKUP_RESTORE=1 make test-e2e-kind-substrate`,
+or a dispatch with `driver=substrate` and `backup_restore=true`. After the quickstart pass, `test/e2e/run.sh` runs the
+spec `test/e2e/home_restore_test.go` (label `home-restore`). It starts the S3 server of the ADR 0109 drill in the fakes
+namespace and turns home checkpoints on with `helm upgrade --reuse-values` (idle timeout 2m, archive delay 1m). An agent
+writes a marker into its home, goes idle, takes its stop checkpoint and is archived: the actor and its durable directory
+are deleted. With every recorded digest of the agent's checkpoints made wrong, the next run fails before the harness
+starts and names the digest mismatch. With the digests put back, the next run restores the home through the Substrate
+upload path, records `run.home_restored` with `verified: true`, loads the task's session and reads the marker. The
+database and keys drill (`test/e2e/backup-restore.sh`) does not run on this leg yet.
 
 ### The N-1 to N upgrade e2e (issue #519)
 
@@ -367,7 +384,7 @@ kind: `test/drill/run.sh` (`KEEP=1` leaves the cluster; `test/drill/sweep.sh <ru
 `koinon.dev/drill-run=<id>` and refuses anything without it). In CI it is the `drill` job of
 `e2e-kind.yml` (`continue-on-error: true`, its main step has its own `timeout-minutes: 55` so a hang counts as red, so a red drill never changes the run conclusion that `hack/e2e-bisect.sh`
 reads; it sits in that file because GitHub starts a dispatch or a schedule only from a workflow on the default
-branch): nightly, on every release tag (rc and final) and on `gh workflow run e2e-kind.yml -f suite=drill --ref <tag>`, which runs only the
+branch): nightly, on every release tag (rc and final) and on `hack/e2e-dispatch.sh --ref <tag> --suite drill`, which runs only the
 drill job (`decide`, `quickstart` and `result` skip on a tag push and on that dispatch); never a pull request or
 merge queue check: it is not a merge check, it is a release check (`hack/release-gate.sh` demands it for every tag; listed in `hack/ci-required.txt` in that sense). A check the product cannot pass yet
 fails with `known gap: #N` and the label `known-gap`; those stay red in the report and do not turn the job red,
@@ -389,7 +406,7 @@ topology stays in the output directory as `topology.json`). The kind topology tu
 the check `browser-signin`: `web/e2e-drill/signin.spec.ts` signs in through the web UI
 that the restored API serves (`pnpm --dir web run test:e2e-drill`; the suite passes the address and the password in the
 environment of that process). The `drill` job installs Node and pnpm (`pnpm --dir web install --frozen-lockfile`) and runs the spec in the pinned
-Playwright image (the digest of `web-e2e`) through `go tool drillwebrun` (`hack/cmd/drillwebrun`, ADR 0118), which `test/drill` calls when
+Playwright image (the pin in `hack/playwright-image.env`, the same as `web-e2e`) through `go tool drillwebrun` (`hack/cmd/drillwebrun`, ADR 0118), which `test/drill` calls when
 `KOINON_DRILL_PLAYWRIGHT_IMAGE` is set. The tool mounts the parent of `PLAYWRIGHT_OUTPUT_DIR`, because Playwright removes its output directory and a mount point cannot be removed; its Docker spec runs as non-root in `go-test` on every pull request (#1072); the job installs no browser or OS package from a live mirror (#569). Without
 that image the spec runs through pnpm on the machine, which then needs its own Chromium. Behind an egress proxy, set `HTTPS_PROXY` (or `https_proxy`) and optionally `NO_PROXY`
 (or `no_proxy`) for the drill: `web/playwright.drill.config.ts` maps them to Playwright's `use.proxy` (Playwright
@@ -548,6 +565,37 @@ session and prints a verdict file path at once (next to it: `pid`, and `rc` when
 and exits with the run's code (0, 1, 3), or 75 "still running" after N seconds (default 600; `--max 0`
 looks once); call it again after a 75. A run that vanished without an exit code is exit 1.
 
+**Tool state in the sandbox (#1296).** A lane runs `lane-gates.sh` in the Claude Code sandbox, which
+lets a process write only to the worktree, `$TMPDIR` and the `allowWrite` entries of the settings. The
+tools under the gates wrote state outside those paths, so a sandboxed run got `operation not permitted`
+in place of a verdict. `hack/gate-state-lib.sh` now gives each tool a path the sandbox allows, and a
+value that is already set (CI, your shell) wins:
+
+- `BUILDX_CONFIG` is `<gate log directory>/state/buildx`: a copy, made again each run, of the builder
+  selection and client certificates in `${DOCKER_CONFIG:-~/.docker}/buildx`. buildx writes its activity file there. Only the
+  client state moves; the build cache stays in the builder.
+- `DOCKER_CONFIG` is `<gate log directory>/state/docker`: a directory with a symbolic link to each
+  entry of `~/.docker` (`config.json`, `contexts`, `cli-plugins`) except `buildx`, made again each run. BuildKit's
+  registry auth writes its `.token_seed` file there on each image pull of a build. The links keep the
+  registry credentials in one place: nothing is copied.
+- `KOINON_PNPM_STORE` is `$TMPDIR/koinon-pnpm-store`, the store of `make test-opencode-plugin`. The web
+  gate keeps the default store, because its `node_modules` were linked from it and it installs offline.
+  pnpm links the plugin `node_modules` again when the store changes, so the first gate run in a
+  worktree (and a later plain `make test-opencode-plugin`) downloads from the registry again.
+- `BUF_CACHE_DIR` is `$TMPDIR/koinon-buf-cache`, the module cache of buf (the proto and generate
+  gates). buf writes it to `~/.cache/buf` by default. The lanes with the same `$TMPDIR` share it. The
+  first run with an empty cache downloads the BSR modules from `buf.build`. If the sandbox blocks that
+  host, run `BUF_CACHE_DIR=$TMPDIR/koinon-buf-cache make generate` once outside the sandbox.
+- The envtest binaries: lane-gates runs `make envtest-assets` once, before the gates start, and passes
+  the directory to `make test-chart-smoke` and `make test-admission` as `KOINON_ENVTEST_ASSETS`.
+  setup-envtest only reads a store that has the version, so run `make envtest-assets` once outside the
+  sandbox. If the sandbox denies the download, the envtest gates are `notrun` with that reason.
+- The envtest port locks stay in `os.UserCacheDir()/kubebuilder-envtest` (`~/Library/Caches` on macOS),
+  because all envtest processes of a machine must share them, and on macOS only `$HOME` moves them. If
+  that directory exists and the sandbox denies writes to it, the envtest gates are `notrun` with
+  `sandbox denial: the envtest port locks ... are not writable`. If it does not exist, controller-runtime
+  uses `$TMPDIR/kubebuilder-envtest`.
+
 **Local hooks (#654).** `hack/wt.sh new` and `hack/git-identity-check.sh install` set `core.hooksPath`
 to `hack/githooks`, which now also holds `pre-push`: per pushed ref it runs
 `gitleaks git --redact --no-banner --log-opts=<remote sha>..<local sha> .` (a new branch scans what the
@@ -611,8 +659,8 @@ Actions minutes are a limited, shared resource; `hack/ci-skip-heavy.sh` decides,
 `generated code`, `chart`, `chart smoke`, `escape (admission)`, `opencode plugin` (path rule `opencodeplugin`) and `harnesses` (not on a pull request, #572), plus
 `lint-shell` and `scripts` (path rules `shell` and `scripts`) and go-tidy and go-lint (path rule `tidy`: Go files,
 `go.mod`, `go.sum`, the lint config) and `go-vuln` (path rule `vuln`: `go.mod`, `go.sum`; see below). `changes` and
-`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity check (`hack/git-identity-check.sh`, list in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320) and the dependency age steps in one job,
-old issue 594: every job pays a fixed start-up cost) and the other workflows (`dco`, `gitleaks`, `claim`,
+`quick checks` (proto, migrations, adr-lint, claim-tests, the Conventional Commits subject check, the commit identity and sign-off check (`hack/git-identity-check.sh`: author and committer in `hack/git-identities.allowed`, read from the pull request's base commit so a pull request cannot widen its own list; the pull request that first adds the file is checked against its own copy; `KOINON_ALLOWED_IDENTITIES` is ignored in CI; koinon#320; and `Signed-off-by: <author>` on every non-merge commit, ADR 0026, #682) and the dependency age steps in one job,
+old issue 594: every job pays a fixed start-up cost) and the other workflows (`gitleaks`, `claim`,
 `e2e result`) always run; `lint-shell` and `scripts` run when the path rules say a change can affect them, and
 are skipped on a draft and on a push to main whose heavy jobs are skipped (#572); the heavy jobs follow the
 same draft rule. A skipped heavy job reports
@@ -689,18 +737,16 @@ Prior art: `dorny/paths-filter` keeps all filters in one YAML file that a job re
 derive "affected" from the build graph instead of lists; we take both: one data file for the rules,
 `go list` for the two Go suites whose imports change.
 
-### go-test satisfied by an external run (old issue 610)
+### go-test always runs on a Go change (#682)
 
-`changes` reads the commit status `go-test-lab` (an external go-test run that passed on exactly this
-head) for the exact PR head SHA; when it is success the ready run skips `go-test`, which `go` accepts
-(the required name stays `go`; no change to the ruleset). Nothing in this repository posts it and
-nothing waits for a late one: without the status `go-test` runs on the hosted runner. The merge
-queue's `merge_group` run never uses it (it runs `go-test` in full), and `hack/release-gate.sh` counts a
-skipped `go-test` on main only through the queue build or a change with no Go. Trust limit as `e2e-lab` (old issue 568).
+`go-test` runs on the hosted runner for every Go change. No commit status can replace it. Issue #682
+removed the `go-test-lab` status of old issue 610: `changes` no longer reads commit statuses, and
+`hack/release-gate.sh` counts a skipped `go-test` on main only through the queue build or a change with no
+Go. `hack/ci-go-gate-test.sh` and `hack/release-gate-test.sh` check this.
 
 ### Draft pull request (old issue 593)
 
-A draft runs nothing heavy. Only `changes`, `quick checks`, `dco`, `gitleaks` and
+A draft runs nothing heavy. Only `changes`, `quick checks`, `gitleaks` and
 `claim` run (`lint-shell` and `scripts` too until #572); `go` and `web` report success with "draft: not run" in the job summary (a skipped required check
 is green anyway). That green is vacuous, so it must never count as evidence. A draft cannot be enqueued or
 merged (`pr-merge.sh` and `pr-wait.sh --checks` exit 5), and marking it ready fires `ready_for_review`, which
@@ -764,7 +810,6 @@ work that fills it, then saves:
 | Cache | Key | Filled by |
 | --- | --- | --- |
 | Go modules and build cache | `go-ci-<os>-<arch>-<go version>-<go.sum hash>-<week>` (`<week>` = whole 7-day periods since the epoch; defined once in `.github/actions/setup-go-cache`) | `go build ./...`, `go test -run '^$' ./...`, the same with `-race` for the go-race packages, one lint run |
-| Go test results (#43) | `go-testres-<os>-<arch>-<go version>-<commit sha>` | the cacheable packages' tests, on every push to main; only the newest entry is kept (older ones are deleted) |
 | envtest API server binaries | `envtest-<ENVTEST_K8S_VERSION>` | `make envtest-assets` |
 | pnpm store (`web`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-web`, with the consumers' `cache-dependency-path` (setup-node saves after a miss) |
 | pnpm store (`harnesses/opencode/plugins`) | setup-node's, by lockfile | `pnpm install` in `warm-caches-opencode-plugins`, the same way |
@@ -825,7 +870,14 @@ it finds present and downloads again on a mismatch. The action restores, runs th
 safety: a job that checks out a ref other than the event's trusted one (`inputs.commit` in
 `e2e-kind`, a `pull_request_target` head) must not run a local action or save: its cache scope is
 the default branch's, so a save would let that ref's code write what main restores (CodeQL "cache
-poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without the cache. `ci.yml`
+poisoning"). `e2e-kind` therefore calls `hack/fetch-pinned.sh` directly, without the cache. No save
+step is not enough: code in a job can write cache entries itself with the runner's cache token. So
+`e2e-kind` also refuses an `inputs.commit` that is not a first-parent commit of the dispatch ref
+(the head or a merge; a step before the checkout, issue 1365). Any ancestor is not enough: the
+inner commits of a merged pull request were never reviewed as a tree. The checkout takes the sha that the guard
+step matched in the commit graph (`steps.dispatchrev.outputs.rev`), not the raw input. CodeQL does not model a `run` step as
+a control check: it flags the first run step after the checkout that matches its poisonable commands (`pnpm store path`,
+`make`), alerts 53 and 58, so the alert can stay open while the guard holds (issue 1365). `ci.yml`
 (`pull_request` has its own cache scope; pushes and queue builds are trusted refs), `secrets.yml` and
 `g2-kind.yml` (the dispatched ref's own scope) keep the action and save. Any new caller on an
 untrusted ref passes `save: 'false'` and takes the action from a trusted checkout. `hack/pinned-download-lint.sh` (the `scripts` job) fails on a
@@ -849,7 +901,7 @@ nightly that went red in the backup-restore step reproduces: fix forward within 
 release tags are cut only from a commit whose `quickstart` job concluded success
 (`hack/release-gate.sh` checks it; dispatch e2e-kind on the commit if the batched run skipped it). The other
 required contexts are read from the tagged commit, then the queue build on the same tree, and only for
-`dco`, `claim`, `e2e result` and the dependency-age half of `quick checks` from the merged PR's head (an admin
+`e2e result` and the pull-request-only half of `quick checks` (dependency age, commit subjects, identities and sign-off) from the merged PR's head (an admin
 merge has no queue build). The gate ignores
 `skipped` `quickstart` check runs (the push run after a queue merge skips it), does not count a dispatch with
 `inputs.commit` (a bisect candidate: its job is named `quickstart (commit)`, #453; older bisect runs still named
@@ -898,8 +950,8 @@ How CI starts on that pull request, with no secret, PAT or App token: GitHub doc
 caused by `GITHUB_TOKEN` create no workflow runs, with two exceptions: `workflow_dispatch` and
 `repository_dispatch`, and `pull_request` events of type `opened`, `synchronize` or `reopened`, which
 create runs in an approval-required state (other types, such as `labeled`, `edited` and
-`ready_for_review`, create none). The required workflows listen as follows: `ci.yml`
-(opened, synchronize, reopened, ready_for_review), `dco.yml` (default types), `claims.yml` (opened,
+`ready_for_review`, create none). The workflows that report checks listen as follows: `ci.yml`
+(opened, synchronize, reopened, ready_for_review), `claims.yml` (opened,
 reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchronize, reopened;
 `e2e-kind.yml` also ready_for_review and `labeled`, which acts only for the `e2e` label). So the route is:
 
@@ -909,7 +961,7 @@ reopened, synchronize, edited), `secrets.yml` and `e2e-kind.yml` (opened, synchr
    this repository), close and reopen the pull request: a person's `reopened` event is a default
    type of every required workflow and runs them normally.
 3. Mark it ready for review: `ready_for_review` re-runs `ci` in full (a draft reports a vacuous
-   green, above). On a pull request `e2e-kind` runs only with the `e2e` label and is advisory (#572). `dco` and `claim` do not listen to it; they keep the result of step 1 or 2.
+   green, above). On a pull request `e2e-kind` runs only with the `e2e` label and is advisory (#572). `claim` does not listen to it; it keeps the result of step 1 or 2.
 4. The change touches `harnesses/`. The proof is the required merge-queue jobs: `harnesses`
    (`hack/paths.rules` matches `harnesses/`) and `quickstart` (ADR 0105). A dispatched `e2e-kind.yml`
    run is not merge evidence.
@@ -921,8 +973,8 @@ step, at the price of a stored secret or an App with write access; that is the o
 (ADR 0094 decision 3 keeps CI on `GITHUB_TOKEN` only today).
 
 The identity checks need no exemption for this bot: the commit carries a `Signed-off-by` for the
-bot's own name and noreply email (`dco`), `* <*@users.noreply.github.com>` in
-`hack/git-identities.allowed` allows the identity (`hack/git-identity-check.sh`), the pull request
+bot's own name and noreply email, `* <*@users.noreply.github.com>` in
+`hack/git-identities.allowed` allows the identity (both in `hack/git-identity-check.sh`), the pull request
 closes no issue so the `claim` check has nothing to refuse, and the subject is a Conventional Commit.
 
 The size guard of `test/harnesses` reports measured KiB, budget and headroom on every run (the spec's
@@ -938,9 +990,9 @@ reports on every pull request, push and merge group build); it also runs in `hac
 
 | Workflow | Triggers that a fork can cause | Secrets and permissions | Finding |
 |---|---|---|---|
-| `ci.yml`, `dco.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`harness-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
+| `ci.yml`, `secrets.yml` | `pull_request` (fork: read-only token, no secrets) | `GITHUB_TOKEN` only; `contents: read` by default; `ci.yml` adds `actions: write` to the `supersede` job (cancels runs of older heads) and `packages: write` to the push-to-main job (`harness-publish`) | ok: on a fork's `pull_request` the token is read-only whatever the job asks for |
 | `e2e-kind.yml` | `pull_request`, `merge_group` | no secrets; `GITHUB_TOKEN`; `contents: read` by default; the `result` job has `actions: write` (re-runs the PR's `e2e result`) and the `bisect` job has `issues: write, actions: write` | ok; the nightly, push and dispatch triggers need write access, and a fork's token is read-only |
-| `claims.yml` | `pull_request`, `merge_group` (the required `claim` job); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
+| `claims.yml` | `pull_request`, `merge_group` (the `claim` job, not required since #682); `push` to `main` (`release`); no schedule (no sweeper since ADR 0104) | `GITHUB_TOKEN` only; the `claim` job has `contents: read, issues: read, pull-requests: read` and no secret; the `release` job (push to `main`) has `contents: write, issues: write, pull-requests: read`; no Environment, no App key | ok: the `claim` job checks out the base branch's tip at run time (`pull_request.base.ref`, not the stale `base.sha`; or `merge_group.base_sha`) and runs the base's `hack/claim.sh`; the PR's code never runs. `release` runs main's own file and script. On `pull_request` the workflow file is the PR head's; see the limit under "Workflow triggers" in the claims section |
 | `contributor-gate.yml` | `pull_request`, `merge_group` (the `contributor gate` job, off by default, #848) | `GITHUB_TOKEN` only; `contents: read` at top level, the job adds `pull-requests: read` (the queued pull request, `check-pr`); no secret, no Environment | ok: checks out the base branch's tip (`pull_request.base.ref`) or `merge_group.base_sha` and runs the base's `hack/contributor-gate.sh`; the PR's code never runs. The workflow file is the PR head's, so the guard is the code-owner review of `.github/`, as for `claims.yml` |
 | `release.yml`, `e2e-toolchain.yml`, `mirror-agentgateway-test-image.yml` | tag push, schedule, dispatch (write access) | `permissions: {}` at top level; `release.yml` has `contents: write` (draft release) and `packages: write` in the release jobs and `id-token: write` in the signing job only; `e2e-toolchain.yml` and `mirror-agentgateway-test-image.yml` have `packages: write` | ok: not reachable from a fork |
 | `ubuntu-snapshot.yml` | schedule, dispatch (write access) | `permissions: {}` at top level; `resolve` has `contents: read` and no write token; `propose` has `contents: write, pull-requests: write` and pushes only `bot/ubuntu-snapshot` (guarded) | ok: not reachable from a fork; no secret besides `GITHUB_TOKEN`; needs the "create and approve pull requests" repository setting |
@@ -974,7 +1026,7 @@ a push to main, nightly and on dispatch, so it is not a `ci.yml` job and has no 
 list in the same PR, and a required job must report on every pull request and push (a job-level
 `if:` skip reports success and is fine; only a workflow-level `paths:` filter leaves a check
 absent). With the merge queue (below) a required job must also report on `merge_group`: the
-workflows that produce a required context listen to it (`ci`, `dco`, `secrets`, `claims`,
+workflows that produce a required context listen to it (`ci`, `secrets`,
 `e2e-kind`), `hack/ci-merge-group-test.sh` keeps them subscribed, and a new required workflow
 subscribes in the same PR.
 
@@ -1036,7 +1088,8 @@ it caught anything Dependabot, govulncheck or OSV did not; if not, remove it.
 ### The `claim` check (ADR 0094, ADR 0104)
 
 `claim` (`.github/workflows/claims.yml`, `pull_request`, read-only, `hack/claim.sh check-pr`)
-is required and is a conflict check: it fails only when another human holds a claim on an issue the
+is a conflict check. It is not required since #682: it reports, and a red `claim` tells the author to talk to
+the holder, but it does not block the merge. It fails only when another human holds a claim on an issue the
 pull request closes, or a `claim/adr-NNNN` reservation for an ADR file it adds. A claim has no lease
 (ADR 0104): it is held until it is released. The issues it reads are GitHub's closing links of the
 pull request (`closingIssuesReferences`: closing keywords in any form, `owner/repo#N` and URLs
@@ -1106,7 +1159,7 @@ succeeded a PR comment with the head SHA and the number of contexts it read. It 
 `--checks`): the runs on the head whose display title is `ci (draft)`, matched by run id (a by-hand
 re-run of a draft run is ignored too). A draft run is green by skipping, so it must never decide. A red or
 cancelled run of the ready `ci` is never dropped, and while the ready run has no checks yet it prints
-`waiting for the ready run`, never green. dco, gitleaks, claim and commit statuses keep their
+`waiting for the ready run`, never green. gitleaks, claim and commit statuses keep their
 result; when gh cannot list the runs, nothing is dropped (a draft run's red then shows as `FAILED`). It exits 6 `STALE-HEAD` when the PR's head stays different from
 `git ls-remote origin refs/heads/<branch>` for `PR_WAIT_STALE_GRACE` seconds (default 120); re-sync with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<PR> -f base=<base>`.
@@ -1159,15 +1212,16 @@ What a `merge_group` build runs (event `checks_requested`, no pull request in th
   cancel one another (a cancelled required check ejects the entry and the ones behind it);
   `ci-supersede.sh`, commit subjects, dependency age and the waiver are pull-request-only steps and are
   skipped (a step skip is green).
-- `dco` and `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits.
+- `gitleaks`: the range `merge_group.base_sha..head_sha`, the entry's own commits. The sign-off and the
+  commit identities are checked once, on the pull request (`quick checks`, #682): the queue builds the same commits.
   On the push to main that the queue made, `gitleaks` does not scan again (#572): `hack/secrets-skip.sh` finds a
   successful `merge_group` run of `secrets.yml` whose `head_sha` is the pushed commit (the queue
   fast-forwards main to that head). It matches the commit, not the tree: gitleaks scans commits, and an equal tree can hide other commits. The job still runs and reports success. An admin or break-glass merge, a
   direct push and any API doubt scan as before. The workflow runs the script only on a `push` event (an `if:` on the step),
   so a changed script cannot switch off the scan of a pull request or a queue build.
-- `claim`: the fencing point. It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
+- `claim` (not required since #682, so it informs and does not eject the entry). It reads `<N>` from the queue ref (`gh-readonly-queue/<base>/pr-<N>-<sha>`),
   checks out `base_sha` and runs the base's `hack/claim.sh check-pr <N>`; a claim another human took while the PR
-  waited fails the entry. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)
+  waited makes it red. It fails closed when `<N>` cannot be read. `release` (a `push` to main job)
   does not run; there is no sweeper (ADR 0104). Limit: a `merge_group` run takes its workflow YAML from the queue
   commit, which is the pull request's own, so a PR that edits `claims.yml` controls what runs at queue time;
   only the script is the base's. On `pull_request` the PR head's workflow file runs as well, so the only
@@ -1238,3 +1292,11 @@ only when it changes Go or web code (a `paths` filter, allowed because the check
 and query suite are the default setup's (actions, go, javascript-typescript, python; `default`). Not in
 `hack/ci-required.txt`. Switching over: merge the workflow, switch the default setup off in Settings right after
 (both cannot upload for one language), then run the workflow once by hand.
+
+## Playwright bump
+
+The Playwright image of `web-e2e` and of the restore drill is one pin: `PLAYWRIGHT_IMAGE` in `hack/playwright-image.env`
+(tag and digest). The one reader is `hack/playwright-image.sh`; it fails closed and nothing sources the file. The `changes` job of `ci.yml` and a step of the drill job in `e2e-kind.yml` call it. A bump is one pull
+request with no `.github` path. It changes only these three places: `web/package.json` (with `web/pnpm-lock.yaml`),
+`hack/e2e-toolchain/web.Dockerfile` (`ARG PLAYWRIGHT_VERSION`) and `hack/playwright-image.env`.
+`hack/ci-playwright-image-test.sh` and `hack/e2e-remote-test.sh` fail when they disagree. A drill of a commit from before the pin file existed has no file to read.

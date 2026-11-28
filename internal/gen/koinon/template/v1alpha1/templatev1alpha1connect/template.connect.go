@@ -29,6 +29,9 @@ const (
 	// TemplateServiceListTemplatesProcedure is the procedure name of the TemplateService's
 	// ListTemplates RPC.
 	TemplateServiceListTemplatesProcedure = "/koinon.template.v1alpha1.TemplateService/ListTemplates"
+	// TemplateServiceCreateTemplateFromAgentProcedure is the procedure name of the TemplateService's
+	// CreateTemplateFromAgent RPC.
+	TemplateServiceCreateTemplateFromAgentProcedure = "/koinon.template.v1alpha1.TemplateService/CreateTemplateFromAgent"
 )
 
 var (
@@ -40,12 +43,27 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	templateServiceCreateTemplateFromAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_template_v1alpha1_template_proto.Services().ByName("TemplateService").Methods().ByName("CreateTemplateFromAgent"),
+			Procedure:  TemplateServiceCreateTemplateFromAgentProcedure,
+		}
+	})
 )
 
 // TemplateServiceClient is a client for the koinon.template.v1alpha1.TemplateService service.
 type TemplateServiceClient interface {
-	// ListTemplates returns the current content of every template.
+	// ListTemplates returns the current content of every platform template and, when the request
+	// names an org, the org's own templates. Every signed-in user can list the platform templates;
+	// the org's templates need membership of the org.
 	ListTemplates(context.Context, *v1alpha1.ListTemplatesRequest) (*v1alpha1.ListTemplatesResponse, error)
+	// CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as
+	// template"). It needs the member role, as creating an agent does. The template keeps the agent's
+	// definition (instructions, model, grants without their bindings, limits, triggers, settings) and
+	// nothing the agent is bound to: no connection, repository or run data. Promotion to a platform
+	// template is not part of this API.
+	CreateTemplateFromAgent(context.Context, *v1alpha1.CreateTemplateFromAgentRequest) (*v1alpha1.CreateTemplateFromAgentResponse, error)
 }
 
 // NewTemplateServiceClient constructs a client for the koinon.template.v1alpha1.TemplateService
@@ -57,8 +75,16 @@ func NewTemplateServiceClient(client *connect.Client) TemplateServiceClient {
 // TemplateServiceHandler is an implementation of the koinon.template.v1alpha1.TemplateService
 // service.
 type TemplateServiceHandler interface {
-	// ListTemplates returns the current content of every template.
+	// ListTemplates returns the current content of every platform template and, when the request
+	// names an org, the org's own templates. Every signed-in user can list the platform templates;
+	// the org's templates need membership of the org.
 	ListTemplates(context.Context, *v1alpha1.ListTemplatesRequest) (*v1alpha1.ListTemplatesResponse, error)
+	// CreateTemplateFromAgent saves the latest version of an agent as an org template ("save as
+	// template"). It needs the member role, as creating an agent does. The template keeps the agent's
+	// definition (instructions, model, grants without their bindings, limits, triggers, settings) and
+	// nothing the agent is bound to: no connection, repository or run data. Promotion to a platform
+	// template is not part of this API.
+	CreateTemplateFromAgent(context.Context, *v1alpha1.CreateTemplateFromAgentRequest) (*v1alpha1.CreateTemplateFromAgentResponse, error)
 }
 
 // RegisterTemplateServiceHandler registers svc as the koinon.template.v1alpha1.TemplateService
@@ -67,6 +93,7 @@ func RegisterTemplateServiceHandler(server *connect.Server, svc TemplateServiceH
 	adapter := templateServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: templateServiceListTemplatesSpec(), Handler: adapter.listTemplates},
+		connect.Method{Spec: templateServiceCreateTemplateFromAgentSpec(), Handler: adapter.createTemplateFromAgent},
 	)
 }
 
@@ -75,6 +102,10 @@ type UnimplementedTemplateServiceHandler struct{}
 
 func (UnimplementedTemplateServiceHandler) ListTemplates(context.Context, *v1alpha1.ListTemplatesRequest) (*v1alpha1.ListTemplatesResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.template.v1alpha1.TemplateService.ListTemplates is not implemented")
+}
+
+func (UnimplementedTemplateServiceHandler) CreateTemplateFromAgent(context.Context, *v1alpha1.CreateTemplateFromAgentRequest) (*v1alpha1.CreateTemplateFromAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.template.v1alpha1.TemplateService.CreateTemplateFromAgent is not implemented")
 }
 
 type templateServiceClient struct {
@@ -89,6 +120,14 @@ func (c *templateServiceClient) ListTemplates(ctx context.Context, req *v1alpha1
 	return &res, nil
 }
 
+func (c *templateServiceClient) CreateTemplateFromAgent(ctx context.Context, req *v1alpha1.CreateTemplateFromAgentRequest) (*v1alpha1.CreateTemplateFromAgentResponse, error) {
+	var res v1alpha1.CreateTemplateFromAgentResponse
+	if err := c.client.CallUnary(ctx, templateServiceCreateTemplateFromAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 type templateServiceHandler struct{ svc TemplateServiceHandler }
 
 func (h templateServiceHandler) listTemplates(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
@@ -97,6 +136,18 @@ func (h templateServiceHandler) listTemplates(ctx context.Context, _ connect.Spe
 		return err
 	}
 	res, err := h.svc.ListTemplates(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h templateServiceHandler) createTemplateFromAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.CreateTemplateFromAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CreateTemplateFromAgent(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -125,3 +125,13 @@ sandbox for a recreation after a complete home checkpoint it sets `restore_check
 sandbox keeps `home_generation`, and agentd restores the checkpoint before the harness starts, so
 `session/load` finds the session. A recreation without a checkpoint (checkpoints off, an ephemeral
 agent) records the new sandbox's ID as before. The stuck mark of ADR 0054 compares `sandbox_id`.
+
+## Amendment (2026-11-25, issue #1090): the generation on Substrate
+
+The rule of the lineage does not change on the Substrate driver. A suspend and resume keep the actor and
+its durable directory at `/sandbox` ([0032](0032-agent-home-checkpoints.md), amendment of 2026-11-25), so
+the home generation, the harness session files and `session/load` are untouched by them. A recreation of
+the actor (a changed spec, an archive) loses the durable directory, because `DeleteActor` without a tag
+deletes it. The recreation therefore restores from the newest verified kopia checkpoint, as on OpenShell,
+and the sandbox keeps `home_generation`. A recreation without a checkpoint starts a new generation, as
+before.

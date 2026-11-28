@@ -32,7 +32,7 @@ test('theme: no wrong-theme flash, no font from a network host, K monogram, swit
 
   // No saved choice: System, which follows the browser's preference (dark here), set before the app code runs.
   await page.emulateMedia({ colorScheme: 'dark' })
-  await page.goto('/')
+  await page.goto('/inbox')
   await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
   const html = page.locator('html')
   await expect(html).toHaveAttribute('data-theme', 'dark')
@@ -46,7 +46,8 @@ test('theme: no wrong-theme flash, no font from a network host, K monogram, swit
   if (shots) await page.screenshot({ path: `${shots}/dark.png` })
 
   // Light through the switch; the choice survives a reload with no flash (the attribute is set at once).
-  await page.getByLabel('Theme').selectOption('light')
+  await page.getByRole('button', { name: /^User menu:/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Light' }).click()
   await expect(html).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(221, 221, 243)')
   if (shots) await page.screenshot({ path: `${shots}/light.png` })
@@ -54,7 +55,8 @@ test('theme: no wrong-theme flash, no font from a network host, K monogram, swit
   expect(await html.getAttribute('data-theme')).toBe('light')
 
   // System follows the preference.
-  await page.getByLabel('Theme').selectOption('system')
+  await page.getByRole('button', { name: /^User menu:/ }).click()
+  await page.getByRole('menuitemradio', { name: 'System' }).click()
   await page.emulateMedia({ colorScheme: 'light' })
   await expect(html).toHaveAttribute('data-theme', 'light')
   await page.emulateMedia({ colorScheme: 'dark' })

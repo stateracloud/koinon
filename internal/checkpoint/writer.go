@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kopia/kopia/fs/localfs"
@@ -149,6 +150,9 @@ type Result struct {
 	Bytes      int64
 	Files      int64
 	Skipped    int64
+	// Digest is the content digest of the staged home (TreeDigest), "sha256:<hex>". The caller
+	// records it and gives it back to Restore.
+	Digest string
 }
 
 func (w *Writer) limits() Limits {
@@ -183,6 +187,16 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 			return Result{}, err
 		}
 	}
+	// The writer is not root: kopia skips, without an error, a file whose owner bits forbid a read.
+	// Make every entry readable first, so that the snapshot keeps the data and the digest below
+	// covers what the snapshot holds.
+	if err := prepareHome(home); err != nil {
+		return Result{}, fmt.Errorf("reading the home: %w", err)
+	}
+	digest, err := TreeDigest(home)
+	if err != nil {
+		return Result{}, fmt.Errorf("digesting the home: %w", err)
+	}
 	rep, err := w.open(ctx, work, prefix, password, true)
 	if err != nil {
 		return Result{}, err
@@ -199,18 +213,29 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		if err != nil {
 			return err
 		}
-		prev, err := snapshot.ListSnapshots(ctx, wr, source)
-		if err != nil {
-			return err
-		}
+		// The digest covers every staged file, so kopia may skip none: a `.kopiaignore` file or a
+		// cache directory marker (CACHEDIR.TAG, which cargo writes in target/) in the agent's home
+		// would leave the snapshot smaller than the digest, and no restore would pass. An old
+		// repository keeps the policy it was made with, so this is set at upload time.
+		pt = keepEverything(pt)
 		u := upload.NewUploader(wr)
 		u.ParallelUploads = 2
-		man, err := u.Upload(ctx, src, pt, source, prev...)
+		// No previous snapshot goes to Upload: kopia would reuse a file's old contents when its name,
+		// mode, size and time match the previous snapshot. The tar stream has whole-second times, so a
+		// file the harness rewrote in the second an earlier checkpoint read it (same length, other
+		// bytes) would keep the old bytes, and the snapshot would not match the digest above (issue
+		// #1090). Every file is read and hashed; kopia still stores only the content it does not hold.
+		man, err := u.Upload(ctx, src, pt, source)
 		if err != nil {
 			return err
 		}
 		if man.IncompleteReason != "" {
 			return fmt.Errorf("the snapshot is incomplete: %s", man.IncompleteReason)
+		}
+		// A checkpoint must not lose data without a signal: an entry that kopia skipped or could not
+		// read fails it, and no snapshot is saved, so no digest is recorded.
+		if err := skippedEntries(man); err != nil {
+			return err
 		}
 		man.Tags = m.tags()
 		if id, err = snapshot.SaveSnapshot(ctx, wr, man); err != nil {
@@ -222,11 +247,16 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{SnapshotID: string(id), Bytes: stats.Bytes, Files: stats.Files, Skipped: stats.Skipped}, nil
+	return Result{SnapshotID: string(id), Bytes: stats.Bytes, Files: stats.Files, Skipped: stats.Skipped, Digest: digest}, nil
 }
 
-// Restore writes the snapshot as a tar stream to out. A snapshot ID of "" restores the newest.
-func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID string, dst io.Writer) error {
+// Restore writes the snapshot as a tar stream to dst. A snapshot ID of "" restores the newest.
+//
+// wantDigest is the digest that Backup returned for the snapshot (Result.Digest). Restore stages
+// the snapshot, recomputes the digest and returns [ErrDigestMismatch] when it differs, before it
+// writes the first byte to dst. An empty wantDigest skips the check: it is for a checkpoint made
+// before digests were recorded, and the caller says so in its log.
+func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID, wantDigest string, dst io.Writer) error {
 	work, err := os.MkdirTemp(w.Scratch, "restore-")
 	if err != nil {
 		return err
@@ -273,6 +303,15 @@ func (w *Writer) Restore(ctx context.Context, prefix, password, snapshotID strin
 	_, err = restore.Entry(ctx, rep, out, root, restore.Options{Parallel: 2, RestoreDirEntryAtDepth: math.MaxInt32})
 	if err != nil {
 		return fmt.Errorf("restoring snapshot %s: %w", man.ID, err)
+	}
+	if wantDigest != "" {
+		got, err := TreeDigest(target)
+		if err != nil {
+			return fmt.Errorf("digesting snapshot %s: %w", man.ID, err)
+		}
+		if got != wantDigest {
+			return fmt.Errorf("%w: snapshot %s is %s, the record says %s", ErrDigestMismatch, man.ID, got, wantDigest)
+		}
 	}
 	return WriteTar(target, dst)
 }
@@ -370,6 +409,72 @@ func (w *Writer) open(ctx context.Context, work, prefix, password string, create
 		return nil, fmt.Errorf("connecting to the repository: %w", err)
 	}
 	return repo.Open(ctx, cfg, password, nil)
+}
+
+// prepareHome is makeReadable; a test replaces it.
+var prepareHome = makeReadable
+
+// skippedEntries returns an error that names the entries kopia could not read or skipped on an error.
+func skippedEntries(man *snapshot.Manifest) error {
+	if man.RootEntry == nil || man.RootEntry.DirSummary == nil {
+		return nil
+	}
+	ds := man.RootEntry.DirSummary
+	if ds.FatalErrorCount+ds.IgnoredErrorCount == 0 {
+		return nil
+	}
+	var paths []string
+	for _, e := range ds.FailedEntries {
+		paths = append(paths, fmt.Sprintf("%q (%s)", e.EntryPath, e.Error))
+	}
+	return fmt.Errorf("the checkpoint is not saved: kopia could not read %d entries of the home: %s",
+		ds.FatalErrorCount+ds.IgnoredErrorCount, strings.Join(paths, ", "))
+}
+
+// makeReadable adds the owner's read bit to files and the read and search bits to directories.
+func makeReadable(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		var add fs.FileMode
+		switch {
+		case info.IsDir():
+			add = 0o500
+		case info.Mode().IsRegular():
+			add = 0o400
+		default:
+			return nil
+		}
+		mode := info.Mode().Perm()
+		if mode&add == add {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		return root.Chmod(rel, mode|add)
+	})
+}
+
+// keepEverything returns a policy tree whose files policy skips nothing that Stage kept.
+func keepEverything(pt *policy.Tree) *policy.Tree {
+	eff := *pt.EffectivePolicy()
+	eff.FilesPolicy.DotIgnoreFiles = nil
+	eff.FilesPolicy.IgnoreRules = nil
+	no := policy.OptionalBool(false)
+	eff.FilesPolicy.IgnoreCacheDirectories = &no
+	return policy.BuildTree(nil, &eff)
 }
 
 // setPolicy sets the global policy of a new repository: zstd compression and retention.

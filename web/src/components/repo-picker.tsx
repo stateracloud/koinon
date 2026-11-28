@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useId, useState, type KeyboardEvent } from 'react'
 import { Input } from '@/components/ui/input'
 import { ConnectionService, type InstallationRepo } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { useDebounced } from '@/hooks/use-debounced'
+import { describeError } from '@/lib/api-error'
 import { useOrg } from '@/lib/org-context'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +21,9 @@ export type RepoPickerProps = {
   searchable: boolean
   'aria-label': string
   'aria-invalid'?: boolean
+  /** The ID of a hint that states the rule for the field, for example that a repository is required. */
+  'aria-describedby'?: string
+  'aria-required'?: boolean
 }
 
 /**
@@ -30,7 +33,7 @@ export type RepoPickerProps = {
  * GitHub's spelling. Any name can still be typed; the API checks it when the
  * draft is created.
  */
-export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-label': label, 'aria-invalid': invalid }: RepoPickerProps) {
+export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-label': label, 'aria-invalid': invalid, 'aria-describedby': describedBy, 'aria-required': required }: RepoPickerProps) {
   const id = useId()
   const { org } = useOrg()
   const [open, setOpen] = useState(false)
@@ -76,6 +79,8 @@ export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-la
         role="combobox"
         aria-label={label}
         aria-invalid={invalid}
+        aria-describedby={describedBy}
+        aria-required={required}
         aria-autocomplete="list"
         aria-expanded={shown}
         aria-controls={listId}
@@ -116,7 +121,7 @@ export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-la
           </ul>
           <p className="text-muted-foreground border-t px-3 py-1.5 text-xs" role="status">
             {list.isError && settled
-              ? `Could not list the connection’s repositories (${ConnectError.from(list.error).rawMessage}); type owner/name.`
+              ? `Could not list the connection’s repositories (${describeError(list.error).message}); type owner/name.`
               : searching
                 ? 'Searching the connection’s repositories…'
                 : repos.length === 0

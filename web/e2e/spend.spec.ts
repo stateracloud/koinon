@@ -38,6 +38,18 @@ function api(role: string, platformAdmin = false) {
         memberships: [{ orgId: org, orgSlug: 'default', orgDisplayName: 'Default', role }],
       }),
       'koinon.budget.v1alpha1.PriceService/ListPrices': () => ({ prices }),
+      'koinon.budget.v1alpha1.PriceService/ExplainOrgPrices': () => ({
+        models: [
+          {
+            providerName: 'router', providerType: 'openrouter', model: 'anthropic/claude-sonnet-4', source: 'org', priceRef: 'org#pv-1',
+            entry: { id: 'sonnet-mine', rates: { input: '3', output: '15' }, maxOutput: 64000 },
+            replaces: { source: 'platform', priceRef: 'platform@3#sonnet', entry: { id: 'sonnet', rates: { input: '4', output: '18' } } },
+          },
+          { providerName: 'router', providerType: 'openrouter', model: 'openai/gpt-6', source: 'platform', priceRef: 'platform@3#gpt-6', entry: { id: 'gpt-6', rates: { input: '4', output: '20' }, maxOutput: 32000 } },
+          { providerName: 'openai-main', providerType: 'openai', model: 'gpt-5', source: 'default', priceRef: 'default@2026-10-24.1#openai-gpt', entry: { id: 'openai-gpt', rates: { input: '2', output: '8' }, maxOutput: 32000 } },
+          { providerName: 'home', providerType: 'ollama', model: 'local/q', unpricedReason: 'no_price' },
+        ],
+      }),
       'koinon.budget.v1alpha1.PriceService/GetDefaultPrices': () => ({
         version: '2026-10-24.1',
         entries: [
@@ -109,11 +121,13 @@ test('owner reads prices, adds one with a tier, and the page passes axe in each 
   await expect(page.getByRole('heading', { name: 'Prices', level: 1 })).toBeVisible()
   await expect(page.getByText('Changed since your last upgrade: rates.input')).toBeVisible()
   await expect(page.getByRole('link', { name: 'https://openai.com/api/pricing/' })).toBeVisible()
-  await expect(page.getByText('openai/gpt-6')).toBeVisible()
+  const flagged = page.getByRole('region', { name: /Flagged/ })
+  await expect(flagged.getByText('openai/gpt-6')).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Prices in use' }).getByRole('rowheader', { name: 'openai/gpt-6' })).toBeVisible()
   await expectAccessible(page)
 
   await page.getByLabel('Reason', { exact: true }).selectOption('usage_missing')
-  await expect(page.getByText('openai/gpt-6')).toHaveCount(0)
+  await expect(flagged.getByText('openai/gpt-6')).toHaveCount(0)
   await expect(page.getByText('local/qwen')).toBeVisible()
   await expectAccessible(page)
   await page.getByLabel('Reason', { exact: true }).selectOption('')
@@ -179,7 +193,9 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   const { handlers, seen } = api('ORG_ROLE_ADMIN', true)
   await mockApi(page, handlers)
   await page.goto('/')
-  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Budget ceilings' }).click()
+  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Platform console' }).click()
+  await page.getByRole('navigation', { name: 'Usage and cost' }).getByRole('link', { name: 'Budget ceilings' }).click()
+  await expect(page).toHaveURL(/\/platform\/usage\/budgets$/)
   await expect(page.getByRole('heading', { name: 'Platform budget ceilings' })).toBeVisible()
   await expectAccessible(page)
   await expect(page.getByRole('heading', { name: 'Acme' })).toBeVisible()
@@ -192,8 +208,11 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   const other = api('ORG_ROLE_ADMIN', false)
   await page.unroute(/\/koinon\.[^/]+\/[^/]+$/)
   await mockApi(page, other.handlers)
+  // The old URL redirects to the console, and the console sends an org admin to the org area.
   await page.goto('/platform/budgets')
-  await expect(page.getByRole('alert').filter({ hasText: 'Only platform admins' })).toBeVisible()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Platform console' })).toHaveCount(0)
   await expect(page.getByRole('navigation', { name: 'Platform' })).toHaveCount(0)
 })
 
@@ -217,7 +236,7 @@ test('a member sees no price or budget links, no banner, and the pages refuse th
 })
 
 // WCAG 1.4.10 Reflow (AA): at 320 CSS px wide the pages need no horizontal scrolling and still pass axe.
-for (const path of ['/settings/prices', '/settings/budgets', '/platform/budgets']) {
+for (const path of ['/settings/prices', '/settings/budgets', '/platform/usage/budgets']) {
   test(`${path} reflows at 320px`, async ({ page }) => {
     const { handlers } = api('ORG_ROLE_OWNER', true)
     await mockApi(page, handlers)

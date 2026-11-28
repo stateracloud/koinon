@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -10,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { BudgetService, type ContinuationOverride, type ContinuationValues } from '@/gen/koinon/budget/v1alpha1/budget_pb'
+import { describeError } from '@/lib/api-error'
 import { formatUSD } from '@/lib/cost'
 import { amountError } from '@/lib/money'
 
@@ -36,7 +36,7 @@ export function AgentContinuationLimits({ agent }: { agent: Agent }) {
   if (limits.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the continuation limits: {ConnectError.from(limits.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the continuation limits: {describeError(limits.error).message}</AlertDescription>
       </Alert>
     )
   }
@@ -54,7 +54,7 @@ export function AgentContinuationLimits({ agent }: { agent: Agent }) {
           current={loaded.override}
           template={loaded.templateDefault}
           pending={save.isPending}
-          error={save.error ? ConnectError.from(save.error).rawMessage : undefined}
+          error={save.error ? describeError(save.error).message : undefined}
           onCancel={() => setEditing(false)}
           onSave={(override) => save.mutateAsync({ orgId: agent.orgId, agentId: agent.id, override }).then(() => setEditing(false))}
         />

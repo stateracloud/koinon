@@ -725,6 +725,362 @@ func (x *SetApproverNotRequesterResponse) GetOn() bool {
 	return false
 }
 
+// RunLimit is one run limit of the org. value is the limit in force; it is default_value when the
+// org set none.
+type RunLimit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         int32                  `protobuf:"varint,1,opt,name=value,proto3" json:"value,omitempty"`
+	DefaultValue  int32                  `protobuf:"varint,2,opt,name=default_value,json=defaultValue,proto3" json:"default_value,omitempty"`
+	Min           int32                  `protobuf:"varint,3,opt,name=min,proto3" json:"min,omitempty"`
+	Max           int32                  `protobuf:"varint,4,opt,name=max,proto3" json:"max,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunLimit) Reset() {
+	*x = RunLimit{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunLimit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunLimit) ProtoMessage() {}
+
+func (x *RunLimit) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunLimit.ProtoReflect.Descriptor instead.
+func (*RunLimit) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RunLimit) GetValue() int32 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+func (x *RunLimit) GetDefaultValue() int32 {
+	if x != nil {
+		return x.DefaultValue
+	}
+	return 0
+}
+
+func (x *RunLimit) GetMin() int32 {
+	if x != nil {
+		return x.Min
+	}
+	return 0
+}
+
+func (x *RunLimit) GetMax() int32 {
+	if x != nil {
+		return x.Max
+	}
+	return 0
+}
+
+// RunLimits are the org's run limits (DB2, ADR 0066).
+type RunLimits struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// max_concurrent_runs is the most runs of the org that start or run at the same time. The other
+	// runs wait in the queue.
+	MaxConcurrentRuns *RunLimit `protobuf:"bytes,1,opt,name=max_concurrent_runs,json=maxConcurrentRuns,proto3" json:"max_concurrent_runs,omitempty"`
+	// trigger_concurrency is the most trigger, webhook and task-creation items of the org that run at
+	// the same time.
+	TriggerConcurrency *RunLimit `protobuf:"bytes,2,opt,name=trigger_concurrency,json=triggerConcurrency,proto3" json:"trigger_concurrency,omitempty"`
+	// trigger_rate_per_minute is the most of those items that start in one minute.
+	TriggerRatePerMinute *RunLimit `protobuf:"bytes,3,opt,name=trigger_rate_per_minute,json=triggerRatePerMinute,proto3" json:"trigger_rate_per_minute,omitempty"`
+	// sandbox_creations_per_minute is the most sandboxes that Koinon creates or starts for the org in
+	// one minute.
+	SandboxCreationsPerMinute *RunLimit `protobuf:"bytes,4,opt,name=sandbox_creations_per_minute,json=sandboxCreationsPerMinute,proto3" json:"sandbox_creations_per_minute,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *RunLimits) Reset() {
+	*x = RunLimits{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunLimits) ProtoMessage() {}
+
+func (x *RunLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunLimits.ProtoReflect.Descriptor instead.
+func (*RunLimits) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RunLimits) GetMaxConcurrentRuns() *RunLimit {
+	if x != nil {
+		return x.MaxConcurrentRuns
+	}
+	return nil
+}
+
+func (x *RunLimits) GetTriggerConcurrency() *RunLimit {
+	if x != nil {
+		return x.TriggerConcurrency
+	}
+	return nil
+}
+
+func (x *RunLimits) GetTriggerRatePerMinute() *RunLimit {
+	if x != nil {
+		return x.TriggerRatePerMinute
+	}
+	return nil
+}
+
+func (x *RunLimits) GetSandboxCreationsPerMinute() *RunLimit {
+	if x != nil {
+		return x.SandboxCreationsPerMinute
+	}
+	return nil
+}
+
+type GetRunLimitsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRunLimitsRequest) Reset() {
+	*x = GetRunLimitsRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRunLimitsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRunLimitsRequest) ProtoMessage() {}
+
+func (x *GetRunLimitsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRunLimitsRequest.ProtoReflect.Descriptor instead.
+func (*GetRunLimitsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetRunLimitsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+type GetRunLimitsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limits        *RunLimits             `protobuf:"bytes,1,opt,name=limits,proto3" json:"limits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRunLimitsResponse) Reset() {
+	*x = GetRunLimitsResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRunLimitsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRunLimitsResponse) ProtoMessage() {}
+
+func (x *GetRunLimitsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRunLimitsResponse.ProtoReflect.Descriptor instead.
+func (*GetRunLimitsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetRunLimitsResponse) GetLimits() *RunLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+// SetRunLimitsRequest changes the limits that are set. A limit that is not set stays as it is; 0
+// returns it to the default.
+type SetRunLimitsRequest struct {
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	OrgId                     string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	MaxConcurrentRuns         *int32                 `protobuf:"varint,2,opt,name=max_concurrent_runs,json=maxConcurrentRuns,proto3,oneof" json:"max_concurrent_runs,omitempty"`
+	TriggerConcurrency        *int32                 `protobuf:"varint,3,opt,name=trigger_concurrency,json=triggerConcurrency,proto3,oneof" json:"trigger_concurrency,omitempty"`
+	TriggerRatePerMinute      *int32                 `protobuf:"varint,4,opt,name=trigger_rate_per_minute,json=triggerRatePerMinute,proto3,oneof" json:"trigger_rate_per_minute,omitempty"`
+	SandboxCreationsPerMinute *int32                 `protobuf:"varint,5,opt,name=sandbox_creations_per_minute,json=sandboxCreationsPerMinute,proto3,oneof" json:"sandbox_creations_per_minute,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *SetRunLimitsRequest) Reset() {
+	*x = SetRunLimitsRequest{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRunLimitsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRunLimitsRequest) ProtoMessage() {}
+
+func (x *SetRunLimitsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRunLimitsRequest.ProtoReflect.Descriptor instead.
+func (*SetRunLimitsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SetRunLimitsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetRunLimitsRequest) GetMaxConcurrentRuns() int32 {
+	if x != nil && x.MaxConcurrentRuns != nil {
+		return *x.MaxConcurrentRuns
+	}
+	return 0
+}
+
+func (x *SetRunLimitsRequest) GetTriggerConcurrency() int32 {
+	if x != nil && x.TriggerConcurrency != nil {
+		return *x.TriggerConcurrency
+	}
+	return 0
+}
+
+func (x *SetRunLimitsRequest) GetTriggerRatePerMinute() int32 {
+	if x != nil && x.TriggerRatePerMinute != nil {
+		return *x.TriggerRatePerMinute
+	}
+	return 0
+}
+
+func (x *SetRunLimitsRequest) GetSandboxCreationsPerMinute() int32 {
+	if x != nil && x.SandboxCreationsPerMinute != nil {
+		return *x.SandboxCreationsPerMinute
+	}
+	return 0
+}
+
+type SetRunLimitsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limits        *RunLimits             `protobuf:"bytes,1,opt,name=limits,proto3" json:"limits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetRunLimitsResponse) Reset() {
+	*x = SetRunLimitsResponse{}
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRunLimitsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRunLimitsResponse) ProtoMessage() {}
+
+func (x *SetRunLimitsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRunLimitsResponse.ProtoReflect.Descriptor instead.
+func (*SetRunLimitsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *SetRunLimitsResponse) GetLimits() *RunLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
 var File_koinon_orgsettings_v1alpha1_orgsettings_proto protoreflect.FileDescriptor
 
 const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
@@ -766,14 +1122,42 @@ const file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc = "" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x0e\n" +
 	"\x02on\x18\x02 \x01(\bR\x02on\"1\n" +
 	"\x1fSetApproverNotRequesterResponse\x12\x0e\n" +
-	"\x02on\x18\x01 \x01(\bR\x02on2\xa1\a\n" +
+	"\x02on\x18\x01 \x01(\bR\x02on\"i\n" +
+	"\bRunLimit\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\x05R\x05value\x12#\n" +
+	"\rdefault_value\x18\x02 \x01(\x05R\fdefaultValue\x12\x10\n" +
+	"\x03min\x18\x03 \x01(\x05R\x03min\x12\x10\n" +
+	"\x03max\x18\x04 \x01(\x05R\x03max\"\x80\x03\n" +
+	"\tRunLimits\x12U\n" +
+	"\x13max_concurrent_runs\x18\x01 \x01(\v2%.koinon.orgsettings.v1alpha1.RunLimitR\x11maxConcurrentRuns\x12V\n" +
+	"\x13trigger_concurrency\x18\x02 \x01(\v2%.koinon.orgsettings.v1alpha1.RunLimitR\x12triggerConcurrency\x12\\\n" +
+	"\x17trigger_rate_per_minute\x18\x03 \x01(\v2%.koinon.orgsettings.v1alpha1.RunLimitR\x14triggerRatePerMinute\x12f\n" +
+	"\x1csandbox_creations_per_minute\x18\x04 \x01(\v2%.koinon.orgsettings.v1alpha1.RunLimitR\x19sandboxCreationsPerMinute\",\n" +
+	"\x13GetRunLimitsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"V\n" +
+	"\x14GetRunLimitsResponse\x12>\n" +
+	"\x06limits\x18\x01 \x01(\v2&.koinon.orgsettings.v1alpha1.RunLimitsR\x06limits\"\x86\x03\n" +
+	"\x13SetRunLimitsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x123\n" +
+	"\x13max_concurrent_runs\x18\x02 \x01(\x05H\x00R\x11maxConcurrentRuns\x88\x01\x01\x124\n" +
+	"\x13trigger_concurrency\x18\x03 \x01(\x05H\x01R\x12triggerConcurrency\x88\x01\x01\x12:\n" +
+	"\x17trigger_rate_per_minute\x18\x04 \x01(\x05H\x02R\x14triggerRatePerMinute\x88\x01\x01\x12D\n" +
+	"\x1csandbox_creations_per_minute\x18\x05 \x01(\x05H\x03R\x19sandboxCreationsPerMinute\x88\x01\x01B\x16\n" +
+	"\x14_max_concurrent_runsB\x16\n" +
+	"\x14_trigger_concurrencyB\x1a\n" +
+	"\x18_trigger_rate_per_minuteB\x1f\n" +
+	"\x1d_sandbox_creations_per_minute\"V\n" +
+	"\x14SetRunLimitsResponse\x12>\n" +
+	"\x06limits\x18\x01 \x01(\v2&.koinon.orgsettings.v1alpha1.RunLimitsR\x06limits2\x90\t\n" +
 	"\x12OrgSettingsService\x12\x96\x01\n" +
 	"\x16GetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
 	"\x16SetRunContentRetention\x12:.koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse\x12\x96\x01\n" +
 	"\x16GetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse\"\x03\x90\x02\x01\x12\x91\x01\n" +
 	"\x16SetHomeBackupRetention\x12:.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest\x1a;.koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse\x12\x99\x01\n" +
 	"\x17GetApproverNotRequester\x12;.koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest\x1a<.koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse\"\x03\x90\x02\x01\x12\x94\x01\n" +
-	"\x17SetApproverNotRequester\x12;.koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest\x1a<.koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
+	"\x17SetApproverNotRequester\x12;.koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest\x1a<.koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse\x12x\n" +
+	"\fGetRunLimits\x120.koinon.orgsettings.v1alpha1.GetRunLimitsRequest\x1a1.koinon.orgsettings.v1alpha1.GetRunLimitsResponse\"\x03\x90\x02\x01\x12s\n" +
+	"\fSetRunLimits\x120.koinon.orgsettings.v1alpha1.SetRunLimitsRequest\x1a1.koinon.orgsettings.v1alpha1.SetRunLimitsResponseB]Z[github.com/stateracloud/koinon/internal/gen/koinon/orgsettings/v1alpha1;orgsettingsv1alpha1b\x06proto3"
 
 var (
 	file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescOnce sync.Once
@@ -787,7 +1171,7 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescGZIP() []byte {
 	return file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDescData
 }
 
-var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_goTypes = []any{
 	(*RunContentRetention)(nil),             // 0: koinon.orgsettings.v1alpha1.RunContentRetention
 	(*GetRunContentRetentionRequest)(nil),   // 1: koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
@@ -803,29 +1187,45 @@ var file_koinon_orgsettings_v1alpha1_orgsettings_proto_goTypes = []any{
 	(*GetApproverNotRequesterResponse)(nil), // 11: koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse
 	(*SetApproverNotRequesterRequest)(nil),  // 12: koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest
 	(*SetApproverNotRequesterResponse)(nil), // 13: koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse
+	(*RunLimit)(nil),                        // 14: koinon.orgsettings.v1alpha1.RunLimit
+	(*RunLimits)(nil),                       // 15: koinon.orgsettings.v1alpha1.RunLimits
+	(*GetRunLimitsRequest)(nil),             // 16: koinon.orgsettings.v1alpha1.GetRunLimitsRequest
+	(*GetRunLimitsResponse)(nil),            // 17: koinon.orgsettings.v1alpha1.GetRunLimitsResponse
+	(*SetRunLimitsRequest)(nil),             // 18: koinon.orgsettings.v1alpha1.SetRunLimitsRequest
+	(*SetRunLimitsResponse)(nil),            // 19: koinon.orgsettings.v1alpha1.SetRunLimitsResponse
 }
 var file_koinon_orgsettings_v1alpha1_orgsettings_proto_depIdxs = []int32{
 	0,  // 0: koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
 	0,  // 1: koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.RunContentRetention
 	5,  // 2: koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
 	5,  // 3: koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse.retention:type_name -> koinon.orgsettings.v1alpha1.HomeBackupRetention
-	1,  // 4: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
-	3,  // 5: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
-	6,  // 6: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
-	8,  // 7: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
-	10, // 8: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest
-	12, // 9: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest
-	2,  // 10: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
-	4,  // 11: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
-	7,  // 12: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
-	9,  // 13: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
-	11, // 14: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse
-	13, // 15: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	14, // 4: koinon.orgsettings.v1alpha1.RunLimits.max_concurrent_runs:type_name -> koinon.orgsettings.v1alpha1.RunLimit
+	14, // 5: koinon.orgsettings.v1alpha1.RunLimits.trigger_concurrency:type_name -> koinon.orgsettings.v1alpha1.RunLimit
+	14, // 6: koinon.orgsettings.v1alpha1.RunLimits.trigger_rate_per_minute:type_name -> koinon.orgsettings.v1alpha1.RunLimit
+	14, // 7: koinon.orgsettings.v1alpha1.RunLimits.sandbox_creations_per_minute:type_name -> koinon.orgsettings.v1alpha1.RunLimit
+	15, // 8: koinon.orgsettings.v1alpha1.GetRunLimitsResponse.limits:type_name -> koinon.orgsettings.v1alpha1.RunLimits
+	15, // 9: koinon.orgsettings.v1alpha1.SetRunLimitsResponse.limits:type_name -> koinon.orgsettings.v1alpha1.RunLimits
+	1,  // 10: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionRequest
+	3,  // 11: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:input_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionRequest
+	6,  // 12: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionRequest
+	8,  // 13: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:input_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionRequest
+	10, // 14: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterRequest
+	12, // 15: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:input_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterRequest
+	16, // 16: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunLimits:input_type -> koinon.orgsettings.v1alpha1.GetRunLimitsRequest
+	18, // 17: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunLimits:input_type -> koinon.orgsettings.v1alpha1.SetRunLimitsRequest
+	2,  // 18: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.GetRunContentRetentionResponse
+	4,  // 19: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunContentRetention:output_type -> koinon.orgsettings.v1alpha1.SetRunContentRetentionResponse
+	7,  // 20: koinon.orgsettings.v1alpha1.OrgSettingsService.GetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.GetHomeBackupRetentionResponse
+	9,  // 21: koinon.orgsettings.v1alpha1.OrgSettingsService.SetHomeBackupRetention:output_type -> koinon.orgsettings.v1alpha1.SetHomeBackupRetentionResponse
+	11, // 22: koinon.orgsettings.v1alpha1.OrgSettingsService.GetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.GetApproverNotRequesterResponse
+	13, // 23: koinon.orgsettings.v1alpha1.OrgSettingsService.SetApproverNotRequester:output_type -> koinon.orgsettings.v1alpha1.SetApproverNotRequesterResponse
+	17, // 24: koinon.orgsettings.v1alpha1.OrgSettingsService.GetRunLimits:output_type -> koinon.orgsettings.v1alpha1.GetRunLimitsResponse
+	19, // 25: koinon.orgsettings.v1alpha1.OrgSettingsService.SetRunLimits:output_type -> koinon.orgsettings.v1alpha1.SetRunLimitsResponse
+	18, // [18:26] is the sub-list for method output_type
+	10, // [10:18] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() }
@@ -833,13 +1233,14 @@ func file_koinon_orgsettings_v1alpha1_orgsettings_proto_init() {
 	if File_koinon_orgsettings_v1alpha1_orgsettings_proto != nil {
 		return
 	}
+	file_koinon_orgsettings_v1alpha1_orgsettings_proto_msgTypes[18].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc), len(file_koinon_orgsettings_v1alpha1_orgsettings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -12,6 +12,11 @@ bootstrapAdmin:
 gateway:
   mcp:
     driver: koinon
+    # The egress listener and the actor token key (#1086 part C2): the ensure-secrets Job makes the key,
+    # koinon-agentd starts with the seed and koinon-gateway with the public key.
+    koinon:
+      egress:
+        enabled: true
 
 # Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
 # default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never

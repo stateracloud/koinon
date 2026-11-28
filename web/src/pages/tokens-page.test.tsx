@@ -2,12 +2,13 @@
 
 import { create } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TokenSchema, TokenService, type CreateTokenRequest, type RevokeTokenRequest } from '@/gen/koinon/token/v1alpha1/token_pb'
+import { resetToasts } from '@/lib/toast'
 import { renderApp, whoAmI } from '@/test-utils'
 
 const day = 86_400_000
@@ -36,6 +37,8 @@ function setup(role = OrgRole.OWNER) {
   renderApp(transport, '/settings/tokens')
   return { creates, revokes }
 }
+
+afterEach(() => resetToasts())
 
 describe('API tokens page', () => {
   it('lists prefix, role, dates, last use and the creation chain', async () => {
@@ -108,6 +111,53 @@ describe('API tokens page', () => {
     expect(revokes).toHaveLength(0)
     await userEvent.click(screen.getByRole('button', { name: 'Revoke token' }))
     await waitFor(() => expect(revokes).toEqual([expect.objectContaining({ tokenId: 't-root' })]))
+    expect(await screen.findByText('Token root revoked.')).toBeInTheDocument()
+  })
+
+  it('shows a failed revoke inline, with no toast', async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.OWNER }) })
+      service(TokenService, {
+        listTokens: () => ({ tokens: [root] }),
+        revokeToken: () => {
+          throw new ConnectError('token is locked', Code.FailedPrecondition)
+        },
+      })
+    })
+    renderApp(transport, '/settings/tokens')
+    await userEvent.click(await screen.findByRole('button', { name: 'Revoke token root' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke token' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('token is locked')
+    expect(screen.queryByText('Token root revoked.')).not.toBeInTheDocument()
+  })
+
+  it('keeps the rows when a refetch fails', async () => {
+    let fail = false
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.OWNER }) })
+      service(TokenService, {
+        listTokens: () => {
+          if (fail) throw new ConnectError('list is down', Code.Unavailable)
+          return { tokens: [root] }
+        },
+      })
+    })
+    const { queryClient } = renderApp(transport, '/settings/tokens')
+    await screen.findByRole('rowheader', { name: /^root/ })
+    fail = true
+    await queryClient.refetchQueries()
+    expect(await screen.findByRole('alert')).toHaveTextContent('list is down')
+    expect(screen.getByRole('rowheader', { name: /^root/ })).toBeInTheDocument()
+  })
+
+  it('shows the empty state when the org has no tokens', async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI({ role: OrgRole.OWNER }) })
+      service(TokenService, { listTokens: () => ({ tokens: [] }) })
+    })
+    renderApp(transport, '/settings/tokens')
+    expect(await screen.findByText('No tokens yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 
   it('is hidden from members', async () => {

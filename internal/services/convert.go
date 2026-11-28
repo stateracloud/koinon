@@ -18,6 +18,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/harness"
+	"github.com/stateracloud/koinon/internal/tasks"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -121,6 +122,8 @@ var actorKindToProto = enumTable[store.TaskActorKind, taskv1alpha1.ActorKind]{
 	store.TaskActorKindUser:   taskv1alpha1.ActorKind_ACTOR_KIND_USER,
 	store.TaskActorKindAgent:  taskv1alpha1.ActorKind_ACTOR_KIND_AGENT,
 	store.TaskActorKindSystem: taskv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,
+	// A person without a linked Koinon account in Slack or Teams (ADR 0130).
+	store.TaskActorKindExternal: taskv1alpha1.ActorKind_ACTOR_KIND_EXTERNAL,
 }
 
 var creatorKindToProto = enumTable[store.TaskCreatorKind, taskv1alpha1.CreatorKind]{
@@ -152,16 +155,24 @@ func taskProto(t store.Task) *taskv1alpha1.Task {
 	}
 }
 
-func taskEventProto(e store.TaskEvent) *taskv1alpha1.TaskEvent {
+// taskEventProto converts an event. actors holds the events' authors (see loadEventActors): a user
+// it lacks leaves actor_display_name empty, and an external actor it lacks leaves actor_external
+// unset. event is the typed event that tasks.Decode reads from the row; it is not set for a kind or
+// a payload that the reader cannot read, and payload still carries the stored JSON.
+func taskEventProto(e store.TaskEvent, actors eventActors) *taskv1alpha1.TaskEvent {
+	event, _ := tasks.Decode(e.Kind, e.PayloadVersion, e.Payload)
 	return &taskv1alpha1.TaskEvent{
-		Seq:          e.Seq,
-		Kind:         e.Kind,
-		ActorKind:    actorKindToProto[e.ActorKind],
-		ActorUserId:  idString(e.ActorUserID),
-		ActorAgentId: idString(e.ActorAgentID),
-		RunId:        idString(e.RunID),
-		Payload:      payloadProto(e.Payload),
-		CreatedAt:    tsProto(e.CreatedAt),
+		Event:            event,
+		ActorDisplayName: actors.names[idString(e.ActorUserID)],
+		ActorExternal:    actors.external[idString(e.ActorExternalID)],
+		Seq:              e.Seq,
+		Kind:             e.Kind,
+		ActorKind:        actorKindToProto[e.ActorKind],
+		ActorUserId:      idString(e.ActorUserID),
+		ActorAgentId:     idString(e.ActorAgentID),
+		RunId:            idString(e.RunID),
+		Payload:          payloadProto(e.Payload),
+		CreatedAt:        tsProto(e.CreatedAt),
 	}
 }
 

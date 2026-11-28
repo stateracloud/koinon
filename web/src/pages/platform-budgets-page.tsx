@@ -1,34 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
 import { AmountForm } from '@/components/amount-form'
 import { ConfirmAction } from '@/components/confirm-action'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { BudgetService, type OrgBudgetSummary } from '@/gen/koinon/budget/v1alpha1/budget_pb'
 import { usePlatformActions } from '@/hooks/use-spend-actions'
+import { describeError } from '@/lib/api-error'
 import { formatUSD } from '@/lib/cost'
 
 /**
- * PlatformBudgetsPage is where a platform admin sees every org's cap, spend and platform ceiling, and sets the
- * ceilings in place (ADR 0056). Org admins see their ceiling, read only, on the Budgets page. Others get a notice.
+ * PlatformBudgetsPage is where a platform admin sees every org's cap, spend and platform ceiling, and sets the ceilings
+ * in place (ADR 0056). Org admins see their ceiling, read only, on the Budgets page. The platform console lets in only
+ * platform admins (PlatformLayout).
  */
 export function PlatformBudgetsPage() {
-  const who = useQuery(AuthService.method.whoAmI, {})
   return (
     <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-4">
-      {who.isPending ? (
-        <p role="status">Loading…</p>
-      ) : who.data?.platformAdmin ? (
-        <PlatformBudgets />
-      ) : (
-        <Alert role="alert">
-          <AlertDescription>Only platform admins can set the platform ceiling.</AlertDescription>
-        </Alert>
-      )}
+      <PlatformBudgets />
     </div>
   )
 }
@@ -46,7 +37,7 @@ function PlatformBudgets() {
       </p>
       {orgs.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(orgs.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(orgs.error).message}</AlertDescription>
         </Alert>
       )}
       {refused && (

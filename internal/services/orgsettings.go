@@ -137,3 +137,66 @@ func (s *Server) SetApproverNotRequester(ctx context.Context, req *orgsettingsv1
 	}
 	return &orgsettingsv1alpha1.SetApproverNotRequesterResponse{On: on}, nil
 }
+
+// The org's run limits (issue #492, ADR 0066): the most runs at once, the trigger share of the queue
+// and the sandbox creation rate.
+
+func runLimitProto(l orgsettings.Limit) *orgsettingsv1alpha1.RunLimit {
+	//nolint:gosec // bounded by the table's CHECK and the constants in orgsettings
+	return &orgsettingsv1alpha1.RunLimit{Value: int32(l.Value), DefaultValue: int32(l.Default), Min: int32(l.Min), Max: int32(l.Max)}
+}
+
+func (s *Server) runLimitsProto(ctx context.Context, org pgtype.UUID) (*orgsettingsv1alpha1.RunLimits, error) {
+	l, err := s.leakGuard.RunLimits(ctx, org)
+	if err != nil {
+		return nil, s.catalogError(err)
+	}
+	v := l.View()
+	return &orgsettingsv1alpha1.RunLimits{
+		MaxConcurrentRuns: runLimitProto(v.MaxConcurrentRuns), TriggerConcurrency: runLimitProto(v.TriggerConcurrency),
+		TriggerRatePerMinute: runLimitProto(v.TriggerRatePerMinute), SandboxCreationsPerMinute: runLimitProto(v.SandboxCreationsPerMinute),
+	}, nil
+}
+
+// GetRunLimits implements OrgSettingsService. Admins and owners.
+func (s *Server) GetRunLimits(ctx context.Context, req *orgsettingsv1alpha1.GetRunLimitsRequest) (*orgsettingsv1alpha1.GetRunLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.runLimitsProto(ctx, c.org)
+	if err != nil {
+		return nil, err
+	}
+	return &orgsettingsv1alpha1.GetRunLimitsResponse{Limits: l}, nil
+}
+
+// optionalInt is the patch field of an optional proto field: nil when it is not set.
+func optionalInt(v *int32) *int {
+	if v == nil {
+		return nil
+	}
+	n := int(*v)
+	return &n
+}
+
+// SetRunLimits implements OrgSettingsService. Admins and owners. A limit that is not set stays; 0
+// returns it to the default.
+func (s *Server) SetRunLimits(ctx context.Context, req *orgsettingsv1alpha1.SetRunLimitsRequest) (*orgsettingsv1alpha1.SetRunLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	p := orgsettings.RunLimitsPatch{
+		MaxConcurrentRuns: optionalInt(req.MaxConcurrentRuns), TriggerConcurrency: optionalInt(req.TriggerConcurrency),
+		TriggerRatePerMinute: optionalInt(req.TriggerRatePerMinute), SandboxCreationsPerMinute: optionalInt(req.SandboxCreationsPerMinute),
+	}
+	if err := s.leakGuard.SetRunLimits(requestCtx(ctx), c.org, c.auditActor(), p); err != nil {
+		return nil, s.catalogError(err)
+	}
+	l, err := s.runLimitsProto(ctx, c.org)
+	if err != nil {
+		return nil, err
+	}
+	return &orgsettingsv1alpha1.SetRunLimitsResponse{Limits: l}, nil
+}

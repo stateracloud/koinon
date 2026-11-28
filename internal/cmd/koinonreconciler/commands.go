@@ -4,8 +4,8 @@ package koinonreconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"time"
 
@@ -32,16 +32,11 @@ func NewRootCommand() *cobra.Command { return newRootCommand(serve) }
 // newRootCommand builds the tree with run as the work of serve, so a test can read the settings
 // the command resolved.
 func newRootCommand(run func(context.Context, config) error) *cobra.Command {
-	return newRootCommandWith(run, listUnmarked)
-}
-
-// newRootCommandWith also takes the work of "unmarked list".
-func newRootCommandWith(run func(context.Context, config) error, list func(context.Context, unmarkedConfig, io.Writer) error) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "koinon-reconciler",
 		Short: "Koinon's reconciler",
 		Long: "koinon-reconciler renders agents into OpenShell sandboxes, provider records and agentgateway keys (serve, " +
-			"also what runs without a subcommand). unmarked lists the OpenShell objects that carry no install mark.\n\n" +
+			"also what runs without a subcommand).\n\n" +
 			"Settings come from the chart's config file (--config, KOINON_CONFIG) and can be overridden by flags; every flag " +
 			"can also be set by an environment variable: KOINON_ plus the flag name in upper case with dashes as underscores " +
 			"(--idle-timeout is KOINON_IDLE_TIMEOUT). Secrets are never flags: the database password comes from PGPASSWORD, " +
@@ -52,7 +47,7 @@ func newRootCommandWith(run func(context.Context, config) error, list func(conte
 	cli.AllowEnv(root, "KOINON_MEMORY_LIMIT_BYTES")
 	cli.DefaultTo(root, "serve")
 	root.AddCommand(newServeCommand(v, run))
-	root.AddCommand(newUnmarkedCommand(v, list))
+	root.AddCommand(newProvisionCommand())
 	return root
 }
 
@@ -66,9 +61,12 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"substrate-server-name":                "execution.substrate.serverName",
 	"substrate-allow-unhardened":           "execution.substrate.allowUnhardened",
 	"substrate-token-file":                 "execution.substrate.tokenFile",
+	"substrate-provisioner-url":            "execution.substrate.provisioner.url",
+	"substrate-provisioner-token-file":     "execution.substrate.provisioner.tokenFile",
 	"substrate-guest-key-file":             "execution.substrate.guestKeyFile",
 	"substrate-runtime-class-tiers":        "execution.substrate.runtimeClassTiers",
 	"substrate-default-tier":               "execution.substrate.defaultTier",
+	"substrate-golden-snapshots":           "execution.substrate.goldenSnapshots",
 	"substrate-image-mirrors":              "execution.substrate.imageMirrors",
 	"substrate-image-registry":             "execution.substrate.imageRegistry",
 	"substrate-snapshot-endpoint":          "execution.substrate.snapshotStore.endpoint",
@@ -92,6 +90,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"gateway-mode":                         "gateway.mode",
 	"gateway-url":                          "gateway.url",
 	"gateway-mcp-url":                      "gateway.mcpUrl",
+	"gateway-model-url":                    "gateway.modelUrl",
 	"gateway-config-map":                   "gateway.configMap",
 	"gateway-deployment":                   "gateway.deployment",
 	"gateway-stats-url":                    "gateway.statsUrl",
@@ -104,6 +103,7 @@ var configKeys = map[string]string{ //nolint:gosec // flag and config key names,
 	"mcp-keys-secret":                      "gateway.mcpKeysSecret",
 	"mcp-keys-dir":                         "gateway.mcpKeysDir",
 	"gateway-mcp-sealed":                   "gateway.mcpSealed",
+	"gateway-egress-url":                   "gateway.egressUrl",
 	"gateway-access-log-otlp":              "gateway.accessLogOtlp",
 	"gateway-access-log-otlp-token-file":   "gateway.accessLogOtlpTokenFile",
 	"gateway-access-log-otlp-token-secret": "gateway.accessLogOtlpTokenSecret",
@@ -171,6 +171,14 @@ func (c *config) finish(v *viper.Viper) error {
 	if err := c.execution.Validate(c.openshellAddress); err != nil {
 		return err
 	}
+	if c.egressURL != "" {
+		if !c.mcpSealed {
+			return errors.New("--gateway-egress-url needs --gateway-mcp-sealed: only koinon-gateway holds the key the forge credential is sealed to")
+		}
+		if _, err := c.egressEndpoint(); err != nil {
+			return err
+		}
+	}
 	if c.execution.IsSubstrate() {
 		// These three act on OpenShell's workspace namespaces and pods, which Substrate does not make
 		// (the actor state replaces the observer, ADR 0119).
@@ -178,6 +186,11 @@ func (c *config) finish(v *viper.Viper) error {
 			if on {
 				return fmt.Errorf("%s acts on OpenShell's namespaces and needs --execution-driver=openshell", flag)
 			}
+		}
+		// Every actor's egress policy allows the gateway URLs and nothing else (issue #1444): refuse at
+		// start a URL that the policy cannot carry, not at the first sandbox.
+		if _, _, err := c.substrateGatewayRoutes(); err != nil {
+			return err
 		}
 	}
 	if err := catalog.ValidateClusterDomain(c.clusterDomain); err != nil {
@@ -286,6 +299,7 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	c.gatewayMode = project.GatewayStandalone
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
+	fs.StringVar(&c.gatewayModelURL, "gateway-model-url", "", "koinon-gateway's model listener URL as sandboxes reach it (gateway.model.driver=koinon); required with --execution-driver=substrate, where agent model calls go there and the listener checks the actor JWT (issue #1489)")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "koinon-gateway's MCP listener URL as sandboxes reach it (gateway.mcp.driver=koinon): agent sandboxes may send /mcp there and not to agentgateway, and the MCP prober lists tools there; empty: agentgateway serves /mcp")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
 	fs.StringVar(&c.gatewayDeployment, "gateway-deployment", "", "standalone agentgateway Deployment that owns the ConfigMap when the reconciler creates it")
@@ -298,6 +312,8 @@ func (c *config) flags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.providerKeysDir, "provider-keys-dir", "", "directory where agentgateway mounts the provider keys Secret")
 	fs.StringVar(&c.mcpKeysSecret, "mcp-keys-secret", "", "Secret that receives the MCP credential files and CA bundles, apart from the provider keys; empty: they go to the provider keys Secret")
 	fs.BoolVar(&c.mcpSealed, "gateway-mcp-sealed", false, "serve sealed (v2) MCP credentials: koinon-gateway serves every MCP path (gateway.mcp.driver=koinon)")
+	fs.StringVar(&c.egressURL, "gateway-egress-url", "",
+		"koinon-gateway's egress listener as sandboxes reach it (#1086 part C2); with it the sandbox of an agent with a code-host grant may send git to the forge routes there. Needs --gateway-mcp-sealed")
 	fs.StringVar(&c.mcpKeysDir, "mcp-keys-dir", "", "directory where the gateway pods mount the MCP credentials Secret, for the rendered config; empty: --provider-keys-dir")
 	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",

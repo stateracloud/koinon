@@ -2,9 +2,10 @@
 {{- /*
 gateway.model.driver=koinon: koinon-gateway serves the model path (ADR 0097 step 2, issue #279, slice 1:
 the proxy and the usage tap). It is its own Deployment and Service next to agentgateway, which keeps
-serving every agent and stays the default. Nothing routes agents to this Service yet: the switch only
-brings the gateway up, so it can be tested, and the slice that moves agents (with the budget stop and
-the retry markers) points them here.
+serving every agent and stays the default. With execution.driver=openshell nothing routes agents to this
+Service yet: the switch only brings the gateway up, so it can be tested. With execution.driver=substrate the
+agents' model calls come here (issue #1489): the guest holds no gateway key, and this gateway checks the actor
+JWT that atenet-egress adds.
 
 The pods keep no state, so there are two or more, spread over nodes, with a PodDisruptionBudget. Each
 follows the State stream of koinon-api (the OTLP listener, with the same bearer token as agentgateway's
@@ -93,6 +94,15 @@ spec:
             - --state-token-file={{ include "koinon.otlpTokenDir" . }}/token
             - --shutdown-delay={{ $delay }}s
             - --drain-timeout={{ $drain }}s
+            {{- if include "koinon.restoreHold" . }}
+            # Held install (restoreHold, ADR 0107, issue #1358): ready with no State revision, deny-all.
+            - --restore-hold
+            {{- end }}
+            {{- with include "koinon.substrateActorJWTArgs" . | trim }}
+            # Substrate (ADR 0120 amendment of 2026-11-27, issue #1489): the agents' model calls carry the actor JWT
+            # that atenet-egress adds, for the model audience; the guest sends only a public placeholder.
+            {{- . | nindent 12 }}
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -130,6 +140,10 @@ spec:
               mountPath: /secrets/providers
               readOnly: true
             {{- include "koinon.otlpTokenVolumeMount" . | nindent 12 }}
+            {{- with include "koinon.substrateActorJWTCAVolumeMount" . | trim }}
+            # The CA bundle of the Substrate issuer (issue #1489): public certificates only.
+            {{- . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -139,6 +153,9 @@ spec:
             secretName: {{ include "koinon.gatewayProvidersName" . }}
             defaultMode: 0444
         {{- include "koinon.otlpTokenVolume" . | nindent 8 }}
+        {{- with include "koinon.substrateActorJWTCAVolume" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
       {{- with $m.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

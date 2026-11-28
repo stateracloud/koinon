@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { buildInbox, stableOrder } from '@/lib/inbox'
+import { timestampFromMs } from '@bufbuild/protobuf/wkt'
+import { buildInbox, parseInboxTab, stableOrder, taskAt, tasksForTab } from '@/lib/inbox'
 import { QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { agent, approval, question, task } from '@/test-utils'
@@ -116,10 +117,46 @@ describe('buildInbox', () => {
 })
 
 describe('stableOrder', () => {
-  const row = (key: string, at: number) => ({ kind: 'task-input' as const, key, taskId: key, taskTitle: `title ${at}`, agentName: undefined, at })
+  const row = (key: string, at: number) => ({ kind: 'task-input' as const, key, taskId: key, taskTitle: `title ${at}`, agentId: '', agentName: undefined, at })
   it('keeps the frozen order but shows the current row content, drops gone rows, appends new ones', () => {
     const out = stableOrder([row('c', 3), row('a', 9), row('d', 5)], ['a', 'b', 'c'])
     expect(out.map((i) => i.key)).toEqual(['a', 'c', 'd'])
     expect(out[0]).toMatchObject({ taskTitle: 'title 9' })
+  })
+})
+
+describe('inbox tabs', () => {
+  const at = (t: ReturnType<typeof task>, updated: number, finished?: number) => {
+    t.updatedAt = timestampFromMs(updated)
+    if (finished !== undefined) t.finishedAt = timestampFromMs(finished)
+    return t
+  }
+  const tasks = [
+    at(task('s', 's', TaskState.SUBMITTED), 1_000),
+    at(task('w', 'w', TaskState.WORKING), 5_000),
+    at(task('i', 'i', TaskState.INPUT_REQUIRED), 3_000),
+    at(task('c', 'c', TaskState.COMPLETED), 9_000, 2_000),
+    at(task('f', 'f', TaskState.FAILED), 4_000, 4_000),
+    at(task('x', 'x', TaskState.CANCELED), 6_000),
+    // A state this UI does not know (a newer server): only All has it.
+    at(task('u', 'u', 99 as TaskState), 7_000),
+  ]
+
+  it('Open has the non-terminal states, newest change first', () => {
+    expect(tasksForTab(tasks, 'open').map((t) => t.id)).toEqual(['w', 'i', 's'])
+  })
+
+  it('Done has the terminal states, by end time (else last change)', () => {
+    expect(tasksForTab(tasks, 'done').map((t) => t.id)).toEqual(['x', 'f', 'c'])
+    expect(taskAt(tasks[3])).toBe(2_000)
+    expect(taskAt(tasks[5])).toBe(6_000)
+  })
+
+  it('All has every task, also one in an unknown state', () => {
+    expect(tasksForTab(tasks, 'all').map((t) => t.id)).toEqual(['u', 'x', 'w', 'f', 'i', 'c', 's'])
+  })
+
+  it('parses only the known tabs', () => {
+    expect(['blocked', 'open', 'done', 'all', 'nope', undefined].map(parseInboxTab)).toEqual(['blocked', 'open', 'done', 'all', undefined, undefined])
   })
 })

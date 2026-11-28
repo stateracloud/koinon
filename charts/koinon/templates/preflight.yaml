@@ -70,12 +70,16 @@ rules:
     verbs: [get]
   {{- if $substrate }}
   # Substrate's api server (its release tag and ready replicas) and the router (its SPIFFE allow-list), in
-  # execution.substrate.namespace, and agentgateway's controller in kubernetes mode (the GatewayClass check
-  # reads it). A ClusterRole: the namespace may not exist yet, and a Role there would fail the hook before
+  # execution.substrate.namespace. A ClusterRole: the namespace may not exist yet, and a Role there would fail the hook before
   # the preflight can say so.
   - apiGroups: [apps]
     resources: [deployments]
-    resourceNames: [ate-api-server, atenet-router{{ if eq .Values.gateway.mode "kubernetes" }}, {{ .Values.preflight.agentgateway.controller }}{{ end }}]
+    resourceNames: [ate-api-server, atenet-router]
+    verbs: [get]
+  # The router Service, for its ports (the port of routerAddress must be one of them; issue #1446).
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [atenet-router]
     verbs: [get]
   {{- else }}
   # The Agent Sandbox controller, for its release version (its namespace is checked by name).
@@ -222,6 +226,11 @@ spec:
             - --driver=substrate
             - --substrate-namespace={{ $sub.namespace }}
             - --substrate-worker-namespace={{ $sub.workerNamespace }}
+            # The router allow-list must hold agentd's identity and the router Service must serve the port of
+            # routerAddress (issue #1446): a wrong port or a missing identity fails every Exec, so fail here.
+            - --substrate-router-address={{ $sub.routerAddress }}
+            - --substrate-agentd-namespace={{ .Release.Namespace }}
+            - --substrate-agentd-service-account={{ include "koinon.componentName" (list . "agentd") }}
             # No probe pod, so the vm-tier and gVisor flags keep their defaults: the device and user-namespace
             # checks only warn that they did not run.
             - --substrate-probes=false

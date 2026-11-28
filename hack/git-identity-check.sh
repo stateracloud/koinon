@@ -3,13 +3,15 @@
 #
 # Git identity guard (koinon#320): a commit, a merge commit included, carries an author and a
 # committer that appear in the allowed identity list, never a personal name picked up from a global
-# git config.
+# git config. Range mode also checks the sign-off (Developer Certificate of Origin, ADR 0026; #682 moved it
+# here from the old dco workflow): every non-merge commit carries `Signed-off-by: <author>`.
 #
 #   hack/git-identity-check.sh commit           the identity git would use for the next commit
 #                                               (what the pre-commit and pre-merge-commit hooks run)
 #   hack/git-identity-check.sh range <base> <head>
 #                                               author and committer of every commit in base..head,
-#                                               merge commits included (what CI runs on a pull request)
+#                                               merge commits included, and the sign-off of every
+#                                               non-merge commit (what CI runs on a pull request)
 #   hack/git-identity-check.sh install          make this worktree run hack/githooks (hack/wt.sh new does it)
 #
 # The allowed list is hack/git-identities.allowed: one `Name <email>` glob per line (`#` comments).
@@ -17,7 +19,7 @@
 # range mode). In range mode the list is read from the base commit, so a pull request cannot widen its
 # own list; a person commits under their GitHub noreply address, which the list already allows; only a maintainer
 # adds a line, and it counts from the next pull request on (KOINON_ALLOWED_IDENTITIES sets a list locally for the hook). Exit 0 when every
-# identity is allowed, 1 when one is not, 2 on misuse or when the commits cannot be listed (fails closed).
+# identity is allowed (in range mode: and every sign-off is there), 1 when one is not, 2 on misuse or when the commits cannot be listed (fails closed).
 # KOINON_SKIP_IDENTITY_CHECK=1 turns the hook off for one command (CI and hack/ship.sh ignore it).
 # The hooks chain to a personal hook of the same name in the common .git/hooks (core.hooksPath replaces it).
 # They do not run on --no-verify, rebase or cherry-pick; CI checks every commit of a pull request.
@@ -30,7 +32,7 @@ set -uo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
-	sed -n '4,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+	sed -n '4,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
 	exit 2
 }
 
@@ -142,7 +144,7 @@ if [[ $mode == commit ]]; then
 fi
 
 # range
-fail=0
+fail=0 signoff_fail=0
 while read -r c; do
 	[[ -z $c ]] && continue
 	for role in a c; do
@@ -154,10 +156,25 @@ while read -r c; do
 			fail=1
 		fi
 	done
+	# Sign-off: a non-merge commit carries `Signed-off-by: <author>`. Merge commits are exempt, and so is
+	# Dependabot (the name dependabot[bot] with a GitHub noreply address).
+	parents=$(git show -s --format=%p "$c")
+	[[ $parents == *" "* ]] && continue
+	name=$(git show -s --format=%an "$c")
+	email=$(git show -s --format=%ae "$c")
+	[[ $name == "dependabot[bot]" && $email == *@users.noreply.github.com ]] && continue
+	if ! git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qxF "$name <$email>"; then
+		echo "::error::commit $(git show -s --format='%h %s' "$c") lacks 'Signed-off-by: $name <$email>'"
+		signoff_fail=1
+	fi
 done <<<"$commits"
 if [[ $fail -ne 0 ]]; then
 	echo "Allowed identities (hack/git-identities.allowed):"
 	printf '  %s\n' "${pats//$'\n'/$'\n'  }"
 	echo "Fix with: set user.name to your name and user.email to your GitHub noreply address (<id>+<username>@users.noreply.github.com), then git commit --amend --reset-author for an unpushed last commit; a pushed commit needs a history rewrite and a force-push: ask your human. Only a maintainer adds lines to hack/git-identities.allowed."
+fi
+if [[ $signoff_fail -ne 0 ]]; then
+	echo "Sign-off fix: git commit --amend -s for an unpushed last commit; a pushed commit needs a force-push or a history rewrite: ask your human. Merge commits are exempt."
+	fail=1
 fi
 exit $fail

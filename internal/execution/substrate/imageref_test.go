@@ -37,6 +37,8 @@ var _ = Describe("RewriteImage", func() {
 		Entry("the registry replaces a host with no entry", "quay.io/org/app:1", "mirror.example.com/all", mirrors, "mirror.example.com/all/org/app:1"),
 		Entry("a mirror wins over the registry", "ghcr.io/org/app:1", "mirror.example.com/all", mirrors, "cache.koinon.svc/ghcr.io/org/app:1"),
 		Entry("a reference in the mirror is not prefixed twice", "cache.koinon.svc/ghcr.io/org/app:1", "", mirrors, "cache.koinon.svc/ghcr.io/org/app:1"),
+		Entry("a mirror host with a port: the real host is the key, the path segment has no colon", "localhost:5001/koinon-e1/sandbox-substrate:e2e"+digest, "", map[string]string{"localhost:5001": "cache.koinon.svc/localhost_5001"},
+			"cache.koinon.svc/localhost_5001/koinon-e1/sandbox-substrate:e2e"+digest),
 		Entry("a host with a port", "localhost:5000/app:1", "r.example.com", nil, "r.example.com/app:1"),
 		Entry("nothing is set", "ghcr.io/org/app:1", "", nil, "ghcr.io/org/app:1"),
 	)
@@ -106,5 +108,24 @@ var _ = Describe("the actor template image", func() {
 		b, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{GuestSigner: fakeate.Signer(), ImageMirrors: map[string]string{"ghcr.io": "b.svc/ghcr.io"}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.GetMetadata().GetName()).NotTo(Equal(b.GetMetadata().GetName()))
+	})
+})
+
+var _ = Describe("the actor template command", func() {
+	It("refuses a command: it would replace the guest front (issue #1092)", func(ctx SpecContext) {
+		spec := execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest, Command: []string{"sleep", "infinity"}}
+		_, err := substrate.RenderTemplateForTest("ws", spec, substrate.Config{GuestSigner: fakeate.Signer()})
+		Expect(err).To(MatchError(ContainSubstring("replace the guest front")))
+
+		d, _ := newDriver()
+		_, err = d.CreateSandbox(ctx, ws, spec)
+		Expect(err).To(MatchError(execution.ErrInvalid))
+		Expect(err).To(MatchError(ContainSubstring("replace the guest front")))
+	})
+
+	It("leaves the entrypoint alone when no command is set", func() {
+		t, err := substrate.RenderTemplateForTest("ws", execution.SandboxSpec{Name: "a", Image: "ghcr.io/org/app:1" + digest}, substrate.Config{GuestSigner: fakeate.Signer()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.GetContainers()[0].GetCommand()).To(BeEmpty())
 	})
 })

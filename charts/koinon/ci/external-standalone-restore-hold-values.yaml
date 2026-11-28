@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Restore-hold on the default standalone install (issue #1358): the shape of the restore drill. The
+# default MCP driver (koinon-gateway) and the koinon model driver start with --restore-hold and are
+# ready with no State revision, deny-all. The smoke tests prove they answer /readyz with 200, and
+# that the egress listener of the held MCP gateway refuses every request (issue #1390).
+restoreHold: true
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+bootstrapAdmin:
+  enabled: false
+gateway:
+  mcp:
+    koinon:
+      egress:
+        enabled: true
+  model:
+    driver: koinon
+
+# Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
+# default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never
+# pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
+execution:
+  substrate:
+    allowUnhardened: true

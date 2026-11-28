@@ -34,10 +34,16 @@
 #   BACKUP_RESTORE=1 (SUITE=go) adds test/e2e/backup-restore.sh after the driver: the command file
 #   test/e2e/commands/backup-restore.e1 backs up the keys and the database, the install is
 #   changed, then the file restores both and the script checks the install is the one that was backed up
-#   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not.
+#   (ADR 0085 decision 18, #90). The nightly run sets it; a pull request's run does not. With DRIVER=substrate it
+#   runs the home restore drill instead (test/e2e/home_restore_test.go, label home-restore; issue #1090 part 3): home
+#   checkpoints on, a marker in an agent's home, idle stop, archive (the actor and its durable directory are deleted),
+#   a restore refused with a wrong recorded digest, then a verified restore that reads the marker. The database and
+#   keys drill of backup-restore.sh is not wired for Substrate yet.
 #   ESCAPE_MCP=1 (SUITE=go) also runs the escape suite's leak guard case (test/escape, label leakguard)
 #   from a real sandbox against this install, inside step 6b while write_item and fetch_url are auto
-#   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it.
+#   (test/e2e/escape-mcp.sh calls test/escape/kind.sh; #348). e2e-kind.yml sets it. With DRIVER=substrate the
+#   case runs as a raw MCP client in the agent's own actor, inside a task (KOINON_E2E_ESCAPE_SUBSTRATE=1,
+#   test/e2e/substrate_test.go; #1428): test/escape/kind.sh is OpenShell only.
 #   ESCAPE_OPENSHELL=1 (default; SUITE=go) runs the escape suite's OpenShell cases against the install after the
 #   Go driver (test/e2e/escape-openshell.sh; #109): the chart's sandbox admission policy is live, so the
 #   real supervisor and workload pods are admitted by it and the escape cases are refused. 0 leaves it out
@@ -56,6 +62,12 @@
 #   `helm upgrade` to this build, and checks convergence (test/e2e/upgrade.sh, issue 519). It skips (exit 0) when the
 #   tag, the chart, the images or registry.k8s.io cannot be reached; KOINON_REQUIRE=e2e-upgrade makes that a failure.
 #   UPGRADE_STORIES=0 leaves out the run-1 story suite on the upgraded install.
+#   DRIVER=openshell|substrate (default openshell; issue #1091). substrate runs the same quickstart with execution.driver:
+#   substrate on the gVisor class (no KVM needed): kind/up.sh leaves out Agent Sandbox and OpenShell, kind/substrate.sh
+#   builds the substrate overlay of the harness image and installs Substrate (`koinon-api substrate install --platform kind`,
+#   gvisor class only), the values are kind/substrate-values.yaml and the OpenShell client certificate block, the OpenShell
+#   escape cases and the OpenShell diagnostics are left out. `make test-e2e-kind-substrate` sets it. SUBSTRATE_SOURCE,
+#   SUBSTRATE_CACHE and GVISOR_MIRROR are described in kind/substrate.sh.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -74,6 +86,10 @@ FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
 SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
+DRIVER=${DRIVER:-openshell}
+case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
+export DRIVER
+[[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
 # The quickstart's port-forward block (docs) uses 8080; run.sh checks that this port is free.
@@ -131,7 +147,9 @@ ln -sfn "$root/charts" "$OUT/quickstart/charts"
 # The images live under this cluster's path on the shared registry (kind/imagerepo.sh), so the static
 # localhost:5001 of the files below is rewritten to it.
 IMAGE_REPO=$(CLUSTER="$CLUSTER" "$here/kind/imagerepo.sh")
-sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/koinon-values.yaml" >"$OUT/quickstart/values.yaml"
+values_src="$here/kind/koinon-values.yaml"
+[[ $DRIVER != substrate ]] || values_src="$here/kind/substrate-values.yaml"
+"$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" >"$OUT/quickstart/values.yaml"
 cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
@@ -153,15 +171,34 @@ diagnostics() {
   mkdir -p "$d"
   "${K[@]}" get pods -A -o wide >"$d/pods.txt" 2>&1 || true
   "${K[@]}" get events -A --sort-by=.lastTimestamp >"$d/events.txt" 2>&1 || true
-  for c in api reconciler agentd gateway mcp-gateway; do
+  for c in api reconciler agentd gateway; do
     "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
   done
+  # koinon-mcp-gateway runs two replicas at least, and a request can reach any of them: every pod's log,
+  # each line prefixed with its pod.
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=mcp-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-mcp-gateway.log" 2>&1 || true
+  "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=model-gateway --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-model-gateway.log" 2>&1 || true
   # The key-admin Jobs (the KEK's and the gateway recipient key's): they print key IDs and states, never a key.
   "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=key-admin --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/key-admin-jobs.log" 2>&1 || true
-  for c in fakemodel fakegithub fakemcp; do
+  for c in fakemodel fakegithub fakemcp fakegitea; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
-  "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
+  if [[ $DRIVER == substrate ]]; then
+    # Substrate: its control plane and the worker pools (the worker namespace is the chart's default, ate-workers).
+    "${K[@]}" -n ate-system get pods -o wide >"$d/ate-system-pods.txt" 2>&1 || true
+    "${K[@]}" -n ate-workers get pods,deploy,workerpools.ate.dev -o yaml >"$d/ate-workers.yaml" 2>&1 || true
+    # The image cache, the provisioner and the Job that gives atelet the cache CA (the Substrate leg's own parts).
+    for c in imagecache provisioner; do
+      "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
+    done
+    "${K[@]}" -n "$NS" logs -l app.kubernetes.io/component=imagecache-ca --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/koinon-imagecache-ca.log" 2>&1 || true
+    for c in ate-api-server ate-controller atelet; do
+      "${K[@]}" -n ate-system logs -l "app.kubernetes.io/name=$c" --all-containers --prefix --tail=-1 --max-log-requests=10 >"$d/$c.log" 2>&1 || true
+    done
+    docker exec "${CLUSTER}-control-plane" journalctl -u containerd --no-pager -n 200 >"$d/node-containerd.txt" 2>&1 || true
+  else
+    "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
+  fi
   # Sandbox namespaces (old issue 159): pod status with exit codes and termination messages. Koinon's
   # admission policy denies pods/log there, so the containers' output is read on the kind node
   # with crictl, below the API.
@@ -215,7 +252,7 @@ fi
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
   CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
-  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG, Agent Sandbox, runc, OpenShell (the image build ran at the same time)"
+  done_step "Prerequisites: registry, kind, kube-network-policies, CNPG$([[ $DRIVER == substrate ]] || echo ", Agent Sandbox, runc, OpenShell") (the image build ran at the same time)"
 fi
 
 if [[ "$SKIP_BUILD" != 1 ]]; then
@@ -224,27 +261,56 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
     wait "$build_pid" || { echo "image build failed:" >&2; cat "$OUT/images-build.log" >&2; exit 1; }
     cat "$OUT/images-build.log"
     echo "-- image build, started with the prerequisites: $(( $(date +%s) - t_build ))s since its start"
-    done_step "Images: ko build and push, harness pull or buildx and push (7 images; started with the prerequisites, this is only the wait that was left)"
+    done_step "Images: ko build and push, harness pull or buildx and push (9 images; started with the prerequisites, this is only the wait that was left)"
   else
     step "images (kind/images.sh): Koinon, the fakes and the OpenCode harness"
     CLUSTER="$CLUSTER" "$here/kind/images.sh"
-    done_step "Images: ko build and push (6 binaries), OpenCode harness (pull or buildx) and push"
+    done_step "Images: ko build and push (8 binaries), OpenCode harness (pull or buildx) and push"
   fi
+fi
+
+if [[ $DRIVER == substrate ]]; then
+  # The substrate overlay of the harness image, pinned by digest in the values (#1192), then Substrate itself. The probe pods of
+  # the installer run the koinon-api image, so this comes after the images. Not on the quickstart clock (ADR 0049): a reader
+  # installs the prerequisites first, as for OpenShell.
+  step "Substrate: harness overlay and install (kind/substrate.sh)"
+  digest=$(OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" harness | tail -n1)
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest for the substrate overlay (got '$digest')" >&2; exit 1; }
+  # The harness contract suite against the overlay image itself (it is the image the actors run), so the Substrate leg tests
+  # what it deploys. The suite starts its containers with its own entrypoint and needs no cluster.
+  step "Substrate: harness contract suite against the overlay image ($IMAGE_REPO/sandbox-substrate:e2e)"
+  (cd "$root" && KOINON_HARNESS_IMAGE_OPENCODE="$IMAGE_REPO/sandbox-substrate:e2e" make harness-suite)
+  # The CIDR of the docker network "kind" (the kind registry's range): the image cache needs an egress rule for it. The network
+  # exists only after kind/up.sh, so the values file is written again here with the range filled in.
+  KIND_CIDR=$(docker network inspect kind --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -n1 || true)
+  [[ -n $KIND_CIDR ]] || { echo "run.sh: no IPv4 subnet in docker network inspect kind" >&2; exit 1; }
+  "$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
+  sed -i.bak "s#sha256:0\{64\}#$digest#" "$OUT/quickstart/values.yaml"
+  grep -q "$digest" "$OUT/quickstart/values.yaml" || { echo "the harness digest was not put into values.yaml" >&2; exit 1; }
+  OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" install 2>&1 | tee "$OUT/substrate-install.log"
+  done_step "Substrate: harness overlay pushed, koinon-api substrate install --platform kind (gvisor)"
 fi
 
 step "fakes ($FAKES)"
 # The fake MCP server serves HTTPS (ADR 0120: a credential goes only over HTTPS). One throw-away CA and
 # certificate per run, given to the fake as a Secret; the e2e suite registers the CA on each server record
 # (caBundle), so the gateway trusts it for that server only. Nothing here is kept or in the tree.
+# The fake Gitea (the clone through koinon-gateway's egress listener, #1086 part C2) has the same certificate;
+# the Gitea connection names the CA, and the install's gateway.mcp.koinon.egress.caBundle gets it below.
 FAKETLS="$OUT/faketls"
 (cd "$root" && go run ./cmd/koinon-faketls -dir "$FAKETLS" \
-  -hosts "fakemcp.$FAKES.svc,fakemcp.$FAKES.svc.cluster.local,fakemcp.$FAKES,fakemcp,localhost,127.0.0.1")
+  -hosts "fakemcp.$FAKES.svc,fakemcp.$FAKES.svc.cluster.local,fakemcp.$FAKES,fakemcp,fakegitea.$FAKES.svc,fakegitea.$FAKES.svc.cluster.local,localhost,127.0.0.1")
 "${K[@]}" get ns "$FAKES" >/dev/null 2>&1 || "${K[@]}" create ns "$FAKES"
-"${K[@]}" -n "$FAKES" create secret generic fakemcp-tls --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
-  --dry-run=client -o yaml | "${K[@]}" apply -f -
+for tls in fakemcp-tls fakegitea-tls; do
+  "${K[@]}" -n "$FAKES" create secret generic "$tls" --from-file=tls.crt="$FAKETLS/tls.crt" --from-file=tls.key="$FAKETLS/tls.key" \
+    --dry-run=client -o yaml | "${K[@]}" apply -f -
+done
+# koinon-values.yaml holds the line `caBundle: "@E2E_EGRESS_CA@"`; it becomes a block with this run's CA. The restore
+# drill fills the same line with the same function (test/e2e/kindvalues, #1487).
+(cd "$root" && go run ./test/e2e/kindvalues/fill-egress-ca -values "$OUT/quickstart/values.yaml" -ca "$FAKETLS/ca.crt")
 sed "s#localhost:5001#$IMAGE_REPO#g" "$here/kind/fakes.yaml" | "${K[@]}" apply -f -
-"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
-"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
+"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea >/dev/null
+"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp deploy/fakegitea --timeout=120s
 done_step "Fakes deployed"
 
 # The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
@@ -252,7 +318,10 @@ done_step "Fakes deployed"
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
 step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
-e1 client-cert
+# Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
+[[ $DRIVER == substrate ]] || e1 client-cert
+# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names.
+[[ $DRIVER != substrate ]] || OUT="$OUT" CLUSTER="$CLUSTER" NAMESPACE="$NS" "$here/kind/substrate.sh" ca
 if [[ $SUITE == go ]]; then
   e1 model-provider
   # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
@@ -322,8 +391,10 @@ go)
   new_password="${KOINON_E2E_NEW_PASSWORD:-e2e-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}"
   # driver <label filter> <junit file> <json file> <log file> <go test timeout>: one pass of the Ginkgo driver.
   # Worst cases (the job limit in e2e-kind.yml is 75 minutes on the schedule and on stories=true): set-up and image
-  # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 1, tear-down 5:
-  # 69 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
+  # builds about 10, quickstart pass 30, stories pass 15, escape OpenShell 8, backup and restore 5 (with
+  # its restore specs; the format gate's hold after the restore is about 3 of it), tear-down 5: 73 minutes. The stories pass measured about 4 minutes on kind (limit 15, about 3 times). Keep the sum below that limit when you change one of them.
+  # The Substrate leg has no escape OpenShell step, and its BACKUP_RESTORE step is the home restore drill (an idle
+  # stop, an archive and two restores, about 15 minutes; spec limit 30, go test 35), which needs the 75-minute job limit too.
   driver() {
     KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
@@ -331,18 +402,23 @@ go)
     KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
     KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
+    KOINON_E2E_HELM="$OUT/bin/helm" \
+    KOINON_E2E_CHART="$root/charts/koinon" \
+    KOINON_E2E_FAKES="$FAKES" \
     KOINON_E2E_PASSWORD="$password" \
     KOINON_E2E_NEW_PASSWORD="$new_password" \
-    KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 ]] && echo "$here/escape-mcp.sh" || true)" \
+    KOINON_E2E_ESCAPE_HOOK="$([[ ${ESCAPE_MCP:-0} == 1 && $DRIVER != substrate ]] && echo "$here/escape-mcp.sh" || true)" \
+    KOINON_E2E_ESCAPE_SUBSTRATE="$([[ ${ESCAPE_MCP:-0} == 1 && $DRIVER == substrate ]] && echo 1 || true)" \
     CLUSTER="$CLUSTER" \
     KOINON_E2E_T0="$T0" \
     KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
       bash -c 'cd "$1/test/e2e" && exec "$2" -test.timeout "$6" -ginkgo.v -ginkgo.junit-report="$4" -ginkgo.json-report="$5" -ginkgo.label-filter="$3"' _ "$root" "$OUT/bin/e2e.test" "$1" "$2" "$3" "$5" 2>&1 | tee "$4"
   }
   # The quickstart pass leaves out the stories (label stories): they are not part of the queue's or a pull
-  # request's run. SUITE_LABEL, when set, is the whole filter (a developer's own choice).
+  # request's run. The restore specs (label restore) run inside backup-restore.sh. SUITE_LABEL, when set, is the
+  # whole filter (a developer's own choice).
   step "quickstart driver (go test ./test/e2e)"
-  driver "${SUITE_LABEL:-!stories && !upgrade}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
+  driver "${SUITE_LABEL:-!stories && !upgrade && !restore}" "$OUT/junit.xml" "$OUT/report.json" "$OUT/driver.log" 30m
   done_step "Quickstart driver"
   # The run-1 story suite (issue 992) is a second pass against the same install, before the escape and
   # backup steps change it. A red stories pass does not stop those steps; it fails the script at the end.
@@ -365,9 +441,13 @@ go)
   ;;
 web)
   step "browser e2e (playwright, web/e2e-real)"
+  # The first spec replaces the bootstrap password; the others sign in with this one (web/e2e-real/session.ts).
+  # KOINON_E2E_FAKEMCP_CA is the fake MCP server's CA, which mcp-servers.spec.ts registers on the server record.
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
     KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="${KOINON_E2E_NEW_PASSWORD:-e2e-browser-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')}" \
     KOINON_E2E_FAKEMODEL_URL="http://fakemodel.$FAKES.svc:8080/v1" \
     PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
     pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"
@@ -376,16 +456,32 @@ web)
   ;;
 esac
 
-if [[ $SUITE == go && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
+if [[ $SUITE == go && $DRIVER == openshell && ${ESCAPE_OPENSHELL:-1} == 1 ]]; then
   step "escape suite, OpenShell cases (test/escape, chart policy live)"
   CLUSTER="$CLUSTER" KOINON_NAMESPACE="$NS" "$here/escape-openshell.sh" 2>&1 | tee "$OUT/escape-openshell.log"
   done_step "Escape suite (OpenShell cases)"
 fi
 
-if [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
+if [[ ${BACKUP_RESTORE:-0} == 1 && $DRIVER == substrate ]]; then
+  [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
+  # The restore drill of the Substrate leg (#1090 part 3): the agent home, through Koinon's checkpoint path. It turns
+  # home checkpoints on with helm upgrade, so it runs last. The database and keys drill (backup-restore.sh) is not
+  # wired for Substrate yet.
+  step "home restore drill on Substrate (go test ./test/e2e, label home-restore)"
+  driver home-restore "$OUT/home-restore-junit.xml" "$OUT/home-restore-report.json" "$OUT/home-restore.log" 35m
+  done_step "Home restore drill (checkpoint, archive, refused wrong digest, verified restore)"
+elif [[ ${BACKUP_RESTORE:-0} == 1 ]]; then
   [[ $SUITE == go ]] || { echo "BACKUP_RESTORE=1 needs SUITE=go" >&2; exit 2; }
   step "backup and restore (commands/backup-restore.e1)"
-  OUT="$OUT" "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
+  # The drill runs the restore specs of the Go driver (label restore, #1335): they sign in as the quickstart's admin
+  # and read the fake MCP server's request log through run.sh's forward. They open their own forward to koinon-api.
+  OUT="$OUT" \
+    KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
+    KOINON_E2E_FAKEMCP_URL="https://127.0.0.1:$MCP_PORT" \
+    KOINON_E2E_FAKEMCP_CA="$FAKETLS/ca.crt" \
+    KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_NEW_PASSWORD="$new_password" \
+    "$here/backup-restore.sh" 2>&1 | tee "$OUT/backup-restore.log"
   done_step "Backup, keys export, restore and verify"
   cat "$OUT/backup-restore/timings.md" >>"$OUT/quickstart-timings.md"
 fi

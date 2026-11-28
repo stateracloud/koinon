@@ -4,15 +4,26 @@
 // column moves, run notes, approvals) and the session updates of its runs,
 // by time.
 
-import type { JsonObject } from '@bufbuild/protobuf'
-import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
+import { timestampDate, timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
+import type { ApprovalChanged, ApprovalRequested, ApprovalScope, RunEnded } from '@/gen/koinon/task/v1alpha1/timeline_pb'
 import { arr, obj, str } from '@/lib/json'
 import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
-  | { key: string; at: number; type: 'message'; actor: ActorKind; actorUserId: string; text: string; runId?: string }
+  | {
+      key: string
+      at: number
+      type: 'message'
+      actor: ActorKind
+      actorUserId: string
+      actorName: string
+      /** The person without a Koinon account who wrote the message in Slack or Teams (ADR 0130). */
+      external?: { platform: string; platformUserId: string }
+      text: string
+      runId?: string
+    }
   | { key: string; at: number; type: 'agent-text'; runId: string; text: string; thought: boolean }
   | { key: string; at: number; type: 'tool'; runId: string; toolCallId: string; title: string; status: string }
   | {
@@ -69,59 +80,65 @@ const sandboxCauses: Record<string, string> = {
   unknown: 'the cause is unknown',
 }
 
-function approvalTarget(p: JsonObject): string {
-  const tool = str(p.tool) ?? 'tool call'
+function approvalTarget(a: ApprovalRequested | ApprovalChanged): string {
+  const tool = a.tool || 'tool call'
   // Targets are "<connector>:<resource>", e.g. "github:owner/repo".
-  const target = str(p.target)?.replace(/^[a-z0-9_-]+:/, '')
+  const target = a.target.replace(/^[a-z0-9_-]+:/, '')
   return target ? `${tool} on ${target}` : tool
 }
 
 /**
- * approvalText describes an approval task event (old issue 34). The GitHub tools
- * server writes approval.requested ({decision, risk}); package approvals
- * writes the decision ({note}) and the outcome (executed {result: {url}},
- * failed {error}, expired, canceled {reason}). Every payload carries
- * approval_id, tool, target and args_sha256.
+ * scopeText names the scope of an approval: "this task" or "this agent", and the day it ends. A
+ * scope without an end has the zero time (approvalscope.Payload), which is not shown.
  */
-function approvalText(kind: string, p: JsonObject): { text: string; url?: string } {
-  const what = approvalTarget(p)
-  const note = str(p.note)
-  const withNote = (t: string) => (note ? `${t}: ${note}` : t)
-  switch (kind) {
-    case 'approval.requested':
-      if (str(p.scope_id)) {
-        const until = str(p.scope_expires_at)
-        const kind = str(p.scope_kind) === 'task' ? 'this task' : 'this agent'
-        return { text: `Running ${what}, allowed by a scope for ${kind}${until ? ` until ${new Date(until).toLocaleDateString()}` : ''}` }
-      }
-      return { text: str(p.decision) === 'allow' ? `Running ${what} (trusted)` : `Approval requested: ${what}` }
-    case 'approval.approved': {
-      const until = str(p.scope_expires_at)
-      const scoped = str(p.scope_id) ? ` for ${str(p.scope_kind) === 'task' ? 'this task' : 'this agent'}${until ? ` until ${new Date(until).toLocaleDateString()}` : ''}` : ''
-      return { text: withNote(`Approved ${what}${scoped}`) }
-    }
-    case 'approval.denied':
-      return { text: withNote(`Denied ${what}`) }
-    case 'approval.executed':
-      return { text: `Done: ${what}`, url: str(obj(p.result)?.url) }
-    case 'approval.failed': {
-      const err = str(p.error)
-      return { text: `Failed: ${what}${err ? `: ${err}` : ''}` }
-    }
-    case 'approval.expired':
-      return { text: `Expired without a decision: ${what}` }
-    case 'approval.canceled': {
-      const reason = str(p.reason)
-      return { text: `Canceled: ${what}${reason ? ` (${reason})` : ''}` }
-    }
+function scopeText(s: ApprovalScope): string {
+  const until = s.expiresAt && timestampMs(s.expiresAt) > 0 ? ` until ${timestampDate(s.expiresAt).toLocaleDateString()}` : ''
+  return `${s.kind === 'task' ? 'this task' : 'this agent'}${until}`
+}
+
+/** The task event oneof: one case for each kind that the server knows (internal/tasks). */
+type TaskEventBody = NonNullable<TaskEvent['event']>['event']
+type ApprovalBody = Extract<TaskEventBody, { value: ApprovalRequested | ApprovalChanged }>
+
+/**
+ * approvalText describes an approval task event (old issue 34). The GitHub tools server writes
+ * approval.requested (decision, risk); package approvals writes the decision (note) and the outcome
+ * (executed with a result url, failed with an error, expired, canceled with a reason).
+ */
+function approvalText(e: ApprovalBody): { text: string; url?: string } {
+  const what = approvalTarget(e.value)
+  switch (e.case) {
+    case 'approvalRequested':
+      if (e.value.scope?.id) return { text: `Running ${what}, allowed by a scope for ${scopeText(e.value.scope)}` }
+      return { text: e.value.decision === 'allow' ? `Running ${what} (trusted)` : `Approval requested: ${what}` }
     default:
-      return { text: `${kind}: ${what}` }
+      break
+  }
+  const { note, scope, error, reason } = e.value
+  const withNote = (t: string) => (note ? `${t}: ${note}` : t)
+  switch (e.case) {
+    case 'approvalFirstApproved':
+      return { text: withNote(`First approval of two: ${what}`) }
+    case 'approvalApproved':
+      return { text: withNote(`Approved ${what}${scope?.id ? ` for ${scopeText(scope)}` : ''}`) }
+    case 'approvalDenied':
+      return { text: withNote(`Denied ${what}`) }
+    case 'approvalExecuted': {
+      const url = e.value.result?.url
+      return { text: `Done: ${what}`, url: typeof url === 'string' ? url : undefined }
+    }
+    case 'approvalFailed':
+      return { text: `Failed: ${what}${error ? `: ${error}` : ''}` }
+    case 'approvalExpired':
+      return { text: `Expired without a decision: ${what}` }
+    case 'approvalCanceled':
+      return { text: `Canceled: ${what}${reason ? ` (${reason})` : ''}` }
   }
 }
 
 // blockedReason says why a task waits on its owner after a run hit its time limit and could not be
-// continued (issue #99): the "reason" of the status.changed event the scheduler writes.
-function blockedReason(reason: string | undefined): string | undefined {
+// continued (issue #99): the reason of the status.changed event the scheduler writes.
+function blockedReason(reason: string): string | undefined {
   switch (reason) {
     case 'continuation_limit':
       return 'the task used all its continuation runs'
@@ -134,118 +151,116 @@ function blockedReason(reason: string | undefined): string | undefined {
   }
 }
 
+/** runEndedText describes a run.failed or run.canceled task event. */
+function runEndedText(failed: boolean, r: RunEnded, runId: string): string {
+  const summary = r.summary ? `\n\nLast summary${r.summarySource === 'notes' ? " (from the agent's notes)" : ''}:\n${r.summary}` : ''
+  if (!failed && r.reason === 'wall_clock_cap') {
+    // agentd and the api's sweep write the same note.
+    const limit = r.maxWallClockSeconds > 0 ? ` of ${humanSeconds(r.maxWallClockSeconds)}` : ''
+    return `Run ${shortId(runId)} stopped at the time limit${limit}.${summary}`
+  }
+  // The ledger ends a run at its model-request or spend limit (ADR 0081) with the same note as the time limit.
+  if (!failed && (r.reason === 'request_cap' || r.reason === 'run_spend_cap')) {
+    const what = r.reason === 'request_cap' ? 'model request limit' : 'spend limit'
+    return `Run ${shortId(runId)} stopped at its ${what}: ${r.message || 'the limit was reached'}.${summary}`
+  }
+  if (failed && r.failureClass === 'loop') {
+    // agentd's loopStopReason says when the harness ignored the cancel and the agent was never asked.
+    const how = r.reason.includes('could not be asked')
+      ? 'and could not be asked to change its approach (the harness ignored the cancel)'
+      : 'after it was asked to change its approach'
+    return `Run ${shortId(runId)} was stopped: the agent kept looping ${how}`
+  }
+  if (failed && r.failureClass === 'sandbox_unavailable') {
+    const cause = sandboxCauses[r.sandboxCause] ?? sandboxCauses.unknown
+    return `Run ${shortId(runId)} failed: the sandbox never became ready (${cause})`
+  }
+  // A spend limit reached (the ledger, ADR 0056) says which limit and what was spent in its message.
+  if (r.reason === 'spend_limit') return `Run ${shortId(runId)} stopped at a spend limit: ${r.message || 'a limit was reached'}`
+  // scheduler.RecordCancel writes a reason and a message; agentd's finish writes a reason.
+  const why = r.message || r.reason
+  return `Run ${shortId(runId)} ${failed ? 'failed' : 'canceled'}${why ? `: ${why}` : ''}`
+}
+
+/** The notes that Koinon writes without a message of their own. */
+const noteFallback = {
+  sandboxRecreated: 'Sandbox recreated.',
+  sandboxWorkLost: "Unsaved work in the agent's sandbox was lost.",
+  agentUnhealthy: 'The agent was marked unhealthy.',
+  runSessionRestarted: 'Session restarted: new instructions.',
+  runSessionReset: "The agent's home was reset, so this run starts a new session.",
+} as const
+
+/**
+ * taskItem reads the typed event (TaskEvent.event, issue #735). The switch has a case for each
+ * member of the oneof, so a new kind is a type error here until it has its words. An event that
+ * this server cannot type (a kind it does not know) shows its kind.
+ */
 function taskItem(ev: TaskEvent): TimelineItem {
   const key = `t:${ev.seq}`
   const at = ms(ev.createdAt)
-  const p = ev.payload ?? {}
   const runId = ev.runId || undefined
-  if (ev.kind.startsWith('approval.')) {
-    const ask = ev.kind === 'approval.requested' && str(p.decision) !== 'allow'
-    return { key, at, type: 'approval', runId, approvalId: str(p.approval_id) ?? '', kind: ev.kind, ask, ...approvalText(ev.kind, p) }
-  }
-  switch (ev.kind) {
-    case 'message':
-      // A direct message's text carries the trigger's instruction; "display" is what the person wrote.
-      return { key, at, type: 'message', actor: ev.actorKind, actorUserId: ev.actorUserId, text: str(p.display) ?? str(p.text) ?? '', runId }
-    case 'task.created':
-    case 'ticket.created':
-      return { key, at, type: 'note', text: `Task created: ${str(p.title) ?? ''}`.trim() }
-    case 'status.changed': {
-      const from = stateLabel(taskStateFromName(str(p.from)))
-      const to = stateLabel(taskStateFromName(str(p.to)))
-      const why = blockedReason(str(p.reason))
-      return { key, at, type: 'note', text: `Moved from ${from} to ${to}${why ? `: ${why}` : ''}` }
+  const note = (text: string): TimelineItem => ({ key, at, type: 'note', text, runId })
+  const e: TaskEventBody = ev.event?.event ?? { case: undefined }
+  switch (e.case) {
+    case undefined:
+      return note(ev.kind)
+    case 'message': {
+      // A direct message's text carries the trigger's instruction; display is what the person wrote.
+      const m = e.value
+      const x = ev.actorKind === ActorKind.EXTERNAL ? ev.actorExternal : undefined
+      const external = x ? { platform: x.platform, platformUserId: x.platformUserId } : undefined
+      return { key, at, type: 'message', actor: ev.actorKind, actorUserId: ev.actorUserId, actorName: ev.actorDisplayName, external, text: m.display || m.text, runId }
     }
-    case 'run.queued':
-      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} queued`, runId }
-    case 'run.parked': {
-      // agentd parks a run whose turn ended with approvals outstanding (old issue 34):
-      // {reason: "approval", approvals: [ids]}.
-      const n = Array.isArray(p.approvals) ? p.approvals.length : 0
-      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} parked for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
+    case 'taskCreated':
+      return { key, at, type: 'note', text: `Task created: ${e.value.title}`.trim() }
+    case 'statusChanged': {
+      const s = e.value
+      const why = blockedReason(s.reason)
+      return { key, at, type: 'note', text: `Moved from ${stateLabel(taskStateFromName(s.from))} to ${stateLabel(taskStateFromName(s.to))}${why ? `: ${why}` : ''}` }
     }
-    case 'run.session_reset':
-      // agentd starts a new harness session when the sandbox's home volume was
-      // replaced since the task's session was stored: {message,
-      // previousSessionId, sessionId}.
-      return { key, at, type: 'note', text: str(p.message) || "The agent's home was reset, so this run starts a new session.", runId }
-    case 'sandbox.recreated':
-    case 'sandbox.work_lost':
-    case 'agent.unhealthy':
-    case 'run.session_restarted': {
-      // Koinon's own notes (system actor), each {message}.
-      const fallback: Record<string, string> = {
-        'sandbox.recreated': 'Sandbox recreated.',
-        'sandbox.work_lost': "Unsaved work in the agent's sandbox was lost.",
-        'agent.unhealthy': 'The agent was marked unhealthy.',
-        'run.session_restarted': 'Session restarted: new instructions.',
-      }
-      return { key, at, type: 'note', text: str(p.message) || fallback[ev.kind], runId }
+    case 'runQueued':
+      return note(`Run ${shortId(ev.runId)} queued`)
+    case 'runParked': {
+      // agentd parks a run whose turn ended with approvals outstanding (old issue 34).
+      const n = e.value.approvalIds.length
+      return note(`Run ${shortId(ev.runId)} parked for ${n === 1 ? '1 approval' : `${n} approvals`}`)
     }
-    case 'question.asked':
-      return { key, at, type: 'note', text: `Asked ${str(p.to_label) ?? 'someone'}: ${str(p.question) ?? ''}`.trim(), runId }
-    case 'question.answered':
-      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} answered: ${str(p.answer) ?? ''}`.trim(), runId }
-    case 'question.dismissed':
-      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} dismissed the question; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
-    case 'question.expired':
-      return { key, at, type: 'note', text: `Nobody answered in time; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
-    case 'question.canceled':
-      return { key, at, type: 'note', text: 'The question was closed: the run ended', runId }
-    case 'question.retargeted':
-      return { key, at, type: 'note', text: `Nobody it was asked to can answer any more; now asked ${str(p.to_label) ?? 'the org\'s admins'}`, runId }
-    case 'run.canceled':
-    case 'run.failed': {
-      if (ev.kind === 'run.canceled' && str(p.reason) === 'wall_clock_cap') {
-        // agentd and the api's sweep write the same note: {reason, message, maxWallClockSeconds, summary?, summarySource}.
-        const limit = typeof p.maxWallClockSeconds === 'number' ? ` of ${humanSeconds(p.maxWallClockSeconds)}` : ''
-        const summary = str(p.summary)
-        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
-        return {
-          key,
-          at,
-          type: 'note',
-          text: `Run ${shortId(ev.runId)} stopped at the time limit${limit}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
-          runId,
-        }
-      }
-      // The ledger ends a run at its model-request or spend limit (ADR 0081) with the same note as
-      // the time limit: {reason, message, limit, ..., summary?, summarySource?}.
-      if (ev.kind === 'run.canceled' && (str(p.reason) === 'request_cap' || str(p.reason) === 'run_spend_cap')) {
-        const what = str(p.reason) === 'request_cap' ? 'model request limit' : 'spend limit'
-        const summary = str(p.summary)
-        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
-        return {
-          key,
-          at,
-          type: 'note',
-          text: `Run ${shortId(ev.runId)} stopped at its ${what}: ${str(p.message) ?? 'the limit was reached'}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
-          runId,
-        }
-      }
-      if (ev.kind === 'run.failed' && str(p.failureClass) === 'loop') {
-        // agentd's loopStopReason says when the harness ignored the cancel and the agent was never asked.
-        const asked = !(str(p.reason) ?? '').includes('could not be asked')
-        const how = asked ? 'after it was asked to change its approach' : 'and could not be asked to change its approach (the harness ignored the cancel)'
-        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} was stopped: the agent kept looping ${how}`, runId }
-      }
-      if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
-        const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
-        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} failed: the sandbox never became ready (${cause})`, runId }
-      }
-      // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.
-      // A spend limit reached (the ledger, ADR 0056) says which limit and what was spent in its message.
-      if (str(p.reason) === 'spend_limit') {
-        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} stopped at a spend limit: ${str(p.message) ?? 'a limit was reached'}`, runId }
-      }
-      const reason = str(p.message) || str(p.reason)
-      const verb = ev.kind === 'run.failed' ? 'failed' : 'canceled'
-      return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} ${verb}${reason ? `: ${reason}` : ''}`, runId }
+    case 'runSessionReset':
+    case 'runSessionRestarted':
+    case 'sandboxRecreated':
+    case 'sandboxWorkLost':
+    case 'agentUnhealthy':
+      // Koinon's own notes (system actor), each with a message. A session reset: agentd starts a new
+      // harness session when the sandbox's home volume was replaced since the task's session was stored.
+      return note(e.value.message || noteFallback[e.case])
+    case 'approvalRequested':
+    case 'approvalFirstApproved':
+    case 'approvalApproved':
+    case 'approvalDenied':
+    case 'approvalExecuted':
+    case 'approvalFailed':
+    case 'approvalExpired':
+    case 'approvalCanceled': {
+      // Only a request that a human decides (not a Trusted-preset call) gets the approval card.
+      const ask = e.case === 'approvalRequested' && e.value.decision !== 'allow'
+      return { key, at, type: 'approval', runId, approvalId: e.value.approvalId, kind: ev.kind, ask, ...approvalText(e) }
     }
-    default: {
-      const text = str(p.text) ?? str(p.reason)
-      return { key, at, type: 'note', text: text ? `${ev.kind}: ${text}` : ev.kind, runId }
-    }
+    case 'questionAsked':
+      return note(`Asked ${e.value.toLabel || 'someone'}: ${e.value.question}`.trim())
+    case 'questionAnswered':
+      return note(`${e.value.answeredByName || 'Someone'} answered: ${e.value.answer}`.trim())
+    case 'questionDismissed':
+      return note(`${e.value.answeredByName || 'Someone'} dismissed the question; the default applied: ${e.value.answer}`.trim())
+    case 'questionExpired':
+      return note(`Nobody answered in time; the default applied: ${e.value.answer}`.trim())
+    case 'questionCanceled':
+      return note('The question was closed: the run ended')
+    case 'questionRetargeted':
+      return note(`Nobody it was asked to can answer any more; now asked ${e.value.toLabel || "the org's admins"}`)
+    case 'runFailed':
+    case 'runCanceled':
+      return note(runEndedText(e.case === 'runFailed', e.value, ev.runId))
   }
 }
 
@@ -321,6 +336,11 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
       const what = provider ? `the model provider ${provider}` : 'the model provider'
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for ${what} to reach the gateway${model ? ` (model ${model})` : ''}`, runId }
     }
+    case 'run.waiting_for_forge': {
+      // agentd waits before it starts the harness until koinon-gateway serves the agent's forge
+      // credential: a new credential is still reaching the gateway (#1086 part C2). {reason}.
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for the gateway to serve the agent's code-host credential`, runId }
+    }
     case 'run.mcp_server_missing': {
       // agentd found an MCP server the agent may use not serving tools before it started the harness
       // (old issue 326). {attempt, servers: [{name, reason}], reason}: the first miss is retried, the second
@@ -342,6 +362,28 @@ function runItem(ev: RunEvent, retentionDays?: number): TimelineItem | undefined
       // agentd retries a turn after a transient model fault: {failureClass, attempt, delaySeconds, reason}.
       const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is retrying after a temporary model fault${attempt}`, runId }
+    }
+    case 'run.sandbox_reverted': {
+      // agentd tells the run that the reconciler reverted its crashed sandbox to its last snapshot
+      // (#1526): {revert, at, snapshot_at?, lost}. Without snapshot_at the time is not known.
+      const snap = str(p.snapshot_at)
+      const lost = snap ? `the writes after ${snap} are lost` : 'the writes after its last snapshot are lost'
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: the sandbox crashed and was reverted to its last snapshot; ${lost}`, runId }
+    }
+    case 'run.home_fell_back': {
+      // agentd tells the run that its home restore skipped newer checkpoints (#1538): {checkpoint,
+      // taken_at, skipped: [{checkpoint, taken_at, reason}], lost}. The restore used the checkpoint taken at taken_at.
+      const used = str(p.taken_at)
+      const skipped = arr(p.skipped).map((s) => {
+        const o = obj(s)
+        const when = str(o?.taken_at)
+        const why = str(o?.reason)
+        return `${when ? `the checkpoint of ${when}` : 'a checkpoint'}${why ? ` (${why})` : ''}`
+      })
+      const from = used ? `the checkpoint of ${used}` : 'an older checkpoint'
+      const lost = used ? `the writes after ${used} are lost` : 'the writes after it are lost'
+      const what = skipped.length > 0 ? `skipped ${skipped.join(', ')} and ` : ''
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: the home restore ${what}used ${from}; ${lost}`, runId }
     }
     default:
       // The user's message chunks (already on the task), plans, usage and

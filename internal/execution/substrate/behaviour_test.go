@@ -285,7 +285,7 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
 			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
 			Expect(cl.RouterResumes(ws, "sb")).To(Equal(1), "the late request landed and resumed the actor")
-			Expect(cl.Calls("SuspendActor")).To(Equal(2))
+			Expect(cl.Calls("SuspendActor")).To(Equal(3), "the seal after the first boot, the suspend, the suspend again")
 			Expect(d.Resuspends("retried")).To(Equal(1.0))
 			Expect(d.Resuspends("failed")).To(BeZero())
 
@@ -305,7 +305,7 @@ var _ = Describe("the Substrate driver", func() {
 			sb, err := d.SuspendSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
-			Expect(cl.Calls("SuspendActor")).To(Equal(3))
+			Expect(cl.Calls("SuspendActor")).To(Equal(4), "the seal after the first boot, then the suspend and two more")
 			_, err = d.ResumeSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
 			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
@@ -314,7 +314,7 @@ var _ = Describe("the Substrate driver", func() {
 			cl.ResumeAfterSuspends(ws, "sb", 1000) // a router request that never stops
 			_, err = d.SuspendSandbox(ctx, ws, "sb")
 			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
-			Expect(cl.Calls("SuspendActor")).To(Equal(3+4), "one suspend and three more")
+			Expect(cl.Calls("SuspendActor")).To(Equal(4+4), "one suspend and three more")
 			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
 			Expect(d.Resuspends("retried")).To(Equal(2.0 + 3.0))
 			Expect(d.Resuspends("failed")).To(Equal(1.0))
@@ -397,20 +397,39 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tw.WriteHeader(&tar.Header{Name: "a.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2})).To(Succeed())
 			_, _ = tw.Write([]byte("hi"))
 			Expect(tw.Close()).To(Succeed())
-			cl.FailNextWriteFiles(ws, "sb", 2)
+			cl.FailNextUploadStreams(ws, "sb", 2)
 			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
-			Expect(cl.Calls("WriteFile")).To(Equal(3), "two failed streams and one that worked")
+			Expect(cl.Calls("WriteProcessInput")).To(Equal(3), "two failed streams and one that worked")
+			Expect(cl.Running(ws, "sb")).To(BeEmpty(), "each retry killed the tar of the stream before it")
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/a.txt", []byte("hi")))
+		})
+
+		// Issue #1516: an archive of exactly one message (256 KiB) fills the first buffer, and the
+		// driver must still see that the stream ended, or it would not retry.
+		It("retries an archive of exactly one message", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("e"), 256<<10-512-1024) // header, body (a multiple of 512) and two end blocks
+			Expect(tw.WriteHeader(&tar.Header{Name: "exact.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			Expect(buf.Len()).To(Equal(256 << 10))
+			cl.FailNextUploadStreams(ws, "sb", 1)
+			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
+			Expect(cl.Calls("WriteProcessInput")).To(Equal(2), "one failed stream and one that worked")
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/exact.bin", body))
 		})
 
 		It("gives up after the ready timeout when every write ends Unavailable", func(ctx SpecContext) {
 			dd, c := newDriver(substrate.Config{PollInterval: time.Millisecond, GuestReadyTimeout: 50 * time.Millisecond})
 			ready(ctx, dd, "sb")
-			c.FailNextWriteFiles(ws, "sb", 1<<20)
+			c.FailNextUploadStreams(ws, "sb", 1<<20)
 			err := dd.Upload(ctx, ws, "sb", "/work", strings.NewReader("x"))
 			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
 		})
 
-		It("uploads a large archive and leaves no temporary file", func(ctx SpecContext) {
+		It("uploads a large archive in several messages and writes no file but the extracted ones", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			var buf bytes.Buffer
 			tw := tar.NewWriter(&buf)
@@ -419,17 +438,106 @@ var _ = Describe("the Substrate driver", func() {
 			_, _ = tw.Write(body)
 			Expect(tw.Close()).To(Succeed())
 			Expect(d.Upload(ctx, ws, "sb", "/work", &buf)).To(Succeed())
+			Expect(cl.Files(ws, "sb")).To(HaveLen(1))
+			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/big.bin", body))
+			Expect(cl.Running(ws, "sb")).To(BeEmpty())
+			Expect(cl.Started(ws, "sb")).To(HaveLen(2), "mkdir and tar: no staging file, no rm")
+		})
+
+		It("kills the tar of a stream that breaks, and does not retry an archive that it cannot read again", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("y"), 1<<20) // more than one message
+			Expect(tw.WriteHeader(&tar.Header{Name: "big.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			cl.FailNextUploadStreams(ws, "sb", 1)
+			err := d.Upload(ctx, ws, "sb", "/work", &buf)
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+			Expect(cl.Files(ws, "sb")).To(BeEmpty(), "tar never got the close, so it extracted nothing")
+		})
+
+		It("kills the tar when the reader fails, and sends no close", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			boom := errors.New("tar source broke")
+			big := io.MultiReader(bytes.NewReader(bytes.Repeat([]byte("z"), 600<<10)), failing{boom})
+			err := d.Upload(ctx, ws, "sb", "/work", big)
+			Expect(errors.Is(err, boom)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+		})
+
+		It("treats io.ErrUnexpectedEOF from the reader as a failed read, not as the end", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			var buf bytes.Buffer
+			tw := tar.NewWriter(&buf)
+			body := bytes.Repeat([]byte("x"), 3<<20)
+			Expect(tw.WriteHeader(&tar.Header{Name: "big.bin", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))})).To(Succeed())
+			_, _ = tw.Write(body)
+			Expect(tw.Close()).To(Succeed())
+			// A valid archive, cut at 600 KiB by a reader that returns io.ErrUnexpectedEOF as its own error.
+			big := io.MultiReader(bytes.NewReader(buf.Bytes()[:600<<10]), failing{io.ErrUnexpectedEOF})
+			err := d.Upload(ctx, ws, "sb", "/work", big)
+			Expect(errors.Is(err, io.ErrUnexpectedEOF)).To(BeTrue(), "got %v", err)
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(5 * time.Second).Should(BeEmpty())
+			Expect(cl.Files(ws, "sb")).To(BeEmpty())
+		})
+
+		It("leaves no tar running after a suspend at the middle of an upload", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			release := make(chan struct{})
+			started := make(chan struct{})
+			upErr := make(chan error, 1)
+			go func() {
+				upErr <- d.Upload(ctx, ws, "sb", "/work", &stallAfter{n: 256 << 10, started: started, release: release})
+			}()
+			Eventually(started).WithTimeout(5 * time.Second).Should(BeClosed())
+			_, err := d.SuspendSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			close(release)
+			Eventually(upErr).WithTimeout(5 * time.Second).Should(Receive(HaveOccurred()))
+			_, err = d.ResumeSandbox(ctx, ws, "sb")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = d.WaitPhase(ctx, ws, "sb", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() [][]string { return cl.Running(ws, "sb") }).WithTimeout(10*time.Second).Should(BeEmpty(), "the orphan is killed once the actor runs")
 		})
 	})
 
 	Describe("the template", func() {
+		It("resumes the actor it created, because Substrate creates one suspended (issue #1092)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, spec("a"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Calls("ResumeActor")).To(Equal(2), "the first boot, and the resume after its seal (issue #1481)")
+			_, err = dd.WaitPhase(ctx, ws, "a", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a repeated create leaves the sandbox as it is")
+			_, err = dd.StopSandbox(ctx, ws, "a")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = dd.CreateSandbox(ctx, ws, spec("a"))
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := dd.GetSandbox(ctx, ws, "a")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseSuspended))
+		})
+
+		It("is refused by Substrate when the spec has no CPU or memory (issue #1092)", func(ctx SpecContext) {
+			dd, _ := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("resources"))
+		})
+
 		It("shares a template between equal specs and carries only the public guest API key", func(ctx SpecContext) {
 			dd, c := newDriver()
 			for _, n := range []string{"a", "b"} {
 				_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: n, Image: img, CPULimit: "500m", MemoryLimit: "1Gi"})
 				Expect(err).NotTo(HaveOccurred())
 			}
-			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2" + digest})
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "c", Image: "img2" + digest, CPULimit: "500m", MemoryLimit: "512Mi"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.Templates(ws)).To(HaveLen(2))
 			Expect(c.TemplateOf(ws, "a")).To(Equal(c.TemplateOf(ws, "b")))
@@ -445,6 +553,39 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(tmpl.Resources.Limits.CpuMillicores).To(BeEquivalentTo(500))
 			Expect(tmpl.Resources.Limits.MemoryBytes).To(BeEquivalentTo(1 << 30))
 			Expect(tmpl.SnapshotConfig.PreferredFidelity).To(Equal(ateapiv1.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY))
+		})
+
+		It("disables golden snapshots by default and enables them only on an admin's setting (issue #1492)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "500m", MemoryLimit: "512Mi"})
+			Expect(err).NotTo(HaveOccurred())
+			off, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(off.SnapshotConfig.GetGoldenSnapshotConfig().GetMode()).To(Equal(ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_DISABLED))
+
+			spec := execution.SandboxSpec{Name: "a", Image: img}
+			cfg := substrate.Config{GuestSigner: fakeate.Signer()}
+			a, err := substrate.RenderTemplateForTest(ws, spec, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			cfg.GoldenSnapshots = true
+			b, err := substrate.RenderTemplateForTest(ws, spec, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.SnapshotConfig.GetGoldenSnapshotConfig().GetMode()).To(Equal(ateapiv1.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_ENABLED))
+			Expect(b.Metadata.Name).NotTo(Equal(a.Metadata.Name), "the setting is part of the template hash")
+		})
+
+		It("mounts a durable directory at the agent's home and no other volume (issue #1090)", func(ctx SpecContext) {
+			dd, c := newDriver()
+			_, err := dd.CreateSandbox(ctx, ws, execution.SandboxSpec{Name: "a", Image: img, CPULimit: "500m", MemoryLimit: "512Mi"})
+			Expect(err).NotTo(HaveOccurred())
+			tmpl, ok := c.Template(ws, c.TemplateOf(ws, "a"))
+			Expect(ok).To(BeTrue())
+			Expect(tmpl.Volumes).To(HaveLen(1))
+			Expect(tmpl.Volumes[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Volumes[0].DurableDir).NotTo(BeNil(), "a durable directory, not an external or an image volume")
+			Expect(tmpl.Containers[0].VolumeMounts).To(HaveLen(1))
+			Expect(tmpl.Containers[0].VolumeMounts[0].Name).To(Equal(substrate.HomeVolume))
+			Expect(tmpl.Containers[0].VolumeMounts[0].MountPath).To(Equal("/sandbox"))
 		})
 
 		It("refuses egress it cannot enforce", func(ctx SpecContext) {
@@ -530,7 +671,7 @@ var _ = Describe("the Substrate driver", func() {
 			cl.FailGetActorsAfterSuspend(ws, "src", 1) // settled fails: the actor is suspended
 			_, err := d.SnapshotSandbox(ctx, ws, "src")
 			Expect(err).To(HaveOccurred())
-			Expect(cl.Calls("SuspendActor")).To(Equal(1))
+			Expect(cl.Calls("SuspendActor")).To(Equal(2), "the seal after the first boot, and the snapshot")
 			sb, err := d.WaitPhase(ctx, ws, "src", execution.PhaseReady)
 			Expect(err).NotTo(HaveOccurred(), "the snapshot resumed the sandbox it suspended")
 			Expect(sb.Phase).To(Equal(execution.PhaseReady))
@@ -596,6 +737,18 @@ var _ = Describe("the Substrate driver", func() {
 			src, _ := dd.GetSandbox(ctx, ws, "src")
 			Expect(cp.ID).NotTo(Equal(src.ID))
 			Expect(c.TemplateOf(ws, "copy")).To(Equal(c.TemplateOf(ws, "src")))
+		})
+
+		It("brings a restored sandbox to ready although Substrate creates the actor suspended", func(ctx SpecContext) {
+			dd, _ := newDriver()
+			ready(ctx, dd, "src")
+			snap, err := dd.SnapshotSandbox(ctx, ws, "src")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = dd.RestoreSandbox(ctx, ws, snap.SnapshotRef, spec("copy"))
+			Expect(err).NotTo(HaveOccurred())
+			sb, err := dd.WaitPhase(ctx, ws, "copy", execution.PhaseReady)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sb.Phase).To(Equal(execution.PhaseReady))
 		})
 
 		It("refuses a restore after the stored snapshot changed", func(ctx SpecContext) {
@@ -705,6 +858,33 @@ var _ = Describe("the Substrate driver", func() {
 type failing struct{ err error }
 
 func (f failing) Read([]byte) (int, error) { return 0, f.err }
+
+// stallAfter returns n bytes, then blocks in Read until release closes (after it closes started):
+// an upload whose stream is open and whose tar waits for input.
+type stallAfter struct {
+	n       int
+	started chan struct{}
+	release chan struct{}
+	read    int
+	stalled bool
+}
+
+func (r *stallAfter) Read(p []byte) (int, error) {
+	if r.read < r.n {
+		k := min(len(p), r.n-r.read)
+		for i := range k {
+			p[i] = 'x'
+		}
+		r.read += k
+		return k, nil
+	}
+	if !r.stalled {
+		r.stalled = true
+		close(r.started)
+	}
+	<-r.release
+	return 0, io.EOF
+}
 
 // stallReader gives one chunk, then blocks until released and ends the stream.
 type stallReader struct {

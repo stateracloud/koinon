@@ -31,22 +31,18 @@ export function isEnded(s: TaskState): boolean {
 }
 
 /**
- * taskStateFromName maps the database names in event payloads ("input_required"). Events written
- * before the move from tickets name the old board columns, which map as the migration did.
+ * taskStateFromName maps the database names of a status.changed event ("input_required"). Migration
+ * 00020 renamed the old board columns in those events, so only the task states are left.
  */
-export function taskStateFromName(name: string | undefined): TaskState {
+export function taskStateFromName(name: string): TaskState {
   switch (name) {
     case 'submitted':
-    case 'todo':
       return TaskState.SUBMITTED
     case 'working':
-    case 'in_progress':
       return TaskState.WORKING
     case 'input_required':
-    case 'waiting_on_you':
       return TaskState.INPUT_REQUIRED
     case 'completed':
-    case 'done':
       return TaskState.COMPLETED
     case 'canceled':
       return TaskState.CANCELED
@@ -81,6 +77,9 @@ export function runFinished(s: RunState): boolean {
 const harnessLabels: Record<string, string> = {
   opencode: 'OpenCode',
 }
+
+/** The built-in harnesses by name, for a form that offers a harness without a template (ADR 0112). */
+export const builtInHarnesses: readonly string[] = Object.keys(harnessLabels)
 
 export function harnessLabel(name: string): string {
   if (name === '') return 'Default'
@@ -133,6 +132,22 @@ const connectionStatusLabels: Record<ConnectionStatus, string> = {
 
 export function connectionStatusLabel(s: ConnectionStatus): string {
   return connectionStatusLabels[s] ?? 'Unknown'
+}
+
+/** orgRoleLabel names a member's role in an org (the org switcher). */
+export function orgRoleLabel(r: OrgRole): string {
+  switch (r) {
+    case OrgRole.OWNER:
+      return 'Owner'
+    case OrgRole.ADMIN:
+      return 'Admin'
+    case OrgRole.MEMBER:
+      return 'Member'
+    case OrgRole.VIEWER:
+      return 'Viewer'
+    default:
+      return 'Unknown'
+  }
 }
 
 /** The roles an API token can have; viewers and members cannot hold one. */

@@ -11,7 +11,9 @@
 //   - a guest request for an actor that is still RESUMING fails with Unavailable (the guest daemon
 //     does not listen yet);
 //   - a process's output is a spool that StreamProcessOutput reads from a byte offset;
-//   - a tag needs a suspended source actor, and an actor seeded from a tag must use the tag's template.
+//   - a tag needs a suspended source actor, and an actor seeded from a tag must use the tag's template;
+//   - an actor's egress policy is a singleton that goes away with the actor, and EgressAllowed decides an
+//     HTTP request as atenet-egress does (issue #1444).
 //
 // Guest commands are Go: cat, mkdir -p, tar -x -f F -C D and rm -f F. Any other command exits 127.
 // The router needs no TLS and no SPIFFE ID here.
@@ -19,6 +21,7 @@ package fakeate
 
 import (
 	"context"
+	"maps"
 	"net"
 	"slices"
 	"sync"
@@ -45,19 +48,29 @@ type Cluster struct {
 	// and no Bind method. Set it before Start.
 	Unguarded bool
 
-	mu        sync.Mutex
-	uid       int
-	atespaces map[string]string // name to uid
-	templates map[key]*ateapiv1.ActorTemplate
-	actors    map[key]*actor
-	tags      map[key]*ateapiv1.Tag
-	tagAuth   map[key]*guestauth.Verifier // the guest front's state in a tag's memory snapshot
-	resumes   map[key]int
-	calls     map[string]int
-	holds     map[key]*getHold
-	tagHolds  map[key]*getHold
-	delays    map[key]*delay
-	stop      chan struct{}
+	enforce          bool     // EnforceAuthz
+	bootstrap        []string // the principals that always hold global owner
+	globalPolicy     *ateapiv1.AccessPolicy
+	atespacePolicies map[string]*ateapiv1.AccessPolicy
+	polVersion       int64
+
+	mu               sync.Mutex
+	uid              int
+	atespaces        map[string]string // name to uid
+	templates        map[key]*ateapiv1.ActorTemplate
+	actors           map[key]*actor
+	armed            map[key][2]int // FailNextResumesAfter for an actor that does not exist yet
+	tags             map[key]*ateapiv1.Tag
+	policies         map[key]*ateapiv1.EgressPolicy // the actor egress policies
+	policyWrites     map[key]int
+	failPolicyWrites int
+	tagAuth          map[key]*guestauth.Verifier // the guest front's state in a tag's memory snapshot
+	resumes          map[key]int
+	calls            map[string]int
+	holds            map[key]*getHold
+	tagHolds         map[key]*getHold
+	delays           map[key]*delay
+	stop             chan struct{}
 
 	ctl, rtr         *grpc.Server
 	ctlLis, routerLn *bufconn.Listener
@@ -66,17 +79,20 @@ type Cluster struct {
 // New returns an empty cluster.
 func New() *Cluster {
 	return &Cluster{
-		atespaces: map[string]string{},
-		templates: map[key]*ateapiv1.ActorTemplate{},
-		actors:    map[key]*actor{},
-		tags:      map[key]*ateapiv1.Tag{},
-		tagAuth:   map[key]*guestauth.Verifier{},
-		resumes:   map[key]int{},
-		calls:     map[string]int{},
-		holds:     map[key]*getHold{},
-		tagHolds:  map[key]*getHold{},
-		delays:    map[key]*delay{},
-		stop:      make(chan struct{}),
+		atespaces:        map[string]string{},
+		atespacePolicies: map[string]*ateapiv1.AccessPolicy{},
+		templates:        map[key]*ateapiv1.ActorTemplate{},
+		actors:           map[key]*actor{},
+		tags:             map[key]*ateapiv1.Tag{},
+		policies:         map[key]*ateapiv1.EgressPolicy{},
+		policyWrites:     map[key]int{},
+		tagAuth:          map[key]*guestauth.Verifier{},
+		resumes:          map[key]int{},
+		calls:            map[string]int{},
+		holds:            map[key]*getHold{},
+		tagHolds:         map[key]*getHold{},
+		delays:           map[key]*delay{},
+		stop:             make(chan struct{}),
 	}
 }
 
@@ -84,7 +100,7 @@ func New() *Cluster {
 // each. Stop shuts both down.
 func (c *Cluster) Start() (control, router *grpc.ClientConn, err error) {
 	c.ctlLis, c.routerLn = bufconn.Listen(1<<20), bufconn.Listen(1<<20)
-	c.ctl = grpc.NewServer()
+	c.ctl = grpc.NewServer(grpc.UnaryInterceptor(c.checkControlUnary))
 	if c.Unguarded {
 		c.rtr = grpc.NewServer()
 	} else {
@@ -126,6 +142,13 @@ func (c *Cluster) Stop() {
 	if c.ctl != nil {
 		c.ctl.Stop()
 	}
+	if c.rtr != nil {
+		c.rtr.Stop()
+	}
+}
+
+// StopRouter stops the router server only: the control API keeps running. It models a router outage.
+func (c *Cluster) StopRouter() {
 	if c.rtr != nil {
 		c.rtr.Stop()
 	}
@@ -324,10 +347,11 @@ func (c *Cluster) FailNextOutputStreams(atespace, name string, n int) {
 	}
 }
 
-// FailNextWriteFiles makes the next n WriteFile streams of an actor end with Unavailable when the
-// client closes them, after the data arrived: client-streaming errors show on Send or CloseAndRecv,
-// not when the stream opens.
-func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
+// FailNextUploadStreams makes the next n WriteProcessInput streams to a tar process end with
+// Unavailable at the message that carries close, after the data arrived. The process does not get the
+// close, so it stays running with its partial input, as a process does in the real guest when the
+// stream that feeds it breaks (issue #1478).
+func (c *Cluster) FailNextUploadStreams(atespace, name string, n int) {
 	c.mu.Lock()
 	a := c.actors[key{atespace, name}]
 	c.mu.Unlock()
@@ -335,6 +359,176 @@ func (c *Cluster) FailNextWriteFiles(atespace, name string, n int) {
 		a.smu.Lock()
 		a.failWrite = n
 		a.smu.Unlock()
+	}
+}
+
+// Running returns the commands of the processes of an actor that have not exited, as the guest runs
+// them (the launcher prefix is removed).
+func (c *Cluster) Running(atespace, name string) [][]string {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	var procs []*fproc
+	if a != nil {
+		for _, p := range a.procs {
+			procs = append(procs, p)
+		}
+	}
+	c.mu.Unlock()
+	var out [][]string
+	for _, p := range procs {
+		p.mu.Lock()
+		if !p.exited {
+			out = append(out, slices.Clone(p.argv))
+		}
+		p.mu.Unlock()
+	}
+	return out
+}
+
+// Files returns the files that tar extracted into an actor, by path.
+func (c *Cluster) Files(atespace, name string) map[string][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a := c.actors[key{atespace, name}]
+	if a == nil {
+		return nil
+	}
+	return maps.Clone(a.files)
+}
+
+// KillFront makes the guest of a running actor answer nothing, as when pid 1 has exited: the actor
+// stays RUNNING with no crash record (issue #1481). A SuspendActor of it passes and its snapshot holds
+// the dead front; RevertActor brings back the front and the files of the newest snapshot.
+func (c *Cluster) KillFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontDead = true
+	}
+}
+
+// ReviveFront ends KillFront and HangFront: the guest of the actor answers again, as when a router-side
+// failure that looked like a dead front ends.
+func (c *Cluster) ReviveFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontDead, a.frontHang = false, false
+	}
+}
+
+// SetWorker places the actor on the worker pod worker: its worker assignment names that pod.
+func (c *Cluster) SetWorker(atespace, name, worker string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.worker = worker
+	}
+}
+
+// FrontDownMessage is the message of the Unavailable that a guest call to a dead front gets. In the
+// default upstream CONNECT mode of the router (Substrate cmd/atenet/internal/router/cmd.go, flag
+// --upstream-connect), atunnel answers the CONNECT with 502 when it cannot dial the guest port
+// (internal/atunnel/ingress/ingress.go, handleConnect), and Envoy answers the gRPC request with its
+// upstream connect error local reply.
+const FrontDownMessage = "upstream connect error or disconnect/reset before headers. reset reason: remote connection failure, transport failure reason: delayed connect error: Connection refused"
+
+// RouterRefuse makes the router answer every guest call of the actor with an Unavailable of its own, as
+// the router's ext_proc does when it cannot route the call (Substrate cmd/atenet/internal/router/ingress/
+// errors.go, mapResumeError and parkingFullErr): the guest is not reached, so it says nothing about the
+// front. on false ends it.
+func (c *Cluster) RouterRefuse(atespace, name string, on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.routerRefuse = on
+	}
+}
+
+// HangFront makes the dead front of KillFront take a guest call and never answer, so the caller runs into
+// its own deadline. A refusing front answers Unavailable at once; this one is silent.
+func (c *Cluster) HangFront(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.frontHang = true
+	}
+}
+
+// DropSnapshots removes the snapshots of an actor, as for an actor that never suspended.
+func (c *Cluster) DropSnapshots(atespace, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.snapshots, a.snapState = nil, nil
+	}
+}
+
+// FailNextReverts makes the next n RevertActor calls for an actor fail with ResourceExhausted.
+func (c *Cluster) FailNextReverts(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failRevert = n
+	}
+}
+
+// FailProbe makes the next n resumes of a suspended actor fail the wakeup probe: the actor ends
+// CRASHED with its snapshots kept, and the call fails with Internal.
+func (c *Cluster) FailProbe(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failProbe = n
+	}
+}
+
+// FailNextPolicyReads makes the next n GetActorEgressPolicy calls for an actor fail with Unavailable,
+// so a driver call that writes the policy fails (issue #1481: the write after RevertActor).
+func (c *Cluster) FailNextPolicyReads(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failPolicyGets = n
+	}
+}
+
+// FailPolicyReadsAfterRevert makes the n GetActorEgressPolicy calls for an actor that follow the next
+// RevertActor that works fail with Unavailable: the write after the revert fails, the calls before it
+// work (issue #1481).
+func (c *Cluster) FailPolicyReadsAfterRevert(atespace, name string, n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.failPolicyAfterRevert = n
+	}
+}
+
+// FailNextResumesAfter lets the next skip ResumeActor calls for an actor work, and then fails n of them
+// with Unavailable (the resume after the first-boot seal, issue #1481).
+func (c *Cluster) FailNextResumesAfter(atespace, name string, skip, n int) {
+	c.mu.Lock()
+	a := c.actors[key{atespace, name}]
+	if a == nil { // the actor is created next: the call applies to it
+		if c.armed == nil {
+			c.armed = map[key][2]int{}
+		}
+		c.armed[key{atespace, name}] = [2]int{skip, n}
+	}
+	c.mu.Unlock()
+	if a != nil {
+		a.smu.Lock()
+		a.failSkip, a.failRes = skip, n
+		a.smu.Unlock()
+	}
+}
+
+// PutFile writes a file into the guest of an actor, as an agent's write to its home does.
+func (c *Cluster) PutFile(atespace, name, path string, body []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.files[path] = body
 	}
 }
 

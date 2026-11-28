@@ -76,10 +76,20 @@ type Agent struct {
 	// Forge is the sealed code-host credential that the agent's forge routes name (#1086 part C), nil
 	// when it has none. Only an active agent's credential goes into the state.
 	Forge *ForgeCredential
+	// Actor is the agent's Agent Substrate actor (issue #1386), nil when it has none with a recorded UID
+	// (OpenShell, or an actor not created yet). Only an active agent's actor goes into the state, so
+	// the gateway knows the org and the agent of the actor's JWT.
+	Actor *Actor
 	// Limit is the agent's budget net of spend; LimitErr is set instead when it could not be computed.
 	// Only agents with a key are looked at.
 	Limit    *gateway.Limit
 	LimitErr error
+}
+
+// Actor is the Substrate identity of an agent's sandbox actor: its workspace (atespace), its name and its
+// UID. The plan adds the org slug and the agent ref.
+type Actor struct {
+	Atespace, Name, UID string
 }
 
 // ForgeCredential is an agent's sealed code-host token (#1086 part C): the gateway opens the file and
@@ -217,6 +227,8 @@ type Probe struct {
 	Name     string
 	Target   string
 	Material string
+	// KeyID is the probe key's ID: the prober waits until koinon-gateway serves it (#1260).
+	KeyID string
 }
 
 // ProblemKind says what a Problem is about, for the pass metrics.
@@ -348,6 +360,7 @@ func (p *Planner) Begin(in Input) *Draft {
 	var (
 		keys   []gateway.Key
 		egress []route.Route
+		actors []gateway.EgressActor
 	)
 	for _, a := range in.Agents {
 		if a.Key.ID != "" {
@@ -358,6 +371,11 @@ func (p *Planner) Begin(in Input) *Draft {
 		}
 		if a.Active {
 			egress = append(egress, a.Egress...)
+			if a.Actor != nil {
+				actors = append(actors, gateway.EgressActor{
+					Atespace: a.Actor.Atespace, Name: a.Actor.Name, UID: a.Actor.UID, Org: a.Ref.Org, Agent: a.Ref.Name,
+				})
+			}
 		}
 	}
 	providers := make([]gateway.Provider, 0, len(in.Providers))
@@ -369,6 +387,7 @@ func (p *Planner) Begin(in Input) *Draft {
 	}
 	d.state = gateway.State{Keys: keys, Providers: providers, MCP: p.toolTargets(), Tools: tools}
 	d.state.EgressRoutes = egress
+	d.state.EgressActors = actors
 	p.warnUnpriced(d.state)
 	// Spend limits net of recorded spend (plan item L1). An agent whose budget cannot be computed
 	// fails closed (its last pushed limit, or zero) and is reported; it never stops the pass for the
@@ -1086,7 +1105,7 @@ func (pl *Plan) applyMCP(ctx context.Context, lk Lookups) ([]Probe, error) {
 		state.GrantTools(ref, gateway.ToolGrant{Target: s.target(), All: true})
 		probes = append(probes, Probe{
 			Org: s.Org.ID, OrgSlug: s.Org.Slug, Server: s.ID, Name: s.Name, Target: s.target(),
-			Material: material,
+			Material: material, KeyID: key.ID,
 		})
 	}
 	return probes, nil

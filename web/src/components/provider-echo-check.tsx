@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -11,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { EchoDiffSegment_Op, ProviderService, type EchoCheck, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { describeError } from '@/lib/api-error'
 import { useOrg } from '@/lib/org-context'
 
 /** Diff shows one side of an echo check's diff, the line sent or the reply, marking what differs. */
@@ -89,7 +89,7 @@ export function ProviderEchoCheck({ provider, models }: { provider: Provider; mo
       )}
       {check.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>The check did not run: {ConnectError.from(check.error).rawMessage}</AlertDescription>
+          <AlertDescription>The check did not run: {describeError(check.error).message}</AlertDescription>
         </Alert>
       )}
       {last && (

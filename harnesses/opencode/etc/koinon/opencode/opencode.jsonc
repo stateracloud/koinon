@@ -4,7 +4,8 @@
 // /etc/koinon/opencode/opencode.jsonc, which is OpenCode's global config because koinon-opencode
 // sets OPENCODE_CONFIG_DIR=/etc/koinon/opencode. The KOINON_* values come from koinon-opencode's
 // arguments; KOINON_MODEL_KEY is the agent's agentgateway key, an OpenShell placeholder inside a
-// sandbox. See harnesses/opencode/README.md.
+// sandbox, or on Agent Substrate the public placeholder that Substrate replaces with the actor
+// JWT. See harnesses/opencode/README.md.
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "koinon/{env:KOINON_MODEL}",
@@ -142,6 +143,12 @@
           "Authorization": "Bearer {env:KOINON_MODEL_KEY}"
         },
         "oauth": false,
+        // Request timeout in ms. OpenCode's default is 60 s. One call has two stages, each up to the
+        // gateway call timeout (mcpgateway.DefaultCallTimeout): the approval wait and the upstream call.
+        // So keep this at or above mcpgateway.MinDrain (4 minutes). v0.1 sends no progress
+        // notifications. A Go spec (internal/mcpgateway, "the OpenCode MCP request timeout") checks it.
+        // ADR 0097 section 14.
+        "timeout": 270000,
         // Tools reach the model one by one as koinon_<tool>, not through OpenCode's code mode.
         "codemode": false
       }

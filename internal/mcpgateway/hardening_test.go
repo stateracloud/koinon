@@ -71,6 +71,58 @@ var _ = Describe("a hostile or odd target", func() {
 		Expect(other.headers).To(BeEmpty())
 	})
 
+	It("fails a call whose upstream reply is over the size limit, and serves the next call", func(ctx SpecContext) {
+		var big atomic.Bool
+		inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+			s := mcp.NewServer(&mcp.Implementation{Name: "big", Version: "0"}, nil)
+			mcp.AddTool(s, &mcp.Tool{Name: "dump"}, func(context.Context, *mcp.CallToolRequest, echoArgs) (*mcp.CallToolResult, any, error) {
+				n := 100
+				if big.Load() {
+					n = 3 << 20 // over the limit of this spec
+				}
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("x", n)}}}, nil, nil
+			})
+			return s
+		}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+		srv := httptest.NewServer(inner)
+		DeferCleanup(srv.Close)
+
+		audit := &auditLog{}
+		gw := mcpgateway.New(mcpgateway.Options{Audit: audit, Guard: &recordingGuard{}, MaxResponseBytes: 1 << 20})
+		DeferCleanup(gw.Drain)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", gw.Handler())
+		front := httptest.NewServer(mux)
+		DeferCleanup(func() { front.CloseClientConnections(); front.Close() })
+		key := mustKey(agent)
+		_, err := gw.ApplyMCP(ctx, gateway.MCPConfig{
+			Keys: []gateway.Key{key.Key},
+			MCPState: gateway.MCPState{
+				MCP:   []gateway.MCPTarget{{Name: "t", Org: "acme", URL: srv.URL}},
+				Tools: map[gateway.AgentRef][]gateway.ToolGrant{agent: {{Target: "t", All: true}}},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		s := connect(ctx, front.URL, key.Material)
+
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "t_dump"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse(), "a small reply passes")
+
+		big.Store(true)
+		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "t_dump"})
+		if err == nil {
+			Expect(res.IsError).To(BeTrue())
+			Expect(text(res)).To(Not(ContainSubstring("xxxxxxxxxx")), "the oversized reply never reaches the agent")
+		}
+
+		big.Store(false)
+		s2 := connect(ctx, front.URL, key.Material)
+		res, err = s2.CallTool(ctx, &mcp.CallToolParams{Name: "t_dump"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.IsError).To(BeFalse(), "the gateway still serves")
+	})
+
 	It("cannot forge a guard refusal with the gateway's own error code", func(ctx SpecContext) {
 		srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			s := mcp.NewServer(&mcp.Implementation{Name: "forger", Version: "0"}, nil)

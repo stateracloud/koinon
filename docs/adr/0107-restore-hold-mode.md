@@ -106,6 +106,22 @@ as long as the hold lasted. Decided by procoduck, 2026-11-11: **ready but deny-a
   (`helm upgrade <release> <chart> --reuse-values --set restoreHold=false --wait`), because `set env` leaves the
   gateway on the deny-all config. The drill does this after the guide's release block.
 
+## Amendment 2026-11-26: koinon-gateway takes the hold flag (issue #1358)
+
+The default MCP driver is `koinon` (#1239). koinon-gateway is not ready before it applies a first State revision, and
+the held reconciler is the only writer of revisions and publishes none, so `helm install --wait` of a held install
+timed out on the mcp-gateway Deployment (the restore drill was red on rc.30). The same holds for the model gateway
+with `gateway.model.driver=koinon`.
+
+- While `restoreHold` is true, the chart passes `--restore-hold` to both koinon-gateway Deployments. With the flag,
+  `/readyz` answers 200 before the first revision, and the MCP and model paths refuse every request (503 with the
+  hold message), whatever config the pod holds. The held reconciler still publishes nothing.
+- The egress listener of a held koinon-gateway refuses every request too (issue #1390): 503, reason `held` in the
+  `Koinon-Egress-Refusal` header, before the actor token check and the route match, whatever routes the pod holds
+  (also the platform routes of `--egress-routes-file`). The log line holds no body, path or host.
+- The release is the same rollout: the chart stops rendering the flag. Checks: `hack/chart-check.d/99-restore-hold.sh`,
+  the chart smoke test (a held gateway is ready) and the `koinongateway` restore-hold spec.
+
 ## Alternatives considered
 
 - **A database-backed hold row** (a setting an admin flips live). Releasable without a rollout. But a dump taken

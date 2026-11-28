@@ -4,8 +4,8 @@
 # Chart assertions: the read-only observer access to the Substrate worker namespace (issue #1162,
 # ADR 0120 section 6). Sourced in order by hack/chart-check.sh; it uses that script's helpers.
 
-wobs=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+wobs=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 wobsT=(--show-only templates/substrate-observer.yaml)

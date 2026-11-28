@@ -388,7 +388,7 @@
                 "replicas": {"type": "integer", "minimum": 2},
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
                 "shutdownDelaySeconds": {"type": "integer", "minimum": 0},
-                "drainTimeoutSeconds": {"type": "integer", "minimum": 1},
+                "drainTimeoutSeconds": {"type": "integer", "minimum": 240},
                 "podDisruptionBudget": {
                   "type": "object",
                   "additionalProperties": false,
@@ -399,6 +399,24 @@
                 "nodeSelector": {"$ref": "#/definitions/map"},
                 "tolerations": {"type": "array"},
                 "affinity": {"$ref": "#/definitions/map"},
+                "egress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {"type": "boolean"},
+                    "port": {"type": "integer", "minimum": 1, "maximum": 65535, "not": {"enum": [15020, 15021]}},
+                    "caBundle": {"type": "string"},
+                    "actorToken": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "issuer": {"$ref": "#/definitions/nonEmpty"},
+                        "keyId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                        "existingSecret": {"type": "string"}
+                      }
+                    }
+                  }
+                },
                 "recipientKey": {
                   "type": "object",
                   "additionalProperties": false,
@@ -468,7 +486,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "driver": {"enum": ["agentgateway", "koinon"]},
+            "driver": {"enum": ["", "agentgateway", "koinon"], "description": "Empty: koinon with execution.driver=substrate, agentgateway otherwise."},
             "koinon": {
               "type": "object",
               "additionalProperties": false,
@@ -767,9 +785,20 @@
           "properties": {
             "controlAddress": {"type": "string"},
             "routerAddress": {"type": "string"},
+            "routerServerName": {"type": "string"},
             "caSecret": {"type": "string"},
             "serverName": {"type": "string"},
             "tokenAudience": {"type": "string"},
+            "provisioner": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "tokenAudience": {"type": "string", "minLength": 1},
+                "resources": {"type": "object"}
+              }
+            },
             "guestKey": {
               "type": "object",
               "additionalProperties": false,
@@ -781,6 +810,7 @@
             },
             "guestImage": {"type": "string"},
             "allowUnhardened": {"type": "boolean"},
+            "goldenSnapshots": {"type": "boolean"},
             "runtimeClassTiers": {"type": "object", "additionalProperties": {"enum": ["vm", "hardened", "dev"]}},
             "defaultTier": {"enum": ["", "vm", "hardened", "dev"]},
             "imageMirrors": {"type": "object", "additionalProperties": {"type": "string"}},
@@ -807,7 +837,7 @@
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["host", "url"],
-                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https://"}}
+                    "properties": {"host": {"$ref": "#/definitions/nonEmpty"}, "url": {"type": "string", "pattern": "^https?://"}, "allowHTTP": {"type": "boolean"}}
                   }
                 },
                 "clusterDomain": {"$ref": "#/definitions/nonEmpty"},
@@ -820,7 +850,7 @@
                 "egress": {
                   "type": "object",
                   "additionalProperties": false,
-                  "properties": {"cidrs": {"type": "array", "items": {"type": "string"}}, "exceptCIDRs": {"type": "array", "items": {"type": "string"}}}
+                  "properties": {"cidrs": {"type": "array", "items": {"type": "string"}}, "exceptCIDRs": {"type": "array", "items": {"type": "string"}}, "extra": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["cidr", "port"], "properties": {"cidr": {"type": "string", "minLength": 1}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}}}
                 },
                 "resources": {"type": "object"},
                 "nodeSelector": {"type": "object"},
@@ -828,6 +858,25 @@
               }
             },
             "gatewayClientNamespaceSelector": {"type": "object"},
+            "actorJwt": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "issuer": {"type": "string", "pattern": "^(https://[^/?#]+)?$"},
+                "ca": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "signerName": {"type": "string"},
+                    "labelSelector": {"type": "object"},
+                    "configMap": {"type": "string"},
+                    "configMapKey": {"$ref": "#/definitions/nonEmpty"}
+                  }
+                },
+                "idpPodSelector": {"type": "object"},
+                "idpPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+              }
+            },
             "namespace": {"$ref": "#/definitions/nonEmpty"},
             "workerNamespace": {"$ref": "#/definitions/nonEmpty"},
             "workerObserver": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
@@ -891,6 +940,7 @@
               "properties": {
                 "enabled": {"type": "boolean"},
                 "controlPlaneApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
+                "koinonIngressPorts": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
                 "apiOnlyApps": {"type": "array", "items": {"$ref": "#/definitions/nonEmpty"}},
                 "imageSource": {
                   "type": "object",
@@ -1160,7 +1210,16 @@
             "enabled": {"type": "boolean"},
             "skipCapabilityCheck": {"type": "boolean"},
             "labels": {"type": "object", "additionalProperties": {"type": "string"}},
-            "durableStrandedFor": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"}
+            "durableStrandedFor": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"},
+            "ateFilesystem": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "freeBelowPercent": {"type": "number", "exclusiveMinimum": 0, "maximum": 100},
+                "for": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"}
+              }
+            }
           }
         },
         "grafanaDashboard": {

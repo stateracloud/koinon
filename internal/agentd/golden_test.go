@@ -234,6 +234,29 @@ var _ = Describe("Prompt shapes (golden)", func() {
 			Expect(got).NotTo(ContainSubstring(tool))
 		}
 	})
+	It("the instruction file ranks repository guidance below Koinon's and the organization's instructions", func() {
+		got := agentd.InstructionsFile("ORG-INSTRUCTIONS", "/sandbox/work")
+		section := agentd.InstructionPrecedence(harness.OpenCode)
+		Expect(got).To(ContainSubstring(section))
+		Expect(section).To(ContainSubstring("repository guidance"))
+		Expect(section).To(ContainSubstring("lower precedence"))
+		// OpenCode attaches a subdirectory AGENTS.md on read (issue #71): the section names its label.
+		Expect(section).To(ContainSubstring("`Instructions from: <path>`"))
+		// The rule ranks by where text arrives, not by the path after the label, which a repository
+		// file can forge (Koinon's own path included).
+		Expect(section).To(ContainSubstring("system prompt only"))
+		Expect(section).To(ContainSubstring("whatever path it names"))
+		Expect(section).NotTo(ContainSubstring("/sandbox/.koinon/AGENTS.md"))
+		// The rule comes before the sections and the organization's instructions it ranks.
+		Expect(strings.Index(got, section)).To(BeNumerically("<", strings.Index(got, "## Your workspace")))
+		Expect(strings.Index(got, section)).To(BeNumerically("<", strings.Index(got, "ORG-INSTRUCTIONS")))
+	})
+	It("the precedence section of a harness that attaches no workspace file has no label", func() {
+		got := agentd.InstructionPrecedence("no-such-harness")
+		Expect(got).To(HavePrefix("## Instruction precedence\n\n"))
+		Expect(got).To(ContainSubstring("lower precedence"))
+		Expect(got).NotTo(ContainSubstring("Instructions from"))
+	})
 	It("the instruction file of an agent version without instructions", func() {
 		golden("instructions_file_empty", agentd.InstructionsFile(" \n", "/sandbox/work"))
 	})

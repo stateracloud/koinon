@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { BudgetService } from '@/gen/koinon/budget/v1alpha1/budget_pb'
+import { describeError } from '@/lib/api-error'
 import { formatUSD } from '@/lib/cost'
 import { amountError } from '@/lib/money'
 
@@ -28,14 +28,14 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
   if (limits.error) {
     return (
       <Alert variant="destructive" role="alert">
-        <AlertDescription>Could not load the continuation cap: {ConnectError.from(limits.error).rawMessage}</AlertDescription>
+        <AlertDescription>Could not load the continuation cap: {describeError(limits.error).message}</AlertDescription>
       </Alert>
     )
   }
   if (!loaded) return <p role="status">Loading the continuation cap…</p>
   return (
-    <section aria-labelledby="continuation-cap" className="grid gap-3">
-      <h2 id="continuation-cap" className="text-lg font-semibold">
+    <section aria-labelledby="continuation-cap" className="bg-card grid gap-3 rounded-lg border p-4 text-sm">
+      <h2 id="continuation-cap" className="font-semibold">
         Task spend cap for continuations
       </h2>
       <p className="text-muted-foreground text-sm">
@@ -49,7 +49,7 @@ export function OrgContinuationCap({ orgId }: { orgId: string }) {
         <CapForm
           initial={loaded.overridden ? loaded.taskSpendUsd : ''}
           pending={save.isPending}
-          error={save.error ? ConnectError.from(save.error).rawMessage : undefined}
+          error={save.error ? describeError(save.error).message : undefined}
           onSave={(usd) => save.mutateAsync({ orgId, taskSpendUsd: usd }).then(() => setEditing(false))}
           onCancel={() => setEditing(false)}
         />

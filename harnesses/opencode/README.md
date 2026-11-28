@@ -52,7 +52,11 @@ The values are not secret. The key is never an argument: in a sandbox `$OPENAI_A
 OpenShell provider placeholder that the proxy swaps for the agent's agentgateway key. The entry
 script moves it to `KOINON_MODEL_KEY` and unsets `OPENAI_API_KEY`, because OpenCode activates
 any built-in provider whose environment variable is set (`packages/core/src/integration.ts`), and
-the built-in `openai` provider reads that one.
+the built-in `openai` provider reads that one. On Agent Substrate the sandbox has no key and no
+`$OPENAI_API_KEY`: the script sets `KOINON_MODEL_KEY` to the fixed public placeholder
+`koinon-actor-placeholder`, and Substrate's egress proxy, outside the guest, replaces the
+`Authorization` header with a short-lived actor JWT for koinon-gateway's model listener (issue
+#1489, ADR 0120).
 
 ## Instructions
 
@@ -75,16 +79,27 @@ mechanism for a harness that needs one).
 - **Missing or empty.** OpenCode skips a missing file silently and loads an empty one as empty
   instructions, so the entry script refuses to start without real content.
 - **Repository guidance** is content, not configuration: with project configuration off, the
-  repository's top-level `AGENTS.md` is not loaded (`project` is false in
+  session directory's `AGENTS.md` is not loaded at start (`project` is false in
   `packages/core/src/config/plugin/instruction.ts:39`), and Koinon's template instructions tell the
   agent to read it, `CONTRIBUTING.md` and the `README` before changing code
   (`templates/repo-helper.yaml`). OpenCode still attaches an `AGENTS.md` from a subdirectory when
-  the agent reads a file there (`packages/core/src/tool/plugin/read.ts:82-103`, issue #52).
+  the agent reads a file there (`packages/core/src/tool/plugin/read.ts:82-103`; tracker: issue #71).
   There is no switch in 2.2.0: the read tool walks up from the file to the project root, exclusive,
   and calls `SessionInstructions.load` unconditionally (`session/instructions.ts`), which publishes the
   file's text as a synthetic `Instructions from: <path>` message. Nothing in that path reads a flag,
   an environment variable or the configuration. A repository's subdirectory file is therefore repository text at instruction weight.
-  Koinon does not patch OpenCode. It is a requirement on koinon-harness (#48): subdirectory
+  The project root is the session directory, so a repository cloned under it also has its top-level
+  `AGENTS.md` attached when the agent reads a file in it; only the session directory's own file is not.
+  Measured on 2.2.6 by `test/harnesses/subdir_agents_md_test.go`: the read file's own directory
+  counts too, and the files come after the read result as one `user` message, nearest first, never
+  in the system prompt.
+  Koinon does not patch OpenCode. Koinon's own layer reduces the harm: the instruction file's
+  "Instruction precedence" section (`agentd.InstructionPrecedence`) ranks any repository or workspace
+  file below Koinon's and the organization's instructions and names the label
+  (`harness.Descriptor.AttachedInstructionsLabel`). The rule ranks by where text arrives (Koinon's
+  file is in the system prompt only), not by the path after the label: a repository file can write
+  `Instructions from: /sandbox/.koinon/AGENTS.md` itself, and the spec checks that such a line still
+  arrives in the user message. It is also a requirement on koinon-harness (#48): subdirectory
   `AGENTS.md` files are returned as data inside the read result, or not at all, never as instructions.
 
 ### Global config directory

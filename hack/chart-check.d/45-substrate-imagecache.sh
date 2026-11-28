@@ -6,8 +6,8 @@
 # script's helpers (render, has, lacks, ...). The operator image source (imageCache.enabled=false) is in
 # 44-substrate-worker.sh.
 
-isub=(--set execution.driver=substrate --set execution.substrate.controlAddress=api.ate-system.svc:443
-	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 --set execution.substrate.tokenAudience=ateapi
+isub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443
+	--set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 --set execution.substrate.tokenAudience=ateapi
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 icache=(--show-only templates/substrate-imagecache.yaml)
@@ -151,3 +151,20 @@ if grep -Eq 'resources: \[(secrets|pods|roles|rolebindings|serviceaccounts)' <<<
 lacks "the CA Job renders no key material" 'tls\.key|PRIVATE KEY' "${isub[@]}" "${icaf[@]}"
 lacks "no Kyverno in the CA Job" '[Kk]yverno' "${isub[@]}" "${icaf[@]}"
 [ "$(render "${isub[@]}" "${icaf[@]}")" == "$icadocs" ] || fail "the CA Job render must be deterministic"
+
+# egress.extra (issue #1091): off by default; one rule for each entry. The default render keeps today's egress: DNS and 443.
+ic_default=$(render "${isub[@]}" "${icache[@]}")
+ic_extra=$(render "${isub[@]}" "${icache[@]}" --set 'execution.substrate.imageCache.egress.extra[0].cidr=172.18.0.0/16' --set 'execution.substrate.imageCache.egress.extra[0].port=5000')
+[ "$(grep -c "protocol: TCP" <<<"$ic_extra")" -eq "$(( $(grep -c "protocol: TCP" <<<"$ic_default") + 1 ))" ] || fail "one egress.extra entry adds exactly one TCP port line, and the default adds none"
+[ "$(grep -c 'ipBlock:' <<<"$ic_extra")" -eq "$(( $(grep -c 'ipBlock:' <<<"$ic_default") + 1 ))" ] || fail "one extra ipBlock must come from one egress.extra entry"
+grep -Fq 'cidr: "172.18.0.0/16"' <<<"$ic_extra" || fail "egress.extra must name its CIDR"
+grep -Eq 'port: 5000, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must name its port"
+grep -Eq 'port: 443, protocol: TCP' <<<"$ic_extra" || fail "egress.extra must keep the 443 rule"
+capacity_refused "an egress.extra entry without a port" "port" "${isub[@]}" "${icache[@]}" --set 'execution.substrate.imageCache.egress.extra[0].cidr=172.18.0.0/16'
+has "an http upstream renders with allowHTTP" '"destination": "/r.example.com"' "${isub[@]}" --set 'execution.substrate.imageCache.upstreams[0].host=r.example.com' --set 'execution.substrate.imageCache.upstreams[0].url=http://r.example.com:5000' --set 'execution.substrate.imageCache.upstreams[0].allowHTTP=true' "${icache[@]}"
+# A host with a port (issue #1091): the mirror key is the real host, and the path segment after the cache host and the Zot
+# destination have no colon (ateapi and atelet refuse a colon in a repository path).
+pp=(--set 'execution.substrate.imageCache.upstreams[0].host=localhost:5001' --set 'execution.substrate.imageCache.upstreams[0].url=http://kind-registry:5000' --set 'execution.substrate.imageCache.upstreams[0].allowHTTP=true')
+has "the mirror key of a host with a port is the real host" '"localhost:5001=koinon-imagecache\.koinon\.svc:[0-9]+/localhost_5001"' "${isub[@]}" "${pp[@]}" "${icfg[@]}"
+lacks "no colon in the mirror path of a host with a port" 'koinon\.svc:[0-9]+/localhost:' "${isub[@]}" "${pp[@]}" "${icfg[@]}"
+has "the Zot destination of a host with a port has no colon" '"destination": "/localhost_5001"' "${isub[@]}" "${pp[@]}" "${icache[@]}"

@@ -56,8 +56,9 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 		return false, nil
 	}
 
+	// cur is the recorded sandbox name; the driver calls name its actor (ActorRef, issue #1386).
 	cur := w.sb.SandboxName
-	sb, err := r.backend.GetSandbox(ctx, ws, cur)
+	sb, err := r.backend.GetSandbox(ctx, ws, w.sb.ActorRef())
 	gone := errors.Is(err, execution.ErrNotFound)
 	if err != nil && !gone {
 		return false, err
@@ -83,12 +84,12 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 					return true, r.record(ctx, w, sb, w.sb.SpecHash, note)
 				}
 			}
-			if err := r.deleteSandbox(ctx, w, ws, cur, "the task ended"); err != nil {
+			if err := r.deleteSandbox(ctx, w, ws, w.sb.ActorRef(), "the task ended"); err != nil {
 				return false, err
 			}
 			r.log.Info("deleted the sandbox of an ended task", w.logAttrs()...)
 			// Not "sandbox.recreate" and no phase: ADR 0054's loop guard counts those.
-			if err := audit.RecordAfter(ctx, r.pool, audit.Event{
+			if err := audit.RecordAfter(ctx, r.db, audit.Event{
 				Org: w.org.ID, Actor: audit.System("koinon-reconciler:ephemeral-cleanup"), Action: "sandbox.delete", TargetKind: "agent", TargetID: w.agent.ID.String(),
 				After: map[string]any{"sandbox": cur, "reason": "ephemeral task ended"},
 			}); err != nil {

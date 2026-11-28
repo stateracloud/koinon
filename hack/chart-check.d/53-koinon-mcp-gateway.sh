@@ -47,10 +47,16 @@ for p in 15020 15021; do
 done
 
 # Drain: the pod grace period is the shutdown delay, the drain timeout and 30 seconds, and the process gets the timeout.
-has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 65$' "${mcp[@]}" "${mcp_only[@]}"
-has "koinon-gateway is told the drain timeout" '--drain-timeout=30s$' "${mcp[@]}" "${mcp_only[@]}"
+has "koinon-gateway grace period is the drain timeout plus 30" 'terminationGracePeriodSeconds: 305$' "${mcp[@]}" "${mcp_only[@]}"
+has "koinon-gateway is told the drain timeout" '--drain-timeout=270s$' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway is told the shutdown delay" '--shutdown-delay=5s$' "${mcp[@]}" "${mcp_only[@]}"
-has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 95$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=60 "${mcp_only[@]}"
+has "koinon-gateway grace period follows the drain timeout" 'terminationGracePeriodSeconds: 335$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=300 "${mcp_only[@]}"
+
+# A drain shorter than twice the call timeout (an approval wait and an upstream call, 120 s each) would cut each call in flight at a rollout (issue 1347).
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=200 >/dev/null 2>&1; then
+  fail "koinon-gateway accepts a drain timeout shorter than twice its call timeout"
+fi
+has "koinon-gateway accepts a drain timeout equal to twice its call timeout" '--drain-timeout=240s$' "${mcp[@]}" --set gateway.mcp.koinon.drainTimeoutSeconds=240 "${mcp_only[@]}"
 has "koinon-gateway readiness is /readyz" 'path: /readyz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway liveness is /healthz" 'path: /healthz,' "${mcp[@]}" "${mcp_only[@]}"
 has "koinon-gateway has a PodDisruptionBudget" '^kind: PodDisruptionBudget$' "${mcp[@]}" "${mcp_only[@]}"
@@ -126,15 +132,48 @@ grep -q 'openshell.ai/managed-by' <<<"$mcp_ing" || fail "koinon-gateway does not
 grep -q 'app.kubernetes.io/instance: koinon$' <<<"$mcp_ing" || fail "koinon-gateway does not admit Koinon's own pods"
 if grep -q 'ipBlock' <<<"$mcp_ing"; then fail "koinon-gateway ingress admits an ipBlock"; fi
 sub_ing=$(awk '/^  ingress:/{f=1} f' <<<"$(netpol_doc koinon-mcp-gateway --set execution.driver=substrate \
-  --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:80 \
+  --set gateway.model.driver=koinon --set gateway.mcp.driver=koinon --set execution.substrate.controlAddress=api.ate-system.svc:443 --set execution.substrate.routerAddress=atenet-router.ate-system.svc:443 \
   --set execution.substrate.tokenAudience=ateapi --set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev \
   --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)")
-grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"
+grep -q 'kubernetes.io/metadata.name: "ate-system"$' <<<"$sub_ing" || fail "koinon-gateway does not admit Substrate's namespace (execution.driver=substrate)"
+# Issue #1489: on Substrate the MCP port admits only atenet-egress, which adds the actor JWT, not the whole namespace.
+grep -q 'app: atenet-egress$' <<<"$sub_ing" || fail "koinon-gateway's MCP port does not admit atenet-egress on Substrate"
+if grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing"; then fail "koinon-gateway's MCP port admits all of Substrate's namespace (issue #1489)"; fi
 # Substrate: the control plane's egress reaches koinon-gateway's MCP pods by default, and not with the fallback.
 sub_np=$(render_default -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml)
 grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
-sub_fb=$(render_default -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" --show-only templates/substrate-networkpolicy.yaml)
-if grep -q 'component: mcp-gateway$' <<<"$sub_fb"; then fail "the Substrate control plane egress reaches koinon-gateway with the fallback"; fi
+# Issue #1489: Substrate refuses the fallback, because only koinon-gateway checks the actor JWT.
+if render_default -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" >/dev/null 2>&1; then fail "Substrate renders with the agentgateway MCP fallback"; fi
+# Issue #1372: the control plane reaches koinon-gateway's MCP pods on the named ports an actor needs, not on every port.
+# The stats port (the metrics of all agents) and the health port stay closed.
+# mcp_rules <rendered policy>: each egress rule that has a koinon-gateway peer, each ended by a line "@@@". A rule ends at the
+# next rule, at the end of the egress list or at a document boundary.
+mcp_rules() { awk '
+function flush() { if (buf ~ /component: mcp-gateway/) printf "%s@@@\n", buf; buf = "" }
+/^---$/ { flush(); f = 0; next }
+/^  egress:/ { flush(); f = 1; next }
+f && /^    - / { flush(); buf = $0 "\n"; next }
+f && /^  [a-z]/ { flush(); f = 0; next }
+f { buf = buf $0 "\n" }
+END { flush() }' <<<"$1"; }
+# mcp_rule_check <label> <rendered policy> <yes|no: egress listener on>: exactly one rule reaches koinon-gateway, and it lists
+# only the named ports of an actor.
+mcp_rule_check() {
+	local rules n
+	rules=$(mcp_rules "$2")
+	n=$(grep -c '^@@@$' <<<"$rules" || true)
+	[ "$n" = 1 ] || { fail "$1: $n egress rules reach koinon-gateway, want exactly one (a second rule can open every port)"; return; }
+	grep -q 'ports:' <<<"$rules" || fail "$1: the egress rule for koinon-gateway has no ports: every port would be open"
+	grep -q 'port: mcp,' <<<"$rules" || fail "$1: the egress rule for koinon-gateway does not name the mcp port"
+	if grep -Eq 'port: (stats|health|15020|15021)' <<<"$rules"; then fail "$1: the egress rule for koinon-gateway opens the stats or health port"; fi
+	if [ "$3" = yes ]; then
+		grep -q 'port: egress,' <<<"$rules" || fail "$1: the egress rule for koinon-gateway does not name the egress port with the egress listener"
+	elif grep -q 'port: egress,' <<<"$rules"; then
+		fail "$1: the egress rule for koinon-gateway names the egress port without the egress listener"
+	fi
+}
+mcp_rule_check "Substrate control plane" "$sub_np" no
+mcp_rule_check "Substrate control plane with the egress listener" "$(render_default -f "$CHART/ci/substrate-values.yaml" --set gateway.mcp.koinon.egress.enabled=true --show-only templates/substrate-networkpolicy.yaml)" yes
 grep -q 'port: 8081$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the tools port of koinon-api"
 grep -q 'cnpg.io/cluster: koinon-pg$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the Postgres pods"
 grep -q 'port: 5432$' <<<"$mcp_np" || fail "koinon-gateway egress does not name the Postgres port"

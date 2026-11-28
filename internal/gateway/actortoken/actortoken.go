@@ -29,8 +29,21 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// Audience is the audience of every actor token: the Koinon gateway.
+// Audience is the audience of every Ed25519 actor token (the OpenShell driver): the Koinon gateway.
 const Audience = "koinon-gateway"
+
+// The audiences of the Substrate actor JWT, one for each koinon-gateway listener (issue #1489, ADR 0120
+// amendment of 2026-11-27). atenet-egress mints the token of each gateway rule with the audience of that
+// listener, and each listener accepts only its own: a token copied from one listener's request is
+// refused on another.
+const (
+	AudienceModel  = "koinon-gateway-model"
+	AudienceMCP    = "koinon-gateway-mcp"
+	AudienceEgress = "koinon-gateway-egress"
+)
+
+// listenerAudiences are the Substrate listener audiences.
+var listenerAudiences = [...]string{AudienceModel, AudienceMCP, AudienceEgress}
 
 // Lifetimes (ADR 0120 section 1.2).
 const (
@@ -161,6 +174,7 @@ func (m *Minter) Mint(actor Actor, ttl time.Duration) (string, error) {
 }
 
 // Verifier checks actor tokens against public keys. It holds no private key.
+// Substrate uses SubstrateVerifier instead; this one stays for OpenShell (exit: #1386 PR B, after #1094).
 type Verifier struct {
 	issuer string
 	keys   map[string]ed25519.PublicKey
@@ -188,6 +202,20 @@ func (v *Verifier) WithClock(now func() time.Time) *Verifier {
 	c := *v
 	c.now = now
 	return &c
+}
+
+// Identify checks token and returns the actor it speaks for, so a Verifier is a route.Identifier: the
+// Ed25519 path of the OpenShell driver, where the token names the org and the agent itself.
+// exit: #1386 PR B, after #1094 (the OpenShell driver and this path go away). A nil Verifier refuses.
+func (v *Verifier) Identify(token string) (Actor, error) {
+	if v == nil {
+		return Actor{}, ErrInvalid
+	}
+	c, err := v.Verify(token)
+	if err != nil {
+		return Actor{}, err
+	}
+	return c.Actor, nil
 }
 
 // Verify checks token and returns its claims. Every failure is ErrInvalid.

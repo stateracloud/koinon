@@ -7,6 +7,7 @@ package koinon.task.v1alpha1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "koinon/run/v1alpha1/run.proto";
+import "koinon/task/v1alpha1/timeline.proto";
 
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1;taskv1alpha1";
 
@@ -73,6 +74,20 @@ enum ActorKind {
   ACTOR_KIND_USER = 1;
   ACTOR_KIND_AGENT = 2;
   ACTOR_KIND_SYSTEM = 3;
+  // A person who writes to the Koinon bot in Slack or Teams and has no linked Koinon account
+  // (ADR 0130). TaskEvent.actor_external names the person. Such a person can only write messages.
+  ACTOR_KIND_EXTERNAL = 4;
+}
+
+// ExternalActor is a person without a linked Koinon account who writes from a chat platform
+// (ADR 0130). It holds no display name and no other profile data.
+message ExternalActor {
+  // "slack" or "teams".
+  string platform = 1;
+  // The Slack team ID or the Teams tenant ID of the workspace in which the person wrote.
+  string team = 2;
+  // The Slack user ID or the Teams user ID.
+  string platform_user_id = 3;
 }
 
 // CreatorKind says what created a task.
@@ -136,8 +151,19 @@ message TaskEvent {
   string actor_agent_id = 5;
   // The run the event is about, if any.
   string run_id = 6;
+  // The free-form payload as stored. Prefer event: it is typed, and the reader fills it for old
+  // rows too.
   google.protobuf.Struct payload = 7;
   google.protobuf.Timestamp created_at = 8;
+  // The display name of actor_user_id, for a person's event; empty for other actors, an unnamed
+  // user or a deleted user. Never an email address. Any role that can read the task sees it.
+  string actor_display_name = 9;
+  // The typed event. It is not set for a kind that this server does not know, or for a payload that
+  // it cannot read.
+  TimelineEvent event = 10;
+  // The person who wrote an event of actor kind ACTOR_KIND_EXTERNAL; not set for other actors. Any
+  // role that can read the task sees it.
+  ExternalActor actor_external = 11;
 }
 
 // CreateTaskRequest describes the task and its first message. A person creating it through this

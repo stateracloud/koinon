@@ -73,6 +73,25 @@ func (s *Service) RunLimits(ctx context.Context, org pgtype.UUID) (RunLimits, er
 	return runLimitsOf(st), err
 }
 
+// Limit is one run limit in force, with its platform default and its bounds: what an API shows
+// next to the value.
+type Limit struct{ Value, Default, Min, Max int }
+
+// RunLimitsView is RunLimits with the default and the bounds of each limit.
+type RunLimitsView struct {
+	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute, SandboxCreationsPerMinute Limit
+}
+
+// View returns the limits with their defaults and bounds.
+func (l RunLimits) View() RunLimitsView {
+	return RunLimitsView{
+		MaxConcurrentRuns:         Limit{l.MaxConcurrentRuns, DefaultMaxConcurrentRuns, MinMaxConcurrentRuns, MaxMaxConcurrentRuns},
+		TriggerConcurrency:        Limit{l.TriggerConcurrency, DefaultTriggerConcurrency, MinTriggerConcurrency, MaxTriggerConcurrency},
+		TriggerRatePerMinute:      Limit{l.TriggerRatePerMinute, DefaultTriggerRatePerMinute, MinTriggerRatePerMinute, MaxTriggerRatePerMinute},
+		SandboxCreationsPerMinute: Limit{l.SandboxCreationsPerMinute, DefaultSandboxCreationsPerMinute, MinSandboxCreationsPerMinute, MaxSandboxCreationsPerMinute},
+	}
+}
+
 // merge applies one patched field to the stored override: nil keeps it, 0 clears it.
 func merge(cur pgtype.Int4, patch *int) pgtype.Int4 {
 	switch {

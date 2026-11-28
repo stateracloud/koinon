@@ -174,6 +174,10 @@ type runner struct {
 	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
 	// requests resolve their paths in it.
 	sbWorkspace, sbName string
+	// egress is set by writeGitConfig when git of this run goes through the gateway's egress
+	// prefix with an actor token (actortoken.go); orgSlug is the token's org, read once.
+	egress  bool
+	orgSlug string
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -318,6 +322,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 	t := time.NewTicker(r.p.cfg.Heartbeat)
 	defer t.Stop()
 	last := time.Now()
+	var notice revertNotice
 	for {
 		select {
 		case <-ctx.Done():
@@ -332,6 +337,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 		switch {
 		case err == nil:
 			last = time.Now()
+			r.noteRevert(ctx, &notice)
 		case errors.Is(err, pgx.ErrNoRows):
 			r.own.FenceFromDB(ctx)
 			return
@@ -545,12 +551,12 @@ func (r *runner) execute(ctx context.Context) error {
 	for attempt := 0; ; attempt++ {
 		r.home = sb.HomeGeneration
 		r.sandboxID = sb.SandboxID.String
-		main, ended, err = r.sweep(fctx, sb.Workspace, sb.SandboxName)
+		main, ended, err = r.sweepSlot(fctx, sb.Workspace, sb.ActorRef())
 		var sv *survivorsError
 		if !errors.As(err, &sv) {
 			break
 		}
-		out, herr := r.handleSurvivors(ctx, sb.Workspace, sb.SandboxName, sv)
+		out, herr := r.handleSurvivors(ctx, sb.Workspace, sb.ActorRef(), sv)
 		if herr != nil {
 			return r.execErr(ctx, "handle the stuck sandbox", herr)
 		}
@@ -571,7 +577,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "end the processes left in the sandbox", err)
 	}
-	workspace, sandbox := sb.Workspace, sb.SandboxName
+	// Every driver call names the sandbox's actor: on Agent Substrate each new actor gets its own name
+	// (issue #1386); elsewhere it is the sandbox name.
+	workspace, sandbox := sb.Workspace, sb.ActorRef()
 	log := r.log.With("sandbox", sandbox)
 	if unknown {
 		// Visible on the task timeline: the run is costlier than the price list suggests.
@@ -622,6 +630,18 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
 		return r.execErr(ctx, "write the git configuration", err)
+	}
+	if r.egress && !r.tokenOutside() {
+		defer r.keepActorToken(ctx, workspace, sandbox)()
+	}
+	if r.egress || r.p.cfg.ActorIdentityOutside {
+		// The agent clones through koinon-gateway: its forge credential must be served first. On Agent
+		// Substrate every model, MCP and egress call carries the actor JWT, and koinon-gateway knows the
+		// actor only from the State revision that holds it: that revision must be served first too, also
+		// for an agent without a forge grant (forgewait.go, issue #1489).
+		if err := r.waitForge(fctx); err != nil {
+			return r.execErr(ctx, "wait for koinon-gateway to serve the agent", err)
+		}
 	}
 
 	var stderr tail
@@ -841,6 +861,12 @@ func (r *runner) execErr(ctx context.Context, what string, err error) error {
 	if errors.As(err, &rq) {
 		return rq
 	}
+	if errors.Is(err, execution.ErrUnreachable) {
+		// The driver cannot connect to the sandbox data path (a wrong address, a failed TLS handshake, a client
+		// certificate the router refuses). Another worker would meet the same refusal and no stream ever opened,
+		// so this is no lost harness connection: fail the run at once with the dial error (issue #1446).
+		return &failure{reason: what + ": " + err.Error()}
+	}
 	if errors.Is(err, execution.ErrUnavailable) || errors.Is(err, execution.ErrFailedPrecondition) ||
 		errors.Is(err, execution.ErrStreamClosed) {
 		// The gateway or the sandbox is not reachable right now: resume later.
@@ -1011,11 +1037,8 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 		if kept[m.Seq] {
 			continue // the context guard kept this one whole and asked; it is not sent
 		}
-		var body struct {
-			Text string `json:"text"`
-		}
-		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
-			texts = append(texts, body.Text)
+		if t := promptMessage(m); t != "" {
+			texts = append(texts, t)
 			seqs = append(seqs, m.Seq)
 		}
 	}

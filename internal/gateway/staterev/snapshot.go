@@ -93,13 +93,18 @@ func FromProto(u *gwv1.StateUpdate) gateway.State {
 			Name: c.GetName(), Org: c.GetOrg(), Agent: c.GetAgent(), File: c.GetFile(), Scheme: c.GetScheme(), User: c.GetUser(),
 		})
 	}
+	for _, a := range u.GetEgress().GetActors() {
+		s.EgressActors = append(s.EgressActors, gateway.EgressActor{
+			Atespace: a.GetAtespace(), Name: a.GetName(), UID: a.GetUid(), Org: a.GetOrg(), Agent: a.GetAgent(), Run: a.GetRun(),
+		})
+	}
 	return s
 }
 
-// egressToProto returns the egress half, or nil when it has no route and no credential, so a State
-// without org routes gives the same message as before the half existed.
+// egressToProto returns the egress half, or nil when it has no route, no credential and no actor, so a
+// State without org routes gives the same message as before the half existed.
 func egressToProto(e gateway.EgressState) *gwv1.EgressState {
-	if len(e.EgressRoutes) == 0 && len(e.EgressCredentials) == 0 {
+	if len(e.EgressRoutes) == 0 && len(e.EgressCredentials) == 0 && len(e.EgressActors) == 0 {
 		return nil
 	}
 	out := &gwv1.EgressState{}
@@ -119,6 +124,14 @@ func egressToProto(e gateway.EgressState) *gwv1.EgressState {
 		})
 	}
 	slices.SortFunc(out.Credentials, func(a, b *gwv1.EgressCredential) int { return cmp.Compare(a.GetName(), b.GetName()) })
+	for _, a := range e.EgressActors {
+		out.Actors = append(out.Actors, &gwv1.EgressActor{
+			Atespace: a.Atespace, Name: a.Name, Uid: a.UID, Org: a.Org, Agent: a.Agent, Run: a.Run,
+		})
+	}
+	slices.SortFunc(out.Actors, func(a, b *gwv1.EgressActor) int {
+		return cmp.Or(cmp.Compare(a.GetAtespace(), b.GetAtespace()), cmp.Compare(a.GetName(), b.GetName()), cmp.Compare(a.GetUid(), b.GetUid()))
+	})
 	return out
 }
 

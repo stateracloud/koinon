@@ -5,6 +5,7 @@ package actortoken
 import (
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -87,6 +88,37 @@ func ParsePublicKey(b []byte) (ed25519.PublicKey, error) {
 		return nil, errors.New("the key is not an Ed25519 key")
 	}
 	return ed, nil
+}
+
+// SeedHexLen is the length of a minting key file: the 32-byte Ed25519 seed as hex.
+const SeedHexLen = 2 * ed25519.SeedSize
+
+// LoadSeedKey reads the minting key of a minter: one file that holds the Ed25519 seed as 64 hex
+// characters (surrounding space is ignored). It is the form that koinon-api ensure-secrets writes
+// (ensuresecrets.KindEd25519Key). The error never holds the file's text.
+func LoadSeedKey(file string) (ed25519.PrivateKey, error) {
+	fi, err := os.Stat(file)
+	if err != nil {
+		return nil, fmt.Errorf("actortoken: minting key: %w", err)
+	}
+	if !fi.Mode().IsRegular() || fi.Size() > maxKeyFile {
+		return nil, errors.New("actortoken: minting key: not a regular file of at most 4 KiB")
+	}
+	b, err := os.ReadFile(file) //nolint:gosec // the operator's mounted key file
+	if err != nil {
+		return nil, fmt.Errorf("actortoken: minting key: %w", err)
+	}
+	return ParseSeedKey(b)
+}
+
+// ParseSeedKey reads an Ed25519 seed written as 64 hex characters.
+func ParseSeedKey(b []byte) (ed25519.PrivateKey, error) {
+	s := strings.TrimSpace(string(b))
+	seed, err := hex.DecodeString(s)
+	if err != nil || len(s) != SeedHexLen {
+		return nil, fmt.Errorf("actortoken: minting key: want %d hex characters", SeedHexLen)
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
 }
 
 // MarshalPublicKey returns the PEM form that ParsePublicKey reads.

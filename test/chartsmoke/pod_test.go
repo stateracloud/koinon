@@ -6,9 +6,16 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"path"
@@ -581,6 +588,18 @@ func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c
 					for k, f := range volumeFiles(data, src.Secret.Items, v.Projected.DefaultMode) {
 						files[k] = f
 					}
+				case src.PodCertificate != nil:
+					// The kubelet writes the key and the chain into one bundle file. The smoke has no router, so a
+					// self-signed certificate stands in; the file must parse as the agentd driver reads it.
+					bundle, _ := fakeIdentity("pod certificate")
+					p := src.PodCertificate
+					if p.CredentialBundlePath == "" {
+						panic(fmt.Sprintf("%s: projected volume %s: a podCertificate source without credentialBundlePath is not modelled", owner, v.Name))
+					}
+					files[p.CredentialBundlePath] = volumeFile{bundle, mode}
+				case src.ClusterTrustBundle != nil:
+					_, ca := fakeIdentity("cluster trust bundle")
+					files[src.ClusterTrustBundle.Path] = volumeFile{ca, mode}
 				default:
 					panic(fmt.Sprintf("%s: projected volume %s has a source this suite does not model; add it to runner.volumes", owner, v.Name))
 				}
@@ -607,6 +626,31 @@ func (r *runner) volumes(ctx context.Context, owner string, ps corev1.PodSpec, c
 }
 
 // volumeFile is a file of a projected volume.
+// fakeIdentity makes a self-signed ECDSA certificate: the credential bundle of a podCertificate volume (the
+// private key, then the certificate) and the certificate alone (a trust bundle).
+func fakeIdentity(name string) (bundle, cert []byte) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, BasicConstraintsValid: true, IsCA: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		panic(err)
+	}
+	cert = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	bundle = append(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), cert...)
+	return bundle, cert
+}
+
 type volumeFile struct {
 	data []byte
 	mode int64

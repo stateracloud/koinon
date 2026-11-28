@@ -1,0 +1,172 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The provisioner (ADR 0128, issue 1398): the one Koinon pod that holds a global role in Agent Substrate. Substrate lets
+only its global owner create an atespace and has no narrower role, so a small pod of its own creates each org's atespace
+and writes the atespace's access policy: the reconciler gets editor, agentd gets viewer. It is "koinon-reconciler
+provision": the same image, no database, no key. The installer (koinon-api substrate install) makes its
+ServiceAccount an owner in Substrate's global access policy; this chart never writes that policy.
+
+It reads no Kubernetes object. Its ServiceAccount token is mounted only to ask the API server for TokenReviews, which
+check the reconciler's token (audience execution.substrate.provisioner.tokenAudience) on each request, so the one
+cluster-scoped grant here is create on tokenreviews.
+*/ -}}
+{{- if include "koinon.provisioner" . }}
+{{- $name := include "koinon.componentName" (list . "provisioner") }}
+{{- $rec := include "koinon.componentName" (list . "reconciler") }}
+{{- $agd := include "koinon.componentName" (list . "agentd") }}
+{{- $s := .Values.execution.substrate }}
+{{- $p := $s.provisioner }}
+{{- $_ := required "execution.substrate.controlAddress is required with execution.driver=substrate" $s.controlAddress }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-{{ .Release.Namespace }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-{{ .Release.Namespace }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+  annotations:
+    # Argo CD only: with the other Deployments. Helm and Flux ignore it.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "provisioner") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "provisioner") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: provisioner
+          image: {{ include "koinon.image" (list . .Values.reconciler.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - provision
+            - --listen={{ printf ":%d" (int $p.port) }}
+            - --token-audience={{ $p.tokenAudience }}
+            - --substrate-control-address={{ $s.controlAddress }}
+            - --substrate-token-file={{ include "koinon.substrateTokenDir" . }}/token
+            {{- if $s.caSecret }}
+            - --substrate-ca-file=/etc/koinon/substrate-ca/ca.crt
+            {{- end }}
+            {{- with $s.serverName }}
+            - --substrate-server-name={{ . }}
+            {{- end }}
+            - --caller=system:serviceaccount:{{ .Release.Namespace }}:{{ $rec }}
+            - --editor=user:system:serviceaccount:{{ .Release.Namespace }}:{{ $rec }}
+            - --viewer=user:system:serviceaccount:{{ .Release.Namespace }}:{{ $agd }}
+          ports:
+            - name: http
+              containerPort: {{ int $p.port }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $p.resources | nindent 12 }}
+          volumeMounts:
+            - name: substrate-token
+              mountPath: {{ include "koinon.substrateTokenDir" . }}
+              readOnly: true
+            {{- if $s.caSecret }}
+            - name: substrate-ca
+              mountPath: /etc/koinon/substrate-ca
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # The token that ateapi accepts: the provisioner's identity in Substrate.
+        - name: substrate-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ required "execution.substrate.tokenAudience is required with execution.driver=substrate" $s.tokenAudience | quote }}
+                  expirationSeconds: 3600
+                  path: token
+        {{- if $s.caSecret }}
+        - name: substrate-ca
+          secret:
+            secretName: {{ $s.caSecret }}
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "provisioner") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ int $p.port }}
+      targetPort: http
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only the reconciler may connect: it is the one caller. The TokenReview of each request checks who asks.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "provisioner") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "provisioner") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: http
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "reconciler") | nindent 14 }}
+{{- end }}
+{{- end }}

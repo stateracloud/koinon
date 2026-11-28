@@ -305,7 +305,7 @@ func usageSpec(env Env) {
 
 		// Chat completions carry reasoning_tokens inside completion_tokens_details, which
 		// agentgateway reads; the Messages API reports thinking_tokens inside
-		// output_tokens_details, which agentgateway v1.7.0 ignores (#78).
+		// output_tokens_details, which agentgateway v1.7.0 ignores (#1464).
 		for _, c := range cases {
 			if c.wantReasoning == 0 {
 				continue
@@ -321,14 +321,18 @@ func usageSpec(env Env) {
 					}
 				}
 				if c.format == modelformat.Anthropic {
-					KnownGap(env, "#78", expect)
+					KnownGap(env, "#1464", expect)
 					return
 				}
 				expect()
 			}
-			if c.format == modelformat.Anthropic {
-				It("records the thinking split of "+c.name+" (expected failure, #78)", check, SpecTimeout(time.Minute))
-			} else {
+			_, gapMessages := env.KnownGaps["#1464"]
+			switch {
+			case c.format == modelformat.Anthropic && gapMessages:
+				It("records the thinking split of "+c.name+" (expected failure, #1464)", check, SpecTimeout(time.Minute))
+			case c.format == modelformat.Anthropic:
+				It("records the thinking split of "+c.name, check, SpecTimeout(time.Minute))
+			default:
 				It("records the reasoning split of "+c.name, check, SpecTimeout(time.Minute))
 			}
 		}

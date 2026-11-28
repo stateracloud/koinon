@@ -6,11 +6,12 @@
 #   release   when a pull request merges (push to main): release the claims of the pull requests the
 #             pushed commits belong to. A pull request closed without a merge is released by its human
 #             (`hack/claim.sh release-pr <PR>` or `release <N>`; ADR 0104, no sweeper)
-#   claim     required check on every pull request: fails only when another human holds a claim on an
+#   claim     check on every pull request (not required since #682: it informs, the merge does not
+#             wait for it): fails only when another human holds a claim on an
 #             issue the pull request closes, or reserved an ADR number it adds. On a merge queue build
 #             (#225, ADR 0094 decision 4) it reads <N> from the queue ref and runs the base's
-#             `check-pr <N>`: the fencing point, a claim another human took while the pull request
-#             waited fails here
+#             `check-pr <N>`: a claim another human took while the pull request waited makes it
+#             red here (information only since #682; it does not eject the entry)
 #
 # No pull_request_target (#463, ADR 0082 amendment): GitHub blocks it by default for public
 # repositories (brownouts from 2026-11-09, permanent 2026-12-02). The `claim` check runs on

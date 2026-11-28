@@ -35,19 +35,6 @@ const (
 
 var errBadPageToken = connect.NewError(connect.CodeInvalidArgument, "page_token is not a next_page_token of this call")
 
-// platformAdmin returns the caller when it is a platform admin, else PermissionDenied. Membership of
-// an org does not count: an org admin or owner is not a platform admin.
-func platformAdmin(ctx context.Context) (*auth.Principal, error) {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
-	}
-	if !p.PlatformAdmin {
-		return nil, withReason(connect.NewError(connect.CodePermissionDenied, "only a platform admin can do this"), "PLATFORM_ADMIN_REQUIRED")
-	}
-	return p, nil
-}
-
 // pageSize clamps a requested page size to (0, maxSize], with def for 0 or less.
 func pageSize(req int32, def, maxSize int) int {
 	switch {
@@ -62,7 +49,7 @@ func pageSize(req int32, def, maxSize int) int {
 
 // ListOrgs implements PlatformService.
 func (s *Server) ListOrgs(ctx context.Context, req *platformv1alpha1.ListOrgsRequest) (*platformv1alpha1.ListOrgsResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	size := pageSize(req.GetPageSize(), defaultOrgPageSize, maxOrgPageSize)
@@ -101,7 +88,7 @@ func (s *Server) ListOrgs(ctx context.Context, req *platformv1alpha1.ListOrgsReq
 
 // GetOrg implements PlatformService. The platform admin need not be a member of the org.
 func (s *Server) GetOrg(ctx context.Context, req *platformv1alpha1.GetOrgRequest) (*platformv1alpha1.GetOrgResponse, error) {
-	if _, err := platformAdmin(ctx); err != nil {
+	if _, err := requirePlatformAdmin(ctx); err != nil {
 		return nil, err
 	}
 	org, err := parseID("org_id", req.GetOrgId())
@@ -132,18 +119,11 @@ func orgSummaryToProto(r store.ListOrgSummariesRow) (*platformv1alpha1.OrgSummar
 	if err != nil {
 		return nil, err
 	}
-	kind := orgv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
-	switch r.Kind {
-	case store.OrgKindPersonal:
-		kind = orgv1alpha1.OrgKind_ORG_KIND_PERSONAL
-	case store.OrgKindTeam:
-		kind = orgv1alpha1.OrgKind_ORG_KIND_TEAM
-	}
 	return &platformv1alpha1.OrgSummary{
 		OrgId:              r.OrgID.String(),
 		Slug:               r.Slug,
 		DisplayName:        r.DisplayName,
-		Kind:               kind,
+		Kind:               orgKindProto(r.Kind),
 		MemberCount:        clampInt32(r.MemberCount),
 		AgentCount:         clampInt32(r.AgentCount),
 		SpentThisMonthUsd:  spent.String(),
@@ -151,6 +131,16 @@ func orgSummaryToProto(r store.ListOrgSummariesRow) (*platformv1alpha1.OrgSummar
 		PlatformCeilingUsd: formatAmount(r.PlatformCeiling),
 		CreatedAt:          timestamppb.New(r.CreatedAt.Time),
 	}, nil
+}
+
+func orgKindProto(k store.OrgKind) orgv1alpha1.OrgKind {
+	switch k {
+	case store.OrgKindPersonal:
+		return orgv1alpha1.OrgKind_ORG_KIND_PERSONAL
+	case store.OrgKindTeam:
+		return orgv1alpha1.OrgKind_ORG_KIND_TEAM
+	}
+	return orgv1alpha1.OrgKind_ORG_KIND_UNSPECIFIED
 }
 
 func clampInt32(n int64) int32 {

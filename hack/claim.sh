@@ -575,7 +575,7 @@ cmd_adr() {
   die "could not reserve an ADR number"
 }
 
-# check-pr P: the required `claim` check. Fails only when another human holds a claim on an issue the
+# check-pr P: the `claim` check (not required since #682). Fails only when another human holds a claim on an issue the
 # pull request closes, or reserved an ADR number the pull request adds a file under. Read-only.
 cmd_check_pr() {
   local p=${1:-} pr author body issues n rc human path num fail=0 added

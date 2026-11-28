@@ -125,10 +125,11 @@ example() { # <name> <want jobs> <want e2e exit> <paths...>
 	if [[ $got == "$wj" && $ge == "$we" ]]; then ok; else bad "$name: jobs [${got% }] want [${wj% }]; e2e exit $ge want $we"; fi
 }
 example "one hack script" "scripts shell" 1 hack/ship.sh
-example "a workflow other than ci.yml" "scripts shell" 1 .github/workflows/dco.yml
+example "a workflow other than ci.yml" "scripts shell" 1 .github/workflows/secrets.yml
 example "the Go test wrapper" "go scripts shell" 1 hack/go-test.sh
 example "e2e driver script" "go scripts shell" 0 test/e2e/run.sh
 example "a chart template" "chart chartsmoke escape go scripts" 0 charts/koinon/templates/api.yaml
+example "the Playwright image pin alone runs web-e2e (#1399)" "go scripts web" 1 hack/playwright-image.env
 example "a web source file" "web" 1 web/src/app.ts
 example "a Go test file of the reconciler" "go scripts tidy" 1 internal/reconciler/reconcile_test.go
 example "the rules themselves" "chart chartsmoke escape harnesses fuzz generate go opencodeplugin scripts shell tidy vuln web" 1 hack/paths.rules
@@ -141,7 +142,7 @@ example "documentation" "" 1 docs/design.md
 for f in go.mod go.sum hack/govulncheck.sh .github/workflows/govulncheck.yml hack/versions.env; do
 	if paths_job_triggers vuln "$f"; then ok; else bad "the vuln rule must match $f"; fi
 done
-for f in hack/spike/acpdrive/go.mod hack/spike/acpdrive/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
+for f in hack/spike/approver/go.mod hack/spike/approver/go.sum internal/foo/go.mod docs/go.sum internal/x.go hack/govulncheck-test.sh; do
 	if paths_job_triggers vuln "$f"; then bad "the vuln rule must not match $f"; else ok; fi
 done
 # The `fuzz` rule (#684): the fuzzed packages and the script, not every Go file.

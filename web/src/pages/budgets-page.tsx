@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useMemo, useState } from 'react'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { AmountForm } from '@/components/amount-form'
 import { ConfirmAction } from '@/components/confirm-action'
-import { OrgContinuationCap } from '@/components/org-continuation-cap'
+import { OrgUsage } from '@/components/org-usage'
 import { RequireAdmin } from '@/components/require-admin'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -46,12 +46,12 @@ function BudgetsContent() {
       </p>
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {budget.isPending ? <p role="status">Loading the budget…</p> : budget.data?.budget && <OrgCap budget={budget.data.budget} actions={actions} />}
+      <OrgUsage orgId={orgId} />
       <AgentLimits loading={agents.isPending} list={agents.data?.budgets ?? []} actions={actions} />
-      <OrgContinuationCap orgId={orgId} />
       <Notices orgId={orgId} actions={actions} agents={agents.data?.budgets ?? []} />
     </>
   )
@@ -204,7 +204,7 @@ function Notices({ orgId, actions, agents }: { orgId: string; actions: Actions; 
       </h2>
       {list.error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(list.error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(list.error).message}</AlertDescription>
         </Alert>
       )}
       {list.isPending ? (

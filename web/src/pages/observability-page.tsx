@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useState } from 'react'
+import { describeError } from '@/lib/api-error'
 import { closeOnly } from '@/lib/editing'
 import { RequireAdmin } from '@/components/require-admin'
 import { FullContentBadge, TraceDestinationCard } from '@/components/trace-destination-card'
-import { HomeBackupRetentionSettings } from '@/components/home-backup-retention-settings'
-import { RunContentRetentionSettings } from '@/components/run-content-retention-settings'
 import { TraceDestinationForm } from '@/components/trace-destination-form'
 import { TraceSettingsForm } from '@/components/trace-settings-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -101,7 +99,7 @@ function ObservabilityContent() {
       )}
       {failed && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(failed).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(failed).message}</AlertDescription>
         </Alert>
       )}
       {destinations.isPending ? (
@@ -151,8 +149,6 @@ function ObservabilityContent() {
       ) : (
         s && <TraceSettingsForm key={`${s.contentLevel}-${s.sampleRate}-${s.platformCopyLevel}-${s.ceiling}-${s.hasPlatformDestination}`} settings={s} isOwner={org.role === OrgRole.OWNER} save={actions.updateSettings} onSaved={() => say('Saved the settings.')} />
       )}
-      <RunContentRetentionSettings orgId={orgId} />
-      <HomeBackupRetentionSettings orgId={orgId} />
     </>
   )
 }

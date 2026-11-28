@@ -16,6 +16,22 @@ database, so every koinon-api replica reports the same value; the rule aggregate
 (version), never sum. A workflow waits for a process of its own version. Older versions are carried
 over by the first koinon-api of the current one, so pending work of a version that no live executor
 runs (a rollback target, or a carry-over that keeps failing) is what the alert names.
+
+Node disk (issue #1494): with execution.driver=substrate, the koinon-sandbox group holds KoinonSandboxHomeFilesystemFilling.
+The home of a sandbox lives under /var/lib/ate on the node, and kubelet does not see that path. The leak-guard byte
+alert (issue #1058, koinon_api_mcp_guard_byte_threshold_runs_total) counts the bytes of MCP calls, not disk, so it does
+not fire on a full home. The rule reads node-exporter's series of the /var/lib/ate mount point, so it needs a mount of
+its own for that path (the preflight warns when there is none) and node-exporter on the worker nodes.
+
+Fleet breaker (issue #1481): with execution.driver=substrate, the koinon-sandbox group holds
+KoinonSandboxFrontsSilentAcrossFleet. It fires while the reconciler's front check holds back every revert of a
+silent front because the fronts are silent across the fleet (koinon_reconciler_front_breaker_open). Only the leader
+sets the gauge, so the rule takes the max over the replicas.
+
+Provider key echo (ADR 0097 section 15, issue #1332): with gateway.model.driver=koinon, the koinon-gateway group
+holds KoinonModelKeyEcho. It fires when the model path saw a provider key in a response (header or body) that
+went back to an agent (koinon_gateway_model_key_echo_total). The body is not changed in v0.2, so the key must be rotated.
+The window is 1h, so the alert stays on for an hour after one echo and an operator can see it.
 */ -}}
 {{- $pr := .Values.metrics.prometheusRule }}
 {{- if $pr.enabled }}
@@ -73,6 +89,55 @@ spec:
               The reconciler failed to apply the default-deny NetworkPolicy in a sandbox namespace. OpenShell's
               own policies and the platform's still apply, but Koinon's second layer is missing there. Check
               the reconciler's RBAC for networkpolicies and its log ("sandbox default-deny NetworkPolicy could not be applied").
+    {{- if and (include "koinon.substrate" . | eq "true") $pr.ateFilesystem.enabled }}
+        - alert: KoinonSandboxHomeFilesystemFilling
+          expr: |
+            100 * node_filesystem_avail_bytes{mountpoint="/var/lib/ate"}
+              / node_filesystem_size_bytes{mountpoint="/var/lib/ate"}
+              < {{ $pr.ateFilesystem.freeBelowPercent }}
+          for: {{ $pr.ateFilesystem.for | quote }}
+          labels:
+            severity: warning
+          annotations:
+            summary: The filesystem of /var/lib/ate on a worker node is almost full
+            description: >-
+              Less than {{ $pr.ateFilesystem.freeBelowPercent }} percent of the filesystem mounted at /var/lib/ate is free on this
+              node. Sandbox homes (gVisor and microVM) live there, and kubelet does not report that space for the sandbox pods. v0.1 has no hard cap per home (issue #1495). Find the largest homes under
+              /var/lib/ate/actors, then stop or clean those sandboxes, or increase the size of the filesystem. A node whose
+              /var/lib/ate shares the root filesystem has no series for this mount point, so this alert stays silent
+              there: the preflight warns about that case.
+    {{- end }}
+    {{- if include "koinon.substrate" . | eq "true" }}
+        - alert: KoinonSandboxFrontsSilentAcrossFleet
+          expr: max(koinon_reconciler_front_breaker_open) > 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Guest fronts are silent on more than one worker, so the reconciler reverts no sandbox for a silent front
+            description: >-
+              The front check of the reconciler found silent guest fronts on more than one worker, or on a large share of the
+              fleet, in one window (issue #1481). The likely cause is the Substrate router or the network between the router and
+              the workers, not the guests. The reconciler does not revert these sandboxes until the fronts answer again. Check
+              the router (atenet), its upstream certificates and the NetworkPolicies of the worker namespace, then the
+              reconciler log ("guest fronts are silent across the fleet"). A real crash of guests on two workers at the same
+              time also holds back their reverts until this alert clears.
+    {{- end }}
+    {{- if include "koinon.modelKoinon" . }}
+    - name: koinon-gateway
+      rules:
+        - alert: KoinonModelKeyEcho
+          expr: sum by (answer) (increase(koinon_gateway_model_key_echo_total[1h])) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: A model provider echoed its provider key in a response that went to an agent
+            description: >-
+              koinon-gateway found the provider key of a model provider in a response ({{ "{{ $labels.answer }}" }}
+              answer, in a header or the body). The response went to the agent unchanged (ADR 0097 section 15), so the agent and its sandbox
+              may hold the key. Rotate the provider key now, then find the provider in the koinon-gateway log
+              ("provider key echoed in a model response").
+    {{- end }}
     - name: koinon-restore
       rules:
         - alert: KoinonRestoreHoldOn

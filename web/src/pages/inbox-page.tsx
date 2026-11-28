@@ -3,24 +3,27 @@
 import { Code, ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useNavigate, useSearch } from '@tanstack/react-router'
+import { useMemo, useState } from 'react'
 import { ChatPanel } from '@/components/chat-panel'
 import { CreateTaskForm } from '@/components/create-task-form'
 import { DirectMessageForm } from '@/components/direct-message-form'
-import { Inbox, type QuestionAnswer } from '@/components/inbox'
+import { Inbox, StateLegend, TaskList, type QuestionAnswer } from '@/components/inbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useInbox } from '@/hooks/use-inbox'
-import type { ApprovalItem, QuestionItem } from '@/lib/inbox'
+import { describeError } from '@/lib/api-error'
+import { inboxTabs, parseInboxTab, tasksForTab, type ApprovalItem, type InboxTab, type QuestionItem } from '@/lib/inbox'
 import { useOrg } from '@/lib/org-context'
 
 /**
- * InboxPage is the home screen (ADR 0065): what waits on the person, with its actions, and the
- * conversations with agents next to it.
+ * InboxPage is the inbox (ADR 0065, ADR 0126 section 3): the tabs Blocked on you, Open, Done and All with their
+ * counts and a state legend, and the conversations with agents next to it. Blocked on you has the actions inline.
  */
 export function InboxPage() {
   const { org } = useOrg()
@@ -28,6 +31,14 @@ export function InboxPage() {
   const canEdit = org.role >= OrgRole.MEMBER
   const queryClient = useQueryClient()
   const { items, tasks, agents, agentNames, error, isPending } = useInbox()
+  const tab = parseInboxTab(useSearch({ strict: false }).tab) ?? 'blocked'
+  const navigate = useNavigate()
+  const byTab = useMemo(() => {
+    const all = tasks.data?.tasks ?? []
+    return { open: tasksForTab(all, 'open'), done: tasksForTab(all, 'done'), all: tasksForTab(all, 'all') }
+  }, [tasks.data])
+  const blockedTaskIds = useMemo(() => new Set(items.map((i) => i.taskId).filter((id) => id !== '')), [items])
+  const counts: Record<InboxTab, number> = { blocked: items.length, open: byTab.open.length, done: byTab.done.length, all: byTab.all.length }
   const [selected, setSelected] = useState<string>()
   const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set())
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
@@ -69,8 +80,8 @@ export function InboxPage() {
       const err = ConnectError.from(e)
       // Approve sends the hash the list showed; Aborted means the request changed since.
       // The server names who answered first ("Ana already answered this question").
-      if (err.code === Code.Aborted && item.kind === 'question') fail(id, err.rawMessage || 'This question was already answered, dismissed or expired.')
-      else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : err.rawMessage)
+      if (err.code === Code.Aborted && item.kind === 'question') fail(id, describeError(err, {}, 'This question was already answered, dismissed or expired.').message)
+      else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : describeError(err).message)
     } finally {
       track(id, false)
       await refresh()
@@ -93,30 +104,53 @@ export function InboxPage() {
       <h1 className="text-xl font-semibold">Inbox</h1>
       {error && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{ConnectError.from(error).rawMessage}</AlertDescription>
+          <AlertDescription>{describeError(error).message}</AlertDescription>
         </Alert>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <section aria-labelledby="waiting-heading" className="grid content-start gap-3">
-          <h2 id="waiting-heading" className="flex items-center gap-2 text-sm font-semibold">
-            Waiting on you
-            <span className="text-muted-foreground font-normal" aria-label={`${items.length} waiting`}>
-              {items.length}
-            </span>
-          </h2>
-          {isPending ? (
-            <p role="status">Loading…</p>
-          ) : (
-            <Inbox
-              items={items}
-              deciding={deciding}
-              errors={errors}
-              onApprove={(i) => void decide(i, () => approve.mutateAsync({ orgId, approvalId: i.approval.id, argsSha256: i.approval.argsSha256 }))}
-              onDeny={(i) => void decide(i, () => deny.mutateAsync({ orgId, approvalId: i.approval.id }))}
-              onAnswer={(i, a) => void decide(i, () => answerQuestion.mutateAsync({ orgId, questionId: i.question.id, answer: answerOf(a) }))}
-              onDismiss={(i) => void decide(i, () => dismissQuestion.mutateAsync({ orgId, questionId: i.question.id }))}
-            />
-          )}
+        <section aria-label="Tasks" className="grid content-start gap-3">
+          <Tabs
+            value={tab}
+            onValueChange={(v) => {
+              const next = parseInboxTab(v)
+              if (next) void navigate({ to: '/inbox', search: next === 'blocked' ? {} : { tab: next }, replace: true })
+            }}
+          >
+            <TabsList aria-label="Inbox">
+              {inboxTabs.map((t) => (
+                // The visible text is the name ("Open 4"): an aria-label would not match it (WCAG 2.5.3).
+                <TabsTrigger key={t.value} value={t.value}>
+                  {t.label}{' '}
+                  <span className="text-muted-foreground tabular-nums">
+                    {isPending ? '…' : counts[t.value]}
+                  </span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <StateLegend />
+            {isPending ? (
+              <p role="status">Loading…</p>
+            ) : (
+              <>
+                <TabsContent value="blocked">
+                  <Inbox
+                    items={items}
+                    deciding={deciding}
+                    errors={errors}
+                    onApprove={(i) => void decide(i, () => approve.mutateAsync({ orgId, approvalId: i.approval.id, argsSha256: i.approval.argsSha256 }))}
+                    onDeny={(i) => void decide(i, () => deny.mutateAsync({ orgId, approvalId: i.approval.id }))}
+                    onAnswer={(i, a) => void decide(i, () => answerQuestion.mutateAsync({ orgId, questionId: i.question.id, answer: answerOf(a) }))}
+                    onDismiss={(i) => void decide(i, () => dismissQuestion.mutateAsync({ orgId, questionId: i.question.id }))}
+                  />
+                </TabsContent>
+                {taskTabs.map(({ value, label, empty }) => (
+                  <TabsContent key={value} value={value}>
+                    <TaskList tasks={byTab[value]} agentNames={agentNames} blockedTaskIds={blockedTaskIds} label={`${label} tasks`} empty={empty} />
+                  </TabsContent>
+                ))}
+              </>
+            )}
+          </Tabs>
         </section>
         <section aria-labelledby="chat-heading" className="grid content-start gap-4">
           <h2 id="chat-heading" className="text-sm font-semibold">
@@ -148,7 +182,7 @@ export function InboxPage() {
               <CreateTaskForm
                 agents={agents.data.agents}
                 pending={createTask.isPending}
-                error={createTask.error ? ConnectError.from(createTask.error).rawMessage : undefined}
+                error={createTask.error ? describeError(createTask.error).message : undefined}
                 onCreate={(t) => createTask.mutateAsync({ orgId, agentId: t.agentId, title: t.title, message: t.message })}
               />
             </section>
@@ -158,6 +192,13 @@ export function InboxPage() {
     </div>
   )
 }
+
+/** The task tabs and what each says when it is empty. */
+const taskTabs = [
+  { value: 'open', label: 'Open', empty: 'No task is open.' },
+  { value: 'done', label: 'Done', empty: 'No task is done yet.' },
+  { value: 'all', label: 'All', empty: 'This org has no tasks yet.' },
+] as const
 
 /** answerOf maps what the person gave to the request's oneof. */
 function answerOf(a: QuestionAnswer) {
