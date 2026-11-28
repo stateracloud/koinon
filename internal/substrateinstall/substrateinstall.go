@@ -303,10 +303,16 @@ func (i *Installer) exportCommit(ctx context.Context, tmp, dst, commit string) e
 	// The fetch names the id, so the source needs no ref that points at it (a cache that holds the commit
 	// only as FETCH_HEAD works), and no other history is copied.
 	repo := filepath.Join(tmp, "repo.git")
+	// The fetch runs under git -C <repo>, so a relative local path would resolve inside the temporary
+	// repository. A local path is made absolute against the working directory of the caller first.
+	source, err := absoluteLocalSource(i.SourceRepo)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrPin, i.SourceRepo, err)
+	}
 	if err := i.Runner.Run(ctx, "", "git", []string{"--no-replace-objects", "-c", "core.fsmonitor=", "init", "--quiet", "--bare", "--", repo}, nil, i.Out); err != nil {
 		return fmt.Errorf("%w: init %s: %w", ErrPin, repo, err)
 	}
-	fetch := gitArgs(repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", i.SourceRepo, commit)
+	fetch := gitArgs(repo, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", source, commit)
 	if err := i.Runner.Run(ctx, "", "git", fetch, nil, i.Out); err != nil {
 		return fmt.Errorf("%w: commit %s is not in %s: %w", ErrPin, commit, i.SourceRepo, err)
 	}
@@ -325,6 +331,19 @@ func (i *Installer) exportCommit(ctx context.Context, tmp, dst, commit string) e
 		return fmt.Errorf("%w: %w", ErrPin, err)
 	}
 	return nil
+}
+
+// absoluteLocalSource makes a relative local path absolute. A remote URL (scheme://, or the scp form host:path)
+// and an absolute path stay as they are.
+func absoluteLocalSource(src string) (string, error) {
+	if strings.Contains(src, "://") || filepath.IsAbs(src) {
+		return src, nil
+	}
+	// scp form: a colon before the first slash names a host.
+	if c := strings.Index(src, ":"); c > 0 && !strings.Contains(src[:c], "/") {
+		return src, nil
+	}
+	return filepath.Abs(src)
 }
 
 // BuildSetup exports the pinned commit from SourceRepo into a fresh temporary directory, builds

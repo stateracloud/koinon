@@ -78,3 +78,21 @@ func TestRefusesACommitThatTheSourceDoesNotHold(t *testing.T) {
 	g.Expect(err).To(MatchError(substrateinstall.ErrPin))
 	g.Expect(err).To(MatchError(ContainSubstring("is not in " + cache)))
 }
+
+func TestExportsACommitFromARelativeLocalSource(t *testing.T) {
+	testenv.RequireT(t, gitBinary)
+	g := NewWithT(t)
+	cache, commit := refLessCache(t)
+	// The caller runs in the parent directory of the source and names it with a relative path, as in
+	// --substrate-source ./substrate. The fetch runs under git -C <temporary repository>, so the path must be made
+	// absolute against this directory first (issue #1530).
+	t.Chdir(filepath.Dir(cache))
+	inst := &substrateinstall.Installer{Runner: execRunner{}, SourceRepo: "./" + filepath.Base(cache), Out: &strings.Builder{}}
+	dst := filepath.Join(t.TempDir(), "src")
+
+	g.Expect(inst.ExportCommit(context.Background(), t.TempDir(), dst, commit)).To(Succeed())
+
+	got, err := os.ReadFile(filepath.Join(dst, "pinned.txt"))
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(string(got)).To(Equal("pinned\n"))
+}

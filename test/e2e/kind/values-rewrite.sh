@@ -6,9 +6,11 @@
 #   values-rewrite.sh <values file> <image repository> [<kind network CIDR>]
 #
 # - koinon-values.yaml (OpenShell): every localhost:5001 becomes the image repository of the cluster.
-# - substrate-values.yaml: only the `registry: localhost:5001` line of the image settings changes. The cache upstream host
-#   `localhost:5001` must stay as it is: it is the registry host of the harness image reference, and the mirror key
-#   of the image cache (a different key leaves the reference unrewritten and atelet dials the registry itself).
+# - substrate-values.yaml: the `registry: localhost:5001` line of the image settings becomes the image repository, and the
+#   `host: localhost:5001` of the cache upstream becomes the host of that repository (the part before the first slash). The
+#   cache upstream host is the registry host of the harness image reference, and the mirror key of the image cache (a
+#   different key leaves the reference unrewritten and atelet dials the registry itself). Its `url` does not change:
+#   it is the registry on the docker network.
 #   The kind network CIDR (docker network inspect kind) replaces the 172.18.0.0/16 of the cache egress rule.
 
 # Needs bash 5 (ADR 0090); keep this line above any bash 4+ syntax.
@@ -22,7 +24,7 @@ repo=$2
 cidr=${3:-}
 
 if [[ $(basename "$file") == substrate-values.yaml ]]; then
-  out=$(sed "s#^\\( *registry: \\)localhost:5001\$#\\1$repo#" "$file")
+  out=$(sed -e "s#^\\( *registry: \\)localhost:5001\$#\\1$repo#" -e "s#{host: localhost:5001,#{host: ${repo%%/*},#" "$file")
   if [[ -n $cidr ]]; then
     out=${out//172.18.0.0\/16/$cidr}
   fi
