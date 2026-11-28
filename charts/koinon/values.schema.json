@@ -778,7 +778,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "driver": {"enum": ["openshell", "substrate"]},
+        "driver": {"enum": ["", "openshell", "substrate"], "description": "Empty: substrate (#1093). Empty with openshell.address set fails to render: set openshell to keep the OpenShell driver."},
         "substrate": {
           "type": "object",
           "additionalProperties": false,
@@ -1056,7 +1056,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {"type": ["boolean", "null"]}
       }
     },
     "sandboxNetworkPolicy": {
@@ -1064,7 +1064,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {"type": ["boolean", "null"]}
       }
     },
     "sandboxLimitRange": {
@@ -1072,7 +1072,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {"type": ["boolean", "null"]}
       }
     },
     "restoreHold": {"type": "boolean"},

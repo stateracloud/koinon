@@ -9,8 +9,10 @@
 #                          <repo>/sandbox-substrate:e2e and print its digest reference. Needs <repo>/sandbox:e2e in
 #                          the local daemon (images.sh build leaves it there). Substrate runs only an image pinned by
 #                          digest (#1192), so the e2e values carry this digest.
-#   substrate.sh install   install Substrate with `koinon-api substrate install --platform kind`, gvisor class only
-#                          (a standard runner has no KVM, ADR 0119 D10), from the pinned commit of a clone.
+#   substrate.sh tools     prepare the quickstart's substrate-install block (`koinon-api substrate install --platform
+#                          kind`), which run.sh then runs: TOOLS=<dir> gets a koinon-api build and a wrapper that adds
+#                          the gvisor class only (a standard runner has no KVM, ADR 0119 D10); the block's variables are
+#                          printed as NAME=value lines (the pinned commit of a clone, this cluster's kubeconfig).
 #
 #   CLUSTER=koinon-e1  OUT=<dir for the binary, the kubeconfig and the digest>
 #   SUBSTRATE_SOURCE=<clone of github.com/agent-substrate/substrate that holds the pinned commit>. Unset: a shallow
@@ -24,7 +26,7 @@
 set -euo pipefail
 
 mode=${1:-}
-case $mode in harness | install | ca) ;; *) echo "usage: substrate.sh harness|install|ca" >&2; exit 2 ;; esac
+case $mode in harness | tools | ca) ;; *) echo "usage: substrate.sh harness|tools|ca" >&2; exit 2 ;; esac
 
 CLUSTER=${CLUSTER:-koinon-e1}
 CTX="kind-${CLUSTER}"
@@ -90,29 +92,35 @@ source_clone() {
   echo "$dir"
 }
 
-install() {
+# tools: the inputs of the quickstart's substrate-install block (test/e2e/commands/quickstart.e1), which run.sh then runs.
+# It builds koinon-api into $TOOLS and writes $TOOLS/koinon-api, a wrapper that adds the kind-only flags (the gvisor
+# class only, --gvisor-mirror) and runs with KUBECONFIG=/dev/null, and prints the block's variables as NAME=value lines.
+# $TOOLS must be outside $OUT: CI uploads $OUT as an artifact (7 days), and the kubeconfig is admin.
+tools() {
   local src kc extra=()
+  [[ -n ${TOOLS:-} && -d $TOOLS ]] || { echo "substrate.sh tools: set TOOLS to a directory outside OUT" >&2; exit 2; }
   step "koinon-api (host build)"
-  # The binary and the admin kubeconfig of the kind cluster stay outside $OUT: CI uploads $OUT as an artifact (7 days).
-  local work
-  work=$(mktemp -d "${TMPDIR:-/tmp}/substrate-install.XXXXXX")
-  TMP_DIRS+=("$work")
-  (cd "$root" && go build -o "$work/koinon-api" ./cmd/koinon-api)
+  (cd "$root" && go build -o "$TOOLS/koinon-api.bin" ./cmd/koinon-api)
   src=$(source_clone)
-  kc="$work/kubeconfig"
+  kc="$TOOLS/kubeconfig"
   kind get kubeconfig --name "$CLUSTER" >"$kc"
   chmod 600 "$kc"
   [[ -z ${GVISOR_MIRROR:-} ]] || extra+=(--gvisor-mirror "$GVISOR_MIRROR")
-  step "koinon-api substrate install --platform kind (gvisor class only), context $CTX"
+  # Every flag is quoted into the wrapper with printf %q.
+  {
+    echo '#!/usr/bin/env bash'
+    printf 'KUBECONFIG=/dev/null exec %q "$@" --sandbox-classes gvisor' "$TOOLS/koinon-api.bin"
+    for a in ${extra[@]+"${extra[@]}"}; do printf ' %q' "$a"; done
+    echo
+  } >"$TOOLS/koinon-api"
+  chmod +x "$TOOLS/koinon-api"
   # The probe pods run the koinon-api image from the local registry; the node pulls it (hosts.toml, registry.sh attach).
-  KUBECONFIG=/dev/null "$work/koinon-api" substrate install \
-    --substrate-source "$src" \
-    --kubeconfig "$kc" --context "$CTX" \
-    --probe-image "$REPO/api:e2e" \
-    --storage-bucket "$BUCKET" \
-    --platform kind \
-    --sandbox-classes gvisor \
-    ${extra[@]+"${extra[@]}"}
+  echo "SUBSTRATE_SOURCE=$src"
+  echo "KUBECONFIG_FILE=$kc"
+  echo "CONTEXT=$CTX"
+  echo "PROBE_IMAGE=$REPO/api:e2e"
+  echo "BUCKET=$BUCKET"
+  echo "PLATFORM=kind"
 }
 
 # ca: the Secret <NAMESPACE>/ate-ca with ca.crt, the roots that sign the serving certificate of ateapi. The reconciler and
@@ -130,6 +138,6 @@ ca() {
 
 case $mode in
 harness) harness ;;
-install) install ;;
+tools) tools ;;
 ca) ca ;;
 esac

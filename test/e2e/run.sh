@@ -62,12 +62,13 @@
 #   `helm upgrade` to this build, and checks convergence (test/e2e/upgrade.sh, issue 519). It skips (exit 0) when the
 #   tag, the chart, the images or registry.k8s.io cannot be reached; KOINON_REQUIRE=e2e-upgrade makes that a failure.
 #   UPGRADE_STORIES=0 leaves out the run-1 story suite on the upgraded install.
-#   DRIVER=openshell|substrate (default openshell; issue #1091). substrate runs the same quickstart with execution.driver:
+#   DRIVER=substrate|openshell (default substrate since #1093; issue #1091). substrate runs the quickstart with execution.driver:
 #   substrate on the gVisor class (no KVM needed): kind/up.sh leaves out Agent Sandbox and OpenShell, kind/substrate.sh
 #   builds the substrate overlay of the harness image and installs Substrate (`koinon-api substrate install --platform kind`,
 #   gvisor class only), the values are kind/substrate-values.yaml and the OpenShell client certificate block, the OpenShell
-#   escape cases and the OpenShell diagnostics are left out. `make test-e2e-kind-substrate` sets it. SUBSTRATE_SOURCE,
-#   SUBSTRATE_CACHE and GVISOR_MIRROR are described in kind/substrate.sh.
+#   escape cases and the OpenShell diagnostics are left out. OpenShell callers pass DRIVER=openshell (`make test-e2e-kind`,
+#   `make test-e2e-web`; UPGRADE_FROM needs it) until #1094 removes the driver. SUBSTRATE_SOURCE, SUBSTRATE_CACHE and
+#   GVISOR_MIRROR are described in kind/substrate.sh.
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
 # The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
@@ -86,9 +87,11 @@ FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
 SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
-DRIVER=${DRIVER:-openshell}
+DRIVER=${DRIVER:-substrate}
 case "$DRIVER" in openshell | substrate) ;; *) echo "DRIVER must be openshell or substrate" >&2; exit 2 ;; esac
 export DRIVER
+# The browser suite has no Substrate leg yet: make test-e2e-web passes DRIVER=openshell.
+[[ $DRIVER == openshell || $SUITE != web ]] || { echo "SUITE=web needs DRIVER=openshell: the browser suite has no Substrate leg yet (the default DRIVER is substrate since #1093)" >&2; exit 2; }
 [[ $DRIVER == openshell || -z ${UPGRADE_FROM:-} ]] || { echo "UPGRADE_FROM needs DRIVER=openshell (the N-1 release has no Substrate leg)" >&2; exit 2; }
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
@@ -223,6 +226,8 @@ cleanup() {
   if [[ -n ${build_pid:-} ]]; then kill -- "-$build_pid" 2>/dev/null || true; fi
   if [[ $status -ne 0 ]]; then diagnostics; fi
   if [[ "$KEEP" != 1 ]]; then "$here/kind/down.sh" || true; fi
+  # The admin kubeconfig of the substrate-install block (Substrate leg only).
+  if [[ -n ${substrate_tools:-} ]]; then rm -rf "$substrate_tools"; fi
   echo "logs and timings in $OUT"
   exit "$status"
 }
@@ -251,7 +256,7 @@ fi
 
 if [[ "$SKIP_UP" != 1 ]]; then
   step "prerequisites (kind/up.sh)"
-  CLUSTER="$CLUSTER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
+  CLUSTER="$CLUSTER" DRIVER="$DRIVER" "$here/kind/up.sh" 2>&1 | tee "$OUT/up.log"
   done_step "Prerequisites: registry, kind, kube-network-policies, CNPG$([[ $DRIVER == substrate ]] || echo ", Agent Sandbox, runc, OpenShell") (the image build ran at the same time)"
 fi
 
@@ -287,7 +292,18 @@ if [[ $DRIVER == substrate ]]; then
   "$here/kind/values-rewrite.sh" "$values_src" "$IMAGE_REPO" "$KIND_CIDR" >"$OUT/quickstart/values.yaml"
   sed -i.bak "s#sha256:0\{64\}#$digest#" "$OUT/quickstart/values.yaml"
   grep -q "$digest" "$OUT/quickstart/values.yaml" || { echo "the harness digest was not put into values.yaml" >&2; exit 1; }
-  OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" install 2>&1 | tee "$OUT/substrate-install.log"
+  # The quickstart's substrate-install block, with the kind values of its variables. The koinon-api build, its wrapper
+  # (gvisor class only) and the admin kubeconfig stay outside $OUT: CI uploads $OUT as an artifact (7 days).
+  substrate_tools=$(mktemp -d "${TMPDIR:-/tmp}/substrate-tools.XXXXXX")
+  # A plain command, so set -e stops the run when it fails.
+  TOOLS="$substrate_tools" OUT="$OUT" CLUSTER="$CLUSTER" "$here/kind/substrate.sh" tools >"$substrate_tools/vars"
+  mapfile -t substrate_vars <"$substrate_tools/vars"
+  # The block names the variables it needs; each must come back as NAME=<value>, so the list lives only in quickstart.e1.
+  for want in $(E1_FILE="$root/test/e2e/commands/quickstart.e1" "$root/hack/docs-e1.sh" show substrate-install | grep -oE '\$[A-Z_]+' | tr -d '$' | sort -u); do
+    grep -qE "^$want=.+" "$substrate_tools/vars" || { echo "run.sh: substrate.sh tools gives no value for $want, which the substrate-install block needs" >&2; exit 1; }
+  done
+  step "quickstart: substrate-install (koinon-api substrate install --platform kind, gvisor class only)"
+  "${e1_env[@]}" "PATH=$substrate_tools:$OUT/bin:$PATH" "${substrate_vars[@]}" "$root/hack/docs-e1.sh" run substrate-install 2>&1 | tee "$OUT/substrate-install.log"
   done_step "Substrate: harness overlay pushed, koinon-api substrate install --platform kind (gvisor)"
 fi
 
@@ -316,11 +332,12 @@ done_step "Fakes deployed"
 # The quickstart blocks (test/e2e/commands/quickstart.e1), as the docs show them. The Go suite declares the model
 # provider with a labelled Secret (the docs' GitOps alternative): model-provider.yaml declares the
 # fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
-step "quickstart: namespace, OpenShell client certificate, model provider"
+step "quickstart: namespace, OpenShell client certificate (openshell driver only), model provider"
 e1 namespace
 # Substrate has no OpenShell client certificate (the chart reads none with execution.driver: substrate).
 [[ $DRIVER == substrate ]] || e1 client-cert
-# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names.
+# Substrate: the CA that signs ateapi's certificate, as the Secret that execution.substrate.caSecret names. Not a
+# quickstart block: interim until #1551 (the chart mounts Substrate's ClusterTrustBundle when caSecret is empty).
 [[ $DRIVER != substrate ]] || OUT="$OUT" CLUSTER="$CLUSTER" NAMESPACE="$NS" "$here/kind/substrate.sh" ca
 if [[ $SUITE == go ]]; then
   e1 model-provider

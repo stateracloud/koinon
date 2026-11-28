@@ -39,6 +39,9 @@ var _ = Describe("the chart and the gateway config", func() {
 			"template", "koinon", chart, "--namespace", "koinon",
 			"--set", "gateway.mode=standalone", "--set", "openshell.insecure=true",
 			"--set", "openshell.address=openshell.openshell.svc:8080",
+			// The OpenShell driver, named: the default is substrate since #1093.
+			"--set", "execution.driver=openshell", "--set", "sandboxObserver.enabled=true",
+			"--set", "sandboxNetworkPolicy.enabled=true", "--set", "sandboxLimitRange.enabled=true",
 		}, args...)...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -90,6 +93,8 @@ var _ = Describe("the held gateway config", func() {
 		cmd := exec.Command(helm, "template", "koinon", filepath.Join("..", "..", "..", "charts", "koinon"),
 			"--namespace", "koinon", "--set", "gateway.mode=standalone", "--set", "openshell.insecure=true",
 			"--set", "openshell.address=openshell.openshell.svc:8080", "--set", "restoreHold=true",
+			"--set", "execution.driver=openshell", "--set", "sandboxObserver.enabled=true",
+			"--set", "sandboxNetworkPolicy.enabled=true", "--set", "sandboxLimitRange.enabled=true",
 			"--show-only", "templates/gateway-standalone.yaml")
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()

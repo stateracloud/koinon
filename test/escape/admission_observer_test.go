@@ -341,7 +341,7 @@ func renderObserver(ctx context.Context, extraArgs ...string) observerObjects {
 	var out, stderr bytes.Buffer
 	args := append([]string{
 		"template", "koinon", "../../charts/koinon", "--namespace", "koinon",
-		"--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-observer.yaml",
+		"--set", "execution.driver=openshell", "--set", "sandboxObserver.enabled=true", "--set", "sandboxNetworkPolicy.enabled=true", "--set", "sandboxLimitRange.enabled=true", "--set", "openshell.insecure=true", "--set", "openshell.address=openshell.openshell.svc:8080", "--show-only", "templates/sandbox-observer.yaml",
 	}, extraArgs...)
 	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr

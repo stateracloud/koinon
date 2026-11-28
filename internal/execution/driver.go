@@ -8,13 +8,13 @@ import "fmt"
 // `execution.driver` (epic 1082, ADR 0119 D9): there is no per-org mix.
 type DriverName string
 
-// The drivers. OpenShell stays the default for the one-minor window in which both exist.
+// The drivers. Substrate is the default since #1093; OpenShell stays selectable until #1094 removes it.
 const (
 	DriverOpenShell DriverName = "openshell"
 	DriverSubstrate DriverName = "substrate"
 
 	// DefaultDriver is what an install that sets nothing runs.
-	DefaultDriver = DriverOpenShell
+	DefaultDriver = DriverSubstrate
 )
 
 // ParseDriver reads the value of `execution.driver`. The empty string is the default.

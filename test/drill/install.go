@@ -118,6 +118,9 @@ func ValuesOverlay(fakesNS string, gw Gateway, gatewayID string, hold bool, stor
 			"ports": []any{map[string]any{"port": 8080}},
 		}}},
 		"openshell": map[string]any{"address": gw.Address(), "clientTLSSecret": gw.ClientTLSSecret, "gatewayId": gatewayID},
+		// The drill runs on OpenShell; the chart's default driver is substrate since #1093, and an empty driver with
+		// openshell.address set does not render.
+		"execution": map[string]any{"driver": "openshell"},
 		// The preflight reads the gateway's ConfigMap and workload by name; the chart's defaults name the
 		// shared "openshell" install, whose gateway_id is "openshell". The gateway chart's fullname is its release name.
 		"preflight": map[string]any{"openshell": map[string]any{"namespace": gw.Namespace, "configMap": gw.Service + "-config", "workload": gw.Service}},

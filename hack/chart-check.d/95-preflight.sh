@@ -21,12 +21,14 @@ for f in "${value_files[@]}"; do
 		'kind: ClusterRole' '- preflight'; do
 		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
 	done
-	if [[ $name == substrate-values || $name == substrate-egress-values ]]; then
+	# Substrate is the default (#1093): every ci values file runs the Substrate checks. Only values.yaml,
+	# rendered with execution.driver=openshell by insecure_for, and openshell-values keep the OpenShell hook under test.
+	if grep -qF -- '--driver=substrate' <<<"$rendered"; then
 		# execution.driver=substrate (#1089): the hook runs the Substrate checks (Kubernetes 1.37, the CRDs, the
 		# pinned api server, the router), not the OpenShell ones, and starts no Substrate probe pod: those
 		# need a privileged namespace of their own that only koinon-api substrate install makes.
 		for want in '- --driver=substrate' '- --substrate-namespace=ate-system' '- --substrate-worker-namespace=ate-workers' \
-			'- --substrate-probes=false' '- --seccomp-probe=false' 'resourceNames: [ate-api-server, atenet-router]'; do
+			'- --substrate-probes=false' '- --seccomp-probe=false' 'resourceNames: [ate-api-server, atenet-router'; do
 			grep -qF -- "$want" <<<"$rendered" || { echo "$name: Substrate preflight hook lacks '$want'" >&2; exit 1; }
 		done
 		# The CRDs and Deployments the hook may read are the ones internal/preflight/substrate.go checks.
@@ -46,9 +48,16 @@ for f in "${value_files[@]}"; do
 		if "$HELM" template koinon "$CHART" --namespace koinon -f "$f" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway --set gateway.mcp.koinon.egress.enabled=false --show-only templates/preflight.yaml >/dev/null 2>&1; then
 			echo "$name: Substrate renders in kubernetes mode" >&2; exit 1
 		fi
-	elif grep -qF -- '--driver=substrate' <<<"$rendered"; then
-		echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2
+	elif [[ $name != values && $name != openshell-values ]]; then
+		echo "$name: the preflight hook runs the OpenShell checks with the default driver" >&2
 		exit 1
+	fi
+	# The other side: values and openshell-values keep the OpenShell hook under test until #1094, so they must render it
+	# (an OpenShell address and no Substrate driver), never the Substrate one.
+	if [[ $name == values || $name == openshell-values ]]; then
+		grep -qF -- '--driver=substrate' <<<"$rendered" && { echo "$name: the OpenShell preflight hook runs the Substrate checks" >&2; exit 1; }
+		grep -qF -- '--openshell-address' <<<"$rendered" || { echo "$name: the OpenShell preflight hook lacks --openshell-address" >&2; exit 1; }
+		openshell_hooks=$((${openshell_hooks:-0} + 1))
 	fi
 	# The ClusterRole is get-only, except that in cnpg mode the CNPG operator check lists
 	# exactly validatingwebhookconfigurations and endpointslices (neither can be narrowed by
@@ -87,4 +96,5 @@ for f in "${value_files[@]}"; do
 	fi
 	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off), NetworkPolicy probe: $([[ $netpol == 1 ]] && echo on || echo off))"
 done
+[[ ${openshell_hooks:-0} == 2 ]] || { echo "the OpenShell preflight hook rendered for ${openshell_hooks:-0} of values and openshell-values, want both" >&2; exit 1; }
 

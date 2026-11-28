@@ -64,7 +64,7 @@ value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
 # The same goes for openshell.address (required, no default).
 # Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
 ADDRESS="openshell.address=openshell.openshell.svc:8080"
-insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true --set $ADDRESS" || true; }
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set execution.driver=openshell --set sandboxObserver.enabled=true --set sandboxNetworkPolicy.enabled=true --set sandboxLimitRange.enabled=true --set openshell.insecure=true --set $ADDRESS" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
@@ -75,10 +75,21 @@ for f in "${value_files[@]}"; do
 	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.yaml"
 done
 
+# The shipped defaults must lint and render as they are (driver substrate, #1093): no OpenShell input.
+# allowUnhardened stays false by default (ADR 0120; docs/dev/guest-launcher.md, Open items): the operator sets it.
+"$HELM" lint --strict "$CHART" --set execution.substrate.allowUnhardened=true >/dev/null
+"$HELM" template koinon "$CHART" --namespace koinon --set execution.substrate.allowUnhardened=true >"$out/defaults-substrate.yaml"
+
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "$@"; }
+# The default driver is substrate (#1093). The OpenShell assertions keep working until #1094 removes the
+# driver: render pins execution.driver=openshell and turns its three OpenShell-only features on; later
+# --set flags win, so an assertion can still choose substrate. render_default renders the shipped defaults.
+OPENSHELL_ARGS=(--set execution.driver=openshell --set sandboxObserver.enabled=true --set sandboxNetworkPolicy.enabled=true --set sandboxLimitRange.enabled=true)
+render() { "$HELM" template koinon "$CHART" --namespace koinon "${OPENSHELL_ARGS[@]}" --set openshell.insecure=true --set "$ADDRESS" "$@"; }
 # render_raw renders without that default, for the assertions about the TLS choice itself.
-render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRESS" "$@"; }
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "${OPENSHELL_ARGS[@]}" --set "$ADDRESS" "$@"; }
+# render_default renders the chart exactly as shipped: no OpenShell flags, no address, no TLS Secret.
+render_default() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and the writer then dies of SIGPIPE (exit 141, #608).
 # hit is grep -q that reads all of its input: `producer | hit pattern` never closes the pipe early.

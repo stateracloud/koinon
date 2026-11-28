@@ -132,7 +132,7 @@ has "external mode reads the key-admin login URI" 'key: gwkeyadmin-uri' "${gkey_
 # NOTES are printed by install, not by template.
 gnotes() {
 	local out rc=0
-	out=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" "$@" 2>&1) || rc=$?
+	out=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client "${OPENSHELL_ARGS[@]}" --set openshell.insecure=true --set "$ADDRESS" "$@" 2>&1) || rc=$?
 	if [[ $rc -ne 0 ]]; then
 		fail "helm install --dry-run=client for the gateway key NOTES failed: $(head -1 <<<"$out")"
 		return 0

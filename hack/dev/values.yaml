@@ -23,3 +23,14 @@ postgres:
 
 gateway:
   mode: standalone
+
+# The chart's default driver is substrate (#1093). The dev loop still runs OpenShell until the
+# substrate kind leg (#1091) and #1094 replace it.
+execution:
+  driver: openshell
+sandboxObserver:
+  enabled: true
+sandboxNetworkPolicy:
+  enabled: true
+sandboxLimitRange:
+  enabled: true

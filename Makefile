@@ -212,8 +212,8 @@ e2e-commands-check: ## Check the e2e command files (test/e2e/commands) and the s
 	hack/e2e-commands-check.sh
 
 .PHONY: test-e2e-kind
-test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
-	STORIES=1 test/e2e/run.sh
+test-e2e-kind: ## Quickstart e2e and the run-1 story suite on a local kind cluster koinon-e1, OpenShell driver until #1094 (KEEP=1 keeps the cluster)
+	DRIVER=openshell STORIES=1 test/e2e/run.sh
 
 .PHONY: test-e2e-kind-substrate
 test-e2e-kind-substrate: ## Quickstart e2e on kind with execution.driver substrate on the gVisor class (issue #1091; KEEP=1 keeps the cluster; docs/dev/ci.md)
@@ -225,7 +225,7 @@ test-fence-kind: ## Prove the Substrate fence on its own throwaway kind cluster 
 
 .PHONY: test-e2e-web
 test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install on kind koinon-e1 (KEEP=1 keeps the cluster)
-	SUITE=web test/e2e/run.sh
+	DRIVER=openshell SUITE=web test/e2e/run.sh
 
 # The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
 # OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape): `make test-escape-kind` runs
@@ -301,7 +301,7 @@ load-gateway: ## Gateway load suite (issue 280): cloud only, never in CI or `mak
 
 .PHONY: dev-kind-up
 dev-kind-up: ## Create the kind cluster kind-koinon-dev with Koinon's prerequisites (CNPG, Agent Sandbox, OpenShell)
-	CLUSTER=$(DEV_KIND_CLUSTER) test/e2e/kind/up.sh
+	CLUSTER=$(DEV_KIND_CLUSTER) DRIVER=openshell test/e2e/kind/up.sh
 
 .PHONY: dev-kind-down
 dev-kind-down: ## Delete the kind cluster kind-koinon-dev

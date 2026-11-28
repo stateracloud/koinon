@@ -177,7 +177,7 @@ func (c *config) validate() error {
 		return errors.New("--database-url is required")
 	}
 	if c.execution.Driver == "" {
-		c.execution.Driver = cli.DriverOpenShell
+		c.execution.Driver = cli.DriverSubstrate // the default since #1093
 	}
 	c.execution.OpenShell = cli.OpenShell{Address: c.openshellAddr, TLSDir: c.openshellTLSDir, ServerName: c.openshellName}
 	c.execution.Owner = c.installMark

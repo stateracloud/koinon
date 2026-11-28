@@ -11,7 +11,7 @@
 # sgw_control: the koinon-substrate-control policy of a render with ci/substrate-values.yaml, without
 # comment lines (a comment must not count as a peer or a port).
 sgw_control() {
-	render -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml |
+	render_default -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml |
 		docof 'NetworkPolicy\nmetadata:\n  name: koinon-substrate-control\n' | nocomment
 }
 
@@ -21,7 +21,7 @@ sgw_std=$(sgw_control)
 if grep -q 'gateway.networking.k8s.io/gateway-name' <<<"$sgw_std"; then fail "standalone: the Substrate control plane egress selects a controller's proxy"; fi
 
 # Kubernetes mode: refused, and the error names the fix.
-if render -f "$CHART/ci/substrate-values.yaml" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway \
+if render_default -f "$CHART/ci/substrate-values.yaml" --set gateway.mode=kubernetes --set gateway.mcp.driver=agentgateway \
 	>/dev/null 2>"$out/sgw-k8s.err"; then
 	fail "Substrate with gateway.mode=kubernetes must not render"
 else
@@ -31,6 +31,6 @@ fi
 
 # Default driver: with Substrate and no gateway.model.driver, the chart uses koinon (ADR 0097 section 16). The null
 # removes the fixture's explicit value.
-sgw_def=$(render -f "$CHART/ci/substrate-values.yaml" --set gateway.model.driver=null) || fail "Substrate without gateway.model.driver does not render"
+sgw_def=$(render_default -f "$CHART/ci/substrate-values.yaml" --set gateway.model.driver=null) || fail "Substrate without gateway.model.driver does not render"
 hit 'name: koinon-model-gateway' <<<"$sgw_def" || fail "Substrate without gateway.model.driver does not render koinon-model-gateway"
 hit 'modelUrl: http://koinon-model-gateway' <<<"$sgw_def" || fail "Substrate without gateway.model.driver does not set the reconciler modelUrl to koinon-model-gateway"

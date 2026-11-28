@@ -734,7 +734,30 @@ render. Only the pods that call the API server use this rule; worker pods never 
 {{- end }}
 
 {{- define "koinon.substrate" -}}
-{{- eq (.Values.execution.driver | default "openshell") "substrate" -}}
+{{- eq (include "koinon.driver" .) "substrate" -}}
+{{- end }}
+
+{{/*
+The execution driver: execution.driver, or substrate when it is empty (the default since #1093). An empty value
+with openshell.address set fails in koinon.validate: it is an OpenShell install from before #1093 that must say so.
+*/}}
+{{- define "koinon.driver" -}}
+{{- .Values.execution.driver | default "substrate" -}}
+{{- end }}
+
+{{/*
+koinon.featureOn (list $ "<key>"): "true" or "false" for sandboxObserver, sandboxNetworkPolicy or sandboxLimitRange.
+An explicit <key>.enabled wins. Unset (null, the default) is on with the OpenShell driver, as before #1093, and off
+with Substrate, which refuses all three.
+*/}}
+{{- define "koinon.featureOn" -}}
+{{- $root := index . 0 -}}
+{{- $v := index (index $root.Values (index . 1) | default dict) "enabled" -}}
+{{- if kindIs "invalid" $v -}}
+{{- ne (include "koinon.substrate" $root) "true" -}}
+{{- else -}}
+{{- $v -}}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -1618,7 +1641,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if and .Values.secrets.kek.kms.keyAdmin.activateIfNoActive (not .Values.secrets.kek.kms.keyAdmin.addKey) }}
 {{- fail "secrets.kek.kms.keyAdmin.activateIfNoActive needs secrets.kek.kms.keyAdmin.addKey: the new ID it makes active" }}
 {{- end }}
-{{- if .Values.sandboxObserver.enabled }}
+{{- if eq (include "koinon.featureOn" (list $ "sandboxObserver")) "true" }}
 {{- if not .Values.sandboxPolicy.enabled }}
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.enabled: the policy's RoleBinding rule is what limits the reconciler's right to bind the observer role to sandbox namespaces. Enable sandboxPolicy, or set sandboxObserver.enabled=false (a sandbox that cannot pull its image then stays an unknown wait cause)" }}
 {{- end }}
@@ -1626,7 +1649,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "sandboxObserver.enabled needs sandboxPolicy.validationActions to include Deny: without it the policy only warns or audits and does not limit where the reconciler may bind the observer role. Set sandboxObserver.enabled=false to run without the observer" }}
 {{- end }}
 {{- end }}
-{{- if .Values.sandboxNetworkPolicy.enabled }}
+{{- if eq (include "koinon.featureOn" (list $ "sandboxNetworkPolicy")) "true" }}
 {{- if not .Values.sandboxPolicy.enabled }}
 {{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.enabled: the NetworkPolicy writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxNetworkPolicy.enabled=false" }}
 {{- end }}
@@ -1634,7 +1657,7 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- fail "sandboxNetworkPolicy.enabled needs sandboxPolicy.validationActions to include Deny: without it the writer ClusterRole can create NetworkPolicies cluster-wide while the policy only warns or audits. Set sandboxNetworkPolicy.enabled=false to run without the writer" }}
 {{- end }}
 {{- end }}
-{{- if .Values.sandboxLimitRange.enabled }}
+{{- if eq (include "koinon.featureOn" (list $ "sandboxLimitRange")) "true" }}
 {{- if not .Values.sandboxPolicy.enabled }}
 {{- fail "sandboxLimitRange.enabled needs sandboxPolicy.enabled: the LimitRange writer's ValidatingAdmissionPolicy uses sandboxPolicy.namespaceSelector to say which namespaces are sandbox namespaces. Enable sandboxPolicy, or set sandboxLimitRange.enabled=false" }}
 {{- end }}
@@ -1677,8 +1700,13 @@ that of k8s resource.ParseQuantity: a render must never refuse a value the binar
 {{- if and .Values.httpRoute.enabled .Values.httpRoute.hostnames (not .Values.publicUrl) (contains "*" (first .Values.httpRoute.hostnames)) }}
 {{- fail "the first httpRoute hostname is a wildcard, so it cannot be the public URL: set publicUrl" }}
 {{- end }}
-{{- if not (has (.Values.execution.driver | default "openshell") (list "openshell" "substrate")) }}
+{{- if not (has (include "koinon.driver" .) (list "openshell" "substrate")) }}
 {{- fail (printf "execution.driver %q: want openshell or substrate" .Values.execution.driver) }}
+{{- end }}
+{{- /* Upgrade from an OpenShell install (#1093): before v0.1.0 the empty driver meant openshell. Such an install sets
+openshell.address, so it must name its driver: a silent switch to Substrate would drop its sandboxes. */}}
+{{- if and (not .Values.execution.driver) .Values.openshell.address }}
+{{- fail "openshell.address is set and execution.driver is not: the default driver is substrate since v0.1.0 (#1093). Set execution.driver=openshell to keep the OpenShell driver, or set execution.driver=substrate and remove openshell.address" }}
 {{- end }}
 {{- if eq (include "koinon.substrate" .) "true" }}
 {{- if or (not .Values.execution.substrate.controlAddress) (not .Values.execution.substrate.routerAddress) }}
@@ -1699,7 +1727,7 @@ and only koinon-gateway checks it. agentgateway cannot, so the model and MCP pat
 {{- fail "execution.driver=substrate needs gateway.mcp.driver=koinon: the guest holds no gateway key, and only koinon-gateway checks the actor JWT that atenet-egress adds to an MCP call (issue #1489). Set gateway.mode=standalone: gateway.mode=kubernetes is not supported with the Substrate driver in v0.1.0 (ADR 0097 amendment of 2026-11-27)" }}
 {{- end }}
 {{- if not .Values.execution.substrate.allowUnhardened }}
-{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). The guest API listens on TCP :80 without authentication, so agent code can start an unconfined process (issue #1309)" }}
+{{- fail "execution.driver=substrate needs execution.substrate.allowUnhardened=true: the substrate overlay of the harness image (guest server and guest launcher, issue #1087) has not yet run in a real Substrate actor with its probe results recorded. The gVisor tiers keep a writable root (issue #1150). Open items that the flag acknowledges are listed in docs/dev/guest-launcher.md (Open items 2, 4 and 7: probe results not recorded; the payload runs as non-root on the gVisor tiers (issue #1387) and can still run as root only on the vm tier (issue #1462); writable root on the gVisor tiers without Landlock)" }}
 {{- end }}
 {{- if and (not .Values.execution.substrate.defaultTier) (not .Values.execution.substrate.runtimeClassTiers) }}
 {{- fail "execution.substrate.defaultTier or execution.substrate.runtimeClassTiers is required with execution.driver=substrate: the driver starts no guest process for a sandbox without an isolation tier" }}
@@ -1713,7 +1741,7 @@ and only koinon-gateway checks it. agentgateway cannot, so the model and MCP pat
 {{- fail (printf "execution.substrate.defaultTier %q: want vm, hardened or dev" .Values.execution.substrate.defaultTier) }}
 {{- end }}
 {{- range $k := list "sandboxObserver" "sandboxNetworkPolicy" "sandboxLimitRange" }}
-{{- if (index $.Values $k).enabled }}
+{{- if eq (include "koinon.featureOn" (list $ $k)) "true" }}
 {{- fail (printf "%s.enabled acts on OpenShell's namespaces and pods: set it to false with execution.driver=substrate" $k) }}
 {{- end }}
 {{- end }}
@@ -1771,9 +1799,10 @@ it carries no credentials.
   valueFrom:
     fieldRef:
       fieldPath: metadata.name
-{{- if eq (include "koinon.substrate" .) "true" }}
+{{- /* Always named: the binaries' default is substrate since #1093, so an OpenShell install must say openshell. */}}
 - name: KOINON_EXECUTION_DRIVER
-  value: substrate
+  value: {{ include "koinon.driver" . }}
+{{- if eq (include "koinon.substrate" .) "true" }}
 - name: KOINON_SUBSTRATE_CONTROL_ADDRESS
   value: {{ .Values.execution.substrate.controlAddress | quote }}
 - name: KOINON_SUBSTRATE_ROUTER_ADDRESS

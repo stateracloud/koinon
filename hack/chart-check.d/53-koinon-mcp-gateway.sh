@@ -140,10 +140,10 @@ grep -q 'kubernetes.io/metadata.name: "ate-system"$' <<<"$sub_ing" || fail "koin
 grep -q 'app: atenet-egress$' <<<"$sub_ing" || fail "koinon-gateway's MCP port does not admit atenet-egress on Substrate"
 if grep -q 'kubernetes.io/metadata.name: ate-system$' <<<"$sub_ing"; then fail "koinon-gateway's MCP port admits all of Substrate's namespace (issue #1489)"; fi
 # Substrate: the control plane's egress reaches koinon-gateway's MCP pods by default, and not with the fallback.
-sub_np=$(render -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml)
+sub_np=$(render_default -f "$CHART/ci/substrate-values.yaml" --show-only templates/substrate-networkpolicy.yaml)
 grep -q 'component: mcp-gateway$' <<<"$sub_np" || fail "the Substrate control plane egress does not reach koinon-gateway"
 # Issue #1489: Substrate refuses the fallback, because only koinon-gateway checks the actor JWT.
-if render -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" >/dev/null 2>&1; then fail "Substrate renders with the agentgateway MCP fallback"; fi
+if render_default -f "$CHART/ci/substrate-values.yaml" "${fb[@]}" >/dev/null 2>&1; then fail "Substrate renders with the agentgateway MCP fallback"; fi
 # Issue #1372: the control plane reaches koinon-gateway's MCP pods on the named ports an actor needs, not on every port.
 # The stats port (the metrics of all agents) and the health port stay closed.
 # mcp_rules <rendered policy>: each egress rule that has a koinon-gateway peer, each ended by a line "@@@". A rule ends at the
@@ -173,7 +173,7 @@ mcp_rule_check() {
 	fi
 }
 mcp_rule_check "Substrate control plane" "$sub_np" no
-mcp_rule_check "Substrate control plane with the egress listener" "$(render -f "$CHART/ci/substrate-values.yaml" --set gateway.mcp.koinon.egress.enabled=true --show-only templates/substrate-networkpolicy.yaml)" yes
+mcp_rule_check "Substrate control plane with the egress listener" "$(render_default -f "$CHART/ci/substrate-values.yaml" --set gateway.mcp.koinon.egress.enabled=true --show-only templates/substrate-networkpolicy.yaml)" yes
 grep -q 'port: 8081$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the tools port of koinon-api"
 grep -q 'cnpg.io/cluster: koinon-pg$' <<<"$mcp_np" || fail "koinon-gateway egress does not reach the Postgres pods"
 grep -q 'port: 5432$' <<<"$mcp_np" || fail "koinon-gateway egress does not name the Postgres port"

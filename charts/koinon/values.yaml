@@ -851,22 +851,27 @@ harnessPrepull:
 
 # The execution layer that runs the agents' sandboxes (ADR 0119, epic #1082).
 execution:
-  # openshell (the default until the epic flips it) or substrate (Agent Substrate). Install Substrate
-  # first with `koinon-api substrate install`, which also runs its preflight. With substrate the
-  # openshell section, sandboxObserver, sandboxNetworkPolicy and sandboxLimitRange are not used (the
-  # chart refuses the last three when they are on), and the install preflight Job runs the Substrate
-  # checks (Kubernetes 1.37, the CRDs, the pinned api server, the router) without the Substrate probe pods.
-  driver: openshell
+  # substrate (Agent Substrate, the default since v0.1.0, ADR 0119) or openshell (until #1094 removes it).
+  # Install Substrate first with `koinon-api substrate install`, which also runs its preflight. With
+  # substrate the openshell section, sandboxObserver, sandboxNetworkPolicy and sandboxLimitRange are not
+  # used (the chart refuses the last three when they are on; unset, they are off with substrate), and the
+  # install preflight Job runs the Substrate checks (Kubernetes 1.37, the CRDs, the pinned api server, the
+  # router) without the Substrate probe pods. With openshell, set openshell.address; the three OpenShell
+  # features (sandboxObserver, sandboxNetworkPolicy, sandboxLimitRange) are then on unless you set them false.
+  # Empty means substrate. Upgrade from an OpenShell install: an empty driver with openshell.address set fails to
+  # render (before v0.1.0 empty meant openshell), so set execution.driver=openshell to keep the OpenShell driver.
+  driver: ""
   substrate:
-    # ateapi's host:port, for example api.ate-system.svc:443. Required with substrate. Use that exact name: the
-    # ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the TLS handshake.
-    controlAddress: ""
-    # The atenet router's host:port, for example atenet-router.ate-system.svc:443. The router serves TLS on 443
+    # ateapi's host:port: the in-cluster address of a default Substrate install. Required with substrate. Use that
+    # exact name: the ateapi certificate names api.ate-system.svc only, so api.ate-system.svc.cluster.local fails the
+    # TLS handshake.
+    controlAddress: api.ate-system.svc:443
+    # The atenet router's host:port of a default Substrate install. The router serves TLS on 443
     # only (Substrate v1.0.1 has no plain listener) and requires a client certificate: koinon-agentd, the one
     # component that calls it, gets a pod certificate (a podCertificate projected volume) and the CA of the
     # router's certificate (a clusterTrustBundle volume), and the installer puts agentd's SPIFFE ID on the router
     # allow-list (koinon-api substrate install --koinon-namespace and --koinon-release; issue #1446).
-    routerAddress: ""
+    routerAddress: atenet-router.ate-system.svc:443
     # Name checked against the router's certificate. Empty uses the host of routerAddress; the certificate names
     # atenet-router.<namespace>.svc, so use that form in routerAddress or set this.
     routerServerName: ""
@@ -874,9 +879,9 @@ execution:
     caSecret: ""
     # Name checked against ateapi's certificate. Empty uses the host of controlAddress.
     serverName: ""
-    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi. Set
+    # Audience of the projected ServiceAccount token that the reconciler and agentd send to ateapi. Keep
     # api.ate-system.svc: ate-setup makes ateapi accept that audience only, and any other gives "invalid bearer token".
-    tokenAudience: ""
+    tokenAudience: api.ate-system.svc
     # The provisioner (ADR 0128). Substrate lets only its global owner create an atespace, and the reconciler must
     # not hold that role. The provisioner is a small pod of its own with its own ServiceAccount: it creates the
     # atespace of each org and writes its access policy (the reconciler gets editor, agentd gets viewer). The
@@ -919,7 +924,7 @@ execution:
     # and for a sandbox with no class (openshell.runtimeClassName empty; such a sandbox has no worker
     # selector, so it can land on any pool). It cannot see a pool that you make yourself
     # (workerPool.enabled=false or a pool outside the chart): check that one.
-    defaultTier: ""
+    defaultTier: hardened
     # Required true with substrate until the substrate overlay of the harness image (sandbox-substrate,
     # issue #1087) has run in a real Substrate actor and its probe results are recorded. Remove then. A read-only root is not a reason:
     # the gVisor tiers keep a writable root by decision (issue #1150).
@@ -1570,7 +1575,8 @@ metrics:
 
 # The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
 # that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
-# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default.
+# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default with
+# execution.driver=openshell, off with substrate (the chart refuses it there).
 # Cluster-scoped objects it renders (templates/sandbox-observer.yaml): a ClusterRole with get on pods
 # and agents.x-k8s.io sandboxes, a ClusterRole that lets the reconciler create RoleBindings and bind
 # that one ClusterRole, and a ValidatingAdmissionPolicy that limits those bindings to OpenShell
@@ -1579,19 +1585,22 @@ metrics:
 # error stays an "unknown" wait cause (the preflight warns). Planned to go away once OpenShell
 # surfaces pod failures itself.
 sandboxObserver:
-  enabled: true
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
 # Default-deny NetworkPolicy for OpenShell sandbox namespaces (spike 8.15, ADR 0045).
-# On by default. Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
+# On by default with execution.driver=openshell, off with substrate (the chart refuses it there). Standard networking.k8s.io/v1 only (no CNI-specific features). The chart
 # renders a ClusterRole, binding and ValidatingAdmissionPolicy (templates/sandbox-networkpolicy.yaml);
 # the reconciler applies a NetworkPolicy named <namespace>-<fullname>-sandbox-default-deny in each
 # workspace namespace of openshell.gatewayId: empty podSelector, policyTypes [Ingress, Egress], no
 # allow rules. OpenShell's own workload and supervisor policies are additive with it. Off, the
 # chart renders none of it and the reconciler applies nothing.
 sandboxNetworkPolicy:
-  enabled: true
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
-# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default. OpenShell
+# LimitRange for OpenShell sandbox namespaces (#76, ADR 0083 follow-up). On by default with execution.driver=openshell,
+# off with substrate (the chart refuses it there). OpenShell
 # cannot size the supervisor or its init containers; the reconciler applies a LimitRange named
 # <namespace>-<release>-sandbox-limitrange in each workspace namespace of openshell.gatewayId
 # (defaultRequest 50m/64Mi, default 250m/256Mi for type Container, covering init containers too). The chart renders
@@ -1600,7 +1609,8 @@ sandboxNetworkPolicy:
 # removed (`kubectl delete limitrange -A -l koinon.dev/sandbox-limit-range=true`). Needs
 # sandboxPolicy.enabled.
 sandboxLimitRange:
-  enabled: true
+  # Unset (null): on with execution.driver=openshell, off with substrate (#1093). true or false overrides it.
+  enabled: null
 
 # Size of every agent sandbox (ADR 0083): CPU and memory requests and limits on the agent container.
 # A template may set its own (spec.resources); a value it leaves out takes the default below, and

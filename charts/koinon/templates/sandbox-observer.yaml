@@ -21,7 +21,7 @@ Three pieces, all cluster-scoped, all prefixed <namespace>-<fullname> like the s
 sandboxObserver.enabled=false renders none of it and the reconciler reads nothing: a pull error then
 stays "unknown" in the wait cause. Interim (#1023): remove all of this once OpenShell surfaces pod failures itself.
 */ -}}
-{{- if .Values.sandboxObserver.enabled }}
+{{- if eq (include "koinon.featureOn" (list $ "sandboxObserver")) "true" }}
 {{- $role := include "koinon.observerRole" . }}
 {{- $binder := printf "%s-binder" $role }}
 {{- $policy := printf "%s-binding" $role }}

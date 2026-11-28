@@ -13,3 +13,20 @@ bootstrapAdmin:
   enabled: false
 preflight:
   enabled: false
+
+# Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
+# default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never
+# pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
+execution:
+  # Named, not left empty: with openshell.address set an empty driver fails to render (#1093 upgrade guard).
+  driver: substrate
+  substrate:
+    allowUnhardened: true

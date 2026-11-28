@@ -83,8 +83,12 @@ func startLocalStack(ctx context.Context, cl *cluster, nwName string, k *kmsSett
 	// The suite calls the gateway in plain HTTP, which it serves on the same port as TLS.
 	ls := localStackAPI{base: fmt.Sprintf("http://%s:%s", h, mapped.Port()), region: k.region}
 
-	key := ls.kms(ctx, "CreateKey", map[string]any{"Description": "koinon chartsmoke KEK wrapping key"})
-	ls.kms(ctx, "CreateAlias", map[string]any{"AliasName": k.keyID, "TargetKeyId": key["KeyMetadata"].(map[string]any)["KeyId"]})
+	// One key per alias the pods name: the KEK's and, with koinon-gateway, the recipient key's.
+	for _, id := range k.keyIDs {
+		Expect(id).To(HavePrefix("alias/"), "the smoke test creates the key under the alias the chart names")
+		key := ls.kms(ctx, "CreateKey", map[string]any{"Description": "koinon chartsmoke wrapping key " + id})
+		ls.kms(ctx, "CreateAlias", map[string]any{"AliasName": id, "TargetKeyId": key["KeyMetadata"].(map[string]any)["KeyId"]})
+	}
 
 	_, err = cl.Admin.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: k.caConfigMap},

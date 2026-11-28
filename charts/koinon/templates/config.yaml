@@ -63,7 +63,7 @@ data:
       providerKeysDir: /secrets/providers
       {{- end }}
     execution:
-      driver: {{ .Values.execution.driver }}
+      driver: {{ include "koinon.driver" . }}
       {{- if eq (include "koinon.substrate" .) "true" }}
       substrate:
         controlAddress: {{ .Values.execution.substrate.controlAddress | quote }}
@@ -115,19 +115,19 @@ data:
       binding: {{ include "koinon.recoveryPolicyName" . | quote }}
     {{- end }}
     sandboxObserver:
-      enabled: {{ .Values.sandboxObserver.enabled }}
-      {{- if .Values.sandboxObserver.enabled }}
+      enabled: {{ include "koinon.featureOn" (list $ "sandboxObserver") }}
+      {{- if eq (include "koinon.featureOn" (list $ "sandboxObserver")) "true" }}
       clusterRole: {{ include "koinon.observerRole" . }}
       serviceAccount: {{ include "koinon.componentName" (list . "reconciler") }}
       {{- end }}
     sandboxNetworkPolicy:
-      enabled: {{ .Values.sandboxNetworkPolicy.enabled }}
-      {{- if .Values.sandboxNetworkPolicy.enabled }}
+      enabled: {{ include "koinon.featureOn" (list $ "sandboxNetworkPolicy") }}
+      {{- if eq (include "koinon.featureOn" (list $ "sandboxNetworkPolicy")) "true" }}
       name: {{ include "koinon.sandboxDefaultDeny" . | quote }}
       {{- end }}
     sandboxLimitRange:
-      enabled: {{ .Values.sandboxLimitRange.enabled }}
-      {{- if .Values.sandboxLimitRange.enabled }}
+      enabled: {{ include "koinon.featureOn" (list $ "sandboxLimitRange") }}
+      {{- if eq (include "koinon.featureOn" (list $ "sandboxLimitRange")) "true" }}
       name: {{ include "koinon.sandboxLimitRange" . | quote }}
       {{- end }}
     reconciler:

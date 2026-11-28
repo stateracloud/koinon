@@ -18,8 +18,14 @@ import (
 )
 
 var _ = Describe("Execution", func() {
-	It("defaults to OpenShell, which needs its address", func() {
+	It("takes an empty driver as substrate (#1093), the same as execution.ParseDriver", func() {
 		e := cli.Execution{}
+		Expect(e.IsSubstrate()).To(BeTrue())
+		Expect(e.Validate("")).To(MatchError(ContainSubstring("--substrate-control-address")))
+		Expect(e.Driver).To(Equal(cli.DriverSubstrate))
+	})
+	It("needs its address for openshell", func() {
+		e := cli.Execution{Driver: cli.DriverOpenShell}
 		Expect(e.Validate("")).To(MatchError(ContainSubstring("--openshell-address")))
 		Expect(e.Validate("gw:8080")).To(Succeed())
 		Expect(e.IsSubstrate()).To(BeFalse())

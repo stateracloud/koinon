@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+# External database with the optional guards off: no NetworkPolicy, no sandbox policy, no fence, no KEK
+# guard, no seccomp probe (was external-kubernetes until #1093 moved it to the standalone gateway).
+# No client TLS Secret: the mesh provides mTLS (openshell.insecure).
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+# The v0.1.0 Substrate shape: koinon-gateway on the model and MCP paths, because only it checks the
+# actor JWT (issue #1489), and Substrate refuses gateway.mode=kubernetes.
+gateway:
+  mode: standalone
+  model:
+    driver: koinon
+  mcp:
+    driver: koinon
+    koinon:
+      recipientKey:
+        # The key Secret's guard is a cluster-scoped ValidatingAdmissionPolicy: off in this fixture only.
+        guard:
+          enabled: false
+networkPolicy:
+  enabled: false
+sandboxPolicy:
+  enabled: false
+# A namespace-scoped install: every optional cluster-scoped guard is off (the KEK guard and the reconciler
+# Secret fence, issue #604; the gateway key guard; the Substrate worker policies, pool and namespace). The
+# only cluster-scoped objects left are the ones it needs, and hack/chart-check.d/59-external-minimal-scope.sh
+# fails on any other: the ClusterRoles and ClusterRoleBindings of platform-recovery, preflight,
+# reconciler-openshell-config and the Substrate provisioner, and the platform-recovery
+# ValidatingAdmissionPolicy and its binding.
+secrets:
+  reconcilerFence:
+    enabled: false
+  kek:
+    guard:
+      enabled: false
+# The observer, NetworkPolicy writer and LimitRange writer need the policy.
+sandboxObserver:
+  enabled: false
+sandboxNetworkPolicy:
+  enabled: false
+sandboxLimitRange:
+  enabled: false
+preflight:
+  seccompProbe:
+    enabled: false
+
+# Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
+# default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never
+# pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
+execution:
+  # Named, not left empty: with openshell.address set an empty driver fails to render (#1093 upgrade guard).
+  driver: substrate
+  substrate:
+    allowUnhardened: true
+    # Cluster-scoped admission policies and the worker Namespace: off in this fixture only (product defaults stay on).
+    workerPolicy:
+      enabled: false
+    workerPool:
+      enabled: false
+    workerNetworkPolicy:
+      enabled: false
+    workerLimits:
+      enabled: false

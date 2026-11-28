@@ -23,7 +23,8 @@ const (
 	endpoint = "http://koinon-api.koinon.svc"
 )
 
-var baseEnv = map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080"}
+// baseEnv names the OpenShell driver: the default is substrate since #1093.
+var baseEnv = map[string]string{"KOINON_DATABASE_URL": db, "KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080", "KOINON_EXECUTION_DRIVER": "openshell"}
 
 // start runs koinon-agentd's startup, without its work, with the base environment plus env.
 func start(env map[string]string, args ...string) error {
@@ -44,20 +45,20 @@ func start(env map[string]string, args ...string) error {
 var _ = Describe("koinon-agentd's startup", func() {
 	It("starts with its three required settings, from the environment or flags", func() {
 		Expect(start(nil)).To(Succeed())
-		Expect(cli.Check(NewRootCommand(), []string{"--database-url", db, "--openshell-address", "o:1", "--gateway-url", "http://g:8080"}, nil)).To(Succeed())
+		Expect(cli.Check(NewRootCommand(), []string{"--database-url", db, "--openshell-address", "o:1", "--gateway-url", "http://g:8080", "--execution-driver", "openshell"}, nil)).To(Succeed())
 	})
 
 	It("takes the database URL from DATABASE_URL and the owner from POD_NAME", func() {
 		Expect(cli.Check(NewRootCommand(), []string{}, map[string]string{
 			"DATABASE_URL": db, "POD_NAME": "koinon-agentd-0",
-			"KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080",
+			"KOINON_OPENSHELL_ADDRESS": "o:1", "KOINON_GATEWAY_URL": "http://g:8080", "KOINON_EXECUTION_DRIVER": "openshell",
 		})).To(Succeed())
 	})
 
 	It("names each missing required setting", func() {
 		all := []string{"database-url", "openshell-address", "gateway-url"}
 		for _, missing := range all {
-			var args []string
+			args := []string{"--execution-driver=openshell"}
 			for _, f := range all {
 				if f != missing {
 					args = append(args, "--"+f+"=x:1")

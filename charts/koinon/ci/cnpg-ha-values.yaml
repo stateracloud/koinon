@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# CNPG with three instances on a named storage class (was cnpg-kubernetes until #1093 moved it to the
+# standalone gateway).
+# No client TLS Secret: the mesh provides mTLS (openshell.insecure).
+openshell:
+  address: openshell.openshell.svc:8080
+  insecure: true
+# The v0.1.0 Substrate shape: koinon-gateway on the model and MCP paths, because only it checks the
+# actor JWT (issue #1489), and Substrate refuses gateway.mode=kubernetes.
+gateway:
+  mode: standalone
+  model:
+    driver: koinon
+  mcp:
+    driver: koinon
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      storageClass: fast
+
+# Substrate runs a harness image only when it is pinned by digest (issue #1192), and Substrate is the
+# default driver (#1093): the reconciler refuses to start without one. The digest is a fake: CI never
+# pulls the image.
+harnesses:
+  opencode:
+    image:
+      repository: sandbox
+      tag: ""
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+# Substrate is the default driver (#1093) and needs this acknowledgement (docs/dev/guest-launcher.md, Open items).
+execution:
+  # Named, not left empty: with openshell.address set an empty driver fails to render (#1093 upgrade guard).
+  driver: substrate
+  substrate:
+    allowUnhardened: true

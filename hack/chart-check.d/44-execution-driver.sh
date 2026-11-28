@@ -9,9 +9,43 @@ sub=(--set execution.driver=substrate --set gateway.model.driver=koinon --set ga
 	--set execution.substrate.allowUnhardened=true --set execution.substrate.defaultTier=dev
 	--set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false)
 
-# OpenShell stays the default: no Substrate input reaches any component.
-has "the default driver is openshell" 'driver: openshell' --show-only templates/config.yaml
-lacks "no Substrate volume with the default driver" 'substrate-token' --show-only templates/deployments.yaml
+# Substrate is the default (#1093): the shipped values render with no flag at all, with the Substrate
+# addresses of a default install, the gvisor pool tier (hardened, never vm) and no OpenShell input.
+# allowUnhardened is false by default and the render names it (the maintainer decides when it goes).
+if render_default >/dev/null 2>"$out/def.err"; then fail "the shipped defaults must not render without allowUnhardened"; fi
+hit 'allowUnhardened' "$out/def.err" || fail "the default-install error must name execution.substrate.allowUnhardened"
+default_out=$(render_default --set execution.substrate.allowUnhardened=true)
+hit 'driver: substrate' <<<"$default_out" || fail "the default driver is substrate"
+hit 'controlAddress: "api.ate-system.svc:443"' <<<"$default_out" || fail "the default control address is the ateapi certificate name"
+hit 'audience: "api.ate-system.svc"' <<<"$default_out" || fail "the default token audience is the one ate-setup accepts"
+hit 'defaultTier: "hardened"' <<<"$default_out" || fail "the default tier fits the default gvisor pool (not vm)"
+hit -e '- name: gvisor' <<<"$default_out" || fail "the default worker pool is gvisor"
+if hit 'KOINON_OPENSHELL_ADDRESS' <<<"$default_out"; then fail "the default driver gives no OpenShell address to any component"; fi
+if hit -E 'sandbox-default-deny|sandbox-networkpolicy' <<<"$default_out"; then fail "no OpenShell sandbox NetworkPolicy writer with the default driver"; fi
+# The OpenShell opt-out of the default-deny writer renders as on main (32-sandbox-networkpolicy.sh checks what it renders).
+render --set sandboxNetworkPolicy.enabled=false >/dev/null || fail "openshell with sandboxNetworkPolicy.enabled=false renders, as before #1093"
+# The OpenShell driver stays selectable until #1094: it needs its address and TLS choice; the three features are on unless set false.
+# The openshell ci values file (charts/koinon/ci/openshell-values.yaml) keeps the driver in the preflight and smoke renders.
+has "the openshell driver is still selectable" 'driver: openshell' --show-only templates/config.yaml
+# Upgrade from an OpenShell install (#1093): openshell.address set and execution.driver left empty fails, and the
+# error names the fix, so the upgrade never switches the driver to Substrate in silence.
+if render_default --set "$ADDRESS" --set openshell.insecure=true --set execution.substrate.allowUnhardened=true >/dev/null 2>"$out/up.err"; then
+	fail "openshell.address with an empty execution.driver must not render"
+fi
+hit 'Set execution.driver=openshell to keep the OpenShell driver' "$out/up.err" || fail "the upgrade error must say: set execution.driver=openshell to keep the OpenShell driver"
+# An OpenShell install that names only the driver keeps the observer, the NetworkPolicy writer and the LimitRange
+# writer, as before #1093: unset (null) they are on with openshell. An explicit false still turns one off.
+pinned=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true)
+hit 'name: koinon-koinon-sandbox-observer' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox observer"
+hit 'sandbox-limitrange' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox LimitRange writer"
+hit 'sandbox-default-deny' <<<"$pinned" || fail "execution.driver=openshell alone must keep the sandbox NetworkPolicy writer"
+pinned_cfg=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true --show-only templates/config.yaml)
+for k in sandboxObserver sandboxNetworkPolicy sandboxLimitRange; do
+	grep -A1 "^    $k:\$" <<<"$pinned_cfg" | hit 'enabled: true' || fail "execution.driver=openshell alone must tell the reconciler $k is on"
+done
+off_cfg=$(render_default --set execution.driver=openshell --set "$ADDRESS" --set openshell.insecure=true --set sandboxObserver.enabled=false --show-only templates/config.yaml)
+grep -A1 '^    sandboxObserver:$' <<<"$off_cfg" | hit 'enabled: false' || fail "an explicit sandboxObserver.enabled=false must win over the openshell default"
+lacks "no Substrate volume with the openshell driver" 'substrate-token' --show-only templates/deployments.yaml
 env_is KOINON_OPENSHELL_ADDRESS '"openshell.openshell.svc:8080"'
 
 # Substrate: the reconciler config and agentd's env carry the addresses and the token file, and both
@@ -69,7 +103,7 @@ for flag in sandboxObserver sandboxNetworkPolicy sandboxLimitRange; do
 	if render "${sub[@]}" --set "$flag.enabled=true" >/dev/null 2>"$out/sub.err"; then fail "$flag.enabled with substrate must not render"; fi
 	grep -q "$flag.enabled" "$out/sub.err" || fail "the $flag error must name it"
 done
-if render --set execution.driver=substrate >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
+if render --set execution.driver=substrate --set execution.substrate.controlAddress= >/dev/null 2>"$out/sub.err"; then fail "substrate without addresses must not render"; fi
 grep -q 'controlAddress' "$out/sub.err" || fail "the missing-address error must name execution.substrate.controlAddress"
 if render --set execution.driver=nomad >/dev/null 2>&1; then fail "an unknown driver must not render"; fi
 # Substrate is refused until the overlay image has a recorded run in a real actor (#1087).
@@ -120,6 +154,6 @@ has "the Substrate peer selector is configurable" 'kubernetes.io/metadata.name: 
 # Substrate needs every harness image pinned by digest (#1192): the reconciler refuses to start
 # without one, so the substrate CI values carry a digest and the config renders it.
 # With substrate the default repository is the overlay with the guest server and launcher (#1087).
-has "the substrate CI values pin the harness image by digest, and it is the substrate overlay" 'image: .*/sandbox-substrate:[^@ ]+@sha256:[0-9a-f]{64}' -f "$CHART/ci/substrate-values.yaml" --show-only templates/config.yaml
+has "the substrate CI values pin the harness image by digest, and it is the substrate overlay" 'image: .*/sandbox-substrate:[^@ ]+@sha256:[0-9a-f]{64}' --set execution.driver=substrate --set sandboxObserver.enabled=false --set sandboxNetworkPolicy.enabled=false --set sandboxLimitRange.enabled=false -f "$CHART/ci/substrate-values.yaml" --show-only templates/config.yaml
 has "a repository set for the harness is used as it is with substrate" 'image: .*/my-sandbox:' "${sub[@]}" --set harnesses.opencode.image.repository=my-sandbox --set harnesses.opencode.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 --show-only templates/config.yaml
 lacks "the default harness image has no digest (OpenShell does not need one)" 'image: .*/sandbox:[^@ ]+@sha256:' --show-only templates/config.yaml
