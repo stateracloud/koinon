@@ -4,6 +4,7 @@ package agentd
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -27,6 +28,9 @@ const (
 	skipDigest     = "its files do not match the recorded digest"
 	skipRepository = "its repository cannot be opened"
 	skipRestore    = "its restore failed"
+	// A checkpoint that the restore list hides (ListCompleteHomeCheckpoints) never reaches the restore.
+	hiddenRepositoryGone = "its repository was deleted"
+	hiddenEpochTooHigh   = "it is from an ownership epoch that no run has seen"
 )
 
 // skippedCheckpoint is one checkpoint that a restore did not use.
@@ -40,10 +44,26 @@ func newSkippedCheckpoint(cp store.HomeCheckpoint, reason string) skippedCheckpo
 	return skippedCheckpoint{id: cp.ID.String(), takenAt: cp.FinishedAt.Time.UTC(), reason: reason}
 }
 
-// noteHomeFallback tells the run that the restore used cp and skipped newer checkpoints. It does
-// nothing when none was skipped. It never fails the restore: a diagnostic event that Record drops is
-// lost, like any diagnostic event.
+// noteHomeFallback tells the run that the restore used cp and skipped newer checkpoints. A newer
+// checkpoint that the restore list hides (its repository was deleted, or its epoch is too high) counts
+// too: its work is lost the same way. It does nothing when none was skipped. It never fails the
+// restore: a diagnostic event that Record drops is lost, like any diagnostic event.
 func (r *runner) noteHomeFallback(ctx context.Context, used store.HomeCheckpoint, skipped []skippedCheckpoint) {
+	hidden, err := r.q.ListHiddenNewerHomeCheckpoints(ctx, store.ListHiddenNewerHomeCheckpointsParams{
+		OrgID: r.run.OrgID, AgentID: r.run.AgentID, UsedFinishedAt: used.FinishedAt, UsedID: used.ID,
+	})
+	if err != nil {
+		r.log.Warn("listing the hidden newer home checkpoints failed", "err", err)
+	}
+	for _, h := range hidden {
+		reason := hiddenRepositoryGone
+		if h.Reason == "epoch_too_high" {
+			reason = hiddenEpochTooHigh
+		}
+		skipped = append(skipped, skippedCheckpoint{id: h.ID.String(), takenAt: h.FinishedAt.Time.UTC(), reason: reason})
+	}
+	// Newest first, as the restore tried them.
+	sort.SliceStable(skipped, func(i, j int) bool { return skipped[i].takenAt.After(skipped[j].takenAt) })
 	if len(skipped) == 0 {
 		return
 	}

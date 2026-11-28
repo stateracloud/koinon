@@ -279,6 +279,27 @@ WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
 ORDER BY c.finished_at DESC, c.id DESC
 LIMIT @max_rows::int;
 
+-- name: ListHiddenNewerHomeCheckpoints :many
+-- The complete checkpoints that ListCompleteHomeCheckpoints hides and that are newer than the one a
+-- restore used (@used_finished_at, @used_id): newest first, each with why it is hidden. A restore
+-- that uses an older checkpoint reports them, so the loss of newer work is never silent (issue #1538).
+SELECT c.id, c.finished_at,
+  CASE WHEN c.epoch > coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+       THEN 'epoch_too_high' ELSE 'repository_gone' END::text AS reason
+FROM home_checkpoints c
+WHERE c.org_id = @org_id AND c.agent_id = @agent_id AND c.status = 'complete'
+  AND (c.finished_at, c.id) > (@used_finished_at::timestamptz, @used_id::uuid)
+  AND (
+    c.epoch > coalesce((SELECT max(r.epoch) FROM runs r WHERE r.org_id = c.org_id AND r.agent_id = c.agent_id), 0)
+    OR EXISTS (SELECT 1 FROM home_repositories h
+               WHERE h.org_id = c.org_id AND h.agent_id = c.agent_id AND c.repository_epoch = 0 AND h.deleted_at IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM home_repository_epochs e
+               WHERE e.org_id = c.org_id AND e.agent_id = c.agent_id AND e.repository_epoch = c.repository_epoch
+                 AND e.deleted_at IS NOT NULL)
+  )
+ORDER BY c.finished_at DESC, c.id DESC
+LIMIT 20;
+
 -- name: ClaimHomeCheckpoint :one
 -- The writer's next request: a requested one that is due, or a running one whose writer died
 -- (started more than @lease_seconds ago), for an agent whose sandbox is ready. No row: nothing to

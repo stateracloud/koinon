@@ -214,6 +214,15 @@ func (l lateStore) Backup(ctx context.Context, prefix, pw string, r io.Reader, m
 	return res, err
 }
 
+// fellBack is the payload of the run's run.home_fell_back event, or nil when the run has none.
+func fellBack(evs []store.RunEvent) map[string]any {
+	i := slices.IndexFunc(evs, func(ev store.RunEvent) bool { return ev.Kind == "run.home_fell_back" })
+	if i < 0 {
+		return nil
+	}
+	return payload(evs[i])
+}
+
 var _ = Describe("home checkpoints", func() {
 	var (
 		e      *env
@@ -381,6 +390,7 @@ var _ = Describe("home checkpoints", func() {
 		Expect(kinds(evs)[:2]).To(Equal([]string{"run.home_restored", "run.session"}), "restored before the harness started")
 		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
 		Expect(kinds(evs)).To(ContainElement("run.home_restored"))
+		Expect(kinds(evs)).NotTo(ContainElement("run.home_fell_back"), "the newest checkpoint restored: nothing was skipped (issue #1538)")
 		Expect(restoreOf(ctx).Valid).To(BeFalse(), "the restore is done")
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
@@ -654,6 +664,8 @@ var _ = Describe("home checkpoints", func() {
 		}))
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "the newest would not restore; the older one did")
+		Expect(fellBack(events(ctx, r2))).To(HaveKeyWithValue("skipped", ConsistOf(And(
+			HaveKeyWithValue("checkpoint", newer.String()), HaveKeyWithValue("reason", "its restore failed")))), "issue #1538")
 		Expect(restoreOf(ctx).Valid).To(BeFalse())
 	})
 
@@ -731,6 +743,51 @@ var _ = Describe("home checkpoints", func() {
 		}))
 		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"), "epoch 1's password is lost; epoch 0's checkpoint restored")
+		Expect(fellBack(events(ctx, r2))).To(HaveKeyWithValue("skipped", ConsistOf(And(
+			HaveKeyWithValue("checkpoint", newer.String()), HaveKeyWithValue("reason", "its repository cannot be opened")))), "issue #1538")
+	})
+
+	// Issue #1538: a newer checkpoint that the restore list hides is still lost work. The run is told.
+	It("tells the run about a newer checkpoint that the restore list hides, with the reason", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		stop()
+		take := func(files map[string]string) pgtype.UUID {
+			home.set(files)
+			id := request(ctx, store.CheckpointReasonStop)
+			stopW := e.pool("agentd-w", cps(ctx))
+			Eventually(status(checkpointOf(ctx, id))).WithTimeout(racescale.D(20 * time.Second)).Should(Equal(store.CheckpointStatusComplete))
+			stopW()
+			return id
+		}
+		take(map[string]string{"notes/v.md": "old"})
+		gone := take(map[string]string{"notes/v.md": "gone"})
+		tooHigh := take(map[string]string{"notes/v.md": "high"})
+
+		By("one checkpoint is in a deleted repository epoch, the newest is from an epoch no run has seen")
+		_, err := db.Exec(ctx, `INSERT INTO home_repositories (org_id, agent_id, prefix, password_envelope) VALUES ($1, $2, $3, '{}')`,
+			e.org, e.agent.ID, checkpoint.Prefix(e.org.String(), e.agent.ID.String()))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `INSERT INTO home_repository_epochs (org_id, agent_id, repository_epoch, prefix, password_envelope, reason, retired_at, delete_after, deleted_at)
+			VALUES ($1, $2, 1, $3, '{}', 'key_lost', now(), now(), now())`, e.org, e.agent.ID, checkpoint.EpochPrefix(e.org.String(), e.agent.ID.String(), 1))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET repository_epoch = 1 WHERE org_id = $1 AND id = $2`, e.org, gone)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET epoch = 999 WHERE org_id = $1 AND id = $2`, e.org, tooHigh)
+		Expect(err).NotTo(HaveOccurred())
+
+		reconcilerRecreates(ctx, tooHigh)
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b", cps(ctx))
+		Eventually(runState(ctx, r2)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(home.get()).To(HaveKeyWithValue("notes/v.md", "old"))
+		Expect(fellBack(events(ctx, r2))).To(HaveKeyWithValue("skipped", ConsistOf(
+			And(HaveKeyWithValue("checkpoint", tooHigh.String()), HaveKeyWithValue("reason", "it is from an ownership epoch that no run has seen")),
+			And(HaveKeyWithValue("checkpoint", gone.String()), HaveKeyWithValue("reason", "its repository was deleted")),
+		)))
 	})
 
 	It("deletes a retired repository past its deadline once a later epoch holds a checkpoint, and no longer restores its own", func(ctx SpecContext) {
