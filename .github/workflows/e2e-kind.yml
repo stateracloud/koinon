@@ -77,10 +77,10 @@ on:
         type: boolean
         default: false
       driver:
-        description: 'The execution driver of the quickstart. openshell: the default run. substrate: the Substrate leg (make test-e2e-kind-substrate, gVisor class, issue 1091; advisory, the ref needs that make target). Go suite only.'
+        description: 'The execution driver of the quickstart. substrate: the default run (gVisor class, issue 1091). openshell: the old leg, until #1094. Go suite only.'
         type: choice
-        options: [openshell, substrate]
-        default: openshell
+        options: [substrate, openshell]
+        default: substrate
       commit:
         description: 'Run on this full commit sha instead of the ref (used by hack/e2e-bisect.sh).'
         type: string
@@ -362,7 +362,8 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/e2e
           SUITE: ${{ inputs.suite || 'go' }}
-          E2E_DRIVER: ${{ inputs.driver || 'openshell' }}
+          # Substrate is the default driver (#1093). The browser suite has no Substrate leg yet (run.sh refuses it), so SUITE=web stays on OpenShell.
+          E2E_DRIVER: ${{ (inputs.suite || 'go') == 'web' && 'openshell' || inputs.driver || 'substrate' }}
           # The nightly run (and a dispatch that asks) backs up, restores and verifies the install after the
           # driver (ADR 0085 decision 18, #90); pull requests and pushes skip it to keep their run short.
           BACKUP_RESTORE: ${{ (github.event_name == 'schedule' || inputs.backup_restore) && (inputs.suite || 'go') == 'go' && '1' || '0' }}
