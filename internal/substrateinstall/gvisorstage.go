@@ -126,12 +126,21 @@ func gvisorSourceURL(mirror string, a gvisorArch) string {
 // checked against the pinned digest before the first byte goes to the store, and the stored object is
 // read back and checked once more.
 func StageGVisor(ctx context.Context, store AssetStore, fetch AssetFetcher, mirror string, out io.Writer) (StageResult, error) {
+	return StageGVisorWithin(ctx, ctx, store, fetch, mirror, out)
+}
+
+// StageGVisorWithin is StageGVisor with a context for the bucket readiness request. The first request to the
+// store, which finds out whether the bucket exists, uses probe: a deadline on probe stops one stalled request
+// from running past the wait for the bucket. Every other request, and the tarball download with its own
+// timeout, uses ctx.
+func StageGVisorWithin(ctx, probe context.Context, store AssetStore, fetch AssetFetcher, mirror string, out io.Writer) (StageResult, error) {
 	var res StageResult
 	for _, a := range gvisorArches {
-		key, found, err := findStagedGVisor(ctx, store, a)
+		key, found, err := findStagedGVisor(probe, store, a)
 		if err != nil {
 			return res, err
 		}
+		probe = ctx // the bucket answered: it exists
 		if found {
 			_, _ = fmt.Fprintf(out, "gvisor %s %s: already in the cluster object store (%s)\n", GVisorRelease, a.goArch, key)
 			res.Present = append(res.Present, a.goArch)
@@ -238,7 +247,7 @@ func (i *Installer) EnsureGVisorAssets(ctx context.Context) error {
 	defer cancel()
 	var res StageResult
 	for {
-		res, err = StageGVisor(ctx, store, fetch, i.Profile.GVisorMirror, i.Out)
+		res, err = StageGVisorWithin(ctx, waitCtx, store, fetch, i.Profile.GVisorMirror, i.Out)
 		if err == nil || !errors.Is(err, ErrNoBucket) || waitCtx.Err() != nil {
 			break
 		}

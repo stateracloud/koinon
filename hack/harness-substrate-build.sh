@@ -24,7 +24,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 [[ -d $root/build/guest-launcher ]] || { echo "harness-substrate-build.sh: $root/build/guest-launcher is missing; run make guest-launcher" >&2; exit 1; }
 
 builder=koinon-substrate
-docker buildx inspect "$builder" >/dev/null 2>&1 || docker buildx create --name "$builder" --driver docker-container >&2
+# Two runs at the same time can both find no builder: the second create then fails. Look again before it is an error.
+docker buildx inspect "$builder" >/dev/null 2>&1 ||
+  docker buildx create --name "$builder" --driver docker-container >&2 ||
+  docker buildx inspect "$builder" >/dev/null 2>&1
 
 # Outside any output directory that CI uploads: the layout holds the whole harness image.
 work=$(mktemp -d "${TMPDIR:-/tmp}/flavor-oci.XXXXXX")
