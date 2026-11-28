@@ -121,8 +121,10 @@ var _ = Describe("Execution", func() {
 			GuestKeyFile:      guestKeyFile(),
 			RuntimeClassTiers: []string{"kata=vm", "gvisor=hardened"}, DefaultTier: "dev",
 			GatewayRoutes: []substrate.GatewayRoute{substrate.ModelRoute(fakeate.GatewayHost, fakeate.GatewayPort)},
+			ActorNames:    fakeate.NewActorNames(),
 		}.DriverConfig(nil)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.ActorNames).NotTo(BeNil(), "the ledger reaches the driver")
 		cfg.PollInterval, cfg.GuestReadyTimeout = 5*time.Millisecond, 2*time.Second
 		cl := fakeate.New()
 		control, router, err := cl.Start()

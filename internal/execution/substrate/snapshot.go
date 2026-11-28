@@ -193,6 +193,12 @@ func (d *Driver) RestoreSandbox(ctx context.Context, workspace string, snap exec
 	if err != nil {
 		return execution.Sandbox{}, err
 	}
+	// The name is claimed as in CreateSandbox (issue #1092). A restore never returns an existing actor.
+	if existing, err := d.claimActorName(ctx, op, key{workspace, spec.Name}); err != nil {
+		return execution.Sandbox{}, err
+	} else if existing != nil {
+		return execution.Sandbox{}, fail(op, execution.ErrAlreadyExists, "sandbox %s exists", spec.Name)
+	}
 	actor, err := d.control.CreateActor(ctx, &ateapiv1.CreateActorRequest{Actor: &ateapiv1.Actor{
 		Metadata:      &ateapiv1.ResourceMetadata{Atespace: workspace, Name: spec.Name},
 		ActorTemplate: ref(workspace, tmpl),
