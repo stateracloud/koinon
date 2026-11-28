@@ -1147,8 +1147,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 			// pod reason (ErrImagePull) and the sandbox observer metrics are OpenShell-only: sandboxObserver is off on this leg and
 			// the driver reports the cause from the actor (phase.go Observe). Whether the run.failed payload then carries
 			// sandboxCause image_pull on Substrate is not proven. Exit condition: a digest-pinned missing image on Substrate is
-			// proven to reach the sandbox wait with the cause image_pull; then port this spec (issue #1091 keeps it open).
-			Skip("issue #1091: the missing-image spec needs a Substrate form (digest-pinned broken image, actor cause); not ported yet")
+			// proven to reach the sandbox wait with the cause image_pull; then port this spec (issue #1534 keeps it open).
+			Skip("issue #1534: the missing-image spec needs a Substrate form (digest-pinned broken image, actor cause); not ported yet")
 		}
 		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
 		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
