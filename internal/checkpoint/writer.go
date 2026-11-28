@@ -213,10 +213,6 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		if err != nil {
 			return err
 		}
-		prev, err := snapshot.ListSnapshots(ctx, wr, source)
-		if err != nil {
-			return err
-		}
 		// The digest covers every staged file, so kopia may skip none: a `.kopiaignore` file or a
 		// cache directory marker (CACHEDIR.TAG, which cargo writes in target/) in the agent's home
 		// would leave the snapshot smaller than the digest, and no restore would pass. An old
@@ -224,7 +220,12 @@ func (w *Writer) Backup(ctx context.Context, prefix, password string, tarStream 
 		pt = keepEverything(pt)
 		u := upload.NewUploader(wr)
 		u.ParallelUploads = 2
-		man, err := u.Upload(ctx, src, pt, source, prev...)
+		// No previous snapshot goes to Upload: kopia would reuse a file's old contents when its name,
+		// mode, size and time match the previous snapshot. The tar stream has whole-second times, so a
+		// file the harness rewrote in the second an earlier checkpoint read it (same length, other
+		// bytes) would keep the old bytes, and the snapshot would not match the digest above (issue
+		// #1090). Every file is read and hashed; kopia still stores only the content it does not hold.
+		man, err := u.Upload(ctx, src, pt, source)
 		if err != nil {
 			return err
 		}
