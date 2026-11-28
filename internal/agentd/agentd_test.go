@@ -396,6 +396,69 @@ var _ = Describe("Pool", func() {
 		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(racescale.D(10 * time.Second)).Should(ContainElement("run.requeued"))
 	})
 
+	It("tells the run once what a crash revert of its sandbox lost (issue 1526)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		r := e.enqueue(ctx, e.task(ctx, markWait))
+		e.pool("agentd-a")
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(1))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(BeEmpty(), "no revert yet")
+
+		// The reconciler records the revert on the sandbox row; it writes no run event itself.
+		_, err := db.Exec(ctx, `UPDATE agent_sandboxes SET last_snapshot_at = $3 WHERE org_id = $1 AND agent_id = $2`,
+			e.org, e.agent.ID, time.Now().Add(-time.Hour))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.sandbox_reverted") }).
+			WithTimeout(racescale.D(5 * time.Second)).Should(HaveLen(1))
+		ev := eventOf(events(ctx, r), "run.sandbox_reverted")[0]
+		Expect(payload(ev)).To(HaveKeyWithValue("revert", BeNumerically("==", 1)))
+		Expect(payload(ev)).To(HaveKey("snapshot_at"))
+		Expect(payload(ev)["lost"]).To(ContainSubstring("the writes after "))
+		// Later heartbeats do not write it again.
+		Consistently(func() []store.RunEvent { return eventOf(events(ctx, r), "run.sandbox_reverted") }, racescale.D(time.Second)).
+			Should(HaveLen(1))
+
+		// A new revert is a new event.
+		_, err = q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.sandbox_reverted") }).
+			WithTimeout(racescale.D(5 * time.Second)).Should(HaveLen(2))
+	})
+
+	It("does not tell a taken-over run again about a revert its first owner reported (issue 1526)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		r := e.enqueue(ctx, e.task(ctx, markHang))
+		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
+		Eventually(e.harness.hangs).WithTimeout(racescale.D(10 * time.Second)).Should(Receive())
+		_, err := q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() []store.RunEvent { return eventOf(events(ctx, r), "run.sandbox_reverted") }).
+			WithTimeout(racescale.D(5 * time.Second)).Should(HaveLen(1))
+
+		killA()
+		e.pool("agentd-b")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(15 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(getRun(ctx, r).OwnerID.String).To(HavePrefix("agentd-b/"))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(HaveLen(1))
+		// The new owner starts from the count the run already reported, in the first epoch's event.
+		reported, err := q.LastRunSandboxRevertReported(ctx, store.LastRunSandboxRevertReportedParams{OrgID: e.org, RunID: r.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(reported).To(Equal(int32(1)))
+	})
+
+	It("does not tell a run about a revert from before it started (issue 1526)", func(ctx SpecContext) {
+		e := newEnv(ctx, harness.OpenCode)
+		_, err := q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		time.Sleep(50 * time.Millisecond)
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(BeEmpty())
+	})
+
 	It("honours a cancel with session/cancel and records only the cut-off message after it", func(ctx SpecContext) {
 		e := newEnv(ctx, harness.OpenCode)
 		r := e.enqueue(ctx, e.task(ctx, markWait))
@@ -893,6 +956,34 @@ var _ = Describe("Pool", func() {
 		e.sandbox = name
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+	})
+
+	It("does not tell an ephemeral run about the revert of the previous task's sandbox (issue 1526)", func(ctx SpecContext) {
+		e := newEnvWith(ctx, harness.OpenCode, func(*env) string {
+			return `{"model":"` + model + `","instructions":"` + instructions + `","ephemeral":true}`
+		})
+		task := e.task(ctx, "hello")
+		r := e.enqueue(ctx, task)
+		prev := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, [16]byte{1})
+		_, err := q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: prev})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateStarting))
+
+		// The previous task's sandbox is reverted after the run was claimed, then the row moves to the
+		// task's own sandbox. The revert belongs to the old sandbox.
+		_, err = q.NoteSandboxRevert(ctx, store.NoteSandboxRevertParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		name := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, task.ID.Bytes)
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/koinon/sandbox:test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: name})
+		Expect(err).NotTo(HaveOccurred())
+		e.sandbox = name
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Eventually(runState(ctx, r)).WithTimeout(racescale.D(10 * time.Second)).Should(Equal(store.RunStateSucceeded))
+		Expect(eventOf(events(ctx, r), "run.sandbox_reverted")).To(BeEmpty())
 	})
 
 	It("requeues a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {

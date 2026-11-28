@@ -142,3 +142,10 @@ WHERE runs.org_id = @org_id AND runs.id = @run_id
 -- name: GetRunEventBySource :one
 SELECT * FROM run_events
 WHERE org_id = @org_id AND run_id = @run_id AND epoch = @epoch AND source_seq = @source_seq::bigint;
+
+-- name: LastRunSandboxRevertReported :one
+-- The newest revert count the run reported with a run.sandbox_reverted event, over every epoch (0: none).
+-- A new owner after a takeover starts from it, so a revert is never reported twice (issue #1526).
+SELECT coalesce(max((payload->>'revert')::int), 0)::int AS reported
+FROM run_events
+WHERE org_id = @org_id AND run_id = @run_id AND kind = 'run.sandbox_reverted';
