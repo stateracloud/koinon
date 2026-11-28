@@ -171,8 +171,14 @@ func (d *Driver) sendArchive(ctx context.Context, op string, k key, id string, f
 		if errors.Is(err, io.EOF) {
 			_, err = stream.CloseAndRecv()
 		}
-		if status.Code(err) == codes.FailedPrecondition {
+		switch status.Code(err) {
+		case codes.FailedPrecondition:
 			return nil // the process has exited: read the exit code
+		case codes.Internal:
+			// tar exited, and the guest closed its stdin pipe before it recorded the exit: the write
+			// or close fails with "file already closed" (see stdin.Close; interim, issue #1549). The
+			// exit code says why tar ended.
+			return nil
 		}
 		return execution.GRPCError(op, err)
 	}

@@ -87,6 +87,10 @@ type Substrate struct {
 	// CodeHostEgressRoute is the gateway's egress listener, or nil. The driver adds it to the policy of an
 	// actor whose agent has a code-host grant only (execution.GatewayAccess).
 	CodeHostEgressRoute *substrate.GatewayRoute
+	// ActorNames is the durable ledger of the actor names the driver created (issue #1092). Only the reconciler
+	// sets it, on its database (package actornames): it is the only binary that creates sandboxes, and without a
+	// ledger every create and restore fails closed.
+	ActorNames substrate.ActorNameLedger
 }
 
 // SnapshotStore reaches Substrate's snapshot bucket for the content digest. It only reads, so give it a read-only key (see docs/dev/substrate-install.md).
@@ -158,6 +162,7 @@ func (s Substrate) driverConfig(logger *slog.Logger, readKey bool) (substrate.Co
 		}
 	}
 	cfg.GoldenSnapshots = s.GoldenSnapshots
+	cfg.ActorNames = s.ActorNames
 	if s.SnapshotStore.set() {
 		o, err := s.SnapshotStore.objectStore()
 		if err != nil {

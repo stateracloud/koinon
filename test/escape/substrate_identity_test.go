@@ -49,6 +49,9 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 	// the result of the probe: a map with "status" and "refusal", or the name of an error.
 	guestGet := func(ctx context.Context, ws, sb, probe string, headers [][]string, tls bool) any {
 		GinkgoHelper()
+		if headers == nil {
+			headers = [][]string{} // a JSON list, never null: spec (b) sends no header at all
+		}
 		res := rig.probeIn(ctx, ws, sb, check{
 			"id": "req", "op": "egress_http", "host": rig.identity.Host, "port": rig.identity.Port,
 			"path": gw.path(probe), "headers": headers, "tls": tls,
@@ -268,15 +271,21 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 		}
 	}, NodeTimeout(3*time.Minute))
 
-	It("(f) a token of a deleted actor does not work for the actor that replaces it (403)", func(ctx SpecContext) {
+	// atenet-egress caches an actor JWT by actor name (Substrate v1.0.1 actorjwt.go:32-34), so a new actor under
+	// the name of a deleted one got the deleted actor's token (rc.33). The maintainer's decision of 2026-11-28
+	// (#1092): the driver refuses that name, fail closed. The actor that replaces the deleted one has a new name.
+	It("(f) the name of a deleted actor is refused, and its token does not work for the actor that replaces it (403)", func(ctx SpecContext) {
 		sb := fmt.Sprintf("kesi-f-%d", suffix())
-		DeferCleanup(func(ctx context.Context) error {
-			_, err := rig.driver.DeleteSandbox(ctx, rig.workspace, sb)
-			if errors.Is(err, execution.ErrNotFound) {
-				return nil
-			}
-			return err
-		})
+		fresh := fmt.Sprintf("kesi-g-%d", suffix())
+		for _, n := range []string{sb, fresh} {
+			DeferCleanup(func(ctx context.Context) error {
+				_, err := rig.driver.DeleteSandbox(ctx, rig.workspace, n)
+				if errors.Is(err, execution.ErrNotFound) {
+					return nil
+				}
+				return err
+			})
+		}
 		old := newActor(ctx, rig.workspace, sb)
 		gw.record(old)
 		p1 := fmt.Sprintf("f1-%d", suffix())
@@ -291,12 +300,19 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 		GinkgoWriter.Printf("the old token verifies: %t\n", r.Verify == "")
 		Expect([]any{r.Status, r.Refusal}).To(Equal([]any{403, string(route.ReasonUnknownActor)}), "the token of the deleted actor")
 
-		By("an actor of the same name replaces it")
-		next := newActor(ctx, rig.workspace, sb)
+		By("the driver refuses an actor of the same name, and creates nothing")
+		Expect(rig.driver.SetGatewayAccess(ctx, rig.workspace, sb, execution.GatewayAccess{CodeHostEgress: true})).To(Succeed())
+		_, err := rig.driver.CreateSandbox(ctx, rig.workspace, rig.sandboxSpec(sb))
+		Expect(err).To(MatchError(execution.ErrNameReused), "a new actor under the name of the deleted one")
+		_, err = rig.driver.GetSandbox(ctx, rig.workspace, sb)
+		Expect(err).To(MatchError(execution.ErrNotFound), "an actor was made under the refused name")
+
+		By("an actor with a new name replaces it, and gets its own token")
+		next := newActor(ctx, rig.workspace, fresh)
 		Expect(next.UID).NotTo(Equal(old.UID), "Substrate gave the new actor the old UID")
 		gw.record(next)
 		p2 := fmt.Sprintf("f2-%d", suffix())
-		res := guestGet(ctx, rig.workspace, sb, p2, placeholder, false)
+		res := guestGet(ctx, rig.workspace, fresh, p2, placeholder, false)
 		a := arrived(p2)
 		Expect(a.Key.UID).NotTo(Equal(old.UID), "atenet-egress sent the token of the deleted actor for the new one")
 		expectAccepted(res, p2, next)

@@ -37,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/substrate/actornames"
 	"github.com/stateracloud/koinon/internal/formatgate"
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
@@ -124,6 +125,9 @@ func serve(ctx context.Context, cfg config) error {
 		if sub.GatewayRoutes, sub.CodeHostEgressRoute, err = cfg.substrateGatewayRoutes(); err != nil {
 			return err
 		}
+		// The driver claims each actor name in the database before it creates the actor, and refuses a name
+		// that a deleted actor used (issue #1092). Every replica shares the record, also after a restart.
+		sub.ActorNames = actornames.New(pool)
 	}
 	conn, err := cfg.execution.Dial()
 	if err != nil {

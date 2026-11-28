@@ -343,7 +343,8 @@ func (s *stdin) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-// Close sends end-of-file. A process that has exited or closed its stdin already is not an error.
+// Close sends end-of-file. A process that has exited or closed its stdin already is not an error,
+// also when the guest fails the close because the exit races it.
 func (s *stdin) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -357,18 +358,44 @@ func (s *stdin) Close() error {
 	default:
 	}
 	err := s.send(&ateenvv1alpha.WriteProcessInputRequest{ProcessId: s.p.id, Close: true}, 0)
-	if errors.Is(err, execution.ErrFailedPrecondition) {
+	if err == nil || errors.Is(err, execution.ErrFailedPrecondition) {
 		return nil
 	}
-	if err != nil {
+	// The guest can fail a close because the command exited before the guest recorded the exit. Its
+	// reaper calls cmd.Wait, which closes the stdin pipe, and marks stdin closed only after it synced
+	// the output spool; a close in that window gets Internal "closing stdin: close |1: file already
+	// closed" (upstream env guest/process/tracker.go, reap and CloseInput). The exit message follows
+	// that mark, so wait for it: a command that ended has no input to close. A command that still
+	// runs after the grace keeps the error. Only Internal comes from that window; any other error
+	// (Unavailable: the stream broke) returns at once. Interim until a Substrate env update closes
+	// the window (issue #1549).
+	if status.Code(err) != codes.Internal {
 		select {
 		case <-s.p.done:
-			return nil // the command ended while the close was on its way
+			return nil // the command ended while the close was on its way (finish cancels ctx after done)
 		default:
 		}
+		return err
+	}
+	t := time.NewTimer(s.p.d.exitGrace)
+	defer t.Stop()
+	select {
+	case <-s.p.done:
+		return nil // the command ended while the close was on its way
+	case <-t.C:
+	}
+	// select picks at random when the exit and the timer are both ready: the exit wins.
+	select {
+	case <-s.p.done:
+		return nil
+	default:
 	}
 	return err
 }
+
+// stdinExitGrace bounds the wait of stdin.Close for the exit of a command whose close failed. The
+// guest publishes the exit right after two fsyncs of the output spool.
+const stdinExitGrace = 5 * time.Second
 
 func (s *stdin) send(req *ateenvv1alpha.WriteProcessInputRequest, want int64) error {
 	p := s.p

@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
+	"github.com/stateracloud/koinon/internal/execution/substrate/fakeate"
 	"github.com/stateracloud/koinon/internal/harness"
 	"github.com/stateracloud/koinon/internal/sandboxres"
 	"github.com/stateracloud/koinon/internal/testing/racescale"
@@ -238,6 +239,10 @@ func buildSubstrate(get func(string) string) (*substrate.Driver, *substrateRig, 
 		ImageMirrors:        splitList(get("KOINON_ESCAPE_SUBSTRATE_IMAGE_MIRRORS")),
 		ImageRegistry:       get("KOINON_ESCAPE_SUBSTRATE_IMAGE_REGISTRY"),
 		GuestKeyFile:        keyFile,
+		// The driver refuses a used actor name (issue #1092). The suite has no Koinon database, so its ledger lives
+		// in the process: spec (f) runs in one process. The reconciler's database ledger has its own specs
+		// (internal/execution/substrate/actornames).
+		ActorNames: fakeate.NewActorNames(),
 		SnapshotStore: cli.SnapshotStore{
 			Endpoint:      get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_ENDPOINT"),
 			Region:        get("KOINON_ESCAPE_SUBSTRATE_SNAPSHOT_REGION"),

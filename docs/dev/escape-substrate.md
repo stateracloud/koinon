@@ -149,7 +149,9 @@ is the Proof list of the ADR 0120 amendment for issue #1386. Each control name s
 - `(d) a request with two actor token values is refused, or reaches the gateway with one minted value`. It
   also sends two copies of a real token to the stand-in and expects `401`.
 - `(e) a direct connection to the gateway's egress listener, past atenet-egress, is blocked`.
-- `(f) a token of a deleted actor does not work for the actor that replaces it (403)`.
+- `(f) the name of a deleted actor is refused, and its token does not work for the actor that replaces it
+  (403)`. The driver refuses a create under the deleted actor's name with `execution.ErrNameReused` (issue
+  #1092: atenet-egress caches a token by actor name), and the replacement actor has a new name.
 - `(g) SHIP GATE: forwarded-identity headers that the guest sets (XFCC, x-forwarded-*) do not change the
   identity`. Each variant must get the same result as the request without the headers. A failure starts
   with `SHIP GATE` and names the variant. When it fails, issue #1386 does not ship.

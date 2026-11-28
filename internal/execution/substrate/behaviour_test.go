@@ -168,6 +168,44 @@ var _ = Describe("the Substrate driver", func() {
 			}
 		}, SpecTimeout(30*time.Second))
 
+		// The guest closes the stdin pipe of a command that exits before it records the exit; a close in
+		// that window fails with Internal (kind e2e run 46151688093, "prepare the session directory").
+		It("closes stdin without error when the guest fails the close because the command exited", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.LagNextExits(ws, "sb", 1, time.Second)
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() int { return cl.PipesGone(ws, "sb") }).WithTimeout(500*time.Millisecond).Should(Equal(1),
+				"mkdir exited and its exit is not published yet, so the close lands in the window")
+			Expect(p.Stdin().Close()).To(Succeed(), "the command ended, so the failed close is no error")
+			code, err := p.Wait()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(BeZero())
+		}, SpecTimeout(15*time.Second))
+
+		It("keeps the error of a failed close when the command does not end in the grace", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			d.SetExitGrace(50 * time.Millisecond)
+			cl.LagNextExits(ws, "sb", 1, 2*time.Second)
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"mkdir", "x"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			Eventually(func() int { return cl.PipesGone(ws, "sb") }).WithTimeout(time.Second).Should(Equal(1))
+			Expect(p.Stdin().Close()).To(MatchError(ContainSubstring("closing stdin")))
+		}, SpecTimeout(15*time.Second))
+
+		It("returns a close that fails with another code at once, without the grace", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			p, err := d.Exec(ctx, ws, "sb", execution.ExecRequest{Command: []string{"cat"}})
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(p.Close)
+			cl.FailNextCloses(ws, "sb", 1)
+			start := time.Now()
+			err = p.Stdin().Close()
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+			Expect(time.Since(start)).To(BeNumerically("<", time.Second), "the grace (5 s) is only for Internal")
+		}, SpecTimeout(15*time.Second))
+
 		It("does not resume a suspended sandbox to run a command", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			_, err := d.StopSandbox(ctx, ws, "sb")
@@ -403,6 +441,17 @@ var _ = Describe("the Substrate driver", func() {
 			Expect(cl.Running(ws, "sb")).To(BeEmpty(), "each retry killed the tar of the stream before it")
 			Expect(cl.Files(ws, "sb")).To(HaveKeyWithValue("/work/a.txt", []byte("hi")))
 		})
+
+		// Issue #1549: tar fails before it reads its input, and the guest closed its stdin pipe before
+		// it recorded the exit. The write fails with Internal; the exit code says why tar ended.
+		It("reports the exit code of a tar that fails while the guest still records its exit", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.LagNextExits(ws, "sb", 2, 200*time.Millisecond) // mkdir -p, then tar
+			cl.FailNextTarsEarly(ws, "sb", 1)
+			err := d.Upload(ctx, ws, "sb", "/work", strings.NewReader("x"))
+			Expect(errors.Is(err, execution.ErrInvalid)).To(BeTrue(), "got %v", err)
+			Expect(err).To(MatchError(ContainSubstring("tar exited 2")))
+		}, SpecTimeout(15*time.Second))
 
 		// Issue #1516: an archive of exactly one message (256 KiB) fills the first buffer, and the
 		// driver must still see that the stream ended, or it would not retry.

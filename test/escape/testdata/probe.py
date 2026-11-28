@@ -540,7 +540,7 @@ def egress_http(c):
             ctx.verify_mode = ssl.CERT_NONE
             s = ctx.wrap_socket(s, server_hostname=c["host"])
         lines = ["GET %s HTTP/1.1" % c["path"], "Host: %s:%d" % (c["host"], c["port"]), "Connection: close"]
-        lines += ["%s: %s" % (k, v) for k, v in c.get("headers", [])]
+        lines += ["%s: %s" % (k, v) for k, v in c.get("headers") or []]
         s.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
         data = b""
         while b"\r\n\r\n" not in data and len(data) < 16384:

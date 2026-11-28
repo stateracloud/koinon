@@ -33,6 +33,9 @@ var noGatewayRoutes bool
 // noTier makes newDriver leave the tier settings empty, for the specs of the launcher's fail-closed rule.
 var noTier bool
 
+// noActorNames makes newDriver leave Config.ActorNames nil, for the spec of the name ledger's fail-closed rule.
+var noActorNames bool
+
 // noSigner makes newDriver leave Config.GuestSigner nil.
 var noSigner bool
 
@@ -57,9 +60,21 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 	DeferCleanup(control.Close)
 	lastControl = ateapiv1.NewControlClient(control)
 	DeferCleanup(router.Close)
+	d := substrate.New(control, router, specConfig(cfg...))
+	_, err = d.EnsureWorkspace(context.Background(), ws, nil)
+	Expect(err).NotTo(HaveOccurred())
+	return d, cl
+}
+
+// specConfig is the driver configuration of the specs: cfg (or the spec defaults) with every required field
+// that it leaves empty filled, unless a no* switch keeps it empty.
+func specConfig(cfg ...substrate.Config) substrate.Config {
 	c := substrate.Config{PollInterval: 5 * time.Millisecond, GuestReadyTimeout: 2 * time.Second, DrainTimeout: 200 * time.Millisecond}
 	if len(cfg) > 0 {
 		c = cfg[0]
+	}
+	if c.ActorNames == nil && !noActorNames {
+		c.ActorNames = fakeate.NewActorNames()
 	}
 	if c.DefaultTier == "" && c.RuntimeClassTiers == nil && !noTier {
 		c.DefaultTier = harness.TierDev
@@ -76,10 +91,7 @@ func newDriver(cfg ...substrate.Config) (*substrate.Driver, *fakeate.Cluster) {
 		// The fake has no object store: the object's content is its address.
 		c.ContentDigest = func(_ context.Context, uri string) (string, error) { return "fake-" + uri, nil }
 	}
-	d := substrate.New(control, router, c)
-	_, err = d.EnsureWorkspace(context.Background(), ws, nil)
-	Expect(err).NotTo(HaveOccurred())
-	return d, cl
+	return c
 }
 
 // gatewayRoutes is the one gateway route of the specs' driver.

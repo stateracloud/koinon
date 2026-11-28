@@ -392,7 +392,7 @@ jobs:
             make -n test-e2e-kind-substrate >/dev/null 2>&1 || { echo "this ref has no test-e2e-kind-substrate target" >&2; exit 1; }
             make test-e2e-kind-substrate 2>&1 | tee "$RUNNER_TEMP/e2e.log"
           else
-            test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+            DRIVER=openshell test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
           fi
 
       - name: Story suite verdict
