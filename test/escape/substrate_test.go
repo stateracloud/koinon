@@ -147,19 +147,25 @@ var _ = Describe("Substrate identity tokens", Label("escape", "substrate", "cont
 	})
 
 	It("refuses an actor JWT that is expired, or that lives outside 300 to 3600 seconds", func(ctx SpecContext) {
+		// The values of ADR 0120 section 1.2, as literals: a change to the constants fails here.
+		const minTTL, maxTTL, leeway = 300 * time.Second, 3600 * time.Second, 30 * time.Second
+		Expect([]time.Duration{actortoken.MinTTL, actortoken.MaxTTL, actortoken.SubstrateLeeway}).
+			To(Equal([]time.Duration{minTTL, maxTTL, leeway}), "the lifetime bounds and the leeway of the Substrate actor JWT")
 		at := func(t time.Time) func() time.Time { return func() time.Time { return t } }
 		iat := time.Now().Add(-time.Hour)
-		for _, life := range []time.Duration{actortoken.MinTTL, actortoken.MaxTTL} {
+		for _, life := range []time.Duration{minTTL, maxTTL} {
 			tok := iss.mint(iss.claims([]string{actortoken.AudienceEgress}, iat, life))
 			exp := iat.Add(life)
 			_, err := iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(-time.Second))).Verify(tok)
 			Expect(err).NotTo(HaveOccurred(), "control: a token of %s before its exp", life)
-			_, err = iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(actortoken.SubstrateLeeway+time.Second))).Verify(tok)
+			_, err = iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(leeway-time.Second))).Verify(tok)
+			Expect(err).NotTo(HaveOccurred(), "control: a token of %s inside the leeway after its exp", life)
+			_, err = iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(leeway+time.Second))).Verify(tok)
 			Expect(err).To(MatchError(actortoken.ErrExpired), "a token of %s after its exp and the leeway", life)
 		}
 		By("a lifetime outside the range is refused, at any time")
 		now := time.Now()
-		for _, life := range []time.Duration{actortoken.MinTTL - time.Second, actortoken.MaxTTL + time.Second, 24 * time.Hour} {
+		for _, life := range []time.Duration{minTTL - time.Second, maxTTL + time.Second, 24 * time.Hour} {
 			tok := iss.mint(iss.claims([]string{actortoken.AudienceEgress}, now, life))
 			_, err := iss.verifier(ctx, actortoken.AudienceEgress, nil).Verify(tok)
 			Expect(err).To(MatchError(actortoken.ErrLifetime), life.String())
