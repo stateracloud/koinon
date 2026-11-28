@@ -353,6 +353,11 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// The database clock now (issue #1481). The reconciler reads it just before a backend call that can take
+	// a snapshot and records it as the snapshot time (a lower bound: the snapshot holds every write before
+	// it). restored_at and the checkpoint times come from this clock too, so the crash path compares times
+	// of one clock only.
+	DatabaseClock(ctx context.Context) (pgtype.Timestamptz, error)
 	// pending -> approved | denied by a human. No row: already decided, or expires_at has passed
 	// (a decision is refused from then on, whether or not the sweeper has marked it expired yet).
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)

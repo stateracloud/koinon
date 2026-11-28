@@ -408,10 +408,11 @@ type Sandbox struct {
 	// Reason and Message describe the latest condition that is not true, if any.
 	Reason  string
 	Message string
-	// SnapshotAt is when the driver sent the suspend that took the sandbox's newest snapshot. It is set
-	// only on the sandbox that a suspend (or the first-boot seal) returns; zero means no new snapshot
-	// or an unknown time. The reconciler stores it, because the Substrate API gives no snapshot time.
-	SnapshotAt time.Time
+	// NewSnapshot is true only on the sandbox that a suspend (or the first-boot seal) returns: the call
+	// took a new snapshot. The Substrate API gives no snapshot time, and the driver gives none either: the
+	// reconciler records the database clock that it read before the call (one clock for every time the
+	// crash path compares, issue #1481).
+	NewSnapshot bool
 }
 
 // SpecIdentifier is implemented by a backend whose sandboxes carry no labels (Agent Substrate has

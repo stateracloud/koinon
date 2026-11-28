@@ -162,6 +162,21 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 	return i, err
 }
 
+const databaseClock = `-- name: DatabaseClock :one
+SELECT clock_timestamp()::timestamptz AS now
+`
+
+// The database clock now (issue #1481). The reconciler reads it just before a backend call that can take
+// a snapshot and records it as the snapshot time (a lower bound: the snapshot holds every write before
+// it). restored_at and the checkpoint times come from this clock too, so the crash path compares times
+// of one clock only.
+func (q *Queries) DatabaseClock(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, databaseClock)
+	var now pgtype.Timestamptz
+	err := row.Scan(&now)
+	return now, err
+}
+
 const getAgentRunActivity = `-- name: GetAgentRunActivity :one
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,

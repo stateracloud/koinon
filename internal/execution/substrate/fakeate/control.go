@@ -82,6 +82,8 @@ type actor struct {
 	frontDead bool
 	// frontHang: the dead front takes a call and never answers (HangFront).
 	frontHang bool
+	// routerRefuse: the router answers every guest call of the actor with its own Unavailable (RouterRefuse).
+	routerRefuse bool
 	// failRevert is how many RevertActor calls fail with ResourceExhausted before one works.
 	failRevert int
 	// failProbe is how many resumes fail the wakeup probe: the actor ends CRASHED and the call fails

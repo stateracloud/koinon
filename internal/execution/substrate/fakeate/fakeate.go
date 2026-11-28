@@ -407,6 +407,25 @@ func (c *Cluster) KillFront(atespace, name string) {
 	}
 }
 
+// FrontDownMessage is the message of the Unavailable that a guest call to a dead front gets. In the
+// default upstream CONNECT mode of the router (Substrate cmd/atenet/internal/router/cmd.go, flag
+// --upstream-connect), atunnel answers the CONNECT with 502 when it cannot dial the guest port
+// (internal/atunnel/ingress/ingress.go, handleConnect), and Envoy answers the gRPC request with its
+// upstream connect error local reply.
+const FrontDownMessage = "upstream connect error or disconnect/reset before headers. reset reason: remote connection failure, transport failure reason: delayed connect error: Connection refused"
+
+// RouterRefuse makes the router answer every guest call of the actor with an Unavailable of its own, as
+// the router's ext_proc does when it cannot route the call (Substrate cmd/atenet/internal/router/ingress/
+// errors.go, mapResumeError and parkingFullErr): the guest is not reached, so it says nothing about the
+// front. on false ends it.
+func (c *Cluster) RouterRefuse(atespace, name string, on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if a := c.actors[key{atespace, name}]; a != nil {
+		a.routerRefuse = on
+	}
+}
+
 // HangFront makes the dead front of KillFront take a guest call and never answer, so the caller runs into
 // its own deadline. A refusing front answers Unavailable at once; this one is silent.
 func (c *Cluster) HangFront(atespace, name string) {

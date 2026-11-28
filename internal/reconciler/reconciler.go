@@ -547,6 +547,9 @@ type work struct {
 	actor *gatewayplan.Actor
 	// keepWarm is set when the agent asks to stay warm and the org's cap grants it (old issue 315).
 	keepWarm bool
+	// snapFrom is the database clock read just before the last backend call of the pass that can take a
+	// snapshot (snapshotClock). record stores it as the snapshot time when the call took one.
+	snapFrom pgtype.Timestamptz
 
 	// submitted is set by the pass when the item went to the work queue (pass goroutine only).
 	submitted bool
@@ -1504,6 +1507,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			spec, hash = r.sandboxSpec(w.org.ID, w.agent.ID, names, harness, providers, network, r.sandboxResources(w))
 		}
 		lrReady := r.cfg.LimitRange == nil || r.cfg.LimitRange.Ready(ctx, ws)
+		if err := r.snapshotClock(ctx, w); err != nil { // the first-boot seal is a snapshot
+			release()
+			return err
+		}
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			if definiteFailure(err) {
@@ -1647,7 +1654,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			} else if !ok {
 				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
 			}
-			if sb, err = r.stopSandbox(ctx, ws, names.Sandbox); err != nil {
+			if sb, err = r.stopSnapshot(ctx, w, ws, names.Sandbox); err != nil {
 				return err
 			}
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
@@ -1656,6 +1663,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if act.HasActive || act.HasDemand || w.keepWarm || r.woken(w.sb, tune) {
 			release, held, err := r.holdForCreationRate(ctx, w, tune, orgsettings.CreationStart, &sb, hash)
 			if err != nil || held {
+				return err
+			}
+			if err := r.snapshotClock(ctx, w); err != nil { // a first boot gets its seal
+				release()
 				return err
 			}
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
@@ -1691,6 +1702,27 @@ func (r *Reconciler) stopSandbox(ctx context.Context, ws, name string) (executio
 	}
 	r.log.Info("a stopped sandbox is running again (a late request woke it); the next pass stops it", "workspace", ws, "sandbox", name, "phase", string(seen.Phase))
 	return seen, nil
+}
+
+// snapshotClock reads the database clock into w.snapFrom just before a backend call that can take a
+// snapshot (a stop, or the first-boot seal of a create or a start). The snapshot holds every write before
+// that time, so it is a lower bound of the snapshot time, on the clock of restored_at and of the
+// checkpoint times (issue #1481). The driver's own clock is never compared with them.
+func (r *Reconciler) snapshotClock(ctx context.Context, w *work) error {
+	at, err := r.q.DatabaseClock(ctx)
+	if err != nil {
+		return fmt.Errorf("read the database clock before the snapshot: %w", err)
+	}
+	w.snapFrom = at
+	return nil
+}
+
+// stopSnapshot is stopSandbox with the snapshot time read first.
+func (r *Reconciler) stopSnapshot(ctx context.Context, w *work, ws, name string) (execution.Sandbox, error) {
+	if err := r.snapshotClock(ctx, w); err != nil {
+		return execution.Sandbox{}, err
+	}
+	return r.stopSandbox(ctx, ws, name)
 }
 
 // holdForCreationRate takes one of the org's sandbox creations per minute (issue #27, ADR 0066
@@ -1907,7 +1939,7 @@ func (r *Reconciler) reconcileDraft(ctx context.Context, w *work) error {
 		return err
 	}
 	if sb.Phase == execution.PhaseReady {
-		if sb, err = r.stopSandbox(ctx, w.sb.Workspace, w.sb.ActorRef()); err != nil {
+		if sb, err = r.stopSnapshot(ctx, w, w.sb.Workspace, w.sb.ActorRef()); err != nil {
 			return err
 		}
 		r.log.Info("stopped sandbox of a draft agent", w.logAttrs()...)
@@ -1948,7 +1980,7 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 		return err
 	case r.cfg.HomeRetention == RetentionRetain:
 		if sb.Phase == execution.PhaseReady {
-			if sb, err = r.stopSandbox(ctx, ws, name); err != nil {
+			if sb, err = r.stopSnapshot(ctx, w, ws, name); err != nil {
 				return err
 			}
 		}
@@ -2034,7 +2066,13 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
 		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
-	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID, sb.SnapshotAt); err != nil {
+	// A snapshot that the call took gets the database clock read before the call. A snapshot without
+	// that read (snapFrom not set) gets no time: the recorded one stays, which is still a lower bound.
+	var snapshotAt pgtype.Timestamptz
+	if sb.NewSnapshot {
+		snapshotAt = w.snapFrom
+	}
+	if err := r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID, snapshotAt); err != nil {
 		return err
 	}
 	if err := r.recordActor(ctx, w, sb); err != nil {
@@ -2062,16 +2100,16 @@ func (r *Reconciler) recordState(ctx context.Context, w *work, state store.Sandb
 	if len(hash) > 0 {
 		h = hash[0]
 	}
-	return r.recordRow(ctx, w, state, phase, msg, "", h, "", time.Time{})
+	return r.recordRow(ctx, w, state, phase, msg, "", h, "", pgtype.Timestamptz{})
 }
 
-// recordRow stores the observed sandbox. snapshotAt is when the newest snapshot was taken, or zero when
-// this observation took none (the recorded time then stays).
-func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string, snapshotAt time.Time) error {
+// recordRow stores the observed sandbox. snapshotAt is the database clock before the call that took the
+// newest snapshot, or NULL when this observation took none (the recorded time then stays).
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string, snapshotAt pgtype.Timestamptz) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
 		State: state, Phase: phase, Message: msg, Reason: reason, SpecHash: hash, HomeGeneration: generation,
-		SnapshotAt: pgtype.Timestamptz{Time: snapshotAt, Valid: !snapshotAt.IsZero()},
+		SnapshotAt: snapshotAt,
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)
@@ -2092,7 +2130,7 @@ const ForeignReason = "OwnedByAnotherInstall"
 // guardSandbox in the OpenShell backend, which refuses every call on a sandbox another install owns.
 // So a failed write is logged and the pass goes on.
 func (r *Reconciler) recordForeign(ctx context.Context, w *work, err error) {
-	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "", time.Time{}); rerr != nil {
+	if rerr := r.recordRow(ctx, w, store.SandboxStateError, "Error", err.Error(), ForeignReason, w.sb.SpecHash, "", pgtype.Timestamptz{}); rerr != nil {
 		r.log.Warn("recording the foreign-owned sandbox failed; guardSandbox still refuses it",
 			append(w.logAttrs(), "err", rerr)...)
 	}

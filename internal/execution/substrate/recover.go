@@ -4,9 +4,11 @@ package substrate
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/execution"
@@ -33,10 +35,15 @@ const controlFastBound = time.Second
 
 // CheckFront implements execution.Reverter. It reads the actor first with the control API, which never
 // resumes it, and calls the guest only when the actor runs. It asks for a process that does not exist:
-// any answer of the front, NotFound included, proves that the front runs. Unavailable from the guest is
-// silence. A deadline is silence only when the control API read of the same call was fast
-// (controlFastBound): with a slow control plane the deadline is not a verdict, and the call returns
-// ErrUnavailable. Any other error is not a verdict on the front and is returned as it is.
+// any answer of the front, NotFound included, proves that the front runs.
+//
+// A failed guest call is silence of the front (ErrFrontDown) only when the router answered and said that
+// it could not reach the guest (frontUnreachable). An Unavailable that the router made itself (its
+// ext_proc refused or shed the call) or that the client made (no connection to the router, a router
+// restart) says nothing about the front and returns ErrUnavailable: a router outage must not revert every
+// running sandbox. A deadline is silence only when the router connection is READY after the call and the
+// control API read of the same call was fast (controlFastBound). Any other error is not a verdict on the
+// front and is returned as it is.
 func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 	const op = "CheckFront"
 	k := key{workspace, name}
@@ -76,12 +83,50 @@ func (d *Driver) CheckFront(ctx context.Context, workspace, name string) error {
 		if derr := d.routerDown(op, err); derr != nil {
 			return derr // the router is down: that says nothing about the front
 		}
-		if status.Code(err) == codes.DeadlineExceeded && !controlFast {
+		if status.Code(err) == codes.Unavailable {
+			if !frontUnreachable(err) {
+				return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s did not reach the guest (%v): no verdict on the front", k, err)
+			}
+			return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer: %v", k, err)
+		}
+		if !controlFast {
 			return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s ran into its deadline and the control API is slow too: no verdict on the front", k)
 		}
-		return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer: %v", k, err)
+		if d.routerState != nil && d.routerState() != connectivity.Ready {
+			// A call on a connection that is still connecting waits for it and ends at the deadline.
+			return fail(op, execution.ErrUnavailable, "the guest call of sandbox %s ran into its deadline and the router connection is %s: no verdict on the front", k, d.routerState())
+		}
+		return fail(op, execution.ErrFrontDown, "the guest front of sandbox %s does not answer in %s", k, d.cfg.FrontCheckTimeout)
 	}
 	return execution.GRPCError(op, err)
+}
+
+// The two forms in which the router reports that it could not reach the guest. Every other Unavailable
+// of a guest call comes from the router itself or from the client's connection to it.
+const (
+	// upstreamConnectError starts the local reply of the router's dataplane (Envoy) when the upstream
+	// failed before it sent headers. In the default upstream CONNECT mode (Substrate cmd/atenet/internal/
+	// router/cmd.go, --upstream-connect), atunnel answers the CONNECT with 502 when it cannot dial the
+	// guest port (internal/atunnel/ingress/ingress.go, handleConnect), and Envoy answers a gRPC request
+	// with this text as an Unavailable. The router's own refusals are ext_proc immediate responses with
+	// other text (cmd/atenet/internal/router/ingress/errors.go, mapResumeError: "actor ... unavailable";
+	// parkingFullErr: "... router at capacity").
+	upstreamConnectError = "upstream connect error or disconnect/reset before headers"
+	// forwardedBadGateway is how grpc-go reports the 502 of atunnel's reverse proxy (internal/atunnel/
+	// ingress/ingress.go, newActorProxy ErrorHandler) that the router forwards with upstream CONNECT off: a
+	// non-gRPC response with HTTP status 502. A router answer of its own is a 503 or a gRPC status.
+	forwardedBadGateway = "unexpected HTTP status code received from server: 502 "
+)
+
+// frontUnreachable reports whether an Unavailable of a guest call is the router's report that it could
+// not reach the guest, the only Unavailable that is a verdict on the front.
+func frontUnreachable(err error) bool {
+	s, ok := status.FromError(err)
+	if !ok || s.Code() != codes.Unavailable {
+		return false
+	}
+	m := s.Message()
+	return strings.HasPrefix(m, upstreamConnectError) || strings.HasPrefix(m, forwardedBadGateway)
 }
 
 // RevertSandbox implements execution.Reverter. The actor must be CRASHED, or RUNNING with a dead front.

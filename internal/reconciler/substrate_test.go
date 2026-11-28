@@ -367,6 +367,38 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 			Expect(d.CheckFront(ctx, ws, actor)).To(Succeed(), "the front of the good snapshot answers")
 		})
 
+		It("does not revert while the router answers the guest calls itself, and reverts once it reports the dead front", func(ctx SpecContext) {
+			_, actor := readyActor(ctx)
+			cl.KillFront(ws, actor)
+			cl.RouterRefuse(ws, actor, true) // the router's own Unavailable: the guest is not reached
+			for i := 1; i <= 5; i++ {
+				advance(time.Duration(i) * time.Minute)
+				pass(ctx)
+			}
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "an Unavailable of the router says nothing about the front")
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+
+			By("the router reaches the worker again and reports the dead front")
+			cl.RouterRefuse(ws, actor, false)
+			for _, off := range []time.Duration{10 * time.Minute, 11 * time.Minute, 12 * time.Minute} {
+				advance(off)
+				pass(ctx)
+			}
+			Expect(cl.Calls("RevertActor")).To(Equal(1), "a dead front still reverts")
+		})
+
+		It("does not revert a running sandbox during a router outage", func(ctx SpecContext) {
+			_, actor := readyActor(ctx)
+			cl.StopRouter() // the client has no connection to the router: every guest call fails with Unavailable
+			for i := 1; i <= 5; i++ {
+				advance(time.Duration(i) * time.Minute)
+				_ = r.ReconcileAll(ctx) // other router calls of the pass may fail too
+			}
+			Expect(cl.Calls("RevertActor")).To(BeZero(), "a router outage says nothing about the front")
+			Expect(cl.Calls("DeleteActor")).To(BeZero())
+			Expect(cl.State(ws, actor)).To(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+		})
+
 		It("leaves a sandbox that was just seen ready alone for the grace time", func(ctx SpecContext) {
 			_, actor := readyActor(ctx)
 			cl.KillFront(ws, actor)
@@ -690,7 +722,7 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				agent, actor := firstBoot(ctx)
 				cp := completeCheckpoint(ctx, agent)
 				dirtyHome(ctx, agent) // the checkpoint is stale: the home was written after it
-				Expect(cp.FinishedAt.Time).To(BeTemporally(">", sandboxRow(ctx, agent.ID).LastSnapshotAt.Time))
+				Expect(cp.StartedAt.Time).To(BeTemporally(">", sandboxRow(ctx, agent.ID).LastSnapshotAt.Time), "one clock: the database's")
 				r = newR() // only the Postgres state: the snapshot time comes from the row
 				cl.Crash(ws, actor, "guest kernel panic")
 				pass(ctx)
@@ -709,6 +741,19 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				Expect(cl.Calls("RevertActor")).To(BeZero(), "an unknown snapshot time loses to the checkpoint")
 				Expect(cl.Calls("DeleteActor")).To(Equal(1))
 				Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID).To(Equal(cp.ID))
+			})
+
+			It("reverts when the checkpoint started before the snapshot and finished after it", func(ctx SpecContext) {
+				agent, actor := firstBoot(ctx)
+				cp := completeCheckpoint(ctx, agent)
+				// The checkpoint read the home before the snapshot was taken: its content is the older one.
+				_, err := pool.Exec(ctx, `UPDATE home_checkpoints SET started_at = s.last_snapshot_at - interval '1 second', finished_at = s.last_snapshot_at + interval '1 minute'
+					FROM agent_sandboxes s WHERE home_checkpoints.org_id = $1 AND home_checkpoints.id = $2 AND s.org_id = $1 AND s.agent_id = $3`, org, cp.ID, agent.ID)
+				Expect(err).NotTo(HaveOccurred())
+				cl.Crash(ws, actor, "guest kernel panic")
+				pass(ctx)
+				Expect(cl.Calls("RevertActor")).To(Equal(1), "the start time of the checkpoint counts, not its end")
+				Expect(cl.Calls("DeleteActor")).To(BeZero())
 			})
 
 			It("reverts when the snapshot is newer than the checkpoint", func(ctx SpecContext) {
@@ -811,6 +856,32 @@ var _ = Describe("Reconciler on the Substrate driver", func() {
 				pass(ctx)
 			}
 			Expect(cl.Calls("DeleteActor")).To(Equal(1), "after the tries the repair path takes the sandbox")
+		})
+
+		It("points the restore at the restored home before the repair path takes a sandbox whose reverts kept failing", func(ctx SpecContext) {
+			agent := newAgent(ctx, org, user)
+			pass(ctx)
+			actor := sandboxRow(ctx, agent.ID).ActorName.String
+			Eventually(running(actor)).Should(Equal(ateapiv1.ActorState_ACTOR_STATE_RUNNING))
+			cl.Crash(ws, actor, "guest kernel panic")
+			cl.FailNextReverts(ws, actor, 1000) // no worker has room, at every try
+			advance(0)
+			pass(ctx) // the first try
+			// tries 2 to 6, each after its backoff
+			for i := range 5 {
+				advance(time.Duration(i+1) * 10 * time.Minute)
+				pass(ctx)
+			}
+			Expect(cl.Calls("DeleteActor")).To(BeZero(), "the tries are not over yet")
+			// A restore ended meanwhile: the mark is set and no restore is pending.
+			restoreHome(ctx, agent, false)
+			restored := sandboxRow(ctx, agent.ID).RestoreCheckpointID
+			restoreHome(ctx, agent, true)
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID.Valid).To(BeFalse())
+			advance(time.Hour)
+			pass(ctx)
+			Expect(cl.Calls("DeleteActor")).To(Equal(1), "after the tries the repair path takes the sandbox")
+			Expect(sandboxRow(ctx, agent.ID).RestoreCheckpointID).To(Equal(restored), "the new sandbox restores the home: the pointer was written before the repair")
 		})
 
 		It("stops at the retry cap, marks the agent unhealthy and reverts no more", func(ctx SpecContext) {

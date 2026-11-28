@@ -17,7 +17,9 @@
 -- them when a stop of the sandbox has taken the snapshot.
 --
 -- last_snapshot_at: when the newest snapshot of the sandbox_id was taken, as Koinon knows it (the
--- Substrate API gives no snapshot time). NULL: unknown. After a crash, the newer of this snapshot and the
+-- Substrate API gives no snapshot time): the database clock read just before the call that took it, a
+-- lower bound. It is never a clock of another host, so it compares with restored_at and the checkpoint
+-- times. NULL: unknown. After a crash, the newer of this snapshot and the
 -- newest complete home checkpoint is used; an unknown time loses to the checkpoint. It belongs to one
 -- sandbox_id: RecordAgentSandbox resets it for another sandbox.
 --

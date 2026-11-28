@@ -8,6 +8,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/substrate"
@@ -46,21 +48,21 @@ var _ = Describe("the crash and liveness path", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sb.Phase).To(Equal(execution.PhaseSuspended), "the real state, not the running one of the first resume")
 			Expect(cl.State(ws, "sb")).To(Equal(ateapiv1.ActorState_ACTOR_STATE_SUSPENDED))
-			Expect(sb.SnapshotAt.IsZero()).To(BeFalse(), "the seal is a snapshot")
+			Expect(sb.NewSnapshot).To(BeTrue(), "the seal is a snapshot")
 		})
-		It("reports the snapshot time of the seal", func(ctx SpecContext) {
+		It("reports the seal as a new snapshot", func(ctx SpecContext) {
 			sb, err := d.CreateSandbox(ctx, ws, spec("sb"))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(sb.SnapshotAt.IsZero()).To(BeFalse())
+			Expect(sb.NewSnapshot).To(BeTrue())
 		})
 	})
 
 	Describe("a suspend", func() {
-		It("reports its time as the snapshot time", func(ctx SpecContext) {
+		It("reports a new snapshot", func(ctx SpecContext) {
 			ready(ctx, d, "sb")
 			sb, err := d.StopSandbox(ctx, ws, "sb")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(sb.SnapshotAt.IsZero()).To(BeFalse())
+			Expect(sb.NewSnapshot).To(BeTrue())
 		})
 	})
 
@@ -74,6 +76,34 @@ var _ = Describe("the crash and liveness path", func() {
 			cl.KillFront(ws, "sb")
 			err := d.CheckFront(ctx, ws, "sb")
 			Expect(errors.Is(err, execution.ErrFrontDown)).To(BeTrue(), "got %v", err)
+		})
+		It("gives no verdict when the router answers the guest call itself", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.KillFront(ws, "sb")
+			cl.RouterRefuse(ws, "sb", true)
+			err := d.CheckFront(ctx, ws, "sb")
+			Expect(errors.Is(err, execution.ErrFrontDown)).To(BeFalse(), "the router's own Unavailable says nothing about the front: %v", err)
+			Expect(errors.Is(err, execution.ErrUnavailable)).To(BeTrue(), "got %v", err)
+		})
+		It("gives no verdict during a router outage", func(ctx SpecContext) {
+			ready(ctx, d, "sb")
+			cl.StopRouter()
+			err := d.CheckFront(ctx, ws, "sb")
+			Expect(err).To(HaveOccurred())
+			Expect(errors.Is(err, execution.ErrFrontDown)).To(BeFalse(), "no connection to the router says nothing about the front: %v", err)
+		})
+		It("takes only the router's reports of an unreachable guest as a dead front", func() {
+			for msg, want := range map[string]bool{
+				fakeate.FrontDownMessage: true, // Envoy's local reply, upstream CONNECT mode
+				"unexpected HTTP status code received from server: 502 (Bad Gateway); transport: received unexpected content-type \"text/plain; charset=utf-8\"": true,  // atunnel's 502, forwarded
+				"unexpected HTTP status code received from server: 503 (Service Unavailable)":                                                                    false, // an ext_proc refusal of the router
+				`actor ws/sb unavailable`: false,
+				`connection error: desc = "transport: Error while dialing: dial tcp 10.0.0.1:443: connect: connection refused"`: false,
+				"error reading from server: EOF": false,
+			} {
+				Expect(substrate.FrontUnreachable(status.Error(codes.Unavailable, msg))).To(Equal(want), msg)
+			}
+			Expect(substrate.FrontUnreachable(status.Error(codes.Internal, fakeate.FrontDownMessage))).To(BeFalse(), "only an Unavailable")
 		})
 		Describe("a front that takes the call and never answers", func() {
 			BeforeEach(func() {

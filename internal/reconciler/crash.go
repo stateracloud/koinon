@@ -29,7 +29,8 @@ import (
 //     (RestoreFromMark). The revert goes back to a snapshot that lacks the home; the pointer makes the
 //     next run restore it. A write that fails stops the revert, so a mark is never left with no restore.
 //  2. Snapshot or checkpoint: without a mark, the newer of the last snapshot and the newest complete home
-//     checkpoint wins. The snapshot time is last_snapshot_at (Postgres); unknown loses to a checkpoint. A
+//     checkpoint wins. All times are of the database clock: last_snapshot_at (read before the snapshot
+//     call), the checkpoint's started_at, restored_at. An unknown snapshot time loses to a checkpoint. A
 //     checkpoint that wins points the restore at it and the sandbox goes through the repair path (delete,
 //     recreate, restore).
 //  3. Otherwise RevertSandbox. ErrNoSnapshot (it never suspended) goes to repair. ErrRevertResume (the
@@ -257,7 +258,8 @@ func restoredMark(sb store.AgentSandbox) bool {
 }
 
 // snapshotAfterRestore reports whether a snapshot of the sandbox is recorded that is newer than its
-// restore, so it holds the restored home.
+// restore, so it holds the restored home. Both times are on the database clock: restored_at is now() of
+// agentd's write, last_snapshot_at the clock read before the snapshot call (snapshotClock), a lower bound.
 func snapshotAfterRestore(sb store.AgentSandbox) bool {
 	return sb.LastSnapshotAt.Valid && sb.RestoredAt.Valid && sb.LastSnapshotAt.Time.After(sb.RestoredAt.Time)
 }
@@ -292,7 +294,7 @@ func (r *Reconciler) sealRestored(ctx context.Context, w *work, ws, name string,
 	} else if !ok {
 		return true, r.record(ctx, w, sb, hash, "waiting for the home backup before the snapshot of the restored home")
 	}
-	stopped, err := r.stopSandbox(ctx, ws, name)
+	stopped, err := r.stopSnapshot(ctx, w, ws, name)
 	if err != nil {
 		return true, err
 	}
@@ -328,6 +330,11 @@ func (r *Reconciler) revertCrashed(ctx context.Context, w *work, ws, name string
 // checkpointWins decides between the last snapshot and the newest complete home checkpoint of the
 // sandbox. The newer one wins; a snapshot time that is not known loses. use is false when there is no
 // complete checkpoint, so the snapshot is all there is.
+//
+// The times compared are those of the content, both on the database clock. The checkpoint reads the home
+// after its started_at (the claim of its last try; requested_at when a copied row has none), so that is
+// its time; finished_at is not: a checkpoint that started before the snapshot and finished after it holds
+// the older home. The snapshot time is the clock read before the snapshot call (snapshotClock).
 func (r *Reconciler) checkpointWins(ctx context.Context, w *work, sb execution.Sandbox) (cp store.HomeCheckpoint, use bool, err error) {
 	if !r.checkpointsOn(w) {
 		return store.HomeCheckpoint{}, false, nil // no checkpoint is taken or restored: the snapshot is all there is
@@ -339,7 +346,11 @@ func (r *Reconciler) checkpointWins(ctx context.Context, w *work, sb execution.S
 	if !w.sb.LastSnapshotAt.Valid {
 		return cp, true, nil // the snapshot time is unknown
 	}
-	return cp, cp.FinishedAt.Time.After(w.sb.LastSnapshotAt.Time), nil
+	taken := cp.RequestedAt
+	if cp.StartedAt.Valid {
+		taken = cp.StartedAt
+	}
+	return cp, taken.Time.After(w.sb.LastSnapshotAt.Time), nil
 }
 
 // latestComplete is the newest complete home checkpoint of the sandbox, if any.
@@ -387,6 +398,18 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 	if r.crash.backingOff(id, now, resumed) {
 		return true, r.record(ctx, w, sb, hash, "")
 	}
+
+	// The restore pointer comes first: a revert with a mark and no pointer would lose the home, and so
+	// would a repair (a new sandbox with no restore). So it comes before every way out below.
+	row, err := r.q.RestoreFromMark(ctx, store.RestoreFromMarkParams{OrgID: w.org.ID, AgentID: w.agent.ID})
+	switch {
+	case err == nil:
+		w.sb = row
+		r.log.Info("pointed the home restore at the checkpoint again before the revert", w.logAttrs()...)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return true, fmt.Errorf("point the home restore at the checkpoint again: %w", err)
+	}
+
 	// A revert that failed too often in a row ends here: the repair path takes the sandbox.
 	if n := r.crash.failed(id, resumed); n >= maxRevertFailures {
 		r.log.Warn("the revert failed at every try; the sandbox goes through the repair path", append(w.logAttrs(), "tries", n)...)
@@ -408,16 +431,6 @@ func (r *Reconciler) recoverSandbox(ctx context.Context, w *work, ws, name strin
 			}
 			return r.repairInstead(ctx, w, ws, name, sb, hash, cause)
 		}
-	}
-
-	// The restore pointer comes first: a revert with a mark and no pointer would lose the home.
-	row, err := r.q.RestoreFromMark(ctx, store.RestoreFromMarkParams{OrgID: w.org.ID, AgentID: w.agent.ID})
-	switch {
-	case err == nil:
-		w.sb = row
-		r.log.Info("pointed the home restore at the checkpoint again before the revert", w.logAttrs()...)
-	case !errors.Is(err, pgx.ErrNoRows):
-		return true, fmt.Errorf("point the home restore at the checkpoint again: %w", err)
 	}
 
 	res, err := rv.RevertSandbox(ctx, ws, name)

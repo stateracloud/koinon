@@ -516,8 +516,7 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 		return execution.Sandbox{}, false, fail(op, err, "drain the router calls to sandbox %s: %v", k, err)
 	}
 	for attempt := 0; ; attempt++ {
-		sent = true      // an error reply does not prove that the suspend did not happen
-		at := time.Now() // the snapshot holds the state from here on, so this is its time (a lower bound)
+		sent = true // an error reply does not prove that the suspend did not happen
 		if _, err := d.control.SuspendActor(ctx, &ateapiv1.SuspendActorRequest{
 			Actor:   ref(workspace, name),
 			Options: &ateapiv1.SuspendOptions{Mode: ateapiv1.DurabilityMode_DURABILITY_MODE_SYNCHRONOUS},
@@ -531,7 +530,7 @@ func (d *Driver) suspend(ctx context.Context, op, workspace, name string) (sb ex
 		switch actor.GetStatus().GetState() {
 		case ateapiv1.ActorState_ACTOR_STATE_SUSPENDED:
 			sb := sandboxFrom(workspace, actor)
-			sb.SnapshotAt = at
+			sb.NewSnapshot = true
 			return sb, sent, nil
 		case ateapiv1.ActorState_ACTOR_STATE_RUNNING:
 		default:
@@ -648,7 +647,7 @@ func (d *Driver) sealFirstBoot(ctx context.Context, op string, k key) (sb execut
 		return sealed, true
 	}
 	out := sandboxFrom(k.atespace, resp.GetActor())
-	out.SnapshotAt = sealed.SnapshotAt
+	out.NewSnapshot = sealed.NewSnapshot
 	return out, true
 }
 
