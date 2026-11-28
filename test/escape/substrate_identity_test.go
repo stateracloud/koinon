@@ -380,6 +380,47 @@ var _ = Describe("Substrate actor identity", Label("escape", "substrate", "live"
 			Expect(a.TLS).To(BeTrue(), "a request of the https probe arrived without TLS: something took the TLS off on the way")
 		}
 	}, NodeTimeout(3*time.Minute))
+
+	// The audience and the lifetime of the real actor JWT (ADR 0120 section 1.2, amendment of 2026-11-27,
+	// issue #1489), on a token that atenet-egress minted and the install's issuer signed: the contract
+	// specs of "Substrate identity tokens" (substrate_test.go) check the verifier with a fake issuer, this
+	// one checks what Substrate really mints. The token stays in this process.
+	It("(i) the actor's JWT has the egress listener as its one audience and a lifetime of 300 to 3600 seconds, and is refused on the other listeners and after it expires", func(ctx SpecContext) {
+		probe := fmt.Sprintf("i-%d", suffix())
+		expectAccepted(guestGet(ctx, rig.workspace, name, probe, placeholder, false), probe, self)
+		tok, ok := gw.token(probe)
+		Expect(ok).To(BeTrue(), "the stand-in kept no verified token of the request")
+
+		c := jwtClaims(tok)
+		Expect(c["aud"]).To(Equal([]any{actortoken.AudienceEgress}), "the audience of the minted JWT")
+		exp := time.Unix(int64(c["exp"].(float64)), 0)
+		life := exp.Sub(time.Unix(int64(c["iat"].(float64)), 0))
+		GinkgoWriter.Printf("minted actor JWT: lifetime %s, expires in %s\n", life, time.Until(exp).Round(time.Second))
+		Expect(life).To(BeNumerically(">=", actortoken.MinTTL))
+		Expect(life).To(BeNumerically("<=", actortoken.MaxTTL))
+
+		By("control: the egress listener's verifier accepts the token now")
+		got, err := gw.verifierFor(ctx, actortoken.AudienceEgress, nil).Verify(tok)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(actortoken.SubstrateActor{Atespace: got.Atespace, Name: got.ActorName, UID: got.ActorUID}).To(Equal(self))
+
+		By("the model and MCP listeners refuse the token: a token copied from an egress request is no key to them")
+		for _, aud := range []string{actortoken.AudienceModel, actortoken.AudienceMCP} {
+			_, err := gw.verifierFor(ctx, aud, nil).Verify(tok)
+			Expect(err).To(MatchError(actortoken.ErrAudience), aud)
+		}
+
+		By("the egress listener refuses the token once it has expired")
+		after := exp.Add(actortoken.SubstrateLeeway + time.Second)
+		_, err = gw.verifierFor(ctx, actortoken.AudienceEgress, func() time.Time { return after }).Verify(tok)
+		Expect(err).To(MatchError(actortoken.ErrExpired))
+
+		By("the guest holds no JWT after the requests of this container")
+		res := rig.probeIn(ctx, rig.workspace, name, check{"id": "jwt", "op": "scan", "roots": scanRootsGuest(), "pattern": jwtShape})
+		scan := res["jwt"].(map[string]any)
+		Expect(scan["files"]).To(BeNumerically(">", 100), "the scan read too few files to mean anything")
+		Expect(scan["found"]).To(BeEmpty(), "a readable file, environment or command line holds a JWT")
+	}, NodeTimeout(4*time.Minute))
 })
 
 // writeGitConfigScript is koinon-agentd's writeGitScript (internal/agentd/gitconfig.go): it replaces

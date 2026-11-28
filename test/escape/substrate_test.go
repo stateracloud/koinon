@@ -4,7 +4,9 @@ package escape_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -45,11 +49,12 @@ func jwtClaims(token string) map[string]any {
 	return c
 }
 
-// The identity tokens of Substrate, checked where they are minted. These specs need no cluster: they
-// pin the two lifetimes and audiences that ADR 0120 sections 1.2 and 3.3 give, so a change to either
-// fails the escape suite, not only a unit test. The specs that look for the tokens inside a guest are
-// in the next container.
-var _ = Describe("Substrate identity tokens", Label("escape", "substrate", "contract"), func() {
+// The Ed25519 actor token of the OpenShell driver, checked where it is minted. koinon-agentd mints it
+// for OpenShell sandboxes only (internal/cmd/koinonagentd/main.go, actortoken.NewMinter), and the
+// gateway checks it on the OpenShell path (actortoken.Verifier); Substrate does not use it
+// (actortoken.go, Verifier). These specs go when #1094 removes the OpenShell driver. The Substrate
+// actor JWT has its own specs in "Substrate identity tokens" below.
+var _ = Describe("OpenShell actor tokens", Label("escape", "openshell", "contract"), func() {
 	var minter *actortoken.Minter
 	var verifier *actortoken.Verifier
 
@@ -99,6 +104,98 @@ var _ = Describe("Substrate identity tokens", Label("escape", "substrate", "cont
 		Expect(err).NotTo(HaveOccurred())
 		_, err = verifier.Verify(forged)
 		Expect(err).To(MatchError(actortoken.ErrInvalid), "a token under the id of a key it was not signed with")
+	})
+})
+
+// The identity tokens of Substrate, checked where they are verified. These specs need no cluster: they
+// pin the audiences and lifetimes that ADR 0120 sections 1.2 and 3.3 and its amendment of 2026-11-27
+// (issue #1489) give, so a change to either fails the escape suite, not only a unit test. The actor JWT
+// is the one that atenet-egress mints (Substrate v1.0.1 cmd/atenet/internal/router/egress/actorjwt,
+// claims in internal/actoridjwt/actoridjwt.go: ES256, aud an array) and that each koinon-gateway listener
+// checks with actortoken.SubstrateVerifier. The live counterpart, on a token that the install's issuer
+// signed, is spec (i) of "Substrate actor identity" (substrate_identity_test.go).
+var _ = Describe("Substrate identity tokens", Label("escape", "substrate", "contract"), func() {
+	var iss *fakeIssuer
+
+	BeforeEach(func() {
+		iss = newFakeIssuer()
+		DeferCleanup(iss.close)
+	})
+
+	It("accepts an actor JWT only on the listener of its one audience", func(ctx SpecContext) {
+		now := time.Now()
+		listeners := []string{actortoken.AudienceModel, actortoken.AudienceMCP, actortoken.AudienceEgress}
+		for _, aud := range listeners {
+			tok := iss.mint(iss.claims([]string{aud}, now, actortoken.DefaultTTL))
+			for _, l := range listeners {
+				_, err := iss.verifier(ctx, l, nil).Verify(tok)
+				if l == aud {
+					Expect(err).NotTo(HaveOccurred(), "control: the listener %s accepts its own token", l)
+				} else {
+					Expect(err).To(MatchError(actortoken.ErrAudience), "a token for %s on the listener %s", aud, l)
+				}
+			}
+		}
+		By("a token with two audiences, or with the audience of the OpenShell token, is refused on every listener")
+		for _, auds := range [][]string{{actortoken.AudienceModel, actortoken.AudienceEgress}, {actortoken.Audience}, {}} {
+			tok := iss.mint(iss.claims(auds, now, actortoken.DefaultTTL))
+			for _, l := range listeners {
+				_, err := iss.verifier(ctx, l, nil).Verify(tok)
+				Expect(err).To(MatchError(actortoken.ErrAudience), "audiences %v on the listener %s", auds, l)
+			}
+		}
+	})
+
+	It("refuses an actor JWT that is expired, or that lives outside 300 to 3600 seconds", func(ctx SpecContext) {
+		at := func(t time.Time) func() time.Time { return func() time.Time { return t } }
+		iat := time.Now().Add(-time.Hour)
+		for _, life := range []time.Duration{actortoken.MinTTL, actortoken.MaxTTL} {
+			tok := iss.mint(iss.claims([]string{actortoken.AudienceEgress}, iat, life))
+			exp := iat.Add(life)
+			_, err := iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(-time.Second))).Verify(tok)
+			Expect(err).NotTo(HaveOccurred(), "control: a token of %s before its exp", life)
+			_, err = iss.verifier(ctx, actortoken.AudienceEgress, at(exp.Add(actortoken.SubstrateLeeway+time.Second))).Verify(tok)
+			Expect(err).To(MatchError(actortoken.ErrExpired), "a token of %s after its exp and the leeway", life)
+		}
+		By("a lifetime outside the range is refused, at any time")
+		now := time.Now()
+		for _, life := range []time.Duration{actortoken.MinTTL - time.Second, actortoken.MaxTTL + time.Second, 24 * time.Hour} {
+			tok := iss.mint(iss.claims([]string{actortoken.AudienceEgress}, now, life))
+			_, err := iss.verifier(ctx, actortoken.AudienceEgress, nil).Verify(tok)
+			Expect(err).To(MatchError(actortoken.ErrLifetime), life.String())
+		}
+		By("a token without exp is refused")
+		c := iss.claims([]string{actortoken.AudienceEgress}, now, actortoken.DefaultTTL)
+		delete(c, "exp")
+		_, err := iss.verifier(ctx, actortoken.AudienceEgress, nil).Verify(iss.mint(c))
+		Expect(err).To(MatchError(actortoken.ErrLifetime))
+	})
+
+	It("refuses an actor JWT with alg none or HS256, or one that another key signed", func(ctx SpecContext) {
+		c := iss.claims([]string{actortoken.AudienceEgress}, time.Now(), actortoken.DefaultTTL)
+		v := iss.verifier(ctx, actortoken.AudienceEgress, nil)
+		payload, err := json.Marshal(c)
+		Expect(err).NotTo(HaveOccurred())
+		enc := base64.RawURLEncoding.EncodeToString
+		none := enc([]byte(`{"alg":"none","typ":"JWT","kid":"`+fakeIssuerKID+`"}`)) + "." + enc(payload) + "."
+		_, err = v.Verify(none)
+		Expect(err).To(MatchError(actortoken.ErrAlgorithm), "alg none")
+
+		hs, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.HS256, Key: []byte("koinon_test_not-a-real-hmac-key-of-32-bytes")},
+			(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", fakeIssuerKID))
+		Expect(err).NotTo(HaveOccurred())
+		hsTok, err := jwt.Signed(hs).Claims(c).Serialize()
+		Expect(err).NotTo(HaveOccurred())
+		_, err = v.Verify(hsTok)
+		Expect(err).To(MatchError(actortoken.ErrAlgorithm), "alg HS256")
+
+		other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = v.Verify(signES256(other, c))
+		Expect(err).To(MatchError(actortoken.ErrSignature), "an ES256 token under the issuer's kid that another key signed")
+
+		_, err = v.Verify(iss.mint(c))
+		Expect(err).NotTo(HaveOccurred(), "control: the issuer's own token")
 	})
 
 	It("gives the guest API token the actor as its audience and a lifetime of 60 seconds, and pins the first actor", func() {
@@ -178,7 +275,14 @@ var _ = Describe("Substrate sandbox", Label("escape", "substrate", "live"), Orde
 		// The nodes' kernel: uname -r on the worker node. The qualifying run sets it.
 		testenv.Require(testenv.Var("host-kernel", "KOINON_ESCAPE_HOST_KERNEL"))
 		Expect(k["release"]).NotTo(Equal(os.Getenv("KOINON_ESCAPE_HOST_KERNEL")), "the sandbox runs on the host kernel")
+		// A release that differs from the node's proves only that some other kernel answers. The
+		// marker names the runtime: gVisor's Sentry reports a release that ends in "-gvisor" (the kind
+		// leg checks the same, test/e2e/substrate_test.go), so a pool of another class fails here.
+		if rig.tier.GVisor() {
+			Expect(k["release"]).To(HaveSuffix("-gvisor"), "the guest kernel of the %s tier is not gVisor's", rig.tier)
+		}
 		if rig.tier == harness.TierVM {
+			Expect(k["release"]).NotTo(HaveSuffix("-gvisor"), "the vm tier runs under gVisor, not in a microVM")
 			Expect(k["hypervisor"]).To(BeTrue(), "the guest of a microVM sees a hypervisor")
 		}
 	}, NodeTimeout(2*time.Minute))
